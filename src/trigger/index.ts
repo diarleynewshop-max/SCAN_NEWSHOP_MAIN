@@ -53,7 +53,7 @@ async function anexarJsonNaTarefa(taskId: string, nomeArquivo: string, conteudo:
 // TASK 1 — Lista baixada → to do + JSON anexado
 export const listaBaixada = task({
   id: "lista-baixada",
-  machine: "medium-1x", // 👈 AQUI você define 1 vCPU / 2GB
+  machine: "small-2x", // 👈 AQUI você define 1 vCPU / 1 RAM
   run: async (payload: any) => {
     const dataFormatada = payload.dataDownload
       ? new Date(payload.dataDownload).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
@@ -83,7 +83,7 @@ Data: ${dataFormatada}`,
 // TASK 2 — Conferência finalizada → complete + detalhes na descrição
 export const conferenciaBaixada = task({
   id: "conferencia-baixada",
-  machine: "medium-1x", // 👈 AQUI você define 1 vCPU / 2GB
+  machine: "small-2x", // 👈 AQUI você define 1 vCPU / 1 RAM
   run: async (payload: any) => {
     const dataFormatada = payload.dataConferencia
       ? new Date(payload.dataConferencia).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
