@@ -1,4 +1,4 @@
-const TRIGGER_API_KEY = "tr_prod_7kJCCh7ASjpbnh69jS8c";
+const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
 
 async function dispararTask(taskId: string, payload: object) {
   try {
