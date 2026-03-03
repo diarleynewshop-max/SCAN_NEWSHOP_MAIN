@@ -55,11 +55,11 @@ export const listaBaixada = task({
   id: "lista-baixada",
   run: async (payload: any) => {
     const dataFormatada = payload.dataDownload
-      ? new Date(payload.dataDownload).toLocaleString("pt-BR")
-      : new Date().toLocaleString("pt-BR");
+      ? new Date(payload.dataDownload).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
+      : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
 
     const taskId = await criarTarefaClickUp(
-      `📦 Lista baixada — ${payload.pessoa}`,
+      `📦 ${payload.titulo} — ${payload.pessoa}`,
       `Pessoa: ${payload.pessoa}
 Título: ${payload.titulo}
 Itens: ${payload.totalItens}
@@ -84,8 +84,8 @@ export const conferenciaBaixada = task({
   id: "conferencia-baixada",
   run: async (payload: any) => {
     const dataFormatada = payload.dataConferencia
-      ? new Date(payload.dataConferencia).toLocaleString("pt-BR")
-      : new Date().toLocaleString("pt-BR");
+      ? new Date(payload.dataConferencia).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
+      : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
 
     const statusMap: Record<string, string> = {
       separado: "✅ Separado",
@@ -101,7 +101,7 @@ export const conferenciaBaixada = task({
       .join("\n");
 
     await criarTarefaClickUp(
-      `✅ Conferência — ${payload.conferente}`,
+      `✅ ${payload.conferente} — ${dataFormatada}`,
       `Conferente: ${payload.conferente}
 Data: ${dataFormatada}
 Tempo: ${payload.tempo}

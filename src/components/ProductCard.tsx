@@ -1,4 +1,5 @@
 import { Package, Trash2 } from "lucide-react";
+import { useState, useRef, useEffect } from "react";
 
 export interface Product {
   id: string;
@@ -27,8 +28,21 @@ interface ProductCardProps {
 }
 
 const ProductCard = ({ product, onDelete }: ProductCardProps) => {
+  // when quantity changes we flash the card briefly
+  const [flash, setFlash] = useState(false);
+  const prevQty = useRef(product.quantity);
+
+  useEffect(() => {
+    if (product.quantity !== prevQty.current) {
+      setFlash(true);
+      const id = setTimeout(() => setFlash(false), 800);
+      prevQty.current = product.quantity;
+      return () => clearTimeout(id);
+    }
+  }, [product.quantity]);
+
   return (
-    <div className="bg-card rounded-xl border border-border p-3 flex gap-3 items-center shadow-sm">
+    <div className={`bg-card rounded-xl border border-border p-3 flex gap-3 items-center shadow-sm transition-colors ${flash ? "animate-pulse" : ""}`}>
       {product.photo ? (
         <img
           src={product.photo}

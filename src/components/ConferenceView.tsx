@@ -18,6 +18,7 @@ import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { dispararWebhookConferenciaBaixada } from "@/lib/webhook";
+import { z } from "zod";
 
 export type ConferenceStatus = "separado" | "nao_tem" | "nao_tem_tudo" | "pendente";
 
@@ -44,6 +45,23 @@ function formatTime(seconds: number): string {
 
 type Phase = "import" | "ready" | "running" | "finished";
 
+const ConferenceFileSchema = z.object({
+  type: z.literal("conference-file"),
+  items: z.array(
+    z.object({
+      codigo: z.string().min(1),
+      sku: z.string().optional().default(""),
+      quantidade: z.number().int().positive(),
+      photo: z.string().nullable().optional(),
+    })
+  ).min(1),
+});
+
+const CsvRowSchema = z.tuple([
+  z.string().min(1),
+  z.string().regex(/^\d+$/, "deve ser número"),
+]);
+
 const ConferenceView = ({ onBack }: ConferenceViewProps) => {
   const [items, setItems] = useState<ConferenceItem[]>([]);
   const [phase, setPhase] = useState<Phase>("import");
@@ -63,41 +81,64 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
 
   const processJsonText = (text: string): boolean => {
     try {
-      const data = JSON.parse(text);
-      if (data.type === "conference-file" && Array.isArray(data.items)) {
-        const parsed: ConferenceItem[] = data.items.map((item: { codigo: string; sku?: string; quantidade: number; photo?: string | null }) => ({
-          id: crypto.randomUUID(),
-          codigo: item.codigo,
-          sku: item.sku || "",
-          quantidadePedida: item.quantidade,
-          quantidadeReal: null,
-          status: "pendente" as ConferenceStatus,
-          photo: item.photo || null,
-        }));
-        if (parsed.length === 0) { setImportError("Nenhum item encontrado no arquivo."); return false; }
-        setItems(parsed);
-        setPhase("ready");
-        setCurrentIndex(0);
-        toast({ title: `${parsed.length} itens importados!` });
-        return true;
+      const raw = JSON.parse(text);
+      const result = ConferenceFileSchema.safeParse(raw);
+      if (!result.success) {
+        setImportError("Arquivo inválido: " + result.error.issues[0]?.message);
+        return false;
       }
-    } catch { /* not valid JSON */ }
-    return false;
+      const parsed: ConferenceItem[] = result.data.items.map((item) => ({
+        id: crypto.randomUUID(),
+        codigo: item.codigo,
+        sku: item.sku ?? "",
+        quantidadePedida: item.quantidade,
+        quantidadeReal: null,
+        status: "pendente" as ConferenceStatus,
+        photo: item.photo ?? null,
+      }));
+      setItems(parsed);
+      setPhase("ready");
+      setCurrentIndex(0);
+      toast({ title: `${parsed.length} itens importados!` });
+      return true;
+    } catch {
+      return false;
+    }
   };
 
   const processCsvText = (text: string): boolean => {
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
     if (lines.length === 0) { setImportError("Arquivo vazio."); return false; }
+
     const parsed: ConferenceItem[] = [];
-    for (let i = 0; i < lines.length; i++) {
-      const parts = lines[i].split(";");
-      if (parts.length < 2) continue;
-      const codigo = parts[0].trim();
-      const qtd = parseInt(parts[1].trim(), 10);
-      if (!codigo || isNaN(qtd) || qtd <= 0) continue;
-      parsed.push({ id: crypto.randomUUID(), codigo, sku: "", quantidadePedida: qtd, quantidadeReal: null, status: "pendente", photo: null });
+    const erros: string[] = [];
+
+    lines.forEach((line, i) => {
+      const parts = line.split(";");
+      const result = CsvRowSchema.safeParse([parts[0]?.trim() ?? "", parts[1]?.trim() ?? ""]);
+      if (!result.success) {
+        erros.push(`Linha ${i + 1}: ${result.error.issues[0]?.message}`);
+        return;
+      }
+      const [codigo, qtdStr] = result.data;
+      parsed.push({
+        id: crypto.randomUUID(),
+        codigo,
+        sku: "",
+        quantidadePedida: parseInt(qtdStr, 10),
+        quantidadeReal: null,
+        status: "pendente",
+        photo: null,
+      });
+    });
+
+    if (parsed.length === 0) {
+      setImportError(`Nenhum item válido. ${erros[0] ?? "Formato: CODIGO;QUANTIDADE"}`);
+      return false;
     }
-    if (parsed.length === 0) { setImportError("Nenhum item válido. Formato esperado: CODIGO;QUANTIDADE"); return false; }
+    if (erros.length > 0) {
+      toast({ title: `${erros.length} linha(s) ignoradas por erro`, variant: "destructive" });
+    }
     setItems(parsed);
     setPhase("ready");
     setCurrentIndex(0);
@@ -110,7 +151,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     if (!file) return;
     setImportError(null);
 
-    // Handle ZIP files
     if (file.name.endsWith(".zip")) {
       try {
         const zip = await JSZip.loadAsync(file);
@@ -220,7 +260,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     }
   };
 
-  // ---- EXPORT ----
   const exportPDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(18);
@@ -241,15 +280,12 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     items.forEach((item, idx) => {
       const itemH = item.photo ? 45 : 25;
       if (y + itemH > pageHeight - 20) { doc.addPage(); y = 20; }
-
       const [r, g, b] = colorMap[item.status];
       doc.setFillColor(r, g, b);
       doc.rect(14, y - 3, 3, item.photo ? 34 : 14, "F");
-
       if (item.photo) {
         try { doc.addImage(item.photo, "JPEG", 20, y - 2, 28, 28); } catch {}
       }
-
       const tx = item.photo ? 52 : 20;
       doc.setFontSize(11);
       doc.setFont("helvetica", "bold");
@@ -257,14 +293,12 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
       doc.setFont("helvetica", "normal");
       doc.setFontSize(9);
       doc.text(`SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status]}`, tx, y + 10);
-
       y += itemH;
     });
 
     doc.save(`conferencia_${new Date().toISOString().slice(0, 10)}.pdf`);
 
-    // 🔔 WEBHOOK — PONTO 2: conferência baixada (PDF)
-    const resumoPdf = {
+    const resumo = {
       separado: items.filter((i) => i.status === "separado").length,
       naoTem: items.filter((i) => i.status === "nao_tem").length,
       parcial: items.filter((i) => i.status === "nao_tem_tudo").length,
@@ -274,7 +308,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
       conferente,
       tempo: formatTime(elapsedSeconds),
       totalItens: items.length,
-      resumo: resumoPdf,
+      resumo,
       itens: items.map((i) => ({
         codigo: i.codigo,
         sku: i.sku,
@@ -307,7 +341,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     zip.file(`${fileName}.json`, JSON.stringify(data, null, 2));
     const zipBlob = await zip.generateAsync({ type: "blob" });
 
-    // Baixa o ZIP sempre, garantido
     const url = URL.createObjectURL(zipBlob);
     const a = document.createElement("a");
     a.href = url;
@@ -318,18 +351,14 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast({ title: "ZIP baixado!", description: "Compartilhe pelo WhatsApp manualmente." });
 
-    // Tenta share nativo depois (Android Chrome)
     const zipFile = new File([zipBlob], `${fileName}.zip`, { type: "application/zip" });
     if (navigator.share) {
       try {
         await navigator.share({ files: [zipFile], title: `Conferência - ${conferente}` });
-      } catch {
-        // usuário cancelou ou não suportado, tudo bem
-      }
+      } catch {}
     }
 
-    // 🔔 WEBHOOK — PONTO 2: conferência baixada (JSON/ZIP)
-    const resumoJson = {
+    const resumo = {
       separado: items.filter((i) => i.status === "separado").length,
       naoTem: items.filter((i) => i.status === "nao_tem").length,
       parcial: items.filter((i) => i.status === "nao_tem_tudo").length,
@@ -339,7 +368,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
       conferente,
       tempo: formatTime(elapsedSeconds),
       totalItens: items.length,
-      resumo: resumoJson,
+      resumo,
       itens: items.map((i) => ({
         codigo: i.codigo,
         sku: i.sku,
@@ -350,7 +379,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     });
   };
 
-  // ---- PHASE: IMPORT ----
   if (phase === "import") {
     return (
       <div className="p-4 space-y-4">
@@ -362,13 +390,8 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             <FileInput className="w-8 h-8 text-muted-foreground" />
           </div>
           <p className="text-foreground font-semibold text-lg mb-1">Importar Lista</p>
-          <p className="text-sm text-muted-foreground mb-1">
-            <strong>JSON / ZIP</strong>: formato de conferência com fotos
-          </p>
-          <p className="text-sm text-muted-foreground mb-4">
-            <strong>CSV</strong>: CODIGO;QUANTIDADE (sem cabeçalho)
-          </p>
-
+          <p className="text-sm text-muted-foreground mb-1"><strong>JSON / ZIP</strong>: formato de conferência com fotos</p>
+          <p className="text-sm text-muted-foreground mb-4"><strong>CSV</strong>: CODIGO;QUANTIDADE (sem cabeçalho)</p>
           <div className="w-full max-w-xs mx-auto mb-4 text-left">
             <label className="text-sm font-semibold text-foreground mb-1.5 block">Nome do Conferente</label>
             <input
@@ -379,17 +402,13 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
               className="w-full h-12 px-4 rounded-xl border border-input bg-card text-foreground placeholder:text-muted-foreground text-base font-semibold focus:outline-none focus:ring-2 focus:ring-ring transition-all"
             />
           </div>
-
           {importError && (
             <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 mb-4 text-sm text-destructive text-left">{importError}</div>
           )}
           <input ref={fileInputRef} type="file" accept=".csv,.txt,.json,.zip" onChange={handleFileImport} className="hidden" />
           <button
             onClick={() => {
-              if (!conferente.trim()) {
-                toast({ title: "Informe o nome do conferente", variant: "destructive" });
-                return;
-              }
+              if (!conferente.trim()) { toast({ title: "Informe o nome do conferente", variant: "destructive" }); return; }
               fileInputRef.current?.click();
             }}
             className="w-full max-w-xs mx-auto h-12 bg-primary text-primary-foreground rounded-xl font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25"
@@ -401,7 +420,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     );
   }
 
-  // ---- PHASE: READY ----
   if (phase === "ready") {
     return (
       <div className="p-4 space-y-4">
@@ -413,9 +431,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             <CheckCircle2 className="w-8 h-8 text-[hsl(var(--success))]" />
           </div>
           <p className="text-foreground font-semibold text-lg mb-1">Lista Importada!</p>
-          <p className="text-sm text-muted-foreground mb-4">
-            <strong>{items.length}</strong> itens prontos para conferência
-          </p>
+          <p className="text-sm text-muted-foreground mb-4"><strong>{items.length}</strong> itens prontos para conferência</p>
           <button onClick={startConference} className="w-full max-w-xs mx-auto h-14 bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))] rounded-xl font-bold text-lg flex items-center justify-center gap-3 active:scale-[0.98] transition-transform shadow-lg">
             <Play className="w-6 h-6" /> Começar
           </button>
@@ -424,18 +440,15 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     );
   }
 
-  // ---- PHASE: FINISHED ----
   if (phase === "finished") {
     const separados = items.filter((i) => i.status === "separado").length;
     const naoTem = items.filter((i) => i.status === "nao_tem").length;
     const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
-
     return (
       <div className="p-4 space-y-4">
         <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
-
         <div className="text-center py-4">
           <div className="w-16 h-16 rounded-full bg-[hsl(var(--success)/0.15)] flex items-center justify-center mx-auto mb-3">
             <Flag className="w-8 h-8 text-[hsl(var(--success))]" />
@@ -446,7 +459,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             <Timer className="w-4 h-4" /> Tempo: <strong>{formatTime(elapsedSeconds)}</strong>
           </div>
         </div>
-
         <div className="bg-card rounded-xl border border-border p-3 space-y-2">
           <p className="text-sm font-bold text-foreground">Resumo - {items.length} itens</p>
           <div className="flex gap-2 flex-wrap text-xs font-semibold">
@@ -455,7 +467,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             <span className="px-2 py-1 rounded-lg bg-destructive/10 text-destructive">❌ {naoTem}</span>
           </div>
         </div>
-
         <div className="grid grid-cols-2 gap-2">
           <button onClick={exportPDF} className="h-11 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
             <FileText className="w-4 h-4" /> PDF
@@ -464,16 +475,13 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             <FileJson className="w-4 h-4" /> JSON
           </button>
         </div>
-
         <div className="space-y-2">
           {items.map((item, idx) => {
             const label = getStatusLabel(item.status);
             const StatusIcon = label.icon;
             return (
               <div key={item.id} className={`rounded-xl p-3 shadow-sm flex gap-3 items-center ${getStatusColor(item.status)}`}>
-                {item.photo && (
-                  <img src={item.photo} alt={item.codigo} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />
-                )}
+                {item.photo && <img src={item.photo} alt={item.codigo} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-muted-foreground">#{idx + 1}</p>
                   <p className="text-sm font-mono font-bold text-foreground">{item.codigo}</p>
@@ -493,13 +501,11 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     );
   }
 
-  // ---- PHASE: RUNNING ----
   const separados = items.filter((i) => i.status === "separado").length;
   const naoTem = items.filter((i) => i.status === "nao_tem").length;
   const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
   const pendentes = items.filter((i) => i.status === "pendente").length;
   const doneCount = items.length - pendentes;
-
   const label = currentItem ? getStatusLabel(currentItem.status) : null;
   const StatusIcon = label?.icon;
 
@@ -531,7 +537,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         </div>
       </div>
 
-      {/* Current item card */}
       {currentItem && (
         <div className={`rounded-xl p-4 space-y-4 shadow-md ${getStatusColor(currentItem.status)}`}>
           {currentItem.photo ? (
@@ -545,18 +550,14 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
               </div>
             </div>
           )}
-
           <div className="text-center space-y-1">
             <p className="text-xs text-muted-foreground font-semibold">ITEM {currentIndex + 1}</p>
             <p className="text-2xl font-mono font-black text-foreground tracking-wider">{currentItem.codigo}</p>
-            {currentItem.sku && (
-              <p className="text-sm text-muted-foreground">SKU: <strong className="text-foreground">{currentItem.sku}</strong></p>
-            )}
+            {currentItem.sku && <p className="text-sm text-muted-foreground">SKU: <strong className="text-foreground">{currentItem.sku}</strong></p>}
             <p className="text-sm text-muted-foreground">
               Quantidade pedida: <strong className="text-foreground text-lg">{currentItem.quantidadePedida}</strong>
             </p>
           </div>
-
           {currentItem.status !== "pendente" && label && StatusIcon && (
             <div className={`flex items-center justify-center gap-2 text-sm font-bold ${label.color}`}>
               <StatusIcon className="w-5 h-5" /> {label.text}
@@ -565,10 +566,8 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
               )}
             </div>
           )}
-
           <div className="flex gap-2">
-            <button
-              onClick={() => setStatus(currentItem.id, "separado")}
+            <button onClick={() => setStatus(currentItem.id, "separado")}
               className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
                 currentItem.status === "separado"
                   ? "bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))] ring-2 ring-[hsl(var(--success))] ring-offset-2"
@@ -577,8 +576,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             >
               <CheckCircle2 className="w-4 h-4" /> Separado
             </button>
-            <button
-              onClick={() => setStatus(currentItem.id, "nao_tem")}
+            <button onClick={() => setStatus(currentItem.id, "nao_tem")}
               className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
                 currentItem.status === "nao_tem"
                   ? "bg-destructive text-destructive-foreground ring-2 ring-destructive ring-offset-2"
@@ -587,8 +585,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             >
               <XCircle className="w-4 h-4" /> Não tem
             </button>
-            <button
-              onClick={() => setStatus(currentItem.id, "nao_tem_tudo")}
+            <button onClick={() => setStatus(currentItem.id, "nao_tem_tudo")}
               className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
                 currentItem.status === "nao_tem_tudo"
                   ? "bg-[hsl(var(--warning))] text-[hsl(var(--warning-foreground))] ring-2 ring-[hsl(var(--warning))] ring-offset-2"
@@ -598,7 +595,6 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
               <AlertTriangle className="w-4 h-4" /> Parcial
             </button>
           </div>
-
           {currentItem.status === "nao_tem_tudo" && (
             <div className="flex items-center gap-3 bg-card/50 rounded-lg p-3 border border-border">
               <label className="text-sm text-muted-foreground whitespace-nowrap">Qtd disponível:</label>
@@ -619,26 +615,19 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
       )}
 
       <div className="flex gap-2">
-        <button
-          onClick={goPrev}
-          disabled={currentIndex === 0}
+        <button onClick={goPrev} disabled={currentIndex === 0}
           className="h-12 px-4 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-1 active:scale-[0.98] transition-transform disabled:opacity-30"
         >
           <ChevronLeft className="w-5 h-5" /> Anterior
         </button>
-
         {isLastItem ? (
-          <button
-            onClick={finishConference}
-            disabled={!allDone}
+          <button onClick={finishConference} disabled={!allDone}
             className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40"
           >
             <Flag className="w-5 h-5" /> Finalizar
           </button>
         ) : (
-          <button
-            onClick={goNext}
-            disabled={!isCurrentComplete}
+          <button onClick={goNext} disabled={!isCurrentComplete}
             className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40"
           >
             Próximo <ChevronRight className="w-5 h-5" />
@@ -650,4 +639,3 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
 };
 
 export default ConferenceView;
-
