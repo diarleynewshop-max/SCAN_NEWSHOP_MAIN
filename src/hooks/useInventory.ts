@@ -46,19 +46,27 @@ export function useInventory() {
   const { toast } = useToast();
   const [lists, setLists] = useState<ListData[]>(() => loadLists());
   const [activeListId, setActiveListId] = useState<string | null>(() => {
-  return localStorage.getItem("scan_newshop_active_list");
-});
+    try {
+      const savedId = localStorage.getItem("scan_newshop_active_list");
+      if (!savedId) return null;
+      const lists = loadLists();
+      const exists = lists.find((l) => l.id === savedId && l.status === "open");
+      return exists ? savedId : null;
+    } catch {
+      return null;
+    }
+  });
 
   const activeList = lists.find((l) => l.id === activeListId && l.status === "open") ?? null;
 
   useEffect(() => {
-  saveLists(lists);
-  if (activeListId) {
-    localStorage.setItem("scan_newshop_active_list", activeListId);
-  } else {
-    localStorage.removeItem("scan_newshop_active_list");
-  }
-}, [lists, activeListId]);
+    saveLists(lists);
+    if (activeListId) {
+      localStorage.setItem("scan_newshop_active_list", activeListId);
+    } else {
+      localStorage.removeItem("scan_newshop_active_list");
+    }
+  }, [lists, activeListId]);
 
   const openList = useCallback(
     ({ title, person }: OpenListParams): boolean => {
@@ -103,12 +111,9 @@ export function useInventory() {
       setLists((prev) =>
         prev.map((l) => {
           if (l.id !== activeListId) return l;
-
-          // look for existing product with same barcode
           const existingIndex = l.products.findIndex((p) => p.barcode === barcode);
           if (existingIndex !== -1) {
             merged = true;
-            // merge quantity into existing product
             const updatedProducts = [...l.products];
             const existing = updatedProducts[existingIndex];
             updatedProducts[existingIndex] = {
@@ -117,8 +122,6 @@ export function useInventory() {
             };
             return { ...l, products: updatedProducts };
           }
-
-          // otherwise push new product
           const newProduct: Product = {
             id: crypto.randomUUID(),
             barcode,
