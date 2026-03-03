@@ -38,10 +38,4 @@ export async function dispararWebhookConferenciaBaixada(payload: object) {
   });
 
 }
-export async function dispararWebhookConferenciaBaixada(payload: object) {
-  await dispararTask("conferencia-baixada", {
-    ...payload,
-    dataConferencia: new Date().toISOString(),
-  });
-}
 
