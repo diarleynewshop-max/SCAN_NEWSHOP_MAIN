@@ -68,19 +68,18 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     if (!list || list.status === "red") return;
     onUpdateList({ ...list, status: "green" });
 
-    // 🔔 WEBHOOK — PONTO 1: lista baixada
     dispararWebhookListaBaixada({
       pessoa: list.person,
       titulo: list.title,
       totalItens: list.products.length,
       dataCriacao: list.createdAt.toISOString(),
       produtos: list.products.map((p) => ({
-       barcode: p.barcode,
+        barcode: p.barcode,
         sku: p.sku || "",
         quantidade: p.quantity,
-       removeTag: p.removeTag ?? false,
-        photo: p.photo || null, // ✅ foto incluída
-})),
+        removeTag: p.removeTag ?? false,
+        photo: p.photo || null,
+      })),
     });
   };
 
@@ -100,7 +99,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     list.products.forEach((p, i) => {
       const itemH = p.photo ? 45 : 25;
       if (y + itemH > pageHeight - 20) { doc.addPage(); y = 20; }
-
       if (p.photo) {
         try { doc.addImage(p.photo, "JPEG", 14, y, 28, 28); } catch {}
       }
@@ -112,7 +110,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
       doc.setFontSize(9);
       doc.text(`SKU: ${p.sku || "-"} | Qtd: ${p.quantity}`, tx, y + 13);
       doc.text(`Tira Etiqueta: ${p.removeTag ? "Sim" : "Nao"}`, tx, y + 19);
-
       y += itemH;
       doc.setDrawColor(200);
       doc.line(14, y, 196, y);
@@ -126,9 +123,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
   };
 
   const exportCSV = (list: ListData) => {
-    const rows = list.products
-      .map((p) => `${p.barcode};${p.quantity}`)
-      .join("\n");
+    const rows = list.products.map((p) => `${p.barcode};${p.quantity}`).join("\n");
     const blob = new Blob([rows], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
@@ -143,7 +138,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
   const handleShare = async (list: ListData) => {
     let text = `📋 ${list.title}\n👤 Pessoa: ${list.person}\n📅 ${list.createdAt.toLocaleDateString("pt-BR")}\n`;
-
     text += `\n📦 PRODUTOS (${list.products.length})\n`;
     list.products.forEach((p, i) => {
       text += `${i + 1}. Código: ${p.barcode} | SKU: ${p.sku || "-"} | Qtd: ${p.quantity}\n`;
@@ -171,7 +165,14 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
       })),
     };
 
-    const fileName = list.title.replace(/[\s\/]/g, "_").replace(/[^a-zA-Z0-9_\-áéíóúàèìòùâêîôûãõäëïöüçÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÃÕÄËÏÖÜÇ]/g, "");
+    const fileName = list.title
+      .replace(/[\s\/]/g, "_")
+      .replace(/[^a-zA-Z0-9_\-áéíóúàèìòùâêîôûãõäëïöüçÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÃÕÄËÏÖÜÇ]/g, "");
+
+    // Gera o TXT com os dois blocos
+    const soCodigosBloco = list.products.map((p) => p.barcode).join("\n");
+    const codigoQuantidadeBloco = list.products.map((p) => `${p.barcode};${p.quantity}`).join("\n");
+    const txtContent = `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
 
     markDownloaded(list.id);
     setDownloadOpen(null);
@@ -179,10 +180,10 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     try {
       const zip = new JSZip();
       zip.file(`${fileName}.json`, JSON.stringify(data, null, 2));
+      zip.file(`${fileName}.txt`, txtContent);
       const zipBlob = await zip.generateAsync({ type: "blob" });
       const zipFile = new File([zipBlob], `${fileName}.zip`, { type: "application/zip" });
 
-      // Tenta share nativo — Android abre menu para escolher WhatsApp com arquivo
       if (navigator.share) {
         try {
           await navigator.share({ files: [zipFile], title: `Lista - ${list.title}` });
@@ -192,7 +193,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
         }
       }
 
-      // Fallback: baixa o ZIP
       const url = URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
       a.href = url;
@@ -232,7 +232,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     );
     const updated = { ...editList, products: updatedProducts };
     setEditList(updated);
-
     if (editIndex < updated.products.length - 1) {
       const next = editIndex + 1;
       setEditIndex(next);
@@ -242,7 +241,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
   const finishEdit = () => {
     if (!editList) return;
-    // Save current product first
     const updatedProducts = editList.products.map((p, i) =>
       i === editIndex ? { ...editProduct! } : p
     );
@@ -254,7 +252,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
   const navigateEdit = (dir: number) => {
     if (!editList || !editProduct) return;
-    // Save current
     const updatedProducts = editList.products.map((p, i) =>
       i === editIndex ? { ...editProduct } : p
     );
@@ -276,7 +273,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
             Feche uma lista na aba "Escanear" para ver aqui
           </p>
         </div>
-
         <div className="pt-4 border-t border-border">
           <button
             onClick={onStartConference}
@@ -384,7 +380,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
             <DialogDescription>Como deseja enviar esta lista?</DialogDescription>
           </DialogHeader>
           <div className="flex flex-col gap-3">
-            {/* Botão principal: WhatsApp com arquivo */}
             <button
               onClick={() => { const l = lists.find((x) => x.id === downloadOpen); if (l) exportJSON(l); }}
               className="h-16 rounded-xl bg-[#25D366] text-white font-bold text-base flex items-center justify-center gap-3 active:scale-[0.98] transition-transform shadow-md"
@@ -392,13 +387,11 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
               <svg viewBox="0 0 24 24" className="w-6 h-6 fill-white"><path d="M17.472 14.382c-.297-.149-1.758-.867-2.03-.967-.273-.099-.471-.148-.67.15-.197.297-.767.966-.94 1.164-.173.199-.347.223-.644.075-.297-.15-1.255-.463-2.39-1.475-.883-.788-1.48-1.761-1.653-2.059-.173-.297-.018-.458.13-.606.134-.133.298-.347.446-.52.149-.174.198-.298.298-.497.099-.198.05-.371-.025-.52-.075-.149-.669-1.612-.916-2.207-.242-.579-.487-.5-.669-.51-.173-.008-.371-.01-.57-.01-.198 0-.52.074-.792.372-.272.297-1.04 1.016-1.04 2.479 0 1.462 1.065 2.875 1.213 3.074.149.198 2.096 3.2 5.077 4.487.709.306 1.262.489 1.694.625.712.227 1.36.195 1.871.118.571-.085 1.758-.719 2.006-1.413.248-.694.248-1.289.173-1.413-.074-.124-.272-.198-.57-.347z"/><path d="M12 0C5.373 0 0 5.373 0 12c0 2.123.554 4.118 1.524 5.855L.057 23.886a.5.5 0 0 0 .606.61l6.198-1.422A11.944 11.944 0 0 0 12 24c6.627 0 12-5.373 12-12S18.627 0 12 0zm0 21.9a9.9 9.9 0 0 1-5.031-1.373l-.36-.214-3.733.856.888-3.62-.235-.373A9.865 9.865 0 0 1 2.1 12C2.1 6.534 6.534 2.1 12 2.1S21.9 6.534 21.9 12 17.466 21.9 12 21.9z"/></svg>
               Enviar pelo WhatsApp
             </button>
-            {/* Linha divisória */}
             <div className="flex items-center gap-2 text-xs text-muted-foreground">
               <div className="flex-1 h-px bg-border" />
               outras opções
               <div className="flex-1 h-px bg-border" />
             </div>
-            {/* Botões secundários */}
             <div className="grid grid-cols-3 gap-2">
               <button
                 onClick={() => { const l = lists.find((x) => x.id === downloadOpen); if (l) exportPDF(l); }}
@@ -491,7 +484,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
                   </button>
                 </div>
               </div>
-
               <div className="flex gap-2 pt-2">
                 <button
                   onClick={() => navigateEdit(-1)}
@@ -520,12 +512,8 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
           )}
         </DialogContent>
       </Dialog>
-
     </div>
   );
 };
 
 export default ListHistory;
-
-
-
