@@ -37,4 +37,3 @@ export async function dispararWebhookConferenciaBaixada(payload: object) {
     dataConferencia: new Date().toISOString(),
   });
 }
-.env
