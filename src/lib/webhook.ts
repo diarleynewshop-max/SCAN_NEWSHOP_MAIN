@@ -36,4 +36,12 @@ export async function dispararWebhookConferenciaBaixada(payload: object) {
     ...payload,
     dataConferencia: new Date().toISOString(),
   });
+
 }
+export async function dispararWebhookConferenciaBaixada(payload: object) {
+  await dispararTask("conferencia-baixada", {
+    ...payload,
+    dataConferencia: new Date().toISOString(),
+  });
+}
+
