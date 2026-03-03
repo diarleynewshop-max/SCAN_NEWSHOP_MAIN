@@ -45,13 +45,20 @@ function loadLists(): ListData[] {
 export function useInventory() {
   const { toast } = useToast();
   const [lists, setLists] = useState<ListData[]>(() => loadLists());
-  const [activeListId, setActiveListId] = useState<string | null>(null);
+  const [activeListId, setActiveListId] = useState<string | null>(() => {
+  return localStorage.getItem("scan_newshop_active_list");
+});
 
   const activeList = lists.find((l) => l.id === activeListId && l.status === "open") ?? null;
 
   useEffect(() => {
-    saveLists(lists);
-  }, [lists]);
+  saveLists(lists);
+  if (activeListId) {
+    localStorage.setItem("scan_newshop_active_list", activeListId);
+  } else {
+    localStorage.removeItem("scan_newshop_active_list");
+  }
+}, [lists, activeListId]);
 
   const openList = useCallback(
     ({ title, person }: OpenListParams): boolean => {
