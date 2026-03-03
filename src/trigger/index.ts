@@ -107,4 +107,56 @@ Data: ${dataFormatada}`,
     });
 
     // Gera e anexa o TXT com os dois blocos
-    const soCo
+    const soCodigosBloco = payload.produtos
+      .map((p: any) => p.barcode)
+      .join("\n");
+
+    const codigoQuantidadeBloco = payload.produtos
+      .map((p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`)
+      .join("\n");
+
+    const txtContent = `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
+
+    await anexarTxtNaTarefa(taskId, `lista_${payload.pessoa}`, txtContent);
+  },
+});
+
+// TASK 2 — Conferência finalizada → complete + detalhes na descrição
+export const conferenciaBaixada = task({
+  id: "conferencia-baixada",
+  machine: "small-2x",
+  run: async (payload: any) => {
+    const dataFormatada = payload.dataConferencia
+      ? new Date(payload.dataConferencia).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
+      : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
+
+    const statusMap: Record<string, string> = {
+      separado: "✅ Separado",
+      nao_tem: "❌ Nao tem",
+      nao_tem_tudo: "⚠️ Parcial",
+      pendente: "⏳ Pendente",
+    };
+
+    const itensTexto = payload.itens
+      .map((item: any, i: number) =>
+        `${i + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`
+      )
+      .join("\n");
+
+    await criarTarefaClickUp(
+      `✅ ${payload.conferente} — ${dataFormatada}`,
+      `Conferente: ${payload.conferente}
+Data: ${dataFormatada}
+Tempo: ${payload.tempo}
+Total: ${payload.totalItens} item(ns)
+📊 RESUMO
+✅ Separado: ${payload.resumo.separado}
+❌ Não tem: ${payload.resumo.naoTem}
+⚠️ Parcial: ${payload.resumo.parcial}
+⏳ Pendente: ${payload.resumo.pendente}
+📦 ITENS
+${itensTexto}`,
+      "complete"
+    );
+  },
+});
