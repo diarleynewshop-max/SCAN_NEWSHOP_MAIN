@@ -95,7 +95,6 @@ Data: ${dataFormatada}`,
       "to do"
     );
 
-    // Anexa o JSON
     await anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
       type: "conference-file",
       items: payload.produtos.map((p: any) => ({
@@ -106,22 +105,17 @@ Data: ${dataFormatada}`,
       })),
     });
 
-    // Gera e anexa o TXT com os dois blocos
-    const soCodigosBloco = payload.produtos
-      .map((p: any) => p.barcode)
-      .join("\n");
-
+    const soCodigosBloco = payload.produtos.map((p: any) => p.barcode).join("\n");
     const codigoQuantidadeBloco = payload.produtos
       .map((p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`)
       .join("\n");
-
     const txtContent = `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
 
     await anexarTxtNaTarefa(taskId, `lista_${payload.pessoa}`, txtContent);
   },
 });
 
-// TASK 2 — Conferência finalizada → complete + detalhes na descrição
+// TASK 2 — Conferência finalizada → complete + itens agrupados por {S} e {M}
 export const conferenciaBaixada = task({
   id: "conferencia-baixada",
   machine: "small-2x",
@@ -137,11 +131,31 @@ export const conferenciaBaixada = task({
       pendente: "⏳ Pendente",
     };
 
-    const itensTexto = payload.itens
-      .map((item: any, i: number) =>
-        `${i + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`
-      )
-      .join("\n");
+    // Separa itens por digito
+    const itensS = payload.itens.filter((i: any) => i.digito === "S");
+    const itensM = payload.itens.filter((i: any) => i.digito === "M");
+    const itensSemDigito = payload.itens.filter((i: any) => !i.digito);
+
+    const formatarItem = (item: any, idx: number) =>
+      `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`;
+
+    let itensTexto = "";
+
+    if (itensS.length > 0) {
+      itensTexto += `{S}\n${itensS.map(formatarItem).join("\n")}`;
+    }
+
+    if (itensM.length > 0) {
+      if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+\n\n";
+      itensTexto += `{M}\n${itensM.map(formatarItem).join("\n")}`;
+    }
+
+    if (itensSemDigito.length > 0) {
+      if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
+\n\n";
+      itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
+    }
 
     await criarTarefaClickUp(
       `✅ ${payload.conferente} — ${dataFormatada}`,
@@ -149,11 +163,13 @@ export const conferenciaBaixada = task({
 Data: ${dataFormatada}
 Tempo: ${payload.tempo}
 Total: ${payload.totalItens} item(ns)
+
 📊 RESUMO
 ✅ Separado: ${payload.resumo.separado}
 ❌ Não tem: ${payload.resumo.naoTem}
 ⚠️ Parcial: ${payload.resumo.parcial}
 ⏳ Pendente: ${payload.resumo.pendente}
+
 📦 ITENS
 ${itensTexto}`,
       "complete"
