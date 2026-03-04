@@ -30,6 +30,7 @@ export interface ConferenceItem {
   quantidadeReal: number | null;
   status: ConferenceStatus;
   photo?: string | null;
+  digito?: "S" | "M" | null;
 }
 
 interface ConferenceViewProps {
@@ -40,7 +41,7 @@ function formatTime(seconds: number): string {
   const h = Math.floor(seconds / 3600);
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
-  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "00")}:${s.toString().padStart(2, "0")}`;
 }
 
 type Phase = "import" | "ready" | "running" | "finished";
@@ -56,11 +57,6 @@ const ConferenceFileSchema = z.object({
     })
   ).min(1),
 });
-
-const CsvRowSchema = z.tuple([
-  z.string().min(1),
-  z.string().regex(/^\d+$/, "deve ser número"),
-]);
 
 const ConferenceView = ({ onBack }: ConferenceViewProps) => {
   const [items, setItems] = useState<ConferenceItem[]>([]);
@@ -95,6 +91,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         quantidadeReal: null,
         status: "pendente" as ConferenceStatus,
         photo: item.photo ?? null,
+        digito: null,
       }));
       setItems(parsed);
       setPhase("ready");
@@ -106,39 +103,121 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     }
   };
 
-  const processCsvText = (text: string): boolean => {
+  // Processa TXT do ERP: CODIGO;QUANTIDADE_ERP;{S|M}
+  // Cruza com JSON original já carregado em items (se houver)
+  // Regras:
+  //   ERP >= Pedido → separado automaticamente (quantidadeReal = quantidadePedida)
+  //   ERP < Pedido (> 0) → parcial (quantidadeReal = ERP)
+  //   ERP = 0 → removido da lista
+  const processCsvText = (text: string, itemsOriginais?: ConferenceItem[]): boolean => {
     const lines = text.split(/\r?\n/).filter((l) => l.trim());
     if (lines.length === 0) { setImportError("Arquivo vazio."); return false; }
 
-    const parsed: ConferenceItem[] = [];
+    // Monta mapa do TXT do ERP: codigo → { qtdErp, digito }
+    const erpMap = new Map<string, { qtdErp: number; digito: "S" | "M" | null }>();
     const erros: string[] = [];
 
     lines.forEach((line, i) => {
       const parts = line.split(";");
-      const result = CsvRowSchema.safeParse([parts[0]?.trim() ?? "", parts[1]?.trim() ?? ""]);
-      if (!result.success) {
-        erros.push(`Linha ${i + 1}: ${result.error.issues[0]?.message}`);
+      const codigo = parts[0]?.trim() ?? "";
+      const qtdStr = parts[1]?.trim() ?? "";
+      const digitoRaw = parts[2]?.trim().toUpperCase() ?? "";
+
+      if (!codigo || !/^\d+$/.test(qtdStr)) {
+        erros.push(`Linha ${i + 1}: formato inválido`);
         return;
       }
-      const [codigo, qtdStr] = result.data;
+
+      const digito: "S" | "M" | null =
+        digitoRaw === "S" ? "S" : digitoRaw === "M" ? "M" : null;
+
+      erpMap.set(codigo, { qtdErp: parseInt(qtdStr, 10), digito });
+    });
+
+    if (erpMap.size === 0) {
+      setImportError(`Nenhum item válido. Formato: CODIGO;QUANTIDADE;S ou CODIGO;QUANTIDADE;M`);
+      return false;
+    }
+
+    if (erros.length > 0) {
+      toast({ title: `${erros.length} linha(s) ignoradas`, variant: "destructive" });
+    }
+
+    // Se tem JSON original carregado, cruza; senão cria itens do zero
+    if (itemsOriginais && itemsOriginais.length > 0) {
+      const parsed: ConferenceItem[] = [];
+
+      itemsOriginais.forEach((item) => {
+        const erp = erpMap.get(item.codigo);
+
+        if (!erp) {
+          // Não veio no TXT do ERP → mantém como pendente
+          parsed.push({ ...item, digito: null });
+          return;
+        }
+
+        const { qtdErp, digito } = erp;
+
+        if (qtdErp === 0) {
+          // Remove da lista
+          return;
+        } else if (qtdErp >= item.quantidadePedida) {
+          // OK — tem tudo
+          parsed.push({
+            ...item,
+            status: "separado",
+            quantidadeReal: item.quantidadePedida,
+            digito,
+          });
+        } else {
+          // Parcial — tem menos do que pedido
+          parsed.push({
+            ...item,
+            status: "nao_tem_tudo",
+            quantidadeReal: qtdErp,
+            digito,
+          });
+        }
+      });
+
+      if (parsed.length === 0) {
+        setImportError("Todos os itens foram zerados pelo ERP.");
+        return false;
+      }
+
+      const removidos = itemsOriginais.length - parsed.length;
+      if (removidos > 0) {
+        toast({ title: `${removidos} item(ns) removido(s) por quantidade zero` });
+      }
+
+      setItems(parsed);
+      setPhase("ready");
+      setCurrentIndex(0);
+      toast({ title: `${parsed.length} itens prontos após cruzamento com ERP!` });
+      return true;
+    }
+
+    // Sem JSON original — cria itens direto do TXT
+    const parsed: ConferenceItem[] = [];
+    erpMap.forEach(({ qtdErp, digito }, codigo) => {
+      if (qtdErp === 0) return;
       parsed.push({
         id: crypto.randomUUID(),
         codigo,
         sku: "",
-        quantidadePedida: parseInt(qtdStr, 10),
+        quantidadePedida: qtdErp,
         quantidadeReal: null,
         status: "pendente",
         photo: null,
+        digito,
       });
     });
 
     if (parsed.length === 0) {
-      setImportError(`Nenhum item válido. ${erros[0] ?? "Formato: CODIGO;QUANTIDADE"}`);
+      setImportError("Todos os itens estão com quantidade zero.");
       return false;
     }
-    if (erros.length > 0) {
-      toast({ title: `${erros.length} linha(s) ignoradas por erro`, variant: "destructive" });
-    }
+
     setItems(parsed);
     setPhase("ready");
     setCurrentIndex(0);
@@ -154,12 +233,52 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     if (file.name.endsWith(".zip")) {
       try {
         const zip = await JSZip.loadAsync(file);
-        const jsonFile = Object.keys(zip.files).find((name) => name.endsWith(".json"));
-        if (!jsonFile) { setImportError("Nenhum arquivo .json encontrado dentro do .zip"); return; }
-        const text = await zip.files[jsonFile].async("string");
-        if (!processJsonText(text)) {
-          setImportError("O JSON dentro do .zip não é um arquivo de conferência válido.");
+
+        // Verifica se tem JSON + TXT (ZIP com os dois)
+        const jsonFileName = Object.keys(zip.files).find((n) => n.endsWith(".json"));
+        const txtFileName = Object.keys(zip.files).find((n) => n.endsWith(".txt"));
+
+        if (jsonFileName && txtFileName) {
+          // Carrega JSON original primeiro
+          const jsonText = await zip.files[jsonFileName].async("string");
+          const raw = JSON.parse(jsonText);
+          const result = ConferenceFileSchema.safeParse(raw);
+
+          if (!result.success) {
+            setImportError("JSON inválido dentro do ZIP.");
+            e.target.value = "";
+            return;
+          }
+
+          const itemsOriginais: ConferenceItem[] = result.data.items.map((item) => ({
+            id: crypto.randomUUID(),
+            codigo: item.codigo,
+            sku: item.sku ?? "",
+            quantidadePedida: item.quantidade,
+            quantidadeReal: null,
+            status: "pendente" as ConferenceStatus,
+            photo: item.photo ?? null,
+            digito: null,
+          }));
+
+          // Cruza com TXT do ERP
+          const txtText = await zip.files[txtFileName].async("string");
+          processCsvText(txtText, itemsOriginais);
+          e.target.value = "";
+          return;
         }
+
+        // Só JSON
+        if (jsonFileName) {
+          const text = await zip.files[jsonFileName].async("string");
+          if (!processJsonText(text)) {
+            setImportError("O JSON dentro do .zip não é um arquivo de conferência válido.");
+          }
+          e.target.value = "";
+          return;
+        }
+
+        setImportError("Nenhum arquivo .json encontrado dentro do .zip");
       } catch {
         setImportError("Erro ao descompactar o arquivo .zip");
       }
@@ -174,6 +293,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         if (file.name.endsWith(".json") || text.trim().startsWith("{")) {
           if (processJsonText(text)) return;
         }
+        // TXT/CSV sem JSON original
         processCsvText(text);
       } catch {
         setImportError("Erro ao ler o arquivo.");
@@ -315,6 +435,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         quantidadePedida: i.quantidadePedida,
         quantidadeReal: i.quantidadeReal,
         status: i.status,
+        digito: i.digito ?? null,
       })),
     });
   };
@@ -333,6 +454,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         quantidadeReal: i.quantidadeReal,
         status: statusMap[i.status],
         photo: i.photo || null,
+        // digito oculto do JSON exportado
       })),
     };
 
@@ -375,6 +497,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         quantidadePedida: i.quantidadePedida,
         quantidadeReal: i.quantidadeReal,
         status: i.status,
+        digito: i.digito ?? null,
       })),
     });
   };
@@ -390,8 +513,8 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             <FileInput className="w-8 h-8 text-muted-foreground" />
           </div>
           <p className="text-foreground font-semibold text-lg mb-1">Importar Lista</p>
-          <p className="text-sm text-muted-foreground mb-1"><strong>JSON / ZIP</strong>: formato de conferência com fotos</p>
-          <p className="text-sm text-muted-foreground mb-4"><strong>CSV</strong>: CODIGO;QUANTIDADE (sem cabeçalho)</p>
+          <p className="text-sm text-muted-foreground mb-1"><strong>ZIP</strong>: JSON + TXT do ERP (cruzamento automático)</p>
+          <p className="text-sm text-muted-foreground mb-4"><strong>TXT/CSV</strong>: CODIGO;QUANTIDADE;S ou CODIGO;QUANTIDADE;M</p>
           <div className="w-full max-w-xs mx-auto mb-4 text-left">
             <label className="text-sm font-semibold text-foreground mb-1.5 block">Nome do Conferente</label>
             <input
