@@ -20,7 +20,11 @@ import JSZip from "jszip";
 import { dispararWebhookConferenciaBaixada } from "@/lib/webhook";
 import { z } from "zod";
 
-export type ConferenceStatus = "separado" | "nao_tem" | "nao_tem_tudo" | "pendente";
+export type ConferenceStatus =
+  | "separado"
+  | "nao_tem"
+  | "nao_tem_tudo"
+  | "pendente";
 
 export interface ConferenceItem {
   id: string;
@@ -33,6 +37,9 @@ export interface ConferenceItem {
   digito?: "S" | "M" | null;
 }
 
+/* --------------------------------------------------------------
+   Props e helpers
+---------------------------------------------------------------- */
 interface ConferenceViewProps {
   onBack: () => void;
 }
@@ -46,6 +53,9 @@ function formatTime(seconds: number): string {
     .padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
+/* --------------------------------------------------------------
+   Vite / ViteReact schema
+---------------------------------------------------------------- */
 type Phase = "import" | "ready" | "running" | "finished";
 
 const ConferenceFileSchema = z.object({
@@ -60,6 +70,9 @@ const ConferenceFileSchema = z.object({
   ).min(1),
 });
 
+/* --------------------------------------------------------------
+   Component
+---------------------------------------------------------------- */
 const ConferenceView = ({ onBack }: ConferenceViewProps) => {
   const [items, setItems] = useState<ConferenceItem[]>([]);
   const [phase, setPhase] = useState<Phase>("import");
@@ -77,9 +90,9 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     };
   }, []);
 
-  // -----------------------------------------------------------------
-  //  Processa JSON (arquivo .json ou .zip que contém .json)
-  // -----------------------------------------------------------------
+/* --------------------------------------------------------------
+   1️⃣ Processamento de JSON (ou ZIP com JSON)
+---------------------------------------------------------------- */
   const processJsonText = (text: string): boolean => {
     try {
       const raw = JSON.parse(text);
@@ -91,7 +104,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         return false;
       }
 
-      // <-- lê digitoMap que o cruzador pode ter gravado
+      // <-- le o mapa de digitos gravado pelo cruzador, se existir
       const digitoMap: Record<string, "S" | "M"> = raw._meta?.digitoMap ?? {};
 
       const parsed: ConferenceItem[] = result.data.items.map((item) => ({
@@ -104,6 +117,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         photo: item.photo ?? null,
         digito: digitoMap[item.codigo] ?? null,
       }));
+
       setItems(parsed);
       setPhase("ready");
       setCurrentIndex(0);
@@ -114,26 +128,21 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     }
   };
 
-  // -----------------------------------------------------------------
-  //  Processa TXT (ou CSV) do ERP
-  // -----------------------------------------------------------------
+/* --------------------------------------------------------------
+   2️⃣ Processamento do TXT (ERP) e cruzamento com o JSON já lido
+---------------------------------------------------------------- */
   const processCsvText = (
     text: string,
     itemsOriginais?: ConferenceItem[]
   ): boolean => {
-    const lines = text
-      .split(/\r?\n/)
-      .filter((l) => l.trim());
+    const lines = text.split(/\r?\n/).filter((l) => l.trim());
     if (lines.length === 0) {
       setImportError("Arquivo vazio.");
       return false;
     }
 
-    // mapa do TXT: codigo → { qtdErp, digito }
-    const erpMap = new Map<
-      string,
-      { qtdErp: number; digito: "S" | "M" | null }
-    >();
+    // mapa: codigo → { qtdErp, digito }
+    const erpMap = new Map<string, { qtdErp: number; digito: "S" | "M" | null }>();
     const erros: string[] = [];
 
     lines.forEach((line, i) => {
@@ -150,10 +159,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
       const digito: "S" | "M" | null =
         digitoRaw === "S" ? "S" : digitoRaw === "M" ? "M" : null;
 
-      erpMap.set(codigo, {
-        qtdErp: parseInt(qtdStr, 10),
-        digito,
-      });
+      erpMap.set(codigo, { qtdErp: parseInt(qtdStr, 10), digito });
     });
 
     if (erpMap.size === 0) {
@@ -171,7 +177,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     }
 
     // -----------------------------------------------------------------
-    //  Se já temos itens do JSON, cruzamos
+    // Se já houver itens (JSON importado), cruzamos com o TXT
     // -----------------------------------------------------------------
     if (itemsOriginais && itemsOriginais.length > 0) {
       const parsed: ConferenceItem[] = [];
@@ -180,7 +186,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         const erp = erpMap.get(item.codigo);
 
         if (!erp) {
-          // não veio no TXT → mantém como pendente (mantém digito original)
+          // não veio no TXT → mantém como pendente (preservando digito)
           parsed.push({ ...item, digito: item.digito ?? null });
           return;
         }
@@ -188,7 +194,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         const { qtdErp, digito } = erp;
 
         if (qtdErp === 0) {
-          // removido
+          // remove da lista
           return;
         } else if (qtdErp >= item.quantidadePedida) {
           // tudo ok
@@ -231,7 +237,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     }
 
     // -----------------------------------------------------------------
-    //  Caso não exista JSON (TXT puro) → cria itens do zero
+    // Caso não exista JSON (TXT puro) → cria itens a partir do TXT
     // -----------------------------------------------------------------
     const parsed: ConferenceItem[] = [];
     erpMap.forEach(({ qtdErp, digito }, codigo) => {
@@ -260,9 +266,9 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     return true;
   };
 
-  // -----------------------------------------------------------------
-  //  Importação de arquivos (ZIP, JSON ou TXT)
-  // -----------------------------------------------------------------
+/* --------------------------------------------------------------
+   3️⃣ Manipulação de arquivos (ZIP, JSON, TXT)
+---------------------------------------------------------------- */
   const handleFileImport = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -273,12 +279,14 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
       try {
         const zip = await JSZip.loadAsync(file);
 
-        const jsonFileName = Object.keys(zip.files).find((n) => n.endsWith(".json"));
+        const jsonFileName = Object.keys(zip.files).find((n) =>
+          n.endsWith(".json")
+        );
         const txtFileName = Object.keys(zip.files).find((n) => n.endsWith(".txt"));
 
         // ZIP com JSON + TXT
         if (jsonFileName && txtFileName) {
-          // ----- Lê o JSON + digitoMap -----
+          // ----- Lê JSON + digitoMap -----
           const jsonText = await zip.files[jsonFileName].async("string");
           const raw = JSON.parse(jsonText);
           const result = ConferenceFileSchema.safeParse(raw);
@@ -288,10 +296,10 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             return;
           }
 
-          // mapa de dígitos (se existir)
-          const digitoMap: Record<string, "S" | "M"> = (raw as any)._meta?.digitoMap ?? {};
+          const digitoMap: Record<string, "S" | "M"> =
+            (raw as any)._meta?.digitoMap ?? {};
 
-          // cria itens já com o dígito
+          // Cria itens já com o dígito (quando existir)
           const itemsOriginais: ConferenceItem[] = result.data.items.map(
             (item) => ({
               id: crypto.randomUUID(),
@@ -305,7 +313,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             })
           );
 
-          // ----- Cruzamento com o TXT -----
+          // Cruzamento com o TXT
           const txtText = await zip.files[txtFileName].async("string");
           processCsvText(txtText, itemsOriginais);
           e.target.value = "";
@@ -340,7 +348,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         if (file.name.endsWith(".json") || text.trim().startsWith("{")) {
           if (processJsonText(text)) return;
         }
-        // TXT/CSV sem JSON
+        // TXT/CSV sem JSON original
         processCsvText(text);
       } catch {
         setImportError("Erro ao ler o arquivo.");
@@ -350,9 +358,9 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     e.target.value = "";
   };
 
-  // -----------------------------------------------------------------
-  //  Controle da conferência (play / finish / status)
-  // -----------------------------------------------------------------
+/* --------------------------------------------------------------
+   Controle da conferência (play / finish / status)
+---------------------------------------------------------------- */
   const startConference = () => {
     setPhase("running");
     setCurrentIndex(0);
@@ -430,16 +438,15 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     );
   };
 
-  // -----------------------------------------------------------------
-  //  UI helpers
-  // -----------------------------------------------------------------
+/* --------------------------------------------------------------
+   Helpers UI (cores, ícones, resumo etc.)
+---------------------------------------------------------------- */
   const currentItem = items[currentIndex];
   const isCurrentComplete =
     currentItem &&
     currentItem.status !== "pendente" &&
     (currentItem.status !== "nao_tem_tudo" ||
-      (currentItem.quantidadeReal !== null &&
-        currentItem.quantidadeReal > 0));
+      (currentItem.quantidadeReal !== null && currentItem.quantidadeReal > 0));
   const isLastItem = currentIndex === items.length - 1;
   const allDone =
     items.length > 0 &&
@@ -506,9 +513,9 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     }
   };
 
-  // -----------------------------------------------------------------
-  //  Exportação PDF (não usa digito, pode ficar como está)
-  // -----------------------------------------------------------------
+/* --------------------------------------------------------------
+   Exportação PDF (não usa digito)
+---------------------------------------------------------------- */
   const exportPDF = () => {
     const doc = new jsPDF();
     doc.setFontSize(18);
@@ -566,13 +573,14 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
 
     doc.save(`conferencia_${new Date().toISOString().slice(0, 10)}.pdf`);
 
-    // resumo para o webhook
     const resumo = {
       separado: items.filter((i) => i.status === "separado").length,
       naoTem: items.filter((i) => i.status === "nao_tem").length,
       parcial: items.filter((i) => i.status === "nao_tem_tudo").length,
       pendente: items.filter((i) => i.status === "pendente").length,
     };
+
+    // dispara webhook (mesma payload que o PDF)
     dispararWebhookConferenciaBaixada({
       conferente,
       tempo: formatTime(elapsedSeconds),
@@ -589,9 +597,9 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     });
   };
 
-  // -----------------------------------------------------------------
-  //  Exportação JSON (AQUI ACRESCENTAMOS `digito`)
-  // -----------------------------------------------------------------
+/* --------------------------------------------------------------
+   Exportação JSON (agora inclui `digito`)
+---------------------------------------------------------------- */
   const exportJSON = async () => {
     const statusMap: Record<ConferenceStatus, string> = {
       separado: "separado",
@@ -599,6 +607,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
       nao_tem_tudo: "parcial",
       pendente: "pendente",
     };
+
     const data = {
       type: "conference-file",
       conferente,
@@ -611,7 +620,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         quantidadeReal: i.quantidadeReal,
         status: statusMap[i.status],
         photo: i.photo || null,
-        // <<< A propriedade **digito** agora está incluída no JSON exportado
+        // <<< campo digito agora está aqui
         digito: i.digito ?? null,
       })),
     };
@@ -633,7 +642,16 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     toast({ title: "ZIP baixado!", description: "Compartilhe pelo WhatsApp manualmente." });
 
-    // também dispara o webhook (mesma payload do PDF)
+    // opcional: share nativo (mobile)
+    const zipFile = new File([zipBlob], `${fileName}.zip`, {
+      type: "application/zip",
+    });
+    if (navigator.share) {
+      try {
+        await navigator.share({ files: [zipFile], title: `Conferência - ${conferente}` });
+      } catch {}
+    }
+
     const resumo = {
       separado: items.filter((i) => i.status === "separado").length,
       naoTem: items.filter((i) => i.status === "nao_tem").length,
@@ -656,9 +674,9 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     });
   };
 
-  // -----------------------------------------------------------------
-  //  Renderização
-  // -----------------------------------------------------------------
+/* --------------------------------------------------------------
+   Renderização – UI por fase
+---------------------------------------------------------------- */
   if (phase === "import") {
     return (
       <div className="p-4 space-y-4">
@@ -668,19 +686,18 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         >
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
+
         <div className="text-center py-10">
           <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
             <FileInput className="w-8 h-8 text-muted-foreground" />
           </div>
-          <p className="text-foreground font-semibold text-lg mb-1">
-            Importar Lista
-          </p>
+
+          <p className="text-foreground font-semibold text-lg mb-1">Importar Lista</p>
           <p className="text-sm text-muted-foreground mb-1">
             <strong>ZIP</strong>: JSON + TXT do ERP (cruzamento automático)
           </p>
           <p className="text-sm text-muted-foreground mb-4">
-            <strong>TXT/CSV</strong>: CODIGO;QUANTIDADE;S ou
-            CODIGO;QUANTIDADE;M
+            <strong>TXT/CSV</strong>: CODIGO;QUANTIDADE;S ou CODIGO;QUANTIDADE;M
           </p>
 
           <div className="w-full max-w-xs mx-auto mb-4 text-left">
@@ -738,16 +755,17 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         >
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
+
         <div className="text-center py-10">
           <div className="w-16 h-16 rounded-full bg-[hsl(var(--success)/0.15)] flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="w-8 h-8 text-[hsl(var(--success))]" />
           </div>
-          <p className="text-foreground font-semibold text-lg mb-1">
-            Lista Importada!
-          </p>
+
+          <p className="text-foreground font-semibold text-lg mb-1">Lista Importada!</p>
           <p className="text-sm text-muted-foreground mb-4">
             <strong>{items.length}</strong> itens prontos para conferência
           </p>
+
           <button
             onClick={startConference}
             className="w-full max-w-xs mx-auto h-14 bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))] rounded-xl font-bold text-lg flex items-center justify-center gap-3 active:scale-[0.98] transition-transform shadow-lg"
@@ -761,7 +779,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
 
   if (phase === "finished") {
     const separados = items.filter((i) => i.status === "separado").length;
-    const naoTem = items.filter((i) => i.status === "nao_tem").length;
+    const naoTem = items.filter((i) => i.status === "nao_met").length;
     const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
     return (
       <div className="p-4 space-y-4">
@@ -776,6 +794,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
           <div className="w-16 h-16 rounded-full bg-[hsl(var(--success)/0.15)] flex items-center justify-center mx-auto mb-3">
             <Flag className="w-8 h-8 text-[hsl(var(--success))]" />
           </div>
+
           <p className="text-foreground font-semibold text-lg mb-1">
             Conferência Finalizada!
           </p>
@@ -788,6 +807,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
           </div>
         </div>
 
+        {/* Resumo */}
         <div className="bg-card rounded-xl border border-border p-3 space-y-2">
           <p className="text-sm font-bold text-foreground">
             Resumo - {items.length} itens
@@ -805,6 +825,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
           </div>
         </div>
 
+        {/* Botões de export */}
         <div className="grid grid-cols-2 gap-2">
           <button
             onClick={exportPDF}
@@ -820,6 +841,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
           </button>
         </div>
 
+        {/* Lista visual dos itens */}
         <div className="space-y-2">
           {items.map((item, idx) => {
             const label = getStatusLabel(item.status);
@@ -839,9 +861,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
                   />
                 )}
                 <div className="flex-1 min-w-0">
-                  <p className="text-xs text-muted-foreground">
-                    #{idx + 1}
-                  </p>
+                  <p className="text-xs text-muted-foreground">#{idx + 1}</p>
                   <p className="text-sm font-mono font-bold text-foreground">
                     {item.codigo}
                   </p>
@@ -868,17 +888,223 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     );
   }
 
-  // -----------------------------------------------------------------
-  //  Tela de conferência (em andamento)
-  // -----------------------------------------------------------------
-  const separados = items.filter((i) => i.status === "separado").length;
-  const naoTem = items.filter((i) => i.status === "nao_tem").length;
-  const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
-  const pendentes = items.filter((i) => i.status === "pendente").length;
-  const doneCount = items.length - pendentes;
-  const label = currentItem ? getStatusLabel(currentItem.status) : null;
-  const StatusIcon = label?.icon;
+  /* --------------------------------------------------------------
+     4️⃣ Fase "running" – conferência em andamento
+     -------------------------------------------------------------- */
+  if (phase === "running") {
+    const separados = items.filter((i) => i.status === "separado").length;
+    const naoTem = items.filter((i) => i.status === "nao_met").length;
+    const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
+    const pendentes = items.filter((i) => i.status === "pendente").length;
+    const doneCount = items.length - pendentes;
+    const label = currentItem ? getStatusLabel(currentItem.status) : null;
+    const StatusIcon = label?.icon;
 
-  return (
-    <div className="p-4 space-y-3">
-      <div class
+    return (
+      <div className="p-4 space-y-3">
+        {/* Header (back + timer) */}
+        <div className="flex items-center justify-between">
+          <button
+            onClick={onBack}
+            className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors"
+          >
+            <ArrowLeft className="w-4 h-4" /> Voltar
+          </button>
+
+          <div className="flex items-center gap-2 text-sm font-mono font-bold text-foreground bg-card border border-border rounded-lg px-3 py-1.5">
+            <Timer className="w-4 h-4 text-primary" />
+            {formatTime(elapsedSeconds)}
+          </div>
+        </div>
+
+        {/* Barra de progresso */}
+        <div className="bg-card rounded-xl border border-border p-3 space-y-2">
+          <div className="flex items-center justify-between text-sm">
+            <span className="font-bold text-foreground">
+              Item {currentIndex + 1} de {items.length}
+            </span>
+            <span className="text-muted-foreground">
+              {doneCount}/{items.length} conferidos
+            </span>
+          </div>
+
+          <div className="w-full h-2 bg-muted rounded-full overflow-hidden">
+            <div
+              className="h-full bg-primary rounded-full transition-all duration-300"
+              style={{ width: `${(doneCount / items.length) * 100}%` }}
+            />
+          </div>
+
+          <div className="flex gap-2 flex-wrap text-xs font-semibold">
+            <span className="px-2 py-0.5 rounded-lg bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]">
+              ✅ {separados}
+            </span>
+            <span className="px-2 py-0.5 rounded-lg bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]">
+              ⚠️ {naoTemTudo}
+            </span>
+            <span className="px-2 py-0.5 rounded-lg bg-destructive/10 text-destructive">
+              ❌ {naoTem}
+            </span>
+            {pendentes > 0 && (
+              <span className="px-2 py-0.5 rounded-lg bg-muted text-muted-foreground">
+                ⏳ {pendentes}
+              </span>
+            )}
+          </div>
+        </div>
+
+        {/* Card do item atual */}
+        {currentItem && (
+          <div
+            className={`rounded-xl p-4 space-y-4 shadow-md ${getStatusColor(
+              currentItem.status
+            )}`}
+          >
+            {currentItem.photo ? (
+              <div className="flex justify-center">
+                <img
+                  src={currentItem.photo}
+                  alt={currentItem.codigo}
+                  className="w-40 h-40 rounded-xl object-cover shadow-sm border border-border"
+                />
+              </div>
+            ) : (
+              <div className="flex justify-center">
+                <div className="w-28 h-28 rounded-xl bg-muted/50 flex items-center justify-center border border-border">
+                  <Package className="w-10 h-10 text-muted-foreground/50" />
+                </div>
+              </div>
+            )}
+
+            <div className="text-center space-y-1">
+              <p className="text-xs text-muted-foreground font-semibold">
+                ITEM {currentIndex + 1}
+              </p>
+              <p className="text-2xl font-mono font-black text-foreground tracking-wider">
+                {currentItem.codigo}
+              </p>
+              {currentItem.sku && (
+                <p className="text-sm text-muted-foreground">
+                  SKU: <strong className="text-foreground">{currentItem.sku}</strong>
+                </p>
+              )}
+              <p className="text-sm text-muted-foreground">
+                Quantidade pedida:{" "}
+                <strong className="text-foreground text-lg">
+                  {currentItem.quantidadePedida}
+                </strong>
+              </p>
+            </div>
+
+            {/* Label de status */}
+            {currentItem.status !== "pendente" && label && StatusIcon && (
+              <div
+                className={`flex items-center justify-center gap-2 text-sm font-bold ${label.color}`}
+              >
+                <StatusIcon className="w-5 h-5" /> {label.text}
+                {currentItem.quantidadeReal !== null &&
+                  currentItem.status === "nao_tem_tudo" && (
+                    <span className="text-foreground ml-1">
+                      ({currentItem.quantidadeReal})
+                    </span>
+                  )}
+              </div>
+            )}
+
+            {/* Botões de mudança de status */}
+            <div className="flex gap-2">
+              <button
+                onClick={() => setStatus(currentItem.id, "separado")}
+                className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
+                  currentItem.status === "separado"
+                    ? "bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))] ring-2 ring-[hsl(var(--success))] ring-offset-2"
+                    : "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))] hover:bg-[hsl(var(--success)/0.25)]"
+                }`}
+              >
+                <CheckCircle2 className="w-4 h-4" /> Separado
+              </button>
+
+              <button
+                onClick={() => setStatus(currentItem.id, "nao_met")}
+                className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
+                  currentItem.status === "nao_met"
+                    ? "bg-destructive text-destructive-foreground ring-2 ring-destructive ring-offset-2"
+                    : "bg-destructive/10 text-destructive hover:bg-destructive/20"
+                }`}
+              >
+                <XCircle className="w-4 h-4" /> Não tem
+              </button>
+
+              <button
+                onClick={() => setStatus(currentItem.id, "nao_tem_tudo")}
+                className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
+                  currentItem.status === "nao_tem_tudo"
+                    ? "bg-[hsl(var(--warning))] text-[hsl(var(--warning-foreground))] ring-2 ring-[hsl(var(--warning))] ring-offset-2"
+                    : "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.25)]"
+                }`}
+              >
+                <AlertTriangle className="w-4 h-4" /> Parcial
+              </button>
+            </div>
+
+            {/* Campo de quantidade quando o status é "Parcial" */}
+            {currentItem.status === "nao_tem_tudo" && (
+              <div className="flex items-center gap-3 bg-card/50 rounded-lg p-3 border border-border">
+                <label className="text-sm text-muted-foreground whitespace-nowrap">
+                  Qtd disponível:
+                </label>
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min="1"
+                  max={currentItem.quantidadePedida - 1}
+                  placeholder="Qtd"
+                  value={currentItem.quantidadeReal ?? ""}
+                  onChange={(e) =>
+                    handleQuantityChange(currentItem.id, e.target.value)
+                  }
+                  className="flex-1 h-10 px-3 rounded-lg border border-input bg-card text-foreground text-base font-bold text-center focus:outline-none focus:ring-2 focus:ring-ring"
+                  autoFocus
+                />
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* Navegação entre itens */}
+        <div className="flex gap-2">
+          <button
+            onClick={goPrev}
+            disabled={currentIndex === 0}
+            className="h-12 px-4 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-1 active:scale-[0.98] transition-transform disabled:opacity-30"
+          >
+            <ChevronLeft className="w-5 h-5" /> Anterior
+          </button>
+
+          {isLastItem ? (
+            <button
+              onClick={finishConference}
+              disabled={!allDone}
+              className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40"
+            >
+              <Flag className="w-5 h-5" /> Finalizar
+            </button>
+          ) : (
+            <button
+              onClick={goNext}
+              disabled={!isCurrentComplete}
+              className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40"
+            >
+              Próximo <ChevronRight className="w-5 h-5" />
+            </button>
+          )}
+        </div>
+      </div>
+    );
+  }
+
+  // Caso algum estado inesperado apareça (fallback)
+  return null;
+};
+
+export default ConferenceView;
