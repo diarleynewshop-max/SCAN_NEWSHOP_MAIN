@@ -75,33 +75,37 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     };
   }, []);
 
-  const processJsonText = (text: string): boolean => {
-    try {
-      const raw = JSON.parse(text);
-      const result = ConferenceFileSchema.safeParse(raw);
-      if (!result.success) {
-        setImportError("Arquivo inválido: " + result.error.issues[0]?.message);
-        return false;
-      }
-      const parsed: ConferenceItem[] = result.data.items.map((item) => ({
-        id: crypto.randomUUID(),
-        codigo: item.codigo,
-        sku: item.sku ?? "",
-        quantidadePedida: item.quantidade,
-        quantidadeReal: null,
-        status: "pendente" as ConferenceStatus,
-        photo: item.photo ?? null,
-        digito: null,
-      }));
-      setItems(parsed);
-      setPhase("ready");
-      setCurrentIndex(0);
-      toast({ title: `${parsed.length} itens importados!` });
-      return true;
-    } catch {
+const processJsonText = (text: string): boolean => {
+  try {
+    const raw = JSON.parse(text);
+    const result = ConferenceFileSchema.safeParse(raw);
+    if (!result.success) {
+      setImportError("Arquivo inválido: " + result.error.issues[0]?.message);
       return false;
     }
-  };
+
+    // Lê digitoMap do cruzador se existir
+    const digitoMap: Record<string, "S" | "M"> = raw._meta?.digitoMap ?? {};
+
+    const parsed: ConferenceItem[] = result.data.items.map((item) => ({
+      id: crypto.randomUUID(),
+      codigo: item.codigo,
+      sku: item.sku ?? "",
+      quantidadePedida: item.quantidade,
+      quantidadeReal: null,
+      status: "pendente" as ConferenceStatus,
+      photo: item.photo ?? null,
+      digito: digitoMap[item.codigo] ?? null,
+    }));
+    setItems(parsed);
+    setPhase("ready");
+    setCurrentIndex(0);
+    toast({ title: `${parsed.length} itens importados!` });
+    return true;
+  } catch {
+    return false;
+  }
+};
 
   // Processa TXT do ERP: CODIGO;QUANTIDADE_ERP;{S|M}
   // Cruza com JSON original já carregado em items (se houver)
@@ -239,17 +243,34 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         const txtFileName = Object.keys(zip.files).find((n) => n.endsWith(".txt"));
 
         if (jsonFileName && txtFileName) {
-          // Carrega JSON original primeiro
-          const jsonText = await zip.files[jsonFileName].async("string");
-          const raw = JSON.parse(jsonText);
-          const result = ConferenceFileSchema.safeParse(raw);
+         // ---------------------------------------------------------------
+// 1️⃣ Lê o JSON + o digitoMap (se existir)
+// ---------------------------------------------------------------
+const jsonText = await zip.files[jsonFileName].async("string");
+const raw = JSON.parse(jsonText);
+const result = ConferenceFileSchema.safeParse(raw);
 
-          if (!result.success) {
-            setImportError("JSON inválido dentro do ZIP.");
-            e.target.value = "";
-            return;
-          }
+if (!result.success) {
+  setImportError("JSON inválido dentro do ZIP.");
+  e.target.value = "";
+  return;
+}
 
+// O mapa que o cruzador grava (ex.: { "7908782201062": "S", ... })
+const digitoMap: Record<string, "S" | "M"> = (raw as any)._meta?.digitoMap ?? {};
+
+// Cria a lista de itens já com o dígito (se o mapa existir)
+const itemsOriginais: ConferenceItem[] = result.data.items.map((item) => ({
+  id: crypto.randomUUID(),
+  codigo: item.codigo,
+  sku: item.sku ?? "",
+  quantidadePedida: item.quantidade,
+  quantidadeReal: null,
+  status: "pendente" as ConferenceStatus,
+  photo: item.photo ?? null,
+  // Usa o dígito do mapa, ou deixa null (será preenchido depois pelo TXT, se houver)
+  digito: digitoMap[item.codigo] ?? null,
+}));
           const itemsOriginais: ConferenceItem[] = result.data.items.map((item) => ({
             id: crypto.randomUUID(),
             codigo: item.codigo,
