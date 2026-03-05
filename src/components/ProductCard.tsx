@@ -1,5 +1,4 @@
 import { Package, Trash2 } from "lucide-react";
-import { useState, useRef, useEffect } from "react";
 
 export interface Product {
   id: string;
@@ -8,7 +7,7 @@ export interface Product {
   description?: string;
   photo: string | null;
   quantity: number;
-  removeTag: boolean; // "Tira etiqueta?"
+  removeTag: boolean;
   createdAt: Date;
 }
 
@@ -19,7 +18,7 @@ export interface ListData {
   products: Product[];
   createdAt: Date;
   closedAt?: Date;
-  status: "open" | "yellow" | "green" | "red"; // open, not downloaded, downloaded, deleted
+  status: "open" | "yellow" | "green" | "red";
 }
 
 interface ProductCardProps {
@@ -28,56 +27,41 @@ interface ProductCardProps {
 }
 
 const ProductCard = ({ product, onDelete }: ProductCardProps) => {
-  // when quantity changes we flash the card briefly
-  const [flash, setFlash] = useState(false);
-  const prevQty = useRef(product.quantity);
-
-  useEffect(() => {
-    if (product.quantity !== prevQty.current) {
-      setFlash(true);
-      const id = setTimeout(() => setFlash(false), 800);
-      prevQty.current = product.quantity;
-      return () => clearTimeout(id);
-    }
-  }, [product.quantity]);
-
   return (
-    <div className={`bg-card rounded-xl border border-border p-3 flex gap-3 items-center shadow-sm transition-colors ${flash ? "animate-pulse" : ""}`}>
+    <div style={{
+      background: "#fff", borderRadius: 12, border: "1px solid hsl(var(--border))",
+      padding: "12px 14px", display: "flex", gap: 12, alignItems: "center",
+      boxShadow: "var(--shadow-xs)",
+    }}>
       {product.photo ? (
-        <img
-          src={product.photo}
-          alt="Produto"
-          className="w-16 h-16 rounded-lg object-cover flex-shrink-0"
-        />
+        <img src={product.photo} alt="Produto" style={{ width: 52, height: 52, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />
       ) : (
-        <div className="w-16 h-16 rounded-lg bg-muted flex items-center justify-center flex-shrink-0">
-          <Package className="w-6 h-6 text-muted-foreground" />
+        <div style={{ width: 52, height: 52, borderRadius: 8, background: "hsl(var(--muted))", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+          <Package style={{ width: 20, height: 20, color: "hsl(var(--muted-foreground))" }} />
         </div>
       )}
 
-      <div className="flex-1 min-w-0">
-        <p className="text-xs font-mono text-muted-foreground truncate">
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ fontFamily: "var(--font-mono)", fontSize: 12, fontWeight: 500, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
           {product.barcode}
         </p>
         {product.sku && (
-          <p className="text-xs text-muted-foreground truncate">SKU: {product.sku}</p>
+          <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginTop: 1 }}>SKU: {product.sku}</p>
         )}
-        <p className="text-lg font-bold text-foreground">
-          Qtd: {product.quantity}
-        </p>
-      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>{product.removeTag ? "Tira etiqueta" : "Não tira"}</span>
+        <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 2 }}>
+          <span style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 900, color: "hsl(var(--foreground))" }}>{product.quantity}</span>
+          <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>unid. · {product.removeTag ? "Tira etiqueta" : "Não tira"}</span>
         </div>
       </div>
 
-      <button
-        onClick={() => onDelete(product.id)}
-        className="p-2 rounded-lg text-destructive hover:bg-destructive/10 transition-colors"
+      <button onClick={() => onDelete(product.id)}
+        style={{ padding: 8, borderRadius: 8, background: "transparent", border: "none", cursor: "pointer", color: "hsl(var(--destructive))", display: "flex" }}
       >
-        <Trash2 className="w-5 h-5" />
+        <Trash2 style={{ width: 18, height: 18 }} />
       </button>
     </div>
   );
 };
 
 export default ProductCard;
+
