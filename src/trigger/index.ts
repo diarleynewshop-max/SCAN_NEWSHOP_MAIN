@@ -146,14 +146,12 @@ export const conferenciaBaixada = task({
     }
 
     if (itensM.length > 0) {
-      if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-\n\n";
+      if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
       itensTexto += `{M}\n${itensM.map(formatarItem).join("\n")}`;
     }
 
     if (itensSemDigito.length > 0) {
-      if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=
-\n\n";
+      if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
       itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
     }
 
