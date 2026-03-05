@@ -1,5 +1,5 @@
 import { useRef } from "react";
-import { Camera, X, ImageIcon } from "lucide-react";
+import { Camera, X } from "lucide-react";
 
 interface PhotoCaptureProps {
   photo: string | null;
@@ -7,40 +7,12 @@ interface PhotoCaptureProps {
   onRemove: () => void;
 }
 
-function compressImage(file: File, maxWidth = 800, quality = 0.7): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const img = new Image();
-      img.onload = () => {
-        const scale = Math.min(1, maxWidth / img.width);
-        const canvas = document.createElement("canvas");
-        canvas.width = img.width * scale;
-        canvas.height = img.height * scale;
-        const ctx = canvas.getContext("2d");
-        if (!ctx) { reject(new Error("Canvas não disponível")); return; }
-        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", quality));
-      };
-      img.onerror = () => reject(new Error("Falha ao carregar imagem"));
-      img.src = e.target?.result as string;
-    };
-    reader.onerror = () => reject(new Error("Falha ao ler arquivo"));
-    reader.readAsDataURL(file);
-  });
-}
-
 const PhotoCapture = ({ photo, onCapture, onRemove }: PhotoCaptureProps) => {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
-  const handleCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
+  const handleCapture = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (!file) return;
-    e.target.value = "";
-    try {
-      const compressed = await compressImage(file);
-      onCapture(compressed);
-    } catch {
+    if (file) {
       const reader = new FileReader();
       reader.onloadend = () => onCapture(reader.result as string);
       reader.readAsDataURL(file);
@@ -49,13 +21,12 @@ const PhotoCapture = ({ photo, onCapture, onRemove }: PhotoCaptureProps) => {
 
   if (photo) {
     return (
-      <div className="relative w-full aspect-video rounded-lg overflow-hidden border border-border">
-        <img src={photo} alt="Produto" className="w-full h-full object-cover" />
-        <button
-          onClick={onRemove}
-          className="absolute top-2 right-2 bg-destructive text-destructive-foreground rounded-full p-1.5 shadow-lg"
+      <div style={{ position: "relative", width: "100%", aspectRatio: "16/9", borderRadius: 10, overflow: "hidden", border: "1.5px solid hsl(var(--border))" }}>
+        <img src={photo} alt="Produto" style={{ width: "100%", height: "100%", objectFit: "cover" }} />
+        <button onClick={onRemove}
+          style={{ position: "absolute", top: 8, right: 8, background: "hsl(var(--destructive))", color: "#fff", border: "none", borderRadius: "50%", width: 28, height: 28, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", boxShadow: "var(--shadow-sm)" }}
         >
-          <X className="w-4 h-4" />
+          <X style={{ width: 14, height: 14 }} />
         </button>
       </div>
     );
@@ -63,30 +34,25 @@ const PhotoCapture = ({ photo, onCapture, onRemove }: PhotoCaptureProps) => {
 
   return (
     <>
-      <button
-        onClick={() => fileInputRef.current?.click()}
-        className="w-full aspect-video rounded-lg border-2 border-dashed border-muted-foreground/30 bg-muted/50 flex flex-col items-center justify-center gap-3 transition-colors active:bg-muted"
+      <button onClick={() => fileInputRef.current?.click()}
+        style={{
+          width: "100%", aspectRatio: "16/9", borderRadius: 10,
+          border: "2px dashed hsl(var(--border))", background: "hsl(var(--secondary))",
+          display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center",
+          gap: 10, cursor: "pointer", transition: "all 0.18s",
+        }}
+        onMouseEnter={e => { e.currentTarget.style.background = "hsl(var(--muted))"; }}
+        onMouseLeave={e => { e.currentTarget.style.background = "hsl(var(--secondary))"; }}
       >
-        <div className="w-14 h-14 rounded-full bg-primary/10 flex items-center justify-center">
-          <Camera className="w-7 h-7 text-primary" />
+        <div style={{ width: 48, height: 48, borderRadius: 14, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+          <Camera style={{ width: 22, height: 22, color: "hsl(var(--primary))" }} />
         </div>
-        <div className="text-center">
-          <span className="text-sm font-medium text-muted-foreground block">Tirar foto do produto</span>
-          <span className="text-xs text-muted-foreground/60 flex items-center justify-center gap-1 mt-0.5">
-            <ImageIcon className="w-3 h-3" /> Imagem comprimida automaticamente
-          </span>
-        </div>
+        <span style={{ fontSize: 13, fontWeight: 500, color: "hsl(var(--muted-foreground))" }}>Tirar foto do produto</span>
       </button>
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        capture="environment"
-        onChange={handleCapture}
-        className="hidden"
-      />
+      <input ref={fileInputRef} type="file" accept="image/*" capture="environment" onChange={handleCapture} style={{ display: "none" }} />
     </>
   );
 };
 
 export default PhotoCapture;
+
