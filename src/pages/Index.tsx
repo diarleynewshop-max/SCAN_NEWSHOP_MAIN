@@ -93,7 +93,7 @@ const Index = () => {
         </div>
         <div style={{ textAlign: "right" }}>
           <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "rgba(255,255,255,0.45)", letterSpacing: "0.15em", textTransform: "uppercase" }}>
-            {activeList ? activeList.title : "Inventário"}
+            {activeList ? activeList.title : "Pedido"}
           </p>
           {activeList && (
             <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "rgba(255,255,255,0.8)", marginTop: 1 }}>
