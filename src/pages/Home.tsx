@@ -54,7 +54,7 @@ const Home = () => {
         <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: "rgba(255,255,255,0.05)", pointerEvents: "none" }} />
         <img src={LOGO} alt="Newshop" style={{ height: 28, filter: "brightness(0) invert(1)", objectFit: "contain" }} />
         <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "rgba(255,255,255,0.45)", letterSpacing: "0.18em", textTransform: "uppercase", marginTop: 8 }}>
-          Sistema de Inventário
+          Sistema de Pedido
         </p>
       </header>
 
@@ -165,7 +165,7 @@ const Home = () => {
       {/* ── Footer ── */}
       <div style={{ padding: "0 20px 24px", textAlign: "center" }}>
         <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(var(--muted-foreground))", letterSpacing: "0.1em" }}>
-          SCAN NEWSHOP © 2025
+          Diarley Duarte © 2025
         </p>
       </div>
 
