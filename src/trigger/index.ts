@@ -80,7 +80,8 @@ async function anexarTxtNaTarefa(taskId: string, nomeArquivo: string, conteudo: 
 // TASK 1 — Lista baixada → to do + JSON + TXT anexados
 export const listaBaixada = task({
   id: "lista-baixada",
-  machine: "small-2x",
+  machine: "micro", // ← menor máquina disponível = cold start mais rápido
+  maxDuration: 30,  // ← evita ficar pendurado
   run: async (payload: any) => {
     const dataFormatada = payload.dataDownload
       ? new Date(payload.dataDownload).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
@@ -95,30 +96,33 @@ Data: ${dataFormatada}`,
       "to do"
     );
 
-    await anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
-      type: "conference-file",
-      items: payload.produtos.map((p: any) => ({
-        codigo: p.barcode,
-        sku: p.sku || "",
-        quantidade: p.quantity ?? p.quantidade,
-        photo: p.photo || null,
-      })),
-    });
-
-    const soCodigosBloco = payload.produtos.map((p: any) => p.barcode).join("\n");
-    const codigoQuantidadeBloco = payload.produtos
-      .map((p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`)
-      .join("\n");
-    const txtContent = `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
-
-    await anexarTxtNaTarefa(taskId, `lista_${payload.pessoa}`, txtContent);
+    // Dispara os dois anexos em paralelo
+    await Promise.all([
+      anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
+        type: "conference-file",
+        items: payload.produtos.map((p: any) => ({
+          codigo: p.barcode,
+          sku: p.sku || "",
+          quantidade: p.quantity ?? p.quantidade,
+          photo: p.photo || null,
+        })),
+      }),
+      anexarTxtNaTarefa(taskId, `lista_${payload.pessoa}`, (() => {
+        const soCodigosBloco = payload.produtos.map((p: any) => p.barcode).join("\n");
+        const codigoQuantidadeBloco = payload.produtos
+          .map((p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`)
+          .join("\n");
+        return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
+      })()),
+    ]);
   },
 });
 
 // TASK 2 — Conferência finalizada → complete + itens agrupados por {S} e {M}
 export const conferenciaBaixada = task({
   id: "conferencia-baixada",
-  machine: "small-2x",
+  machine: "micro", // ← menor máquina disponível = cold start mais rápido
+  maxDuration: 30,  // ← evita ficar pendurado
   run: async (payload: any) => {
     const dataFormatada = payload.dataConferencia
       ? new Date(payload.dataConferencia).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
@@ -131,7 +135,6 @@ export const conferenciaBaixada = task({
       pendente: "⏳ Pendente",
     };
 
-    // Separa itens por digito
     const itensS = payload.itens.filter((i: any) => i.digito === "S");
     const itensM = payload.itens.filter((i: any) => i.digito === "M");
     const itensSemDigito = payload.itens.filter((i: any) => !i.digito);
@@ -140,16 +143,11 @@ export const conferenciaBaixada = task({
       `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`;
 
     let itensTexto = "";
-
-    if (itensS.length > 0) {
-      itensTexto += `{S}\n${itensS.map(formatarItem).join("\n")}`;
-    }
-
+    if (itensS.length > 0) itensTexto += `{S}\n${itensS.map(formatarItem).join("\n")}`;
     if (itensM.length > 0) {
       if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
       itensTexto += `{M}\n${itensM.map(formatarItem).join("\n")}`;
     }
-
     if (itensSemDigito.length > 0) {
       if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
       itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
