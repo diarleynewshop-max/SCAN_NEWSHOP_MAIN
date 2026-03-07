@@ -13,6 +13,7 @@ import {
   ChevronRight,
   Package,
   FileInput as FileJson,
+  Share2,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
@@ -332,6 +333,33 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     setItems((prev) => prev.map((i) => (i.id === id ? { ...i, quantidadeReal: num, status: "nao_tem_tudo" } : i)));
   };
 
+  const getResumo = () => ({
+    separado: items.filter((i) => i.status === "separado").length,
+    naoTem: items.filter((i) => i.status === "nao_tem").length,
+    parcial: items.filter((i) => i.status === "nao_tem_tudo").length,
+    pendente: items.filter((i) => i.status === "pendente").length,
+  });
+
+  const getPayloadClickUp = () => ({
+    conferente,
+    tempo: formatTime(elapsedSeconds),
+    totalItens: items.length,
+    resumo: getResumo(),
+    itens: items.map((i) => ({
+      codigo: i.codigo,
+      sku: i.sku,
+      quantidadePedida: i.quantidadePedida,
+      quantidadeReal: i.quantidadeReal,
+      status: i.status,
+      digito: i.digito ?? null,
+    })),
+  });
+
+  const enviarClickUp = () => {
+    dispararWebhookConferenciaBaixada(getPayloadClickUp());
+    toast({ title: "✅ Enviado para o ClickUp!" });
+  };
+
   const currentItem = items[currentIndex];
   const isCurrentComplete =
     currentItem &&
@@ -412,27 +440,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     });
 
     doc.save(`conferencia_${new Date().toISOString().slice(0, 10)}.pdf`);
-
-    const resumo = {
-      separado: items.filter((i) => i.status === "separado").length,
-      naoTem: items.filter((i) => i.status === "nao_tem").length,
-      parcial: items.filter((i) => i.status === "nao_tem_tudo").length,
-      pendente: items.filter((i) => i.status === "pendente").length,
-    };
-    dispararWebhookConferenciaBaixada({
-      conferente,
-      tempo: formatTime(elapsedSeconds),
-      totalItens: items.length,
-      resumo,
-      itens: items.map((i) => ({
-        codigo: i.codigo,
-        sku: i.sku,
-        quantidadePedida: i.quantidadePedida,
-        quantidadeReal: i.quantidadeReal,
-        status: i.status,
-        digito: i.digito ?? null,
-      })),
-    });
+    toast({ title: "PDF exportado!" });
   };
 
   const exportJSON = async () => {
@@ -468,33 +476,12 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     a.click();
     document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-    toast({ title: "ZIP baixado!", description: "Compartilhe pelo WhatsApp manualmente." });
+    toast({ title: "ZIP baixado!" });
 
     const zipFile = new File([zipBlob], `${fileName}.zip`, { type: "application/zip" });
     if (navigator.share) {
       try { await navigator.share({ files: [zipFile], title: `Conferência - ${conferente}` }); } catch {}
     }
-
-    const resumo = {
-      separado: items.filter((i) => i.status === "separado").length,
-      naoTem: items.filter((i) => i.status === "nao_tem").length,
-      parcial: items.filter((i) => i.status === "nao_tem_tudo").length,
-      pendente: items.filter((i) => i.status === "pendente").length,
-    };
-    dispararWebhookConferenciaBaixada({
-      conferente,
-      tempo: formatTime(elapsedSeconds),
-      totalItens: items.length,
-      resumo,
-      itens: items.map((i) => ({
-        codigo: i.codigo,
-        sku: i.sku,
-        quantidadePedida: i.quantidadePedida,
-        quantidadeReal: i.quantidadeReal,
-        status: i.status,
-        digito: i.digito ?? null,
-      })),
-    });
   };
 
   if (phase === "import") {
@@ -585,12 +572,15 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             <span className="px-2 py-1 rounded-lg bg-destructive/10 text-destructive">❌ {naoTem}</span>
           </div>
         </div>
-        <div className="grid grid-cols-2 gap-2">
+        <div className="grid grid-cols-3 gap-2">
           <button onClick={exportPDF} className="h-11 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
             <FileText className="w-4 h-4" /> PDF
           </button>
-          <button onClick={exportJSON} className="h-11 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
+          <button onClick={exportJSON} className="h-11 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
             <FileJson className="w-4 h-4" /> JSON
+          </button>
+          <button onClick={enviarClickUp} className="h-11 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
+            <Share2 className="w-4 h-4" /> ClickUp
           </button>
         </div>
         <div className="space-y-2">
@@ -751,4 +741,3 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
 };
 
 export default ConferenceView;
-
