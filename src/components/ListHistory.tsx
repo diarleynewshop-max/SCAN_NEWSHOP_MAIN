@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { dispararWebhookListaBaixada } from "@/lib/webhook";
 import { Product, ListData } from "@/components/ProductCard";
-import { MoreVertical, Pencil, Trash2, Download, FileText, FileSpreadsheet, Share2, FileInput, ChevronLeft, ChevronRight } from "lucide-react";
+import { MoreVertical, Pencil, Trash2, Download, FileText, FileSpreadsheet, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
@@ -111,6 +111,116 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     } catch {
       toast({ title: "Erro ao gerar ZIP", variant: "destructive" });
     }
+  };
+
+  const exportHTML = (list: ListData) => {
+    const produtosJS = JSON.stringify(list.products.map((p) => ({
+      codigo: p.barcode,
+      sku: p.sku || "",
+      quantidade: p.quantity,
+      removeTag: p.removeTag ?? false,
+      photo: p.photo || null,
+    })));
+
+    const html = `<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8"/>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+  <title>${list.title} — ${list.person}</title>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet"/>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #f4f3f0; --card: #ffffff; --border: #e2e0da;
+      --text: #1a1916; --muted: #8a8780; --badge: #f0ede8;
+      --green: #1e7d4a; --green-bg: #e8f5ee;
+    }
+    body { font-family: 'DM Sans', sans-serif; background: var(--bg); color: var(--text); min-height: 100vh; padding: 32px 24px 60px; }
+    header { max-width: 1200px; margin: 0 auto 28px; display: flex; align-items: flex-end; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+    header h1 { font-size: 26px; font-weight: 900; letter-spacing: -0.5px; }
+    header p { font-family: 'DM Mono', monospace; font-size: 11px; color: var(--muted); letter-spacing: 0.12em; text-transform: uppercase; margin-top: 4px; }
+    .badge { background: var(--badge); border: 1px solid var(--border); border-radius: 20px; padding: 6px 14px; font-family: 'DM Mono', monospace; font-size: 11px; font-weight: 500; color: var(--muted); }
+    .badge span { color: var(--text); font-weight: 700; }
+    .grid { max-width: 1200px; margin: 0 auto; display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 14px; }
+    .card { background: var(--card); border-radius: 16px; border: 1.5px solid var(--border); overflow: hidden; cursor: pointer; transition: transform 0.15s, box-shadow 0.15s; position: relative; }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 12px 32px rgba(0,0,0,0.1); }
+    .card::before { content: ''; position: absolute; left: 0; top: 0; bottom: 0; width: 4px; background: #e2e0da; }
+    .card.has-tag::before { background: #f0a500; }
+    .card-img { width: 100%; aspect-ratio: 1; object-fit: cover; display: block; background: var(--bg); }
+    .card-no-img { width: 100%; aspect-ratio: 1; background: var(--badge); display: flex; align-items: center; justify-content: center; font-size: 42px; color: var(--border); }
+    .card-body { padding: 11px 13px 13px; border-top: 1.5px solid var(--border); }
+    .card-code { font-family: 'DM Mono', monospace; font-size: 12px; font-weight: 500; color: var(--text); word-break: break-all; line-height: 1.4; }
+    .card-sku { font-size: 11px; color: var(--muted); margin-top: 2px; }
+    .card-footer { display: flex; align-items: center; justify-content: space-between; margin-top: 8px; }
+    .card-qty strong { font-size: 20px; font-weight: 900; color: var(--text); line-height: 1; display: block; }
+    .card-qty span { font-size: 10px; color: var(--muted); font-family: 'DM Mono', monospace; }
+    .tag { font-size: 10px; font-weight: 700; padding: 3px 7px; border-radius: 6px; font-family: 'DM Mono', monospace; }
+    .tag-etiqueta { background: #fff3e0; color: #a05c00; }
+    .tag-ok { background: var(--green-bg); color: var(--green); }
+    .toast { position: fixed; bottom: 24px; left: 50%; transform: translateX(-50%) translateY(80px); background: var(--text); color: #fff; padding: 12px 24px; border-radius: 40px; font-size: 13px; font-weight: 600; opacity: 0; transition: all 0.25s cubic-bezier(0.34,1.56,0.64,1); pointer-events: none; white-space: nowrap; z-index: 999; }
+    .toast.show { opacity: 1; transform: translateX(-50%) translateY(0); }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>📦 ${list.title}</h1>
+    <p>👤 ${list.person} · ${list.createdAt.toLocaleDateString("pt-BR")} · Clique no card para copiar o código</p>
+  </div>
+  <div style="display:flex;gap:8px;flex-wrap:wrap">
+    <div class="badge">Total: <span>${list.products.length}</span></div>
+  </div>
+</header>
+<div class="grid" id="grid"></div>
+<div class="toast" id="toast"></div>
+<script>
+  const produtos = ${produtosJS};
+  const grid = document.getElementById("grid");
+  produtos.forEach(p => {
+    const card = document.createElement("div");
+    card.className = "card" + (p.removeTag ? " has-tag" : "");
+    card.title = "Clique para copiar o código";
+    card.onclick = () => {
+      navigator.clipboard.writeText(p.codigo).then(() => {
+        const t = document.getElementById("toast");
+        t.textContent = "✅ Copiado: " + p.codigo;
+        t.classList.add("show");
+        setTimeout(() => t.classList.remove("show"), 2000);
+      });
+    };
+    const img = p.photo
+      ? \`<img class="card-img" src="\${p.photo}" alt="\${p.codigo}" loading="lazy" onerror="this.parentElement.innerHTML='<div class=\\"card-no-img\\">📦</div>'">\`
+      : \`<div class="card-no-img">📦</div>\`;
+    card.innerHTML = \`
+      \${img}
+      <div class="card-body">
+        <div class="card-code">\${p.codigo}</div>
+        <div class="card-sku">SKU: \${p.sku || "—"}</div>
+        <div class="card-footer">
+          <div class="card-qty">
+            <strong>\${p.quantidade}</strong>
+            <span>unid</span>
+          </div>
+          \${p.removeTag ? '<span class="tag tag-etiqueta">Tira etiqueta</span>' : '<span class="tag tag-ok">OK</span>'}
+        </div>
+      </div>
+    \`;
+    grid.appendChild(card);
+  });
+<\/script>
+</body>
+</html>`;
+
+    const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `lista_${list.person.replace(/\s/g, "_")}.html`;
+    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setDownloadOpen(null);
+    toast({ title: "HTML gerado! Abra no navegador do PC." });
   };
 
   const enviarClickUp = (list: ListData) => {
@@ -257,11 +367,12 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
             <div style={{ display: "flex", alignItems: "center", gap: 10, color: "hsl(var(--muted-foreground))", fontSize: 11 }}>
               <div style={{ flex: 1, height: 1, background: "hsl(var(--border))" }} /> outras opções <div style={{ flex: 1, height: 1, background: "hsl(var(--border))" }} />
             </div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
               {[
                 { label: "PDF", Icon: FileText, action: () => { const l = lists.find(x => x.id === downloadOpen); if (l) exportPDF(l); } },
                 { label: "CSV", Icon: FileSpreadsheet, action: () => { const l = lists.find(x => x.id === downloadOpen); if (l) exportCSV(l); } },
                 { label: "Texto", Icon: Share2, action: () => { const l = lists.find(x => x.id === downloadOpen); if (l) handleShare(l); } },
+                { label: "HTML", Icon: Monitor, action: () => { const l = lists.find(x => x.id === downloadOpen); if (l) exportHTML(l); } },
               ].map(({ label, Icon, action }) => (
                 <button key={label} onClick={action}
                   style={{ height: 56, borderRadius: 10, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))", fontWeight: 600, fontSize: 12, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "center", gap: 4, cursor: "pointer" }}
