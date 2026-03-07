@@ -53,17 +53,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     toast({ title: "Lista marcada como excluída" });
   };
 
-  const markDownloaded = (listId: string) => {
-    const list = lists.find((l) => l.id === listId);
-    if (!list || list.status === "red") return;
-    onUpdateList({ ...list, status: "green" });
-    dispararWebhookListaBaixada({
-      pessoa: list.person, titulo: list.title,
-      totalItens: list.products.length, dataCriacao: list.createdAt.toISOString(),
-      produtos: list.products.map((p) => ({ barcode: p.barcode, sku: p.sku || "", quantidade: p.quantity, removeTag: p.removeTag ?? false, photo: p.photo || null })),
-    });
-  };
-
   const exportPDF = (list: ListData) => {
     const doc = new jsPDF();
     doc.setFontSize(18); doc.text(list.title || "Lista", 14, 20);
@@ -82,7 +71,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
       y += h;
     });
     doc.save(`lista_${list.person.replace(/\s/g, "_")}.pdf`);
-    markDownloaded(list.id); setDownloadOpen(null);
+    setDownloadOpen(null);
     toast({ title: "PDF exportado!" });
   };
 
@@ -90,7 +79,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     const blob = new Blob([list.products.map((p) => `${p.barcode};${p.quantity}`).join("\n")], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `lista_${list.person.replace(/\s/g,"_")}.csv`; a.click();
-    URL.revokeObjectURL(url); markDownloaded(list.id); setDownloadOpen(null);
+    URL.revokeObjectURL(url); setDownloadOpen(null);
     toast({ title: "CSV exportado!" });
   };
 
@@ -99,14 +88,14 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     list.products.forEach((p, i) => { text += `${i + 1}. ${p.barcode} | SKU: ${p.sku || "-"} | Qtd: ${p.quantity}\n`; });
     if (navigator.share) { try { await navigator.share({ title: list.title, text }); } catch {} }
     else { await navigator.clipboard.writeText(text); toast({ title: "Lista copiada!" }); }
-    markDownloaded(list.id); setDownloadOpen(null);
+    setDownloadOpen(null);
   };
 
   const exportJSON = async (list: ListData) => {
     const data = { type: "conference-file", items: list.products.map((p) => ({ codigo: p.barcode, sku: p.sku || "", quantidade: p.quantity, photo: p.photo || null })) };
     const fileName = list.title.replace(/[\s\/]/g, "_").replace(/[^a-zA-Z0-9_\-áéíóúàèìòùâêîôûãõäëïöüçÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÃÕÄËÏÖÜÇ]/g, "");
     const txt = `Codigo\n${list.products.map((p) => p.barcode).join("\n")}\n\n------------------------\n\nCodigo;Quantidade\n${list.products.map((p) => `${p.barcode};${p.quantity}`).join("\n")}`;
-    markDownloaded(list.id); setDownloadOpen(null);
+    setDownloadOpen(null);
     try {
       const zip = new JSZip();
       zip.file(`${fileName}.json`, JSON.stringify(data, null, 2));
@@ -122,6 +111,21 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     } catch {
       toast({ title: "Erro ao gerar ZIP", variant: "destructive" });
     }
+  };
+
+  const enviarClickUp = (list: ListData) => {
+    dispararWebhookListaBaixada({
+      pessoa: list.person,
+      titulo: list.title,
+      totalItens: list.products.length,
+      dataCriacao: list.createdAt.toISOString(),
+      produtos: list.products.map((p) => ({
+        barcode: p.barcode, sku: p.sku || "",
+        quantidade: p.quantity, removeTag: p.removeTag ?? false, photo: p.photo || null,
+      })),
+    });
+    onUpdateList({ ...list, status: "green" });
+    toast({ title: "✅ Enviado para o ClickUp!" });
   };
 
   const openEdit = (list: ListData) => {
@@ -171,7 +175,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
       {sortedLists.map((list) => (
         <div key={list.id} style={{ background: "#fff", borderRadius: 16, border: "1px solid hsl(var(--border))", overflow: "hidden", boxShadow: "var(--shadow-xs)", position: "relative" }}>
-          {/* color strip */}
           <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: STATUS_LEFT[list.status] ?? STATUS_LEFT.yellow }} />
 
           <div style={{ padding: "16px 16px 12px 20px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
@@ -185,11 +188,11 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
             </div>
           </div>
 
-          {/* Actions */}
           <div style={{ display: "flex", gap: 8, padding: "10px 16px 14px 20px", borderTop: "1px solid hsl(var(--muted))" }}>
             {[
               { label: "Editar", icon: <Pencil style={{ width: 13, height: 13 }} />, onClick: () => openEdit(list) },
-              { label: "Baixar", icon: <Download style={{ width: 13, height: 13 }} />, onClick: () => { setDownloadOpen(list.id); setMenuOpen(null); }, primary: true },
+              { label: "Baixar", icon: <Download style={{ width: 13, height: 13 }} />, onClick: () => { setDownloadOpen(list.id); setMenuOpen(null); } },
+              { label: "ClickUp", icon: <Share2 style={{ width: 13, height: 13 }} />, onClick: () => enviarClickUp(list), primary: true },
               { label: "Excluir", icon: <Trash2 style={{ width: 13, height: 13 }} />, onClick: () => { setDeleteConfirm(list.id); setMenuOpen(null); }, danger: true },
             ].map(({ label, icon, onClick, primary, danger }) => (
               <button key={label} onClick={onClick}
@@ -340,4 +343,3 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 };
 
 export default ListHistory;
-
