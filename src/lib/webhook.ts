@@ -1,41 +1,34 @@
-const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
+const WEBHOOK_LISTA = import.meta.env.VITE_WEBHOOK_LISTA as string;
+const WEBHOOK_CONFERENCIA = import.meta.env.VITE_WEBHOOK_CONFERENCIA as string;
 
-async function dispararTask(taskId: string, payload: object) {
-  if (!TRIGGER_API_KEY) {
-    console.warn("[Trigger.dev] Chave não configurada. Defina VITE_TRIGGER_API_KEY no .env");
+async function dispararWebhook(url: string, payload: object) {
+  if (!url) {
+    console.warn("[Webhook] URL não configurada.");
     return;
   }
   try {
-    const res = await fetch(`https://api.trigger.dev/api/v1/tasks/${taskId}/trigger`, {
+    const res = await fetch(url, {
       method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${TRIGGER_API_KEY}`,
-      },
-      body: JSON.stringify({ payload }),
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
     });
-    if (!res.ok) {
-      console.warn(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}`);
-      return;
-    }
-    console.info(`[Trigger.dev] ✅ ${taskId} disparada`);
+    if (!res.ok) console.warn(`[Webhook] Erro ${res.status}`);
+    else console.info(`[Webhook] ✅ Disparado`);
   } catch (err) {
-    console.warn(`[Trigger.dev] ❌ Falha de rede:`, err);
+    console.warn(`[Webhook] ❌ Falha:`, err);
   }
 }
 
 export async function dispararWebhookListaBaixada(payload: object) {
-  await dispararTask("lista-baixada", {
+  await dispararWebhook(WEBHOOK_LISTA, {
     ...payload,
     dataDownload: new Date().toISOString(),
   });
 }
 
 export async function dispararWebhookConferenciaBaixada(payload: object) {
-  await dispararTask("conferencia-baixada", {
+  await dispararWebhook(WEBHOOK_CONFERENCIA, {
     ...payload,
     dataConferencia: new Date().toISOString(),
   });
-
 }
-
