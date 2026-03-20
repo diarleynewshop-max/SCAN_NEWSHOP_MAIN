@@ -1,14 +1,16 @@
 import { task } from "@trigger.dev/sdk/v3";
 
 // ── Credenciais SOYE / FACIL ─────────────────────────────────────────
-const CLICKUP_TOKEN_SF       = process.env.CLICKUP_TOKEN_SF!;
-const CLICKUP_LIST_ID_SOYE   = process.env.CLICKUP_LIST_ID_SOYE  ?? "901326461924";
-const CLICKUP_LIST_ID_FACIL  = process.env.CLICKUP_LIST_ID_FACIL ?? "901326461915";
+const CLICKUP_TOKEN_SF         = process.env.CLICKUP_TOKEN_SF!;
+const CLICKUP_LIST_ID_SOYE     = process.env.CLICKUP_LIST_ID_SOYE     ?? "901326461924"; // LOJA SOYE
+const CLICKUP_LIST_ID_FACIL    = process.env.CLICKUP_LIST_ID_FACIL    ?? "901326461915"; // LOJA FACIL
+const CLICKUP_CD_LIST_ID_SOYE  = process.env.CLICKUP_CD_LIST_ID_SOYE  ?? "901326461924"; // CD SOYE  (ajuste se tiver ID separado)
+const CLICKUP_CD_LIST_ID_FACIL = process.env.CLICKUP_CD_LIST_ID_FACIL ?? "901326461915"; // CD FACIL (ajuste se tiver ID separado)
 
-// ── Helper: escolhe list ID pela empresa ─────────────────────────────────────
-function getListId(empresa: string): string {
-  if (empresa === "FACIL") return CLICKUP_LIST_ID_FACIL;
-  return CLICKUP_LIST_ID_SOYE; // default SOYE
+// ── Helper: escolhe list ID pela empresa e flag ───────────────────────────────
+function getListId(empresa: string, isCD = false): string {
+  if (empresa === "FACIL") return isCD ? CLICKUP_CD_LIST_ID_FACIL : CLICKUP_LIST_ID_FACIL;
+  return isCD ? CLICKUP_CD_LIST_ID_SOYE : CLICKUP_LIST_ID_SOYE; // default SOYE
 }
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -100,8 +102,10 @@ async function anexarTxtNaTarefa(
 }
 
 // ── TASK 1 — Lista baixada (SOYE / FACIL) ────────────────────────────────────
-// LOJA SOYE  → CLICKUP_LIST_ID_SOYE  → status "to do"
-// LOJA FACIL → CLICKUP_LIST_ID_FACIL → status "to do"
+// LOJA SOYE  → CLICKUP_LIST_ID_SOYE      → status "to do"
+// LOJA FACIL → CLICKUP_LIST_ID_FACIL     → status "to do"
+// CD   SOYE  → CLICKUP_CD_LIST_ID_SOYE   → status "EM CONFERENCIA"
+// CD   FACIL → CLICKUP_CD_LIST_ID_FACIL  → status "EM CONFERENCIA"
 export const listaBaixadaSF = task({
   id: "lista-baixada-sf",
   machine: "micro",
@@ -111,7 +115,10 @@ export const listaBaixadaSF = task({
       ? new Date(payload.dataDownload).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
       : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
 
-    const listId  = getListId(payload.empresa ?? "SOYE");
+    const isCD      = payload.flag === "cd";
+    const listId    = getListId(payload.empresa ?? "SOYE", isCD);
+    const status    = isCD ? "EM CONFERENCIA" : "to do";
+    const flagLabel = isCD ? "CD" : "LOJA";
 
     const taskId = await criarTarefaClickUp(
       listId,
@@ -119,15 +126,17 @@ export const listaBaixadaSF = task({
       `Pessoa: ${payload.pessoa}
 Título: ${payload.titulo}
 Empresa: ${payload.empresa}
-Tipo: LOJA
+Tipo: ${flagLabel}
 Itens: ${payload.totalItens}
 Data: ${dataFormatada}`,
-      "to do"
+      status
     );
 
     await Promise.all([
       anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
         type: "conference-file",
+        empresa: payload.empresa ?? "SOYE",
+        flag:    payload.flag    ?? "loja",
         items: payload.produtos.map((p: any) => ({
           codigo:     p.barcode,
           sku:        p.sku || "",
@@ -147,6 +156,10 @@ Data: ${dataFormatada}`,
 });
 
 // ── TASK 2 — Conferência finalizada (SOYE / FACIL) ───────────────────────────
+// LOJA SOYE  → CLICKUP_LIST_ID_SOYE      → status "complete"
+// LOJA FACIL → CLICKUP_LIST_ID_FACIL     → status "complete"
+// CD   SOYE  → CLICKUP_CD_LIST_ID_SOYE   → status "complete"
+// CD   FACIL → CLICKUP_CD_LIST_ID_FACIL  → status "complete"
 export const conferenciaBaixadaSF = task({
   id: "conferencia-baixada-sf",
   machine: "micro",
@@ -156,7 +169,8 @@ export const conferenciaBaixadaSF = task({
       ? new Date(payload.dataConferencia).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
       : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
 
-    const listId = getListId(payload.empresa ?? "SOYE");
+    const isCD   = payload.flag === "cd";
+    const listId = getListId(payload.empresa ?? "SOYE", isCD);
 
     const statusMap: Record<string, string> = {
       separado:     "✅ Separado",
@@ -188,7 +202,7 @@ export const conferenciaBaixadaSF = task({
       `✅ ${payload.conferente} — ${dataFormatada}`,
       `Conferente: ${payload.conferente}
 Empresa: ${payload.empresa}
-Tipo: LOJA
+Tipo: ${isCD ? "CD" : "LOJA"}
 Data: ${dataFormatada}
 Tempo: ${payload.tempo}
 Total: ${payload.totalItens} item(ns)

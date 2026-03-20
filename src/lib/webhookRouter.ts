@@ -76,7 +76,7 @@ export async function enviarParaClickUp(payload: WebhookPayload): Promise<void> 
       return;
     }
     if (empresa === "SOYE" || empresa === "FACIL") {
-      console.info(`[webhookRouter] CD ${empresa} — não configurado ainda`);
+      await dispararTrigger("lista-baixada-sf", p);  // indexSF.ts → CLICKUP_TOKEN_SF + CD list
       return;
     }
   }
@@ -107,7 +107,7 @@ export async function enviarConferenciaParaClickUp(payload: object & { flag?: st
       return;
     }
     if (empresa === "SOYE" || empresa === "FACIL") {
-      console.info(`[webhookRouter] CD conferência ${empresa} — não configurado ainda`);
+      await dispararTrigger("conferencia-baixada-sf", p); // indexSF.ts → CLICKUP_TOKEN_SF + CD list
       return;
     }
   }

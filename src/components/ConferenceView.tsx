@@ -18,7 +18,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
-import { dispararWebhookConferenciaBaixada } from "@/lib/webhook";
+import { enviarConferenciaParaClickUp } from "@/lib/webhookRouter";
 import { z } from "zod";
 
 export type ConferenceStatus =
@@ -40,6 +40,8 @@ export interface ConferenceItem {
 
 interface ConferenceViewProps {
   onBack: () => void;
+  empresa?: string;
+  flag?: string;
 }
 
 function formatTime(seconds: number): string {
@@ -53,6 +55,8 @@ type Phase = "import" | "ready" | "running" | "finished";
 
 const ConferenceFileSchema = z.object({
   type: z.literal("conference-file"),
+  empresa: z.string().optional(),
+  flag: z.string().optional(),
   items: z.array(
     z.object({
       codigo: z.string().min(1),
@@ -63,13 +67,16 @@ const ConferenceFileSchema = z.object({
   ).min(1),
 });
 
-const ConferenceView = ({ onBack }: ConferenceViewProps) => {
+const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagProp = "loja" }: ConferenceViewProps) => {
   const [items, setItems] = useState<ConferenceItem[]>([]);
   const [phase, setPhase] = useState<Phase>("import");
   const [importError, setImportError] = useState<string | null>(null);
   const [conferente, setConferente] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  // empresa/flag podem vir da prop (activeList) ou ser sobrescritos pelo arquivo importado
+  const [empresa, setEmpresa] = useState(empresaProp);
+  const [flag, setFlag] = useState(flagProp);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -88,6 +95,10 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
         setImportError("Arquivo inválido: " + result.error.issues[0]?.message);
         return false;
       }
+
+      // Sobrescreve empresa/flag se o arquivo tiver essa informação
+      if (result.data.empresa) setEmpresa(result.data.empresa);
+      if (result.data.flag)    setFlag(result.data.flag);
 
       const digitoMap: Record<string, "S" | "M"> = raw._meta?.digitoMap ?? {};
 
@@ -216,6 +227,24 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     if (!file) return;
     setImportError(null);
 
+    // ── Detecta empresa/flag pelo nome do arquivo (fallback se JSON não tiver) ──
+    const detectarPeloNome = (nome: string) => {
+      const n = nome.toUpperCase();
+      let empresaDetectada: string | null = null;
+      let flagDetectada: string | null = null;
+
+      if (n.includes("NEWSHOP")) empresaDetectada = "NEWSHOP";
+      else if (n.includes("FACIL"))   empresaDetectada = "FACIL";
+      else if (n.includes("SOYE"))    empresaDetectada = "SOYE";
+
+      if (n.includes("_CD_") || n.startsWith("CD_") || n.endsWith("_CD") || n.includes("-CD-"))
+        flagDetectada = "cd";
+      else if (n.includes("_LOJA_") || n.startsWith("LOJA_") || n.endsWith("_LOJA") || n.includes("-LOJA-"))
+        flagDetectada = "loja";
+
+      return { empresaDetectada, flagDetectada };
+    };
+
     if (file.name.endsWith(".zip")) {
       try {
         const zip = await JSZip.loadAsync(file);
@@ -232,6 +261,18 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
             e.target.value = "";
             return;
           }
+
+          // Prioridade 1: campos dentro do JSON
+          if (result.data.empresa) {
+            setEmpresa(result.data.empresa);
+          } else {
+            // Prioridade 2: nome do arquivo ZIP
+            const { empresaDetectada, flagDetectada } = detectarPeloNome(file.name);
+            if (empresaDetectada) setEmpresa(empresaDetectada);
+            if (flagDetectada)    setFlag(flagDetectada);
+            // Prioridade 3: seleção manual já está no state (não faz nada)
+          }
+          if (result.data.flag) setFlag(result.data.flag);
 
           const digitoMap: Record<string, "S" | "M"> = (raw as any)._meta?.digitoMap ?? {};
 
@@ -254,6 +295,10 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
 
         if (jsonFileName) {
           const text = await zip.files[jsonFileName].async("string");
+          // Tenta ler do nome do ZIP antes de processar
+          const { empresaDetectada, flagDetectada } = detectarPeloNome(file.name);
+          if (empresaDetectada) setEmpresa(empresaDetectada);
+          if (flagDetectada)    setFlag(flagDetectada);
           if (!processJsonText(text)) {
             setImportError("O JSON dentro do .zip não é um arquivo de conferência válido.");
           }
@@ -268,6 +313,11 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
       e.target.value = "";
       return;
     }
+
+    // Para JSON/TXT/CSV direto, tenta ler pelo nome do arquivo também
+    const { empresaDetectada, flagDetectada } = detectarPeloNome(file.name);
+    if (empresaDetectada) setEmpresa(empresaDetectada);
+    if (flagDetectada)    setFlag(flagDetectada);
 
     const reader = new FileReader();
     reader.onload = (event) => {
@@ -356,7 +406,11 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
   });
 
   const enviarClickUp = () => {
-    dispararWebhookConferenciaBaixada(getPayloadClickUp());
+    enviarConferenciaParaClickUp({
+      ...getPayloadClickUp(),
+      empresa,
+      flag,
+    });
     toast({ title: "✅ Enviado para o ClickUp!" });
   };
 
@@ -484,20 +538,85 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
     }
   };
 
+  // ── Badge de empresa/flag ─────────────────────────────────────────────────
+  const EmpresaBadge = () => {
+    const empresaColors: Record<string, { bg: string; border: string; text: string }> = {
+      NEWSHOP: { bg: "hsl(var(--primary)/0.12)", border: "hsl(var(--primary)/0.4)", text: "hsl(var(--primary))" },
+      SOYE:    { bg: "hsl(142 72% 29%/0.12)",    border: "hsl(142 72% 29%/0.4)",    text: "hsl(142 72% 29%)"    },
+      FACIL:   { bg: "hsl(30 95% 50%/0.12)",     border: "hsl(30 95% 50%/0.4)",     text: "hsl(30 95% 50%)"    },
+    };
+    const colors = empresaColors[empresa] ?? empresaColors["NEWSHOP"];
+    return (
+      <div style={{ display: "inline-flex", alignItems: "center", gap: 6, padding: "4px 12px", borderRadius: 999, background: colors.bg, border: `1px solid ${colors.border}`, fontSize: 12, fontWeight: 700, color: colors.text, fontFamily: "var(--font-mono)" }}>
+        <span style={{ opacity: 0.7 }}>{flag.toUpperCase()}</span>
+        <span style={{ opacity: 0.4 }}>·</span>
+        <span>{empresa}</span>
+      </div>
+    );
+  };
+
   if (phase === "import") {
+    const flagOptions: { value: string; label: string }[] = [
+      { value: "loja", label: "LOJA" },
+      { value: "cd",   label: "CD"   },
+    ];
+    const empresaOptions: { value: string; label: string; color: string }[] = [
+      { value: "NEWSHOP", label: "NEWSHOP", color: "hsl(var(--primary))"  },
+      { value: "SOYE",    label: "SOYE",    color: "hsl(142 72% 29%)"     },
+      { value: "FACIL",   label: "FACIL",   color: "hsl(30 95% 50%)"      },
+    ];
+
     return (
       <div className="p-4 space-y-4">
         <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
-        <div className="text-center py-10">
-          <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mx-auto mb-4">
-            <FileInput className="w-8 h-8 text-muted-foreground" />
+
+        <div className="space-y-4 pt-2">
+          {/* Tipo */}
+          <div>
+            <p className="text-sm font-semibold text-foreground mb-2">Tipo</p>
+            <div className="flex gap-2">
+              {flagOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setFlag(opt.value)}
+                  className="flex-1 h-11 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
+                  style={{
+                    background: flag === opt.value ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                    color: flag === opt.value ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
+                    border: flag === opt.value ? "2px solid hsl(var(--primary))" : "2px solid transparent",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
           </div>
-          <p className="text-foreground font-semibold text-lg mb-1">Importar Lista</p>
-          <p className="text-sm text-muted-foreground mb-1"><strong>ZIP</strong>: JSON + TXT do ERP (cruzamento automático)</p>
-          <p className="text-sm text-muted-foreground mb-4"><strong>TXT/CSV</strong>: CODIGO;QUANTIDADE;S ou CODIGO;QUANTIDADE;M</p>
-          <div className="w-full max-w-xs mx-auto mb-4 text-left">
+
+          {/* Empresa */}
+          <div>
+            <p className="text-sm font-semibold text-foreground mb-2">Empresa</p>
+            <div className="flex gap-2">
+              {empresaOptions.map((opt) => (
+                <button
+                  key={opt.value}
+                  onClick={() => setEmpresa(opt.value)}
+                  className="flex-1 h-11 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
+                  style={{
+                    background: empresa === opt.value ? opt.color : "hsl(var(--muted))",
+                    color: empresa === opt.value ? "#fff" : "hsl(var(--muted-foreground))",
+                    border: empresa === opt.value ? `2px solid ${opt.color}` : "2px solid transparent",
+                  }}
+                >
+                  {opt.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Conferente */}
+          <div>
             <label className="text-sm font-semibold text-foreground mb-1.5 block">Nome do Conferente</label>
             <input
               type="text"
@@ -507,16 +626,22 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
               className="w-full h-12 px-4 rounded-xl border border-input bg-card text-foreground placeholder:text-muted-foreground text-base font-semibold focus:outline-none focus:ring-2 focus:ring-ring transition-all"
             />
           </div>
+
+          <div className="flex justify-center pt-1">
+            <EmpresaBadge />
+          </div>
+
           {importError && (
-            <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 mb-4 text-sm text-destructive text-left">{importError}</div>
+            <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{importError}</div>
           )}
+
           <input ref={fileInputRef} type="file" accept=".csv,.txt,.json,.zip" onChange={handleFileImport} className="hidden" />
           <button
             onClick={() => {
               if (!conferente.trim()) { toast({ title: "Informe o nome do conferente", variant: "destructive" }); return; }
               fileInputRef.current?.click();
             }}
-            className="w-full max-w-xs mx-auto h-12 bg-primary text-primary-foreground rounded-xl font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25"
+            className="w-full h-12 bg-primary text-primary-foreground rounded-xl font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25"
           >
             <FileInput className="w-5 h-5" /> Selecionar Arquivo
           </button>
@@ -532,6 +657,7 @@ const ConferenceView = ({ onBack }: ConferenceViewProps) => {
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
         <div className="text-center py-10">
+          <div className="mb-3"><EmpresaBadge /></div>
           <div className="w-16 h-16 rounded-full bg-[hsl(var(--success)/0.15)] flex items-center justify-center mx-auto mb-4">
             <CheckCircle2 className="w-8 h-8 text-[hsl(var(--success))]" />
           </div>

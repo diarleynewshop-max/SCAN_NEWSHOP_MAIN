@@ -2,8 +2,8 @@ import { task } from "@trigger.dev/sdk/v3";
 
 // ── Credenciais NEWSHOP ───────────────────────────────────────────────────────
 const CLICKUP_TOKEN      = process.env.CLICKUP_TOKEN!;
-const CLICKUP_LIST_ID    = process.env.CLICKUP_LIST_ID!;      // LOJA NEWSHOP
-const CLICKUP_CD_LIST_ID = process.env.CLICKUP_CD_LIST_ID!;   // CD NEWSHOP
+const CLICKUP_LIST_ID    = process.env.CLICKUP_LIST_ID    ?? "901325900510"; // LOJA NEWSHOP
+const CLICKUP_CD_LIST_ID = process.env.CLICKUP_CD_LIST_ID ?? "901325900510"; // CD NEWSHOP (ajuste se tiver ID separado)
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function criarTarefaClickUp(
@@ -117,6 +117,8 @@ Data: ${dataFormatada}`,
     await Promise.all([
       anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
         type: "conference-file",
+        empresa: payload.empresa ?? "NEWSHOP",
+        flag:    payload.flag    ?? "loja",
         items: payload.produtos.map((p: any) => ({
           codigo:     p.barcode,
           sku:        p.sku || "",

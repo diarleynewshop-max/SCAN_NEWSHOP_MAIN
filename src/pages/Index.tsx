@@ -312,7 +312,7 @@ const Index = () => {
         ) : view === "list" ? (
           <ListHistory lists={lists} onUpdateList={updateList} onStartConference={() => setView("conference")} />
         ) : (
-          <ConferenceView onBack={() => setView("list")} />
+          <ConferenceView onBack={() => setView("list")} empresa={activeList?.empresa} flag={activeList?.flag} />
         )}
       </div>
 
