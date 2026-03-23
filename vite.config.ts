@@ -16,4 +16,15 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    outDir: "dist",
+    rollupOptions: {
+      // Trigger.dev é server-side — não entra no bundle do frontend
+      external: [
+        "@trigger.dev/sdk",
+        "@trigger.dev/sdk/v3",
+        "@trigger.dev/build",
+      ],
+    },
+  },
 });
