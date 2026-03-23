@@ -167,7 +167,6 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
               </button>
               <button
                 onClick={() => {
-                  // Also allow picking from gallery
                   const input = document.createElement("input");
                   input.type = "file";
                   input.accept = "image/*";
@@ -180,8 +179,24 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
               </button>
             </div>
           ) : (
-            <div className="rounded-2xl overflow-hidden">
-              <video ref={videoRef} className="w-full rounded-2xl" playsInline muted />
+            <div className="space-y-3">
+              <div className="rounded-2xl overflow-hidden">
+                <video ref={videoRef} className="w-full rounded-2xl" playsInline muted />
+              </div>
+              {/* Botão galeria visível mesmo na câmera ao vivo */}
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleFileCapture}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="w-full h-11 bg-card/20 text-primary-foreground rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform border border-white/20"
+              >
+                <Upload className="w-4 h-4" /> Escolher da Galeria
+              </button>
             </div>
           )}
         </div>
