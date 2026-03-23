@@ -63,3 +63,7 @@ body { font-family: var(--font-sans); background: hsl(var(--background)); color:
 .font-serif { font-family: var(--font-serif) !important; }
 .font-mono  { font-family: var(--font-mono) !important; }
 
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
+}

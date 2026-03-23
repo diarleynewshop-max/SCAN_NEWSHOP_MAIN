@@ -23,6 +23,7 @@ export interface ListData {
   closedAt?: Date;
   status: "open" | "yellow" | "green" | "red";
   flag: ListFlag; // "loja" ou "cd"
+  sentToClickUp?: boolean; // true depois do primeiro envio bem-sucedido
 }
 
 interface ProductCardProps {

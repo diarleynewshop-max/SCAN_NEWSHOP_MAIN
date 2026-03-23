@@ -74,12 +74,36 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   const [conferente, setConferente] = useState("");
   const [currentIndex, setCurrentIndex] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  // empresa/flag podem vir da prop (activeList) ou ser sobrescritos pelo arquivo importado
   const [empresa, setEmpresa] = useState(empresaProp);
   const [flag, setFlag] = useState(flagProp);
+  // ID único desta conferência — gerado ao finalizar, garante 1 envio por sessão
+  const [conferenceId] = useState(() => crypto.randomUUID());
+  // "idle" | "sending" | "sent" | "error"
+  const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // Chave de storage para IDs já enviados
+  const STORAGE_KEY = "clickup_sent_ids";
+
+  const jaFoiEnviado = (): boolean => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const ids: string[] = raw ? JSON.parse(raw) : [];
+      return ids.includes(conferenceId);
+    } catch { return false; }
+  };
+
+  const marcarComoEnviado = () => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const ids: string[] = raw ? JSON.parse(raw) : [];
+      // Mantém só os últimos 200 IDs para não encher o storage
+      const novos = [...ids, conferenceId].slice(-200);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(novos));
+    } catch {}
+  };
 
   useEffect(() => {
     return () => {
@@ -405,13 +429,29 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     })),
   });
 
-  const enviarClickUp = () => {
-    enviarConferenciaParaClickUp({
-      ...getPayloadClickUp(),
-      empresa,
-      flag,
-    });
-    toast({ title: "✅ Enviado para o ClickUp!" });
+  const enviarClickUp = async () => {
+    // Bloqueia se já foi enviado
+    if (jaFoiEnviado() || sendStatus === "sent") {
+      toast({ title: "⚠️ Já enviado!", description: "Este pedido já foi compartilhado no ClickUp.", variant: "destructive" });
+      return;
+    }
+    if (sendStatus === "sending") return;
+
+    setSendStatus("sending");
+    try {
+      await enviarConferenciaParaClickUp({
+        ...getPayloadClickUp(),
+        empresa,
+        flag,
+        conferenceId,
+      });
+      marcarComoEnviado();
+      setSendStatus("sent");
+      toast({ title: "✅ Chegou no ClickUp!", description: `Pedido de ${conferente} enviado com sucesso.` });
+    } catch {
+      setSendStatus("error");
+      toast({ title: "❌ Falha no envio", description: "Verifique sua conexão e tente novamente.", variant: "destructive" });
+    }
   };
 
   const currentItem = items[currentIndex];
@@ -705,8 +745,31 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
           <button onClick={exportJSON} className="h-11 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
             <FileJson className="w-4 h-4" /> JSON
           </button>
-          <button onClick={enviarClickUp} className="h-11 rounded-xl bg-primary text-primary-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
-            <Share2 className="w-4 h-4" /> ClickUp
+          <button
+            onClick={enviarClickUp}
+            disabled={sendStatus === "sending" || sendStatus === "sent"}
+            className="h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed"
+            style={{
+              background:
+                sendStatus === "sent"    ? "hsl(var(--success))"     :
+                sendStatus === "error"   ? "hsl(var(--destructive))"  :
+                sendStatus === "sending" ? "hsl(var(--muted))"        :
+                "hsl(var(--primary))",
+              color:
+                sendStatus === "sent"    ? "hsl(var(--success-foreground))"     :
+                sendStatus === "error"   ? "hsl(var(--destructive-foreground))" :
+                sendStatus === "sending" ? "hsl(var(--muted-foreground))"       :
+                "hsl(var(--primary-foreground))",
+            }}
+          >
+            {sendStatus === "sending" && <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" />}
+            {sendStatus === "sent"    && <CheckCircle2 className="w-4 h-4" />}
+            {sendStatus === "error"   && <XCircle className="w-4 h-4" />}
+            {sendStatus === "idle"    && <Share2 className="w-4 h-4" />}
+            {sendStatus === "sending" ? "Enviando…" :
+             sendStatus === "sent"    ? "Enviado!" :
+             sendStatus === "error"   ? "Tentar de novo" :
+             "ClickUp"}
           </button>
         </div>
         <div className="space-y-2">

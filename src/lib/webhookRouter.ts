@@ -35,23 +35,20 @@ export interface WebhookPayload {
 // ── Trigger.dev helper ────────────────────────────────────────────────────────
 async function dispararTrigger(taskId: string, payload: object) {
   if (!TRIGGER_API_KEY) {
-    console.warn("[Trigger.dev] VITE_TRIGGER_API_KEY não configurada");
-    return;
+    throw new Error("[Trigger.dev] VITE_TRIGGER_API_KEY não configurada");
   }
-  try {
-    const res = await fetch(`https://api.trigger.dev/api/v1/tasks/${taskId}/trigger`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        Authorization: `Bearer ${TRIGGER_API_KEY}`,
-      },
-      body: JSON.stringify({ payload }),
-    });
-    if (!res.ok) console.warn(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}`);
-    else         console.info(`[Trigger.dev] ✅ ${taskId} disparada`);
-  } catch (err) {
-    console.warn("[Trigger.dev] ❌ Falha de rede:", err);
+  const res = await fetch(`https://api.trigger.dev/api/v1/tasks/${taskId}/trigger`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: `Bearer ${TRIGGER_API_KEY}`,
+    },
+    body: JSON.stringify({ payload }),
+  });
+  if (!res.ok) {
+    throw new Error(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}`);
   }
+  console.info(`[Trigger.dev] ✅ ${taskId} disparada`);
 }
 
 // ── ROTEADOR: TASK 1 (lista baixada) ─────────────────────────────────────────

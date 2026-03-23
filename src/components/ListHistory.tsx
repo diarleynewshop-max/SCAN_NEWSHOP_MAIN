@@ -200,7 +200,36 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
   };
 
   // ── Roteador central: flag + empresa decide o destino ────────────────────
-  const enviarClickUp = (list: ListData) => {
+  const [sendingId, setSendingId] = useState<string | null>(null);
+
+  const STORAGE_KEY = "clickup_sent_list_ids";
+
+  const listaJaFoiEnviada = (listId: string): boolean => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const ids: string[] = raw ? JSON.parse(raw) : [];
+      return ids.includes(listId);
+    } catch { return false; }
+  };
+
+  const marcarListaEnviada = (listId: string) => {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const ids: string[] = raw ? JSON.parse(raw) : [];
+      const novos = [...ids, listId].slice(-200);
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(novos));
+    } catch {}
+  };
+
+  const enviarClickUp = async (list: ListData) => {
+    // Bloqueia reenvio
+    if (list.sentToClickUp || listaJaFoiEnviada(list.id)) {
+      toast({ title: "⚠️ Já enviado!", description: "Esta lista já foi enviada ao ClickUp.", variant: "destructive" });
+      return;
+    }
+    if (sendingId === list.id) return;
+
+    setSendingId(list.id);
     const payload: WebhookPayload = {
       flag:        (list.flag ?? "loja") as "loja" | "cd",
       empresa:     list.empresa ?? "",
@@ -217,11 +246,17 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
       })),
     };
 
-    enviarParaClickUp(payload);
-    onUpdateList({ ...list, status: "green" });
-
-    const dest = `${payload.flag.toUpperCase()} · ${payload.empresa}`;
-    toast({ title: `✅ Enviado para o ClickUp! [${dest}]` });
+    try {
+      await enviarParaClickUp(payload);
+      marcarListaEnviada(list.id);
+      onUpdateList({ ...list, status: "green", sentToClickUp: true });
+      const dest = `${payload.flag.toUpperCase()} · ${payload.empresa}`;
+      toast({ title: `✅ Chegou no ClickUp! [${dest}]`, description: `Lista "${list.title}" enviada com sucesso.` });
+    } catch {
+      toast({ title: "❌ Falha no envio", description: "Verifique sua conexão e tente novamente.", variant: "destructive" });
+    } finally {
+      setSendingId(null);
+    }
   };
 
   const openEdit = (list: ListData) => {
@@ -301,25 +336,47 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
           </div>
 
           <div style={{ display: "flex", gap: 8, padding: "10px 16px 14px 20px", borderTop: "1px solid hsl(var(--muted))" }}>
-            {[
-              { label: "Editar", icon: <Pencil style={{ width: 13, height: 13 }} />, onClick: () => openEdit(list) },
-              { label: "Baixar", icon: <Download style={{ width: 13, height: 13 }} />, onClick: () => { setDownloadOpen(list.id); setMenuOpen(null); } },
-              { label: "ClickUp", icon: <Share2 style={{ width: 13, height: 13 }} />, onClick: () => enviarClickUp(list), primary: true },
-              { label: "Excluir", icon: <Trash2 style={{ width: 13, height: 13 }} />, onClick: () => { setDeleteConfirm(list.id); setMenuOpen(null); }, danger: true },
-            ].map(({ label, icon, onClick, primary, danger }) => (
-              <button key={label} onClick={onClick}
-                style={{
-                  flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600,
-                  display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                  cursor: "pointer", transition: "all 0.15s",
-                  background: primary ? "hsl(var(--primary))" : danger ? "hsl(var(--destructive) / 0.07)" : "hsl(var(--secondary))",
-                  color: primary ? "hsl(var(--primary-foreground))" : danger ? "hsl(var(--destructive))" : "hsl(var(--foreground))",
-                  border: primary ? "none" : danger ? "1px solid hsl(var(--destructive) / 0.2)" : "1px solid hsl(var(--border))",
-                }}
-              >
-                {icon} {label}
-              </button>
-            ))}
+            {/* Editar */}
+            <button onClick={() => openEdit(list)}
+              style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))" }}>
+              <Pencil style={{ width: 13, height: 13 }} /> Editar
+            </button>
+            {/* Baixar */}
+            <button onClick={() => { setDownloadOpen(list.id); setMenuOpen(null); }}
+              style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))" }}>
+              <Download style={{ width: 13, height: 13 }} /> Baixar
+            </button>
+            {/* ClickUp — com estados visuais e anti-duplicata */}
+            {(() => {
+              const jaEnviado = list.sentToClickUp || listaJaFoiEnviada(list.id);
+              const enviando  = sendingId === list.id;
+              return (
+                <button
+                  onClick={() => enviarClickUp(list)}
+                  disabled={enviando || jaEnviado}
+                  style={{
+                    flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600,
+                    display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                    cursor: (enviando || jaEnviado) ? "not-allowed" : "pointer",
+                    opacity: (enviando || jaEnviado) ? 0.75 : 1,
+                    transition: "all 0.2s",
+                    background: jaEnviado ? "hsl(var(--success))" : enviando ? "hsl(var(--muted))" : "hsl(var(--primary))",
+                    color:      jaEnviado ? "hsl(var(--success-foreground))" : enviando ? "hsl(var(--muted-foreground))" : "hsl(var(--primary-foreground))",
+                    border: "none",
+                  }}
+                >
+                  {enviando && <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />}
+                  {jaEnviado && <span style={{ fontSize: 11 }}>✅</span>}
+                  {!enviando && !jaEnviado && <Share2 style={{ width: 13, height: 13 }} />}
+                  {enviando ? "Enviando…" : jaEnviado ? "Enviado" : "ClickUp"}
+                </button>
+              );
+            })()}
+            {/* Excluir */}
+            <button onClick={() => { setDeleteConfirm(list.id); setMenuOpen(null); }}
+              style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--destructive) / 0.07)", color: "hsl(var(--destructive))", border: "1px solid hsl(var(--destructive) / 0.2)" }}>
+              <Trash2 style={{ width: 13, height: 13 }} /> Excluir
+            </button>
           </div>
         </div>
       ))}
