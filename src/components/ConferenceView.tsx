@@ -14,11 +14,24 @@ import {
   Package,
   FileInput as FileJson,
   Share2,
+  Lock,
+  RefreshCw,
+  ClipboardList,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { enviarConferenciaParaClickUp } from "@/lib/webhookRouter";
+import {
+  validarSenha,
+  buscarTasksAnalisado,
+  baixarJsonDaTask,
+  buscarAttachmentsDaTask,
+  deletarTask,
+  type ClickUpTask,
+  type EmpresaKey,
+  type FlagKey,
+} from "@/lib/clickupApi";
 import { z } from "zod";
 
 export type ConferenceStatus =
@@ -51,7 +64,7 @@ function formatTime(seconds: number): string {
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
 }
 
-type Phase = "import" | "ready" | "running" | "finished";
+type Phase = "import" | "pickTask" | "ready" | "running" | "finished";
 
 const ConferenceFileSchema = z.object({
   type: z.literal("conference-file"),
@@ -80,6 +93,16 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   const [conferenceId] = useState(() => crypto.randomUUID());
   // "idle" | "sending" | "sent" | "error"
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
+  // ── Estados da fase pickTask ───────────────────────────────────────────────
+  const [senha, setSenha] = useState("");
+  const [senhaErro, setSenhaErro] = useState(false);
+  const [tasks, setTasks] = useState<ClickUpTask[]>([]);
+  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [tasksErro, setTasksErro] = useState<string | null>(null);
+  const [taskSelecionada, setTaskSelecionada] = useState<ClickUpTask | null>(null);
+  const [loadingJson, setLoadingJson] = useState(false);
+  // ID da task de origem (para deletar após concluir)
+  const [taskOrigemId, setTaskOrigemId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -110,6 +133,92 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
       if (timerRef.current) clearInterval(timerRef.current);
     };
   }, []);
+
+  // ── Senha + busca de tasks ────────────────────────────────────────────────
+  const confirmarSenha = async () => {
+    const ok = validarSenha(empresa as EmpresaKey, senha);
+    if (!ok) { setSenhaErro(true); return; }
+    setSenhaErro(false);
+    setLoadingTasks(true);
+    setTasksErro(null);
+    try {
+      const lista = await buscarTasksAnalisado(empresa as EmpresaKey, flag as FlagKey);
+      setTasks(lista);
+      setPhase("pickTask");
+    } catch (e: any) {
+      setTasksErro(e.message ?? "Erro ao buscar tasks");
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  const recarregarTasks = async () => {
+    setLoadingTasks(true);
+    setTasksErro(null);
+    try {
+      const lista = await buscarTasksAnalisado(empresa as EmpresaKey, flag as FlagKey);
+      setTasks(lista);
+    } catch (e: any) {
+      setTasksErro(e.message ?? "Erro ao buscar tasks");
+    } finally {
+      setLoadingTasks(false);
+    }
+  };
+
+  const abrirTask = async (task: ClickUpTask) => {
+    setLoadingJson(true);
+    setTaskSelecionada(task);
+    try {
+      // Se os attachments não vieram na listagem, busca individualmente
+      let attachments = task.attachments;
+      if (!attachments || attachments.length === 0) {
+        attachments = await buscarAttachmentsDaTask(empresa as EmpresaKey, task.id);
+      }
+      const taskComAnexos = { ...task, attachments };
+
+      const json = await baixarJsonDaTask(empresa as EmpresaKey, taskComAnexos);
+      if (!json) {
+        toast({ title: "Nenhum JSON encontrado nesta task", variant: "destructive" });
+        setLoadingJson(false);
+        setTaskSelecionada(null);
+        return;
+      }
+
+      const result = ConferenceFileSchema.safeParse(json);
+      if (!result.success) {
+        toast({ title: "JSON inválido na task", description: result.error.issues[0]?.message, variant: "destructive" });
+        setLoadingJson(false);
+        setTaskSelecionada(null);
+        return;
+      }
+
+      // Sobrescreve empresa/flag se o JSON tiver
+      if (result.data.empresa) setEmpresa(result.data.empresa);
+      if (result.data.flag)    setFlag(result.data.flag);
+
+      const digitoMap: Record<string, "S" | "M"> = (json as any)._meta?.digitoMap ?? {};
+      const parsed: ConferenceItem[] = result.data.items.map((item) => ({
+        id: crypto.randomUUID(),
+        codigo: item.codigo,
+        sku: item.sku ?? "",
+        quantidadePedida: item.quantidade,
+        quantidadeReal: null,
+        status: "pendente" as ConferenceStatus,
+        photo: item.photo ?? null,
+        digito: digitoMap[item.codigo] ?? null,
+      }));
+
+      setItems(parsed);
+      setTaskOrigemId(task.id); // guarda para deletar depois
+      setPhase("ready");
+      toast({ title: `${parsed.length} itens carregados da task!` });
+    } catch (e: any) {
+      toast({ title: "Erro ao carregar task", description: e.message, variant: "destructive" });
+      setTaskSelecionada(null);
+    } finally {
+      setLoadingJson(false);
+    }
+  };
 
   const processJsonText = (text: string): boolean => {
     try {
@@ -448,6 +557,17 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
       marcarComoEnviado();
       setSendStatus("sent");
       toast({ title: "✅ Chegou no ClickUp!", description: `Pedido de ${conferente} enviado com sucesso.` });
+
+      // Deleta a task de origem do status "Analisado" após concluir
+      if (taskOrigemId) {
+        try {
+          await deletarTask(empresa as EmpresaKey, taskOrigemId);
+          setTaskOrigemId(null);
+          toast({ title: "🗑️ Task de origem removida do Analisado." });
+        } catch {
+          toast({ title: "⚠️ Não foi possível deletar a task de origem", variant: "destructive" });
+        }
+      }
     } catch {
       setSendStatus("error");
       toast({ title: "❌ Falha no envio", description: "Verifique sua conexão e tente novamente.", variant: "destructive" });
@@ -618,18 +738,13 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             <p className="text-sm font-semibold text-foreground mb-2">Tipo</p>
             <div className="flex gap-2">
               {flagOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setFlag(opt.value)}
+                <button key={opt.value} onClick={() => setFlag(opt.value)}
                   className="flex-1 h-11 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
                   style={{
                     background: flag === opt.value ? "hsl(var(--primary))" : "hsl(var(--muted))",
                     color: flag === opt.value ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
                     border: flag === opt.value ? "2px solid hsl(var(--primary))" : "2px solid transparent",
-                  }}
-                >
-                  {opt.label}
-                </button>
+                  }}>{opt.label}</button>
               ))}
             </div>
           </div>
@@ -639,20 +754,31 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             <p className="text-sm font-semibold text-foreground mb-2">Empresa</p>
             <div className="flex gap-2">
               {empresaOptions.map((opt) => (
-                <button
-                  key={opt.value}
-                  onClick={() => setEmpresa(opt.value)}
+                <button key={opt.value} onClick={() => { setEmpresa(opt.value); setSenha(""); setSenhaErro(false); }}
                   className="flex-1 h-11 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
                   style={{
                     background: empresa === opt.value ? opt.color : "hsl(var(--muted))",
                     color: empresa === opt.value ? "#fff" : "hsl(var(--muted-foreground))",
                     border: empresa === opt.value ? `2px solid ${opt.color}` : "2px solid transparent",
-                  }}
-                >
-                  {opt.label}
-                </button>
+                  }}>{opt.label}</button>
               ))}
             </div>
+          </div>
+
+          {/* Senha */}
+          <div>
+            <label className="text-sm font-semibold text-foreground mb-1.5 block flex items-center gap-1">
+              <Lock className="w-3.5 h-3.5" /> Senha
+            </label>
+            <input
+              type="password"
+              placeholder="••••"
+              value={senha}
+              onChange={(e) => { setSenha(e.target.value); setSenhaErro(false); }}
+              onKeyDown={(e) => { if (e.key === "Enter" && senha.trim()) confirmarSenha(); }}
+              className={`w-full h-12 px-4 rounded-xl border bg-card text-foreground text-base font-bold text-center tracking-widest focus:outline-none focus:ring-2 focus:ring-ring transition-all ${senhaErro ? "border-destructive ring-1 ring-destructive" : "border-input"}`}
+            />
+            {senhaErro && <p className="text-xs text-destructive mt-1">Senha incorreta para {empresa}</p>}
           </div>
 
           {/* Conferente */}
@@ -667,24 +793,117 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             />
           </div>
 
-          <div className="flex justify-center pt-1">
-            <EmpresaBadge />
+          <div className="flex justify-center pt-1"><EmpresaBadge /></div>
+
+          {tasksErro && (
+            <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{tasksErro}</div>
+          )}
+
+          {/* Botão principal — busca do ClickUp */}
+          <button
+            onClick={() => {
+              if (!conferente.trim()) { toast({ title: "Informe o nome do conferente", variant: "destructive" }); return; }
+              if (!senha.trim())      { toast({ title: "Informe a senha",               variant: "destructive" }); return; }
+              confirmarSenha();
+            }}
+            disabled={loadingTasks}
+            className="w-full h-13 bg-primary text-primary-foreground rounded-xl font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-60"
+          >
+            {loadingTasks
+              ? <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> Buscando...</>
+              : <><ClipboardList className="w-5 h-5" /> Buscar Pedidos do ClickUp</>}
+          </button>
+
+          {/* Divisor */}
+          <div className="flex items-center gap-3">
+            <div className="flex-1 h-px bg-border" />
+            <span className="text-xs text-muted-foreground font-medium">ou</span>
+            <div className="flex-1 h-px bg-border" />
           </div>
 
+          {/* Botão arquivo manual */}
           {importError && (
             <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{importError}</div>
           )}
-
           <input ref={fileInputRef} type="file" accept=".csv,.txt,.json,.zip" onChange={handleFileImport} className="hidden" />
           <button
             onClick={() => {
               if (!conferente.trim()) { toast({ title: "Informe o nome do conferente", variant: "destructive" }); return; }
               fileInputRef.current?.click();
             }}
-            className="w-full h-12 bg-primary text-primary-foreground rounded-xl font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25"
+            className="w-full h-11 bg-muted text-muted-foreground rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform border border-border"
           >
-            <FileInput className="w-5 h-5" /> Selecionar Arquivo
+            <FileInput className="w-4 h-4" /> Selecionar Arquivo Manualmente
           </button>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Fase: escolher task do ClickUp ──────────────────────────────────────────
+  if (phase === "pickTask") {
+    return (
+      <div className="p-4 space-y-4">
+        <div className="flex items-center justify-between">
+          <button onClick={() => setPhase("import")} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="w-4 h-4" /> Voltar
+          </button>
+          <button onClick={recarregarTasks} disabled={loadingTasks}
+            className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
+            <RefreshCw className={`w-3.5 h-3.5 ${loadingTasks ? "animate-spin" : ""}`} /> Atualizar
+          </button>
+        </div>
+
+        <div className="flex items-center justify-between">
+          <div>
+            <p className="text-base font-bold text-foreground">Pedidos — Analisado</p>
+            <p className="text-xs text-muted-foreground">{tasks.length} task(s) encontrada(s)</p>
+          </div>
+          <EmpresaBadge />
+        </div>
+
+        {tasksErro && (
+          <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{tasksErro}</div>
+        )}
+
+        {loadingTasks && (
+          <div className="flex items-center justify-center py-10 gap-3 text-muted-foreground">
+            <span className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+            <span className="text-sm">Carregando tasks...</span>
+          </div>
+        )}
+
+        {!loadingTasks && tasks.length === 0 && (
+          <div className="text-center py-10">
+            <ClipboardList className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
+            <p className="text-sm font-semibold text-muted-foreground">Nenhuma task no status Analisado</p>
+            <p className="text-xs text-muted-foreground mt-1">Verifique o ClickUp ou aguarde novas listas</p>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          {tasks.map((task) => {
+            const isLoading = loadingJson && taskSelecionada?.id === task.id;
+            const data = task.date_created
+              ? new Date(Number(task.date_created)).toLocaleString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
+              : "";
+            return (
+              <button
+                key={task.id}
+                onClick={() => abrirTask(task)}
+                disabled={loadingJson}
+                className="w-full text-left rounded-xl border border-border bg-card p-4 flex items-center justify-between gap-3 active:scale-[0.99] transition-all hover:border-primary/40 hover:bg-primary/5 disabled:opacity-60"
+              >
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-foreground truncate">{task.name}</p>
+                  {data && <p className="text-xs text-muted-foreground mt-0.5">{data}</p>}
+                </div>
+                {isLoading
+                  ? <span className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  : <Play className="w-4 h-4 text-primary flex-shrink-0" />}
+              </button>
+            );
+          })}
         </div>
       </div>
     );
