@@ -1,121 +1,73 @@
 import type { NextApiRequest, NextApiResponse } from 'next';
 
-type Data = {
-  success: boolean;
-  data?: any;
-  error?: string;
+const LIST_IDS: Record<string, Record<string, string>> = {
+  NEWSHOP: { loja: '901325900510', cd: '901325900510' },
+  SOYE:    { loja: '901326461924', cd: '901326461924' },
+  FACIL:   { loja: '901326461915', cd: '901326461915' },
 };
 
-export default async function handler(
-  req: NextApiRequest,
-  res: NextApiResponse<Data>
-) {
+function getToken(empresa: string): string {
+  return empresa === 'NEWSHOP'
+    ? process.env.CLICKUP_TOKEN!
+    : process.env.CLICKUP_TOKEN_SF!;
+}
+
+export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  const { action, empresa = 'NEWSHOP', flag = 'loja', taskId } = req.query as Record<string, string>;
+  const token = getToken(empresa);
+
   try {
-    const { action, taskId, fileId, listId } = req.query;
-    
-    // Validar parâmetros obrigatórios
-    if (!action) {
-      return res.status(400).json({ 
-        success: false, 
-        error: 'Parâmetro "action" é obrigatório' 
+    if (action === 'buscar-tasks') {
+      const listId = LIST_IDS[empresa]?.[flag] ?? '901325900510';
+      const r = await fetch(
+        `https://api.clickup.com/api/v2/list/${listId}/task?statuses[]=analisado&include_closed=false`,
+        { headers: { Authorization: token } }
+      );
+      const d = await r.json();
+      const tasks = (d.tasks ?? []).map((t: any) => ({
+        id: t.id, name: t.name,
+        status: t.status?.status ?? '',
+        date_created: t.date_created ?? '',
+        attachments: (t.attachments ?? []).map((a: any) => ({
+          id: a.id, title: a.title ?? a.file_name ?? '',
+          url: a.url, mimetype: a.mimetype ?? '',
+        })),
+      }));
+      return res.status(200).json({ tasks });
+    }
+
+    if (action === 'baixar-json') {
+      if (!taskId) return res.status(400).json({ error: 'taskId obrigatório' });
+      // Busca task completa com attachments
+      const r = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+        headers: { Authorization: token },
       });
+      const taskData = await r.json();
+      const att = (taskData.attachments ?? []).find(
+        (a: any) => (a.title ?? a.file_name ?? '').endsWith('.json') || a.mimetype === 'application/json'
+      );
+      if (!att) return res.status(404).json({ error: 'JSON não encontrado na task' });
+      // Baixa o arquivo no servidor (sem CORS)
+      const fileRes = await fetch(att.url, { headers: { Authorization: token } });
+      const json = await fileRes.json();
+      return res.status(200).json(json);
     }
 
-    const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN || process.env.CLICKUP_TOKEN_SF;
-    
-    if (!CLICKUP_TOKEN) {
-      return res.status(500).json({ 
-        success: false, 
-        error: 'Token do ClickUp não configurado' 
+    if (action === 'deletar-task') {
+      if (!taskId) return res.status(400).json({ error: 'taskId obrigatório' });
+      const r = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+        method: 'DELETE', headers: { Authorization: token },
       });
+      return res.status(200).json({ deleted: r.ok });
     }
 
-    // Headers padrão para ClickUp
-    const headers = {
-      'Authorization': CLICKUP_TOKEN,
-      'Content-Type': 'application/json',
-    };
-
-    let response;
-    let data;
-
-    switch (action) {
-      // Buscar tasks
-      case 'buscar-tasks':
-        const listIdToUse = listId || '901325900510'; // Default NEWSHOP
-        response = await fetch(
-          `https://api.clickup.com/api/v2/list/${listIdToUse}/task?subtasks=true`,
-          { headers }
-        );
-        data = await response.json();
-        return res.status(200).json({ success: true, data });
-
-      // Baixar JSON do attachment
-      case 'baixar-json':
-        if (!taskId || !fileId) {
-          return res.status(400).json({ 
-            success: false, 
-            error: 'taskId e fileId são obrigatórios para baixar-json' 
-          });
-        }
-        
-        // Aqui você pode fazer uma chamada direta ou usar a API do ClickUp
-        // Para attachments, muitas vezes é melhor fazer via proxy
-        const attachmentUrl = `https://api.clickup.com/api/v2/task/${taskId}/attachment/${fileId}`;
-        response = await fetch(attachmentUrl, { headers });
-        
-        if (!response.ok) {
-          return res.status(response.status).json({ 
-            success: false, 
-            error: `Erro ao buscar attachment: ${response.statusText}` 
-          });
-        }
-        
-        data = await response.json();
-        return res.status(200).json({ success: true, data });
-
-      // Deletar task
-      case 'deletar-task':
-        if (!taskId) {
-          return res.status(400).json({ 
-            success: false, 
-            error: 'taskId é obrigatório para deletar-task' 
-          });
-        }
-        
-        response = await fetch(
-          `https://api.clickup.com/api/v2/task/${taskId}`,
-          { 
-            method: 'DELETE',
-            headers 
-          }
-        );
-        
-        if (response.status === 204) {
-          return res.status(200).json({ 
-            success: true, 
-            data: { message: 'Task deletada com sucesso' } 
-          });
-        } else {
-          const errorData = await response.json();
-          return res.status(response.status).json({ 
-            success: false, 
-            error: errorData.err || 'Erro ao deletar task' 
-          });
-        }
-
-      default:
-        return res.status(400).json({ 
-          success: false, 
-          error: 'Action não reconhecida' 
-        });
-    }
-
-  } catch (error: any) {
-    console.error('Erro no clickup-proxy:', error);
-    return res.status(500).json({ 
-      success: false, 
-      error: error.message || 'Erro interno do servidor' 
-    });
+    return res.status(400).json({ error: 'Action inválida' });
+  } catch (e: any) {
+    return res.status(500).json({ error: e.message });
   }
 }
