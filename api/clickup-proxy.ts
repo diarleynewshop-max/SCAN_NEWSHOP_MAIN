@@ -1,4 +1,4 @@
-import type { NextApiRequest, NextApiResponse } from 'next';
+import { VercelRequest, VercelResponse } from '@vercel/node';
 
 const LIST_IDS: Record<string, Record<string, string>> = {
   NEWSHOP: { loja: '901325900510', cd: '901325900510' },
@@ -12,7 +12,7 @@ function getToken(empresa: string): string {
     : process.env.CLICKUP_TOKEN_SF!;
 }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
