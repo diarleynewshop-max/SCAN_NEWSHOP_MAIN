@@ -1,4 +1,4 @@
-<<<<<<< HEAD
+
 export type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
 export type FlagKey    = 'loja' | 'cd';
 
@@ -36,7 +36,7 @@ export async function baixarJsonDaTask(empresa: EmpresaKey, taskId: string): Pro
 export async function deletarTask(empresa: EmpresaKey, taskId: string): Promise<void> {
   await proxy('deletar-task', { empresa, taskId });
 }
-=======
+
 /**
  * clickupApi.ts
  * Chamadas diretas à API do ClickUp feitas pelo frontend.
@@ -183,4 +183,3 @@ export async function deletarTask(
 
   if (!res.ok) throw new Error(`Erro ${res.status} ao deletar task ${taskId}`);
 }
->>>>>>> aba55050a4bbb21deaf2546891bf00e322e31b8c
