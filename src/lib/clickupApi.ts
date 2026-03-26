@@ -68,67 +68,37 @@ export async function buscarTasksAnalisado(
   empresa: EmpresaKey,
   flag: FlagKey
 ): Promise<ClickUpTask[]> {
-  const { token, resolvedListId } = getConfig(empresa, flag);
-
-  if (!token) throw new Error(`Token ClickUp não configurado para ${empresa}. Verifique o .env`);
-
-  const url = `https://api.clickup.com/api/v2/list/${resolvedListId}/task?statuses[]=Analisado&include_closed=false`;
-
-  const res = await fetch(url, {
-    headers: { Authorization: token },
-  });
-
-  if (!res.ok) throw new Error(`Erro ${res.status} ao buscar tasks do ClickUp`);
-
-  const data = await res.json();
-  const tasks: ClickUpTask[] = (data.tasks ?? []).map((t: any) => ({
-    id:           t.id,
-    name:         t.name,
-    status:       t.status?.status ?? "",
-    date_created: t.date_created ?? "",
-    attachments:  t.attachments ?? [],
-  }));
-
-  return tasks;
+  const response = await fetch(`/api/clickup-proxy?action=buscar-tasks&empresa=${empresa}&flag=${flag}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao buscar tasks`);
+  const data = await response.json();
+  return data.tasks ?? [];
 }
 
-// ── Baixar o JSON de uma task (primeiro .json nos attachments) ─────────────────
+// ── Baixar o JSON de uma task ─────────────────────────────────────────────────
 export async function baixarJsonDaTask(
   empresa: EmpresaKey,
   task: ClickUpTask
 ): Promise<object | null> {
-  const { token } = getConfig(empresa, "loja"); // token é igual para loja/cd da mesma empresa
-
-  const jsonAttachment = task.attachments.find(
-    (a) => a.title.endsWith(".json") || a.mimetype === "application/json"
-  );
-
-  if (!jsonAttachment) return null;
-
-  const res = await fetch(jsonAttachment.url, {
-    headers: { Authorization: token },
-  });
-
-  if (!res.ok) throw new Error(`Erro ${res.status} ao baixar JSON da task`);
-
-  return res.json();
+  const taskId = task.id;
+  const response = await fetch(`/api/clickup-proxy?action=baixar-json&taskId=${taskId}&empresa=${empresa}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao baixar JSON`);
+  const data = await response.json();
+  return data;
 }
 
-// ── Buscar attachments de uma task (caso não venham no list) ──────────────────
+// ── Buscar attachments de uma task ───────────────────────────────────────────
 export async function buscarAttachmentsDaTask(
   empresa: EmpresaKey,
   taskId: string
 ): Promise<ClickUpAttachment[]> {
-  const { token } = getConfig(empresa, "loja");
-
-  const res = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
-    headers: { Authorization: token },
-  });
-
-  if (!res.ok) throw new Error(`Erro ${res.status} ao buscar task`);
-
-  const data = await res.json();
-  return data.attachments ?? [];
+  // Como o proxy já retorna attachments na buscar-tasks, esta função pode ser simplificada
+  // ou você pode adicionar uma action específica no proxy se precisar
+  const response = await fetch(`/api/clickup-proxy?action=buscar-tasks&empresa=${empresa}&flag=loja`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao buscar attachments`);
+  const data = await response.json();
+  // Procure a task específica nos resultados
+  const task = data.tasks?.find((t: any) => t.id === taskId);
+  return task?.attachments ?? [];
 }
 
 // ── Deletar uma task ──────────────────────────────────────────────────────────
@@ -136,12 +106,6 @@ export async function deletarTask(
   empresa: EmpresaKey,
   taskId: string
 ): Promise<void> {
-  const { token } = getConfig(empresa, "loja");
-
-  const res = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
-    method: "DELETE",
-    headers: { Authorization: token },
-  });
-
-  if (!res.ok) throw new Error(`Erro ${res.status} ao deletar task ${taskId}`);
+  const response = await fetch(`/api/clickup-proxy?action=deletar-task&taskId=${taskId}&empresa=${empresa}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao deletar task`);
 }
