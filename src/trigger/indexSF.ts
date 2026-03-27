@@ -69,38 +69,6 @@ async function anexarJsonNaTarefa(
   }
 }
 
-async function anexarTxtNaTarefa(
-  taskId: string,
-  nomeArquivo: string,
-  conteudo: string
-) {
-  try {
-    const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
-    const body = [
-      `--${boundary}`,
-      `Content-Disposition: form-data; name="attachment"; filename="${nomeArquivo}.txt"`,
-      `Content-Type: text/plain`,
-      ``,
-      conteudo,
-      `--${boundary}--`,
-    ].join("\r\n");
-    const response = await fetch(
-      `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: CLICKUP_TOKEN_SF,
-          "Content-Type": `multipart/form-data; boundary=${boundary}`,
-        },
-        body,
-      }
-    );
-    console.log("TXT STATUS:", response.status);
-  } catch (err) {
-    console.error("Erro ao anexar TXT:", err);
-  }
-}
-
 // ── TASK 1 — Lista baixada (SOYE / FACIL) ────────────────────────────────────
 // LOJA SOYE  → CLICKUP_LIST_ID_SOYE      → status "to do"
 // LOJA FACIL → CLICKUP_LIST_ID_FACIL     → status "to do"
@@ -123,35 +91,21 @@ export const listaBaixadaSF = task({
     const taskId = await criarTarefaClickUp(
       listId,
       `📦 ${payload.titulo} — ${payload.pessoa}`,
-      `Pessoa: ${payload.pessoa}
-Título: ${payload.titulo}
-Empresa: ${payload.empresa}
-Tipo: ${flagLabel}
-Itens: ${payload.totalItens}
-Data: ${dataFormatada}`,
+      `Pessoa: ${payload.pessoa}\nTítulo: ${payload.titulo}\nEmpresa: ${payload.empresa}\nTipo: ${flagLabel}\nItens: ${payload.totalItens}\nData: ${dataFormatada}`,
       status
     );
 
-    await Promise.all([
-      anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
-        type: "conference-file",
-        empresa: payload.empresa ?? "SOYE",
-        flag:    payload.flag    ?? "loja",
-        items: payload.produtos.map((p: any) => ({
-          codigo:     p.barcode,
-          sku:        p.sku || "",
-          quantidade: p.quantity ?? p.quantidade,
-          photo:      p.photo || null,
-        })),
-      }),
-      anexarTxtNaTarefa(taskId, `lista_${payload.pessoa}`, (() => {
-        const soCodigosBloco = payload.produtos.map((p: any) => p.barcode).join("\n");
-        const codigoQuantidadeBloco = payload.produtos
-          .map((p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`)
-          .join("\n");
-        return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
-      })()),
-    ]);
+    await anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
+      type: "conference-file",
+      empresa: payload.empresa ?? "SOYE",
+      flag:    payload.flag    ?? "loja",
+      items: payload.produtos.map((p: any) => ({
+        codigo:     p.barcode,
+        sku:        p.sku || "",
+        quantidade: p.quantity ?? p.quantidade,
+        photo:      p.photo || null,
+      })),
+    });
   },
 });
 
@@ -200,21 +154,7 @@ export const conferenciaBaixadaSF = task({
     await criarTarefaClickUp(
       listId,
       `✅ ${payload.conferente} — ${dataFormatada}`,
-      `Conferente: ${payload.conferente}
-Empresa: ${payload.empresa}
-Tipo: ${isCD ? "CD" : "LOJA"}
-Data: ${dataFormatada}
-Tempo: ${payload.tempo}
-Total: ${payload.totalItens} item(ns)
-
-📊 RESUMO
-✅ Separado: ${payload.resumo.separado}
-❌ Não tem: ${payload.resumo.naoTem}
-⚠️ Parcial: ${payload.resumo.parcial}
-⏳ Pendente: ${payload.resumo.pendente}
-
-📦 ITENS
-${itensTexto}`,
+      `Conferente: ${payload.conferente}\nEmpresa: ${payload.empresa}\nTipo: ${isCD ? "CD" : "LOJA"}\nData: ${dataFormatada}\nTempo: ${payload.tempo}\nTotal: ${payload.totalItens} item(ns)\n\n📊 RESUMO\n✅ Separado: ${payload.resumo.separado}\n❌ Não tem: ${payload.resumo.naoTem}\n⚠️ Parcial: ${payload.resumo.parcial}\n⏳ Pendente: ${payload.resumo.pendente}\n\n📦 ITENS\n${itensTexto}`,
       "complete"
     );
   },
