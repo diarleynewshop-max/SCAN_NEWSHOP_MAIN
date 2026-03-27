@@ -11,7 +11,11 @@
  * CD SOYE/FACIL → não configurado ainda
  */
 
+<<<<<<< HEAD
 // API calls are proxied to/server-side; remove frontend dependency on TRIGGER API key here
+=======
+const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
+>>>>>>> 98e65c1c5b8004a1a82ee777f4f99c0476c626f2
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 type ListFlag = "loja" | "cd";
@@ -34,6 +38,7 @@ export interface WebhookPayload {
 
 // ── Trigger.dev helper ────────────────────────────────────────────────────────
 async function dispararTrigger(taskId: string, payload: object) {
+<<<<<<< HEAD
   // Use the serverless API proxy; no client-side key usage
   console.log(`[Trigger.dev] 🔧 Disparando task: ${taskId}`);
   try {
@@ -42,10 +47,35 @@ async function dispararTrigger(taskId: string, payload: object) {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ taskId, payload }),
     });
+=======
+  if (!TRIGGER_API_KEY) {
+    throw new Error("[Trigger.dev] VITE_TRIGGER_API_KEY não configurada");
+  }
+  
+  console.log(`[Trigger.dev] 🔧 Disparando task: ${taskId}`);
+  
+  try {
+    // USAR PROXY SERVER-SIDE (sem CORS)
+    const res = await fetch('/api/trigger-proxy', {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ 
+        task: taskId,
+        payload 
+      }),
+    });
+    
+>>>>>>> 98e65c1c5b8004a1a82ee777f4f99c0476c626f2
     if (!res.ok) {
       const errorText = await res.text();
       throw new Error(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}: ${errorText}`);
     }
+<<<<<<< HEAD
+=======
+    
+>>>>>>> 98e65c1c5b8004a1a82ee777f4f99c0476c626f2
     const result = await res.json();
     console.info(`[Trigger.dev] ✅ ${taskId} disparada com sucesso:`, result.runId);
     return result;
