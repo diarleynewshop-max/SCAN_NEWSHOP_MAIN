@@ -37,7 +37,7 @@ async function dispararTrigger(taskId: string, payload: object) {
   if (!TRIGGER_API_KEY) {
     throw new Error("[Trigger.dev] VITE_TRIGGER_API_KEY não configurada");
   }
-  const res = await fetch(`https://api.trigger.dev/api/v1/tasks/${taskId}/trigger`, {
+  const res = await fetch(`https://api.trigger.dev/v1/runs`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
