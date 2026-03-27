@@ -16,7 +16,10 @@
     "test:watch": "vitest"
   },
   "dependencies": {
+<<<<<<< HEAD
     "@vercel/node": "^2.0.0",
+=======
+>>>>>>> 98e65c1 (feat(trigger): route Trigger.dev calls through serverless API /api/trigger; add API route for secure Trigger.dev calls)
     "@radix-ui/react-alert-dialog": "^1.1.14",
     "@radix-ui/react-aspect-ratio": "^1.1.7",
     "@radix-ui/react-collapsible": "^1.1.11",
@@ -35,6 +38,10 @@
     "@tanstack/react-query": "^5.83.0",
     "@types/dompurify": "^3.0.5",
     "@types/pdfkit": "^0.17.5",
+<<<<<<< HEAD
+=======
+    "@vercel/node": "^2.0.0",
+>>>>>>> 98e65c1 (feat(trigger): route Trigger.dev calls through serverless API /api/trigger; add API route for secure Trigger.dev calls)
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "dompurify": "^3.1.6",
@@ -77,4 +84,8 @@
     "vite": "^5.4.19",
     "vitest": "^3.2.4"
   }
+<<<<<<< HEAD
 }
+=======
+}
+>>>>>>> 98e65c1 (feat(trigger): route Trigger.dev calls through serverless API /api/trigger; add API route for secure Trigger.dev calls)

@@ -1,21 +1,16 @@
-const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
-
+// Trigger via serverless API (do not expose API key in frontend)
 async function dispararTask(taskId: string, payload: object) {
-  if (!TRIGGER_API_KEY) {
-    console.warn("[Trigger.dev] Chave não configurada. Defina VITE_TRIGGER_API_KEY no .env");
-    return;
-  }
   try {
-    const res = await fetch(`https://api.trigger.dev/api/v1/tasks/${taskId}/trigger`, {
+    const res = await fetch(`/api/trigger`, {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        Authorization: `Bearer ${TRIGGER_API_KEY}`,
       },
-      body: JSON.stringify({ payload }),
+      body: JSON.stringify({ taskId, payload }),
     });
+    const text = await res.text();
     if (!res.ok) {
-      console.warn(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}`);
+      console.warn(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}: ${text}`);
       return;
     }
     console.info(`[Trigger.dev] ✅ ${taskId} disparada`);
