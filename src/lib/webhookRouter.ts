@@ -37,18 +37,34 @@ async function dispararTrigger(taskId: string, payload: object) {
   if (!TRIGGER_API_KEY) {
     throw new Error("[Trigger.dev] VITE_TRIGGER_API_KEY não configurada");
   }
-  const res = await fetch(`https://api.trigger.dev/v1/runs`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${TRIGGER_API_KEY}`,
-    },
-    body: JSON.stringify({ payload }),
-  });
-  if (!res.ok) {
-    throw new Error(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}`);
+  
+  console.log(`[Trigger.dev] 🔧 Disparando task: ${taskId}`);
+  
+  try {
+    // USAR PROXY SERVER-SIDE (sem CORS)
+    const res = await fetch('/api/trigger-proxy', {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ 
+        task: taskId,
+        payload 
+      }),
+    });
+    
+    if (!res.ok) {
+      const errorText = await res.text();
+      throw new Error(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}: ${errorText}`);
+    }
+    
+    const result = await res.json();
+    console.info(`[Trigger.dev] ✅ ${taskId} disparada com sucesso:`, result.runId);
+    return result;
+  } catch (error) {
+    console.error(`[Trigger.dev] 💥 Erro ao disparar ${taskId}:`, error);
+    throw error;
   }
-  console.info(`[Trigger.dev] ✅ ${taskId} disparada`);
 }
 
 // ── ROTEADOR: TASK 1 (lista baixada) ─────────────────────────────────────────
