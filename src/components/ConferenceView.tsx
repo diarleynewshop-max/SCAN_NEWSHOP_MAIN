@@ -524,19 +524,20 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   });
 
   const getPayloadClickUp = () => ({
-    conferente,
-    tempo: formatTime(elapsedSeconds),
-    totalItens: items.length,
-    resumo: getResumo(),
-    itens: items.map((i) => ({
-      codigo: i.codigo,
-      sku: i.sku,
-      quantidadePedida: i.quantidadePedida,
-      quantidadeReal: i.quantidadeReal,
-      status: i.status,
-      digito: i.digito ?? null,
-    })),
-  });
+  conferente,
+  tempo: formatTime(elapsedSeconds),
+  totalItens: items.length,
+  resumo: getResumo(),
+  itens: items.map((i) => ({
+    codigo: i.codigo,
+    sku: i.sku,
+    quantidadePedida: i.quantidadePedida,
+    quantidadeReal: i.quantidadeReal,
+    status: i.status,
+    digito: i.digito ?? null,
+    photo: i.photo ?? null, // ✅ ADICIONAR AQUI!
+  })),
+});
 
   const enviarClickUp = async () => {
     // Bloqueia se já foi enviado
