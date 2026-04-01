@@ -420,33 +420,54 @@ function gerarPDFConferencia(payload: any): Buffer {
       doc.setFont("helvetica", "normal");
       doc.text(String(item.quantidadeReal ?? "-"), infoX + 22, yPos + 29);
 
+            // ── FOTO (compatível com Node.js / Trigger.dev) ──
       try {
-        let imgData = item.photo;
-        if (!imgData.startsWith("data:image/")) {
-          imgData = `data:image/jpeg;base64,${imgData}`;
+        let raw = item.photo as string;
+
+        // 1. Detecta o formato real da imagem
+        let format: "JPEG" | "PNG" = "JPEG";
+        if (raw.includes("data:image/png")) {
+          format = "PNG";
         }
+
+        // 2. Remove o prefixo data URI → fica só o base64 puro
+        if (raw.includes(";base64,")) {
+          raw = raw.split(";base64,")[1];
+        }
+
+        // 3. Converte base64 → Buffer → Uint8Array (funciona no Node)
+        const imgBuffer = Buffer.from(raw, "base64");
+        const uint8 = new Uint8Array(imgBuffer);
+
+        console.log(
+          `Foto #${idx + 1} (${item.codigo}): ${format}, ${imgBuffer.length} bytes`
+        );
+
+        // 4. Adiciona usando Uint8Array (compatível com jsPDF no Node.js)
         doc.addImage(
-          imgData,
-          "JPEG",
+          uint8,
+          format,
           cardX + 5,
           yPos + 10,
           fotoWidth,
           fotoHeight
         );
+
+        console.log(`Foto #${idx + 1} adicionada ao PDF com sucesso`);
       } catch (err) {
         console.error(
-          `Erro ao adicionar foto do item ${item.codigo}:`,
+          `❌ Erro ao adicionar foto do item ${item.codigo}:`,
           err
         );
-        doc.setTextColor(200, 0, 0);
+        // Desenha placeholder quando a foto falha
+        doc.setFillColor(230, 230, 230);
+        doc.rect(cardX + 5, yPos + 10, fotoWidth, fotoHeight, "F");
+        doc.setTextColor(150, 0, 0);
         doc.setFontSize(9);
-        doc.text("Erro ao carregar foto", cardX + 5, yPos + 35);
+        doc.setFont("helvetica", "bold");
+        doc.text("FOTO INDISPONÍVEL", cardX + 8, yPos + 40);
         doc.setTextColor(0, 0, 0);
       }
-
-      yPos += blocoHeight + 10;
-    });
-  }
 
   // ═══════════════════════════════════════════
   // RODAPÉ
