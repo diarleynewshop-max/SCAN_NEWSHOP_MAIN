@@ -1,13 +1,21 @@
 import { task } from "@trigger.dev/sdk/v3";
-import jsPDF from "jspdf";
-import autoTable from "jspdf-autotable";
+import * as jsPDFModule from "jspdf";
+import * as autoTableModule from "jspdf-autotable";
+
+// ── Fix ESM/CJS interop ──────────────────────────────────────────────────────
+const jsPDFConstructor = (jsPDFModule as any).default?.jsPDF
+  ?? (jsPDFModule as any).jsPDF
+  ?? (jsPDFModule as any).default
+  ?? jsPDFModule;
+
+const autoTable = (autoTableModule as any).default ?? autoTableModule;
 
 // ── Credenciais NEWSHOP ───────────────────────────────────────────────────────
 const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN!;
 const CLICKUP_LIST_ID = process.env.CLICKUP_LIST_ID ?? "901325900510";
 const CLICKUP_CD_LIST_ID = process.env.CLICKUP_CD_LIST_ID ?? "901325900510";
 const CLICKUP_TODO_LIST_ID =
-  process.env.CLICKUP_TODO_LIST_ID ?? "901326684020"; // COMPRAS
+  process.env.CLICKUP_TODO_LIST_ID ?? "901326684020";
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function criarTarefaClickUp(
@@ -100,17 +108,13 @@ async function anexarTxtNaTarefa(
   }
 }
 
-// ── NOVO: Upload de PDF usando Blob/FormData real (não corrompe binário) ─────
 async function anexarPDFNaTarefa(
   taskId: string,
   pdfBuffer: Buffer,
   filename: string
 ) {
   try {
-    // Cria um Blob real a partir do Buffer
     const blob = new Blob([pdfBuffer], { type: "application/pdf" });
-
-    // Usa FormData nativo para montar o multipart corretamente
     const formData = new FormData();
     formData.append("attachment", blob, filename);
 
@@ -120,17 +124,20 @@ async function anexarPDFNaTarefa(
         method: "POST",
         headers: {
           Authorization: CLICKUP_TOKEN,
-          // NÃO definir Content-Type — o fetch define automaticamente com o boundary correto
         },
         body: formData,
       }
     );
 
     const responseText = await response.text();
-    console.log(`PDF anexado — Status: ${response.status} — Resposta: ${responseText}`);
+    console.log(
+      `PDF anexado — Status: ${response.status} — Resposta: ${responseText}`
+    );
 
     if (!response.ok) {
-      throw new Error(`Erro ao anexar PDF: ${response.status} — ${responseText}`);
+      throw new Error(
+        `Erro ao anexar PDF: ${response.status} — ${responseText}`
+      );
     }
   } catch (err) {
     console.error("Erro ao anexar PDF:", err);
@@ -138,14 +145,18 @@ async function anexarPDFNaTarefa(
   }
 }
 
-// ── NOVO: Gerar PDF de Conferência com FOTOS e STATUS ────────────────────────
+// ── Gerar PDF de Conferência com FOTOS e STATUS ──────────────────────────────
 function gerarPDFConferencia(payload: any): Buffer {
-  const doc = new jsPDF();
+  // Debug: mostra o que foi resolvido
+  console.log("jsPDFConstructor type:", typeof jsPDFConstructor);
+  console.log("jsPDFConstructor keys:", Object.keys(jsPDFConstructor || {}));
+
+  const doc = new jsPDFConstructor();
   const pageWidth = doc.internal.pageSize.getWidth();
 
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
   // CABEÇALHO
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
   doc.setFillColor(41, 128, 185);
   doc.rect(0, 0, pageWidth, 40, "F");
 
@@ -165,9 +176,9 @@ function gerarPDFConferencia(payload: any): Buffer {
     { align: "center" }
   );
 
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
   // INFORMAÇÕES GERAIS
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
   doc.setTextColor(0, 0, 0);
   doc.setFontSize(11);
 
@@ -200,9 +211,9 @@ function gerarPDFConferencia(payload: any): Buffer {
     infoY + 21
   );
 
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
   // RESUMO (cards coloridos)
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
   const resumoY = infoY + 32;
   const resumo = payload.resumo ?? {
     separado: 0,
@@ -234,7 +245,7 @@ function gerarPDFConferencia(payload: any): Buffer {
     },
   ];
 
-  const cardWidth = (pageWidth - 28 - 15) / 4; // 14 margem cada lado + 5px gap entre
+  const cardWidth = (pageWidth - 28 - 15) / 4;
   cards.forEach((card, i) => {
     const x = 14 + i * (cardWidth + 5);
     doc.setFillColor(card.color[0], card.color[1], card.color[2]);
@@ -252,9 +263,9 @@ function gerarPDFConferencia(payload: any): Buffer {
     });
   });
 
-  // ══════════════════════════════════════════════════════════════
-  // TABELA RESUMIDA DE TODOS OS ITENS
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
+  // TABELA DE ITENS
+  // ═══════════════════════════════════════════
   doc.setTextColor(0, 0, 0);
 
   const statusLabel: Record<string, string> = {
@@ -299,7 +310,6 @@ function gerarPDFConferencia(payload: any): Buffer {
       5: { halign: "center" },
       6: { halign: "center" },
     },
-    // Colore a célula de status com a cor correspondente
     didParseCell: (data: any) => {
       if (data.section === "body" && data.column.index === 5) {
         const item = (payload.itens || [])[data.row.index];
@@ -312,9 +322,9 @@ function gerarPDFConferencia(payload: any): Buffer {
     },
   });
 
-  // ══════════════════════════════════════════════════════════════
-  // PÁGINAS DE FOTOS — cada item com foto ganha um bloco
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
+  // PÁGINAS DE FOTOS
+  // ═══════════════════════════════════════════
   const itensComFoto = (payload.itens || []).filter(
     (item: any) => item.photo
   );
@@ -322,7 +332,6 @@ function gerarPDFConferencia(payload: any): Buffer {
   if (itensComFoto.length > 0) {
     doc.addPage();
 
-    // Título da seção de fotos
     doc.setFillColor(41, 128, 185);
     doc.rect(0, 0, pageWidth, 25, "F");
     doc.setTextColor(255, 255, 255);
@@ -333,35 +342,46 @@ function gerarPDFConferencia(payload: any): Buffer {
     let yPos = 35;
     const fotoWidth = 55;
     const fotoHeight = 55;
-    const blocoHeight = fotoHeight + 25; // foto + info
+    const blocoHeight = fotoHeight + 25;
 
     itensComFoto.forEach((item: any, idx: number) => {
-      // Verifica se precisa de nova página
       if (yPos + blocoHeight > doc.internal.pageSize.getHeight() - 15) {
         doc.addPage();
         yPos = 20;
       }
 
-      // ── Card do item ──
       const cardX = 12;
       const cardW = pageWidth - 24;
 
-      // Fundo do card
       doc.setFillColor(245, 245, 245);
       doc.roundedRect(cardX, yPos - 5, cardW, blocoHeight, 3, 3, "F");
 
-      // Borda com cor do status
       const borderColor = statusColor[item.status] ?? [149, 165, 166];
-      doc.setDrawColor(borderColor[0], borderColor[1], borderColor[2]);
+      doc.setDrawColor(
+        borderColor[0],
+        borderColor[1],
+        borderColor[2]
+      );
       doc.setLineWidth(1.5);
       doc.roundedRect(cardX, yPos - 5, cardW, blocoHeight, 3, 3, "S");
 
-      // Badge de status
       const badgeColor = statusColor[item.status] ?? [149, 165, 166];
       const badgeText = statusLabel[item.status] ?? item.status;
       const badgeWidth = doc.getTextWidth(badgeText) + 10;
-      doc.setFillColor(badgeColor[0], badgeColor[1], badgeColor[2]);
-      doc.roundedRect(cardX + cardW - badgeWidth - 5, yPos - 2, badgeWidth, 10, 2, 2, "F");
+      doc.setFillColor(
+        badgeColor[0],
+        badgeColor[1],
+        badgeColor[2]
+      );
+      doc.roundedRect(
+        cardX + cardW - badgeWidth - 5,
+        yPos - 2,
+        badgeWidth,
+        10,
+        2,
+        2,
+        "F"
+      );
       doc.setTextColor(255, 255, 255);
       doc.setFontSize(8);
       doc.setFont("helvetica", "bold");
@@ -372,7 +392,6 @@ function gerarPDFConferencia(payload: any): Buffer {
         { align: "center" }
       );
 
-      // Info do item (lado direito da foto)
       const infoX = cardX + fotoWidth + 15;
       doc.setTextColor(0, 0, 0);
 
@@ -401,7 +420,6 @@ function gerarPDFConferencia(payload: any): Buffer {
       doc.setFont("helvetica", "normal");
       doc.text(String(item.quantidadeReal ?? "-"), infoX + 22, yPos + 29);
 
-      // Foto
       try {
         let imgData = item.photo;
         if (!imgData.startsWith("data:image/")) {
@@ -416,7 +434,10 @@ function gerarPDFConferencia(payload: any): Buffer {
           fotoHeight
         );
       } catch (err) {
-        console.error(`Erro ao adicionar foto do item ${item.codigo}:`, err);
+        console.error(
+          `Erro ao adicionar foto do item ${item.codigo}:`,
+          err
+        );
         doc.setTextColor(200, 0, 0);
         doc.setFontSize(9);
         doc.text("Erro ao carregar foto", cardX + 5, yPos + 35);
@@ -427,9 +448,9 @@ function gerarPDFConferencia(payload: any): Buffer {
     });
   }
 
-  // ══════════════════════════════════════════════════════════════
-  // RODAPÉ em todas as páginas
-  // ══════════════════════════════════════════════════════════════
+  // ═══════════════════════════════════════════
+  // RODAPÉ
+  // ═══════════════════════════════════════════
   const totalPages = doc.getNumberOfPages();
   for (let i = 1; i <= totalPages; i++) {
     doc.setPage(i);
@@ -499,7 +520,8 @@ Data: ${dataFormatada}`,
             .join("\n");
           const codigoQuantidadeBloco = payload.produtos
             .map(
-              (p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`
+              (p: any) =>
+                `${p.barcode};${p.quantity ?? p.quantidade}`
             )
             .join("\n");
           return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
@@ -513,7 +535,7 @@ Data: ${dataFormatada}`,
 export const conferenciaBaixada = task({
   id: "conferencia-baixada",
   machine: "micro",
-  maxDuration: 60, // aumentei pq gerar PDF com fotos pode demorar
+  maxDuration: 60,
   run: async (payload: any) => {
     const dataFormatada = payload.dataConferencia
       ? new Date(payload.dataConferencia).toLocaleString("pt-BR", {
@@ -533,9 +555,15 @@ export const conferenciaBaixada = task({
       pendente: "⏳ Pendente",
     };
 
-    const itensS = payload.itens.filter((i: any) => i.digito === "S");
-    const itensM = payload.itens.filter((i: any) => i.digito === "M");
-    const itensSemDigito = payload.itens.filter((i: any) => !i.digito);
+    const itensS = payload.itens.filter(
+      (i: any) => i.digito === "S"
+    );
+    const itensM = payload.itens.filter(
+      (i: any) => i.digito === "M"
+    );
+    const itensSemDigito = payload.itens.filter(
+      (i: any) => !i.digito
+    );
 
     const formatarItem = (item: any, idx: number) =>
       `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`;
@@ -584,9 +612,9 @@ ${itensTexto}`,
       const pdfBuffer = gerarPDFConferencia(payload);
       console.log(`PDF gerado — ${pdfBuffer.length} bytes`);
 
-      // Monta descrição detalhada para a task de compras
       const itensNaoTem = (payload.itens || []).filter(
-        (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
+        (i: any) =>
+          i.status === "nao_tem" || i.status === "nao_tem_tudo"
       );
 
       const listaFaltantes = itensNaoTem
@@ -623,13 +651,10 @@ ${listaFaltantes || "Nenhum item faltante."}
 
       console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
 
-      // Anexa o PDF
       const nomeArquivo = `conferencia_${payload.conferente}_${Date.now()}.pdf`;
       await anexarPDFNaTarefa(todoTaskId, pdfBuffer, nomeArquivo);
-
       console.log("PDF anexado com sucesso na tarefa de COMPRAS!");
 
-      // Também anexa o JSON para referência
       await anexarJsonNaTarefa(
         todoTaskId,
         `conferencia_${payload.conferente}`,
@@ -643,10 +668,12 @@ ${listaFaltantes || "Nenhum item faltante."}
           itens: payload.itens,
         }
       );
-
       console.log("JSON também anexado na tarefa de COMPRAS!");
     } catch (err) {
-      console.error("Erro ao criar tarefa de COMPRAS ou anexar PDF:", err);
+      console.error(
+        "Erro ao criar tarefa de COMPRAS ou anexar PDF:",
+        err
+      );
     }
   },
 });
