@@ -1,9 +1,12 @@
 import { task } from "@trigger.dev/sdk/v3";
+import jsPDF from 'jspdf';
+import autoTable from 'jspdf-autotable';
 
 // ── Credenciais NEWSHOP ───────────────────────────────────────────────────────
 const CLICKUP_TOKEN      = process.env.CLICKUP_TOKEN!;
 const CLICKUP_LIST_ID    = process.env.CLICKUP_LIST_ID    ?? "901325900510"; // LOJA NEWSHOP
-const CLICKUP_CD_LIST_ID = process.env.CLICKUP_CD_LIST_ID ?? "901325900510"; // CD NEWSHOP (ajuste se tiver ID separado)
+const CLICKUP_CD_LIST_ID = process.env.CLICKUP_CD_LIST_ID ?? "901325900510"; // CD NEWSHOP
+const CLICKUP_TODO_LIST_ID = process.env.CLICKUP_TODO_LIST_ID ?? "901326684020"; // COMPRAS 
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 async function criarTarefaClickUp(
@@ -23,10 +26,10 @@ async function criarTarefaClickUp(
       body: JSON.stringify({ name: nome, description: descricao, status }),
     }
   );
- const data = await response.json();
-console.log("Resposta ClickUp completa:", JSON.stringify(data));
-console.log("Tarefa criada, ID:", data.id);
-return data.id;
+  const data = await response.json();
+  console.log("Resposta ClickUp completa:", JSON.stringify(data));
+  console.log("Tarefa criada, ID:", data.id);
+  return data.id;
 }
 
 async function anexarJsonNaTarefa(taskId: string, nomeArquivo: string, conteudo: object) {
@@ -86,9 +89,115 @@ async function anexarTxtNaTarefa(taskId: string, nomeArquivo: string, conteudo: 
   }
 }
 
+async function anexarPDFNaTarefa(taskId: string, pdfBuffer: Buffer, filename: string) {
+  try {
+    const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
+    const body = [
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="attachment"; filename="${filename}"`,
+      `Content-Type: application/pdf`,
+      ``,
+      pdfBuffer.toString('binary'),
+      `--${boundary}--`,
+    ].join("\r\n");
+
+    const response = await fetch(
+      `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: CLICKUP_TOKEN,
+          "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        },
+        body,
+      }
+    );
+    console.log("PDF anexado, status:", response.status);
+  } catch (err) {
+    console.error("Erro ao anexar PDF:", err);
+  }
+}
+
+// Função para gerar o PDF da conferência
+function gerarPDFConferencia(payload: any): Buffer {
+  const doc = new jsPDF();
+
+  // Título
+  doc.setFontSize(18);
+  doc.text('Relatório de Conferência', 14, 22);
+
+  // Metadados
+  doc.setFontSize(12);
+  doc.text(`Empresa: ${payload.empresa ?? 'NEWSHOP'}`, 14, 32);
+  doc.text(`Flag: ${payload.flag === 'cd' ? 'CD' : 'LOJA'}`, 14, 38);
+  doc.text(`Conferente: ${payload.conferente}`, 14, 44);
+  const data = payload.dataConferencia
+    ? new Date(payload.dataConferencia).toLocaleString('pt-BR')
+    : new Date().toLocaleString('pt-BR');
+  doc.text(`Data: ${data}`, 14, 50);
+  doc.text(`Tempo: ${payload.tempo ?? '-'}`, 14, 56);
+  doc.text(`Total itens: ${payload.totalItens ?? payload.itens?.length}`, 14, 62);
+
+  // Tabela com os itens
+  const statusMap: Record<string, string> = {
+    separado: '✅ Separado',
+    nao_tem: '❌ Não tem',
+    nao_tem_tudo: '⚠️ Parcial',
+    pendente: '⏳ Pendente',
+  };
+
+  const tableData = (payload.itens || []).map((item: any) => {
+    const statusText = statusMap[item.status] || item.status;
+    const photoStatus = item.photo ? '✓' : '✗';
+    return [
+      item.codigo,
+      item.sku || '-',
+      item.quantidadePedida,
+      item.quantidadeReal ?? '-',
+      statusText,
+      photoStatus,
+    ];
+  });
+
+  autoTable(doc, {
+    startY: 68,
+    head: [['Código', 'SKU', 'Pedido', 'Real', 'Status', 'Foto']],
+    body: tableData,
+    theme: 'grid',
+    styles: { fontSize: 9 },
+    headStyles: { fillColor: [41, 128, 185], textColor: 255 },
+  });
+
+  // Adicionar imagens (fotos) em páginas separadas
+  let yPos = (doc as any).lastAutoTable.finalY + 10;
+  (payload.itens || []).forEach((item: any, idx: number) => {
+    if (item.photo) {
+      if (yPos > 250) {
+        doc.addPage();
+        yPos = 20;
+      }
+      doc.setFontSize(11);
+      doc.text(`Foto do item: ${item.codigo} (${item.sku || 'sem SKU'})`, 14, yPos);
+      try {
+        // Se a foto não tiver o prefixo, adiciona (opcional)
+        let imgData = item.photo;
+        if (!imgData.startsWith('data:image/')) {
+          imgData = `data:image/jpeg;base64,${imgData}`;
+        }
+        doc.addImage(imgData, 'JPEG', 14, yPos + 5, 50, 50);
+        yPos += 60;
+      } catch (err) {
+        console.error('Erro ao adicionar imagem:', err);
+        doc.text('Erro ao carregar imagem', 14, yPos + 5);
+        yPos += 10;
+      }
+    }
+  });
+
+  return Buffer.from(doc.output('arraybuffer'));
+}
+
 // ── TASK 1 — Lista baixada ────────────────────────────────────────────────────
-// LOJA NEWSHOP → CLICKUP_LIST_ID    → status "to do"
-// CD   NEWSHOP → CLICKUP_CD_LIST_ID → status "EM CONFERENCIA"
 export const listaBaixada = task({
   id: "lista-baixada",
   machine: "micro",
@@ -139,8 +248,6 @@ Data: ${dataFormatada}`,
 });
 
 // ── TASK 2 — Conferência finalizada ──────────────────────────────────────────
-// LOJA NEWSHOP → CLICKUP_LIST_ID    → status "complete"
-// CD   NEWSHOP → CLICKUP_CD_LIST_ID → status "complete"
 export const conferenciaBaixada = task({
   id: "conferencia-baixada",
   machine: "micro",
@@ -178,6 +285,7 @@ export const conferenciaBaixada = task({
       itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
     }
 
+    // 1. Cria tarefa original (já existente)
     await criarTarefaClickUp(
       listId,
       `✅ ${payload.conferente} — ${dataFormatada}`,
@@ -198,5 +306,37 @@ Total: ${payload.totalItens} item(ns)
 ${itensTexto}`,
       "complete"
     );
+
+    // 2. (NOVO) Gera PDF e cria tarefa na lista TO-DO
+    if (!CLICKUP_TODO_LIST_ID) {
+      console.warn("⚠️ CLICKUP_TODO_LIST_ID não definida. Nenhuma tarefa TO-DO será criada.");
+      return;
+    }
+
+    try {
+      // Gera o PDF
+      const pdfBuffer = gerarPDFConferencia(payload);
+
+      // Cria tarefa na lista TO-DO
+      const todoTaskId = await criarTarefaClickUp(
+        CLICKUP_TODO_LIST_ID,
+        `📋 Relatório: ${payload.conferente} — ${dataFormatada}`,
+        `Relatório gerado automaticamente após conferência.
+        
+Empresa: ${payload.empresa ?? "NEWSHOP"}
+Tipo: ${isCD ? "CD" : "LOJA"}
+Conferente: ${payload.conferente}
+Data: ${dataFormatada}
+Total itens: ${payload.totalItens}
+
+Arquivo PDF anexado.`,
+        "to do"   // Status desejado na lista TO-DO
+      );
+
+      // Anexa o PDF à tarefa
+      await anexarPDFNaTarefa(todoTaskId, pdfBuffer, `conferencia_${payload.conferente}_${Date.now()}.pdf`);
+    } catch (err) {
+      console.error("Erro ao criar tarefa na lista TO-DO ou anexar PDF:", err);
+    }
   },
 });
