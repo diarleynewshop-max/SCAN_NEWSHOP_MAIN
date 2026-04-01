@@ -676,20 +676,6 @@ ${listaFaltantes || "Nenhum item faltante."}
       await anexarPDFNaTarefa(todoTaskId, pdfBuffer, nomeArquivo);
       console.log("PDF anexado com sucesso na tarefa de COMPRAS!");
 
-      await anexarJsonNaTarefa(
-        todoTaskId,
-        `conferencia_${payload.conferente}`,
-        {
-          type: "conference-result",
-          empresa: payload.empresa ?? "NEWSHOP",
-          flag: payload.flag ?? "loja",
-          conferente: payload.conferente,
-          data: dataFormatada,
-          resumo: payload.resumo,
-          itens: payload.itens,
-        }
-      );
-      console.log("JSON também anexado na tarefa de COMPRAS!");
     } catch (err) {
       console.error(
         "Erro ao criar tarefa de COMPRAS ou anexar PDF:",
