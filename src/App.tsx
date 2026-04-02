@@ -7,6 +7,9 @@ import Home from "./pages/Home";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
+// 1. IMPORTAMOS O BOTÃO AQUI
+import { ThemeToggle } from "@/components/theme-toggle"; 
+
 const queryClient = new QueryClient();
 
 const App = () => (
@@ -14,6 +17,12 @@ const App = () => (
     <TooltipProvider>
       <Toaster />
       <Sonner />
+      
+      {/* 2. COLOCAMOS O BOTÃO FLUTUANTE NO CANTO SUPERIOR DIREITO */}
+      <div className="fixed top-4 right-4 z-50">
+        <ThemeToggle />
+      </div>
+
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<Home />} />
