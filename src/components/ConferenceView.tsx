@@ -17,6 +17,7 @@ import {
   Lock,
   RefreshCw,
   ClipboardList,
+  Database,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
@@ -33,6 +34,7 @@ import {
   type FlagKey,
 } from "@/lib/clickupApi";
 import { z } from "zod";
+import { supabase } from "@/lib/supabase";
 
 export type ConferenceStatus =
   | "separado"
@@ -49,6 +51,7 @@ export interface ConferenceItem {
   status: ConferenceStatus;
   photo?: string | null;
   digito?: "S" | "M" | null;
+  estoque_sistema?: number | null;
 }
 
 interface ConferenceViewProps {
@@ -89,11 +92,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [empresa, setEmpresa] = useState(empresaProp);
   const [flag, setFlag] = useState(flagProp);
-  // ID único desta conferência — gerado ao finalizar, garante 1 envio por sessão
   const [conferenceId] = useState(() => crypto.randomUUID());
-  // "idle" | "sending" | "sent" | "error"
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  // ── Estados da fase pickTask ───────────────────────────────────────────────
   const [senha, setSenha] = useState("");
   const [senhaErro, setSenhaErro] = useState(false);
   const [tasks, setTasks] = useState<ClickUpTask[]>([]);
@@ -101,13 +101,13 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   const [tasksErro, setTasksErro] = useState<string | null>(null);
   const [taskSelecionada, setTaskSelecionada] = useState<ClickUpTask | null>(null);
   const [loadingJson, setLoadingJson] = useState(false);
-  // ID da task de origem (para deletar após concluir)
   const [taskOrigemId, setTaskOrigemId] = useState<string | null>(null);
+  const [loadingEstoque, setLoadingEstoque] = useState(false);
+  const [estoqueAnalisado, setEstoqueAnalisado] = useState(false);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
-  // Chave de storage para IDs já enviados
   const STORAGE_KEY = "clickup_sent_ids";
 
   const jaFoiEnviado = (): boolean => {
@@ -122,7 +122,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     try {
       const raw = localStorage.getItem(STORAGE_KEY);
       const ids: string[] = raw ? JSON.parse(raw) : [];
-      // Mantém só os últimos 200 IDs para não encher o storage
       const novos = [...ids, conferenceId].slice(-200);
       localStorage.setItem(STORAGE_KEY, JSON.stringify(novos));
     } catch {}
@@ -134,7 +133,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     };
   }, []);
 
-  // ── Senha + busca de tasks ────────────────────────────────────────────────
   const confirmarSenha = async () => {
     const ok = validarSenha(empresa as EmpresaKey, senha);
     if (!ok) { setSenhaErro(true); return; }
@@ -169,7 +167,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     setLoadingJson(true);
     setTaskSelecionada(task);
     try {
-      // Se os attachments não vieram na listagem, busca individualmente
       let attachments = task.attachments;
       if (!attachments || attachments.length === 0) {
         attachments = await buscarAttachmentsDaTask(empresa as EmpresaKey, task.id);
@@ -192,7 +189,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
         return;
       }
 
-      // Sobrescreve empresa/flag se o JSON tiver
       if (result.data.empresa) setEmpresa(result.data.empresa);
       if (result.data.flag)    setFlag(result.data.flag);
 
@@ -209,7 +205,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
       }));
 
       setItems(parsed);
-      setTaskOrigemId(task.id); // guarda para deletar depois
+      setTaskOrigemId(task.id);
       setPhase("ready");
       toast({ title: `${parsed.length} itens carregados da task!` });
     } catch (e: any) {
@@ -229,7 +225,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
         return false;
       }
 
-      // Sobrescreve empresa/flag se o arquivo tiver essa informação
       if (result.data.empresa) setEmpresa(result.data.empresa);
       if (result.data.flag)    setFlag(result.data.flag);
 
@@ -360,7 +355,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     if (!file) return;
     setImportError(null);
 
-    // ── Detecta empresa/flag pelo nome do arquivo (fallback se JSON não tiver) ──
     const detectarPeloNome = (nome: string) => {
       const n = nome.toUpperCase();
       let empresaDetectada: string | null = null;
@@ -395,15 +389,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             return;
           }
 
-          // Prioridade 1: campos dentro do JSON
           if (result.data.empresa) {
             setEmpresa(result.data.empresa);
           } else {
-            // Prioridade 2: nome do arquivo ZIP
             const { empresaDetectada, flagDetectada } = detectarPeloNome(file.name);
             if (empresaDetectada) setEmpresa(empresaDetectada);
             if (flagDetectada)    setFlag(flagDetectada);
-            // Prioridade 3: seleção manual já está no state (não faz nada)
           }
           if (result.data.flag) setFlag(result.data.flag);
 
@@ -428,7 +419,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
 
         if (jsonFileName) {
           const text = await zip.files[jsonFileName].async("string");
-          // Tenta ler do nome do ZIP antes de processar
           const { empresaDetectada, flagDetectada } = detectarPeloNome(file.name);
           if (empresaDetectada) setEmpresa(empresaDetectada);
           if (flagDetectada)    setFlag(flagDetectada);
@@ -447,7 +437,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
       return;
     }
 
-    // Para JSON/TXT/CSV direto, tenta ler pelo nome do arquivo também
     const { empresaDetectada, flagDetectada } = detectarPeloNome(file.name);
     if (empresaDetectada) setEmpresa(empresaDetectada);
     if (flagDetectada)    setFlag(flagDetectada);
@@ -524,23 +513,22 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   });
 
   const getPayloadClickUp = () => ({
-  conferente,
-  tempo: formatTime(elapsedSeconds),
-  totalItens: items.length,
-  resumo: getResumo(),
-  itens: items.map((i) => ({
-    codigo: i.codigo,
-    sku: i.sku,
-    quantidadePedida: i.quantidadePedida,
-    quantidadeReal: i.quantidadeReal,
-    status: i.status,
-    digito: i.digito ?? null,
-    photo: i.photo ?? null, // ✅ ADICIONAR AQUI!
-  })),
-});
+    conferente,
+    tempo: formatTime(elapsedSeconds),
+    totalItens: items.length,
+    resumo: getResumo(),
+    itens: items.map((i) => ({
+      codigo: i.codigo,
+      sku: i.sku,
+      quantidadePedida: i.quantidadePedida,
+      quantidadeReal: i.quantidadeReal,
+      status: i.status,
+      digito: i.digito ?? null,
+      photo: i.photo ?? null,
+    })),
+  });
 
   const enviarClickUp = async () => {
-    // Bloqueia se já foi enviado
     if (jaFoiEnviado() || sendStatus === "sent") {
       toast({ title: "⚠️ Já enviado!", description: "Este pedido já foi compartilhado no ClickUp.", variant: "destructive" });
       return;
@@ -559,7 +547,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
       setSendStatus("sent");
       toast({ title: "✅ Chegou no ClickUp!", description: `Pedido de ${conferente} enviado com sucesso.` });
 
-      // Deleta a task de origem do status "Analisado" após concluir
       if (taskOrigemId) {
         try {
           await deletarTask(empresa as EmpresaKey, taskOrigemId);
@@ -619,139 +606,127 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   };
 
   const exportPDF = () => {
-  const doc = new jsPDF();
-  const pageW = doc.internal.pageSize.getWidth();
-  const pageH = doc.internal.pageSize.getHeight();
+    const doc = new jsPDF();
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
 
-  // ── Cabeçalho ──────────────────────────────────────────────────────────
-  doc.setFillColor(20, 20, 20);
-  doc.rect(0, 0, pageW, 28, "F");
-  doc.setFontSize(16);
-  doc.setFont("helvetica", "bold");
-  doc.setTextColor(255, 255, 255);
-  doc.text("Conferência de Lista", 14, 12);
-  doc.setFontSize(8);
-  doc.setFont("helvetica", "normal");
-  doc.text(`${empresa} · ${flag.toUpperCase()}`, 14, 19);
-  doc.text(`Conferente: ${conferente}`, 14, 24);
-  doc.text(`Data: ${new Date().toLocaleDateString("pt-BR")}  |  Tempo: ${formatTime(elapsedSeconds)}  |  Total: ${items.length} itens`, pageW - 14, 24, { align: "right" });
-
-  // ── Resumo ─────────────────────────────────────────────────────────────
-  const resumo = getResumo();
-  const resumoY = 36;
-  const cols = [
-    { label: "✅ Separado", val: resumo.separado, r: 34,  g: 197, b: 94  },
-    { label: "⚠️ Parcial",  val: resumo.parcial,  r: 234, g: 179, b: 8   },
-    { label: "❌ Não tem",  val: resumo.naoTem,   r: 239, g: 68,  b: 68  },
-    { label: "⏳ Pendente", val: resumo.pendente, r: 156, g: 163, b: 175 },
-  ];
-  const colW = (pageW - 28) / 4;
-  cols.forEach((c, i) => {
-    const x = 14 + i * colW;
-    doc.setFillColor(c.r, c.g, c.b);
-    doc.roundedRect(x, resumoY, colW - 4, 14, 2, 2, "F");
+    doc.setFillColor(20, 20, 20);
+    doc.rect(0, 0, pageW, 28, "F");
+    doc.setFontSize(16);
+    doc.setFont("helvetica", "bold");
     doc.setTextColor(255, 255, 255);
-    doc.setFontSize(14);
-    doc.setFont("helvetica", "bold");
-    doc.text(String(c.val), x + (colW - 4) / 2, resumoY + 8, { align: "center" });
-    doc.setFontSize(6);
-    doc.setFont("helvetica", "normal");
-    doc.text(c.label, x + (colW - 4) / 2, resumoY + 13, { align: "center" });
-  });
-
-  // ── Itens ──────────────────────────────────────────────────────────────
-  const statusColors: Record<ConferenceStatus, [number, number, number]> = {
-    separado:     [34,  197, 94 ],
-    nao_tem:      [239, 68,  68 ],
-    nao_tem_tudo: [234, 179, 8  ],
-    pendente:     [156, 163, 175],
-  };
-  const statusLabels: Record<ConferenceStatus, string> = {
-    separado: "SEPARADO", nao_tem: "NÃO TEM", nao_tem_tudo: "PARCIAL", pendente: "PENDENTE",
-  };
-
-  let y = resumoY + 22;
-
-  items.forEach((item, idx) => {
-    const hasPhoto = !!item.photo;
-    const itemH   = hasPhoto ? 36 : 20;
-
-    if (y + itemH > pageH - 14) { doc.addPage(); y = 14; }
-
-    const [r, g, b] = statusColors[item.status];
-
-    // Fundo alternado
-    if (idx % 2 === 0) {
-      doc.setFillColor(248, 248, 248);
-      doc.rect(14, y - 2, pageW - 28, itemH, "F");
-    }
-
-    // Barra colorida de status à esquerda
-    doc.setFillColor(r, g, b);
-    doc.rect(14, y - 2, 3, itemH, "F");
-
-    // Foto
-    if (hasPhoto) {
-      try {
-        doc.addImage(item.photo!, "JPEG", 20, y, 28, 28);
-      } catch {}
-    }
-
-    const tx = hasPhoto ? 52 : 20;
-
-    // Número do item
-    doc.setFontSize(7);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(150, 150, 150);
-    doc.text(`#${idx + 1}`, tx, y + 4);
-
-    // Código
-    doc.setFontSize(11);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(20, 20, 20);
-    doc.text(item.codigo, tx + 8, y + 4);
-
-    // SKU
-    if (item.sku) {
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(100, 100, 100);
-      doc.text(`SKU: ${item.sku}`, tx, y + 10);
-    }
-
-    // Qtd pedida / real
+    doc.text("Conferência de Lista", 14, 12);
     doc.setFontSize(8);
     doc.setFont("helvetica", "normal");
-    doc.setTextColor(60, 60, 60);
-    doc.text(`Pedido: ${item.quantidadePedida}  |  Real: ${item.quantidadeReal ?? "-"}`, tx, y + (item.sku ? 16 : 10));
+    doc.text(`${empresa} · ${flag.toUpperCase()}`, 14, 19);
+    doc.text(`Conferente: ${conferente}`, 14, 24);
+    doc.text(`Data: ${new Date().toLocaleDateString("pt-BR")}  |  Tempo: ${formatTime(elapsedSeconds)}  |  Total: ${items.length} itens`, pageW - 14, 24, { align: "right" });
 
-    // Badge de status (canto direito)
-    doc.setFillColor(r, g, b);
-    doc.roundedRect(pageW - 42, y + 2, 28, 8, 2, 2, "F");
-    doc.setFontSize(6);
-    doc.setFont("helvetica", "bold");
-    doc.setTextColor(255, 255, 255);
-    doc.text(statusLabels[item.status], pageW - 28, y + 7, { align: "center" });
+    const resumo = getResumo();
+    const resumoY = 36;
+    const cols = [
+      { label: "✅ Separado", val: resumo.separado, r: 34,  g: 197, b: 94  },
+      { label: "⚠️ Parcial",  val: resumo.parcial,  r: 234, g: 179, b: 8   },
+      { label: "❌ Não tem",  val: resumo.naoTem,   r: 239, g: 68,  b: 68  },
+      { label: "⏳ Pendente", val: resumo.pendente, r: 156, g: 163, b: 175 },
+    ];
+    const colW = (pageW - 28) / 4;
+    cols.forEach((c, i) => {
+      const x = 14 + i * colW;
+      doc.setFillColor(c.r, c.g, c.b);
+      doc.roundedRect(x, resumoY, colW - 4, 14, 2, 2, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFontSize(14);
+      doc.setFont("helvetica", "bold");
+      doc.text(String(c.val), x + (colW - 4) / 2, resumoY + 8, { align: "center" });
+      doc.setFontSize(6);
+      doc.setFont("helvetica", "normal");
+      doc.text(c.label, x + (colW - 4) / 2, resumoY + 13, { align: "center" });
+    });
 
-    y += itemH + 2;
-  });
+    const statusColors: Record<ConferenceStatus, [number, number, number]> = {
+      separado:     [34,  197, 94 ],
+      nao_tem:      [239, 68,  68 ],
+      nao_tem_tudo: [234, 179, 8  ],
+      pendente:     [156, 163, 175],
+    };
+    const statusLabels: Record<ConferenceStatus, string> = {
+      separado: "SEPARADO", nao_tem: "NÃO TEM", nao_tem_tudo: "PARCIAL", pendente: "PENDENTE",
+    };
 
-  // ── Rodapé ─────────────────────────────────────────────────────────────
-  const totalPages = (doc as any).internal.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    doc.setFillColor(240, 240, 240);
-    doc.rect(0, pageH - 10, pageW, 10, "F");
-    doc.setFontSize(7);
-    doc.setFont("helvetica", "normal");
-    doc.setTextColor(120, 120, 120);
-    doc.text(`${empresa} · Gerado em ${new Date().toLocaleString("pt-BR")}`, 14, pageH - 3);
-    doc.text(`Página ${i} de ${totalPages}`, pageW - 14, pageH - 3, { align: "right" });
-  }
+    let y = resumoY + 22;
 
-  doc.save(`conferencia_${empresa}_${new Date().toISOString().slice(0, 10)}.pdf`);
-  toast({ title: "PDF exportado!" });
-};
+    items.forEach((item, idx) => {
+      const hasPhoto = !!item.photo;
+      const itemH   = hasPhoto ? 36 : 20;
+
+      if (y + itemH > pageH - 14) { doc.addPage(); y = 14; }
+
+      const [r, g, b] = statusColors[item.status];
+
+      if (idx % 2 === 0) {
+        doc.setFillColor(248, 248, 248);
+        doc.rect(14, y - 2, pageW - 28, itemH, "F");
+      }
+
+      doc.setFillColor(r, g, b);
+      doc.rect(14, y - 2, 3, itemH, "F");
+
+      if (hasPhoto) {
+        try {
+          doc.addImage(item.photo!, "JPEG", 20, y, 28, 28);
+        } catch {}
+      }
+
+      const tx = hasPhoto ? 52 : 20;
+
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(150, 150, 150);
+      doc.text(`#${idx + 1}`, tx, y + 4);
+
+      doc.setFontSize(11);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(20, 20, 20);
+      doc.text(item.codigo, tx + 8, y + 4);
+
+      if (item.sku) {
+        doc.setFontSize(8);
+        doc.setFont("helvetica", "normal");
+        doc.setTextColor(100, 100, 100);
+        doc.text(`SKU: ${item.sku}`, tx, y + 10);
+      }
+
+      doc.setFontSize(8);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(60, 60, 60);
+      doc.text(`Pedido: ${item.quantidadePedida}  |  Real: ${item.quantidadeReal ?? "-"}`, tx, y + (item.sku ? 16 : 10));
+
+      doc.setFillColor(r, g, b);
+      doc.roundedRect(pageW - 42, y + 2, 28, 8, 2, 2, "F");
+      doc.setFontSize(6);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(255, 255, 255);
+      doc.text(statusLabels[item.status], pageW - 28, y + 7, { align: "center" });
+
+      y += itemH + 2;
+    });
+
+    const totalPages = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFillColor(240, 240, 240);
+      doc.rect(0, pageH - 10, pageW, 10, "F");
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(120, 120, 120);
+      doc.text(`${empresa} · Gerado em ${new Date().toLocaleString("pt-BR")}`, 14, pageH - 3);
+      doc.text(`Página ${i} de ${totalPages}`, pageW - 14, pageH - 3, { align: "right" });
+    }
+
+    doc.save(`conferencia_${empresa}_${new Date().toISOString().slice(0, 10)}.pdf`);
+    toast({ title: "PDF exportado!" });
+  };
 
   const exportJSON = async () => {
     const statusMap: Record<ConferenceStatus, string> = {
@@ -794,7 +769,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     }
   };
 
-  // ── Badge de empresa/flag ─────────────────────────────────────────────────
   const EmpresaBadge = () => {
     const empresaColors: Record<string, { bg: string; border: string; text: string }> = {
       NEWSHOP: { bg: "hsl(var(--primary)/0.12)", border: "hsl(var(--primary)/0.4)", text: "hsl(var(--primary))" },
@@ -829,7 +803,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
         </button>
 
         <div className="space-y-4 pt-2">
-          {/* Tipo */}
           <div>
             <p className="text-sm font-semibold text-foreground mb-2">Tipo</p>
             <div className="flex gap-2">
@@ -845,7 +818,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             </div>
           </div>
 
-          {/* Empresa */}
           <div>
             <p className="text-sm font-semibold text-foreground mb-2">Empresa</p>
             <div className="flex gap-2">
@@ -861,7 +833,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             </div>
           </div>
 
-          {/* Senha */}
           <div>
             <label className="text-sm font-semibold text-foreground mb-1.5 block flex items-center gap-1">
               <Lock className="w-3.5 h-3.5" /> Senha
@@ -877,7 +848,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             {senhaErro && <p className="text-xs text-destructive mt-1">Senha incorreta para {empresa}</p>}
           </div>
 
-          {/* Conferente */}
           <div>
             <label className="text-sm font-semibold text-foreground mb-1.5 block">Nome do Conferente</label>
             <input
@@ -895,7 +865,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{tasksErro}</div>
           )}
 
-          {/* Botão principal — busca do ClickUp */}
           <button
             onClick={() => {
               if (!conferente.trim()) { toast({ title: "Informe o nome do conferente", variant: "destructive" }); return; }
@@ -910,14 +879,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
               : <><ClipboardList className="w-5 h-5" /> Buscar Pedidos do ClickUp</>}
           </button>
 
-          {/* Divisor */}
           <div className="flex items-center gap-3">
             <div className="flex-1 h-px bg-border" />
             <span className="text-xs text-muted-foreground font-medium">ou</span>
             <div className="flex-1 h-px bg-border" />
           </div>
 
-          {/* Botão arquivo manual */}
           {importError && (
             <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{importError}</div>
           )}
@@ -936,7 +903,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     );
   }
 
-  // ── Fase: escolher task do ClickUp ──────────────────────────────────────────
   if (phase === "pickTask") {
     return (
       <div className="p-4 space-y-4">
@@ -1030,6 +996,41 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     const separados = items.filter((i) => i.status === "separado").length;
     const naoTem = items.filter((i) => i.status === "nao_tem").length;
     const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
+
+    const analisarEstoqueNoSupabase = async () => {
+      setLoadingEstoque(true);
+      try {
+        const codigosParaBuscar = items.map(i => i.codigo);
+        const { data, error } = await supabase
+          .from('estoque')
+          .select('codigo, quantidade')
+          .in('codigo', codigosParaBuscar);
+
+        if (error) throw error;
+
+        const mapaEstoque = new Map<string, number>();
+        if (data) {
+          data.forEach((row: any) => {
+            mapaEstoque.set(row.codigo, Number(row.quantidade));
+          });
+        }
+
+        setItems((prev) =>
+          prev.map(item => ({
+            ...item,
+            estoque_sistema: mapaEstoque.get(item.codigo) ?? 0
+          }))
+        );
+
+        setEstoqueAnalisado(true);
+        toast({ title: "✅ Análise concluída!", description: "Estoques cruzados com o banco de dados." });
+      } catch (error: any) {
+        toast({ title: "❌ Erro na análise", description: "Falha ao conectar com o Supabase.", variant: "destructive" });
+      } finally {
+        setLoadingEstoque(false);
+      }
+    };
+
     return (
       <div className="p-4 space-y-4">
         <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
@@ -1045,6 +1046,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             <Timer className="w-4 h-4" /> Tempo: <strong>{formatTime(elapsedSeconds)}</strong>
           </div>
         </div>
+
         <div className="bg-card rounded-xl border border-border p-3 space-y-2">
           <p className="text-sm font-bold text-foreground">Resumo - {items.length} itens</p>
           <div className="flex gap-2 flex-wrap text-xs font-semibold">
@@ -1053,6 +1055,26 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             <span className="px-2 py-1 rounded-lg bg-destructive/10 text-destructive">❌ {naoTem}</span>
           </div>
         </div>
+
+        {/* BOTÃO ANALISAR ESTOQUE */}
+        <button
+          onClick={analisarEstoqueNoSupabase}
+          disabled={loadingEstoque || estoqueAnalisado}
+          className={`w-full h-14 rounded-xl font-bold text-base flex items-center justify-center gap-3 active:scale-[0.98] transition-all border shadow-lg ${
+            estoqueAnalisado
+              ? "bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)] shadow-none"
+              : "bg-primary text-primary-foreground border-primary shadow-primary/25 hover:opacity-90"
+          }`}
+        >
+          {loadingEstoque ? (
+            <><span className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" /> Buscando no Banco...</>
+          ) : estoqueAnalisado ? (
+            <><CheckCircle2 className="w-5 h-5" /> Estoque Analisado</>
+          ) : (
+            <><Database className="w-5 h-5" /> Analisar Estoque do Sistema</>
+          )}
+        </button>
+
         <div className="grid grid-cols-3 gap-2">
           <button onClick={exportPDF} className="h-11 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
             <FileText className="w-4 h-4" /> PDF
@@ -1081,18 +1103,27 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             {sendStatus === "sent"    && <CheckCircle2 className="w-4 h-4" />}
             {sendStatus === "error"   && <XCircle className="w-4 h-4" />}
             {sendStatus === "idle"    && <Share2 className="w-4 h-4" />}
-            {sendStatus === "sending" ? "Enviando…" :
-             sendStatus === "sent"    ? "Enviado!" :
-             sendStatus === "error"   ? "Tentar de novo" :
-             "ClickUp"}
+            {sendStatus === "sending" ? "Enviando…" : sendStatus === "sent" ? "Enviado!" : sendStatus === "error" ? "Tentar de novo" : "ClickUp"}
           </button>
         </div>
+
+        {/* LISTA COM CORES VERDE/VERMELHO APÓS ANÁLISE */}
         <div className="space-y-2">
           {items.map((item, idx) => {
             const label = getStatusLabel(item.status);
             const StatusIcon = label.icon;
+
+            let corFundo = getStatusColor(item.status);
+            if (estoqueAnalisado) {
+              if (item.estoque_sistema !== undefined && item.estoque_sistema > 0) {
+                corFundo = "border-l-4 border-l-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]";
+              } else {
+                corFundo = "border-l-4 border-l-destructive bg-destructive/10";
+              }
+            }
+
             return (
-              <div key={item.id} className={`rounded-xl p-3 shadow-sm flex gap-3 items-center ${getStatusColor(item.status)}`}>
+              <div key={item.id} className={`rounded-xl p-3 shadow-sm flex gap-3 items-center transition-colors duration-300 ${corFundo}`}>
                 {item.photo && <img src={item.photo} alt={item.codigo} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-muted-foreground">#{idx + 1}</p>
@@ -1102,8 +1133,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
                     Pedido: <strong>{item.quantidadePedida}</strong> • Real: <strong>{item.quantidadeReal}</strong>
                   </p>
                 </div>
-                <div className={`flex items-center gap-1 text-xs font-semibold ${label.color}`}>
-                  <StatusIcon className="w-4 h-4" /> {label.text}
+                <div className="flex flex-col items-end gap-1.5">
+                  <div className={`flex items-center gap-1 text-[11px] font-bold ${label.color} bg-background/50 px-2 py-0.5 rounded-full`}>
+                    <StatusIcon className="w-3.5 h-3.5" /> {label.text}
+                  </div>
+                  {estoqueAnalisado && (
+                    <div className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md ${item.estoque_sistema! > 0 ? "bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))]" : "bg-destructive text-destructive-foreground"}`}>
+                      <Database className="w-3 h-3" /> Sis: {item.estoque_sistema}
+                    </div>
+                  )}
                 </div>
               </div>
             );
