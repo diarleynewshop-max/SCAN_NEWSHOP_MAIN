@@ -1,19 +1,21 @@
 import { task } from "@trigger.dev/sdk/v3";
 
-// ── Credenciais SOYE / FACIL ─────────────────────────────────────────
-const CLICKUP_TOKEN_SF         = process.env.CLICKUP_TOKEN_SF!;
-const CLICKUP_LIST_ID_SOYE     = process.env.CLICKUP_LIST_ID_SOYE     ?? "901326461924"; // LOJA SOYE
-const CLICKUP_LIST_ID_FACIL    = process.env.CLICKUP_LIST_ID_FACIL    ?? "901326461915"; // LOJA FACIL
-const CLICKUP_CD_LIST_ID_SOYE  = process.env.CLICKUP_CD_LIST_ID_SOYE  ?? "901326461924"; // CD SOYE  (ajuste se tiver ID separado)
-const CLICKUP_CD_LIST_ID_FACIL = process.env.CLICKUP_CD_LIST_ID_FACIL ?? "901326461915"; // CD FACIL (ajuste se tiver ID separado)
+// ── Credenciais SOYE / FACIL ─────────────────────────────────────────────────
+const CLICKUP_TOKEN_SF = process.env.CLICKUP_TOKEN_SF!;
+const CLICKUP_LIST_ID_SOYE = process.env.CLICKUP_LIST_ID_SOYE ?? "901326461924";
+const CLICKUP_LIST_ID_FACIL = process.env.CLICKUP_LIST_ID_FACIL ?? "901326461915";
+const CLICKUP_CD_LIST_ID_SOYE = process.env.CLICKUP_CD_LIST_ID_SOYE ?? "901326461924";
+const CLICKUP_CD_LIST_ID_FACIL = process.env.CLICKUP_CD_LIST_ID_FACIL ?? "901326461915";
+const CLICKUP_TODO_LIST_ID_SF = process.env.CLICKUP_TODO_LIST_ID_SF ?? "901326695640"; // COMPRAS SF
 
-// ── Helper: escolhe list ID pela empresa e flag ───────────────────────────────
+// ── Helper: escolhe list ID pela empresa e flag ──────────────────────────────
 function getListId(empresa: string, isCD = false): string {
   if (empresa === "FACIL") return isCD ? CLICKUP_CD_LIST_ID_FACIL : CLICKUP_LIST_ID_FACIL;
-  return isCD ? CLICKUP_CD_LIST_ID_SOYE : CLICKUP_LIST_ID_SOYE; // default SOYE
+  return isCD ? CLICKUP_CD_LIST_ID_SOYE : CLICKUP_LIST_ID_SOYE;
 }
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
+// ── Helpers ──────────────────────────────────────────────────────────────────
+
 async function criarTarefaClickUp(
   listId: string,
   nome: string,
@@ -32,6 +34,7 @@ async function criarTarefaClickUp(
     }
   );
   const data = await response.json();
+  console.log("Resposta ClickUp completa:", JSON.stringify(data));
   console.log("Tarefa criada, ID:", data.id);
   return data.id;
 }
@@ -101,23 +104,70 @@ async function anexarTxtNaTarefa(
   }
 }
 
+async function anexarFotoNaTarefa(
+  taskId: string,
+  photoBase64: string,
+  filename: string
+): Promise<boolean> {
+  try {
+    let raw = photoBase64;
+
+    // Detecta formato
+    let mimeType = "image/jpeg";
+    if (raw.includes("data:image/png")) {
+      mimeType = "image/png";
+    }
+
+    // Remove prefixo data URI
+    if (raw.includes(";base64,")) {
+      raw = raw.split(";base64,")[1];
+    }
+
+    // Converte base64 → Buffer → Blob
+    const imgBuffer = Buffer.from(raw, "base64");
+    const blob = new Blob([imgBuffer], { type: mimeType });
+
+    console.log(`Preparando foto "${filename}" — ${imgBuffer.length} bytes`);
+
+    const formData = new FormData();
+    formData.append("attachment", blob, filename);
+
+    const response = await fetch(
+      `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: CLICKUP_TOKEN_SF,
+        },
+        body: formData,
+      }
+    );
+
+    console.log(`📸 Foto "${filename}" — Status: ${response.status}`);
+    return response.ok;
+  } catch (err) {
+    console.error(`❌ Erro ao anexar foto "${filename}":`, err);
+    return false;
+  }
+}
+
 // ── TASK 1 — Lista baixada (SOYE / FACIL) ────────────────────────────────────
-// LOJA SOYE  → CLICKUP_LIST_ID_SOYE      → status "to do"
-// LOJA FACIL → CLICKUP_LIST_ID_FACIL     → status "to do"
-// CD   SOYE  → CLICKUP_CD_LIST_ID_SOYE   → status "EM CONFERENCIA"
-// CD   FACIL → CLICKUP_CD_LIST_ID_FACIL  → status "EM CONFERENCIA"
 export const listaBaixadaSF = task({
   id: "lista-baixada-sf",
   machine: "micro",
   maxDuration: 30,
   run: async (payload: any) => {
     const dataFormatada = payload.dataDownload
-      ? new Date(payload.dataDownload).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
-      : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
+      ? new Date(payload.dataDownload).toLocaleString("pt-BR", {
+          timeZone: "America/Fortaleza",
+        })
+      : new Date().toLocaleString("pt-BR", {
+          timeZone: "America/Fortaleza",
+        });
 
-    const isCD      = payload.flag === "cd";
-    const listId    = getListId(payload.empresa ?? "SOYE", isCD);
-    const status    = isCD ? "EM CONFERENCIA" : "to do";
+    const isCD = payload.flag === "cd";
+    const listId = getListId(payload.empresa ?? "SOYE", isCD);
+    const status = isCD ? "EM CONFERENCIA" : "to do";
     const flagLabel = isCD ? "CD" : "LOJA";
 
     const taskId = await criarTarefaClickUp(
@@ -136,68 +186,80 @@ Data: ${dataFormatada}`,
       anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
         type: "conference-file",
         empresa: payload.empresa ?? "SOYE",
-        flag:    payload.flag    ?? "loja",
+        flag: payload.flag ?? "loja",
         items: payload.produtos.map((p: any) => ({
-          codigo:     p.barcode,
-          sku:        p.sku || "",
+          codigo: p.barcode,
+          sku: p.sku || "",
           quantidade: p.quantity ?? p.quantidade,
-          photo:      p.photo || null,
+          photo: p.photo || null,
         })),
       }),
-      anexarTxtNaTarefa(taskId, `lista_${payload.pessoa}`, (() => {
-        const soCodigosBloco = payload.produtos.map((p: any) => p.barcode).join("\n");
-        const codigoQuantidadeBloco = payload.produtos
-          .map((p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`)
-          .join("\n");
-        return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
-      })()),
+      anexarTxtNaTarefa(
+        taskId,
+        `lista_${payload.pessoa}`,
+        (() => {
+          const soCodigosBloco = payload.produtos
+            .map((p: any) => p.barcode)
+            .join("\n");
+          const codigoQuantidadeBloco = payload.produtos
+            .map(
+              (p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`
+            )
+            .join("\n");
+          return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
+        })()
+      ),
     ]);
   },
 });
 
-// ── TASK 2 — Conferência finalizada (SOYE / FACIL) ───────────────────────────
-// LOJA SOYE  → CLICKUP_LIST_ID_SOYE      → status "complete"
-// LOJA FACIL → CLICKUP_LIST_ID_FACIL     → status "complete"
-// CD   SOYE  → CLICKUP_CD_LIST_ID_SOYE   → status "complete"
-// CD   FACIL → CLICKUP_CD_LIST_ID_FACIL  → status "complete"
+// ── TASK 2 — Conferência finalizada (SOYE / FACIL) COM FOTOS ─────────────────
 export const conferenciaBaixadaSF = task({
   id: "conferencia-baixada-sf",
   machine: "micro",
-  maxDuration: 30,
+  maxDuration: 60,
   run: async (payload: any) => {
     const dataFormatada = payload.dataConferencia
-      ? new Date(payload.dataConferencia).toLocaleString("pt-BR", { timeZone: "America/Fortaleza" })
-      : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
+      ? new Date(payload.dataConferencia).toLocaleString("pt-BR", {
+          timeZone: "America/Fortaleza",
+        })
+      : new Date().toLocaleString("pt-BR", {
+          timeZone: "America/Fortaleza",
+        });
 
-    const isCD   = payload.flag === "cd";
+    const isCD = payload.flag === "cd";
     const listId = getListId(payload.empresa ?? "SOYE", isCD);
 
     const statusMap: Record<string, string> = {
-      separado:     "✅ Separado",
-      nao_tem:      "❌ Nao tem",
+      separado: "✅ Separado",
+      nao_tem: "❌ Nao tem",
       nao_tem_tudo: "⚠️ Parcial",
-      pendente:     "⏳ Pendente",
+      pendente: "⏳ Pendente",
     };
 
-    const itensS         = payload.itens.filter((i: any) => i.digito === "S");
-    const itensM         = payload.itens.filter((i: any) => i.digito === "M");
+    const itensS = payload.itens.filter((i: any) => i.digito === "S");
+    const itensM = payload.itens.filter((i: any) => i.digito === "M");
     const itensSemDigito = payload.itens.filter((i: any) => !i.digito);
 
     const formatarItem = (item: any, idx: number) =>
       `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`;
 
     let itensTexto = "";
-    if (itensS.length > 0) itensTexto += `{S}\n${itensS.map(formatarItem).join("\n")}`;
+    if (itensS.length > 0)
+      itensTexto += `{S}\n${itensS.map(formatarItem).join("\n")}`;
     if (itensM.length > 0) {
-      if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
+      if (itensTexto)
+        itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
       itensTexto += `{M}\n${itensM.map(formatarItem).join("\n")}`;
     }
     if (itensSemDigito.length > 0) {
-      if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
+      if (itensTexto)
+        itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
       itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
     }
 
-    await criarTarefaClickUp(
+    // ── 1. Cria tarefa original na lista de conferência ──
+    const tarefaOriginalId = await criarTarefaClickUp(
       listId,
       `✅ ${payload.conferente} — ${dataFormatada}`,
       `Conferente: ${payload.conferente}
@@ -217,5 +279,78 @@ Total: ${payload.totalItens} item(ns)
 ${itensTexto}`,
       "complete"
     );
+
+    console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
+
+    // ── 2. Cria tarefa de COMPRAS com fotos diretas ──
+    try {
+      const itensNaoTem = (payload.itens || []).filter(
+        (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
+      );
+
+      const listaFaltantes = itensNaoTem
+        .map(
+          (item: any, idx: number) =>
+            `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0} | ${statusMap[item.status] ?? item.status}`
+        )
+        .join("\n");
+
+      const listaTodos = (payload.itens || [])
+        .map(
+          (item: any, idx: number) =>
+            `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | ${statusMap[item.status] ?? item.status} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0}${item.photo ? " 📸" : ""}`
+        )
+        .join("\n");
+
+      const todoTaskId = await criarTarefaClickUp(
+        CLICKUP_TODO_LIST_ID_SF,
+        `🛒 Compras: ${payload.empresa} — ${payload.conferente} — ${dataFormatada}`,
+        `Relatório gerado automaticamente após conferência.
+
+📋 INFORMAÇÕES
+Empresa: ${payload.empresa ?? "SOYE"}
+Tipo: ${isCD ? "CD" : "LOJA"}
+Conferente: ${payload.conferente}
+Data: ${dataFormatada}
+Total itens conferidos: ${payload.totalItens}
+
+📊 RESUMO
+✅ Separado: ${payload.resumo?.separado ?? 0}
+❌ Não tem: ${payload.resumo?.naoTem ?? 0}
+⚠️ Parcial: ${payload.resumo?.parcial ?? 0}
+⏳ Pendente: ${payload.resumo?.pendente ?? 0}
+
+🛒 ITENS FALTANTES (${itensNaoTem.length})
+${listaFaltantes || "Nenhum item faltante."}
+
+📦 TODOS OS ITENS
+${listaTodos}
+
+📸 Fotos anexadas abaixo (itens marcados com 📸)`,
+        "to do"
+      );
+
+      console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
+
+      // ── 3. Anexa foto APENAS dos itens que NÃO TEM ──
+      const itensComFoto = (payload.itens || []).filter(
+        (i: any) =>
+          i.photo &&
+          i.photo.length > 0 &&
+          (i.status === "nao_tem" || i.status === "nao_tem_tudo")
+      );
+
+      console.log(`Itens com foto (NÃO TEM): ${itensComFoto.length}`);
+
+      for (const item of itensComFoto) {
+        const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+        const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
+        await anexarFotoNaTarefa(todoTaskId, item.photo, filename);
+      }
+
+      console.log("✅ Todas as fotos anexadas!");
+    } catch (err) {
+      console.error("Erro ao criar tarefa de COMPRAS:", err);
+    }
   },
 });
