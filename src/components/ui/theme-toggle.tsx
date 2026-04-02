@@ -1,7 +1,7 @@
-// src/components/theme-toggle.tsx
+// src/components/theme-toggle.ts
 import { Moon, Sun } from "lucide-react"
-import { useTheme } from "./theme-provider"
-import { Button } from "./ui/button"
+import { useTheme } from "./theme-provider" // 👈 Ficou só "./"
+import { Button } from "./button"           // 👈 Tirou o "ui/" porque já estão na mesma pasta
 
 export function ThemeToggle() {
   const { theme, setTheme } = useTheme()

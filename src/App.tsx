@@ -8,7 +8,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 
 // 1. IMPORTAMOS O BOTÃO AQUI
-import { ThemeToggle } from "@/components/theme-toggle"; 
+import { ThemeToggle } from "@/components/ui/theme-toggle"; 
 
 const queryClient = new QueryClient();
 
