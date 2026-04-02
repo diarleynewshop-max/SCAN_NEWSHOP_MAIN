@@ -834,12 +834,50 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   if (phase === "ready") { /* igual ... omitido apenas texto */ }
 
   // 👈 TELA FINISHED - ONDE ACONTECE A MÁGICA DA ANÁLISE!
-  if (phase === "finished") {
+    if (phase === "finished") {
     const separados = items.filter((i) => i.status === "separado").length;
     const naoTem = items.filter((i) => i.status === "nao_tem").length;
     const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
+
+    // 🚀 FUNÇÃO QUE BUSCA O ESTOQUE NO SUPABASE
+    const analisarEstoqueNoSupabase = async () => {
+      setLoadingEstoque(true);
+      try {
+        const codigosParaBuscar = items.map(i => i.codigo);
+
+        const { data, error } = await supabase
+          .from('estoque')
+          .select('codigo, quantidade')
+          .in('codigo', codigosParaBuscar);
+
+        if (error) throw error;
+
+        const mapaEstoque = new Map<string, number>();
+        if (data) {
+          data.forEach((row: any) => {
+            mapaEstoque.set(row.codigo, Number(row.quantidade));
+          });
+        }
+
+        setItems((prev) => 
+          prev.map(item => ({
+            ...item,
+            estoque_sistema: mapaEstoque.get(item.codigo) ?? 0
+          }))
+        );
+
+        setEstoqueAnalisado(true);
+        toast({ title: "✅ Análise concluída!", description: "Os estoques foram cruzados com o banco de dados." });
+      } catch (error: any) {
+        toast({ title: "❌ Erro na análise", description: "Falha ao conectar com o Supabase.", variant: "destructive" });
+      } finally {
+        setLoadingEstoque(false);
+      }
+    };
+
     return (
       <div className="p-4 space-y-4">
+        {/* Cabeçalho */}
         <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
@@ -863,21 +901,26 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
           </div>
         </div>
 
-        {/* 👈 BOTÃO DE ANÁLISE DO SUPABASE AQUI! */}
-        {!estoqueAnalisado && (
-          <button 
-            onClick={analisarEstoqueNoSupabase}
-            disabled={loadingEstoque}
-            className="w-full h-12 rounded-xl bg-secondary text-secondary-foreground font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform border border-border"
-          >
-            {loadingEstoque ? (
-              <span className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" />
-            ) : (
-              <><Database className="w-5 h-5" /> Analisar Estoque no Sistema</>
-            )}
-          </button>
-        )}
+        {/* 👇 O BOTÃO MÁGICO ENTRA AQUI 👇 */}
+        <button 
+          onClick={analisarEstoqueNoSupabase}
+          disabled={loadingEstoque || estoqueAnalisado}
+          className={`w-full h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all border ${
+            estoqueAnalisado 
+              ? "bg-[hsl(var(--success)/0.1)] text-[hsl(var(--success))] border-[hsl(var(--success)/0.3)]" 
+              : "bg-secondary text-secondary-foreground border-border hover:bg-secondary/80"
+          }`}
+        >
+          {loadingEstoque ? (
+            <><span className="w-5 h-5 border-2 border-current border-t-transparent rounded-full animate-spin" /> Buscando no Banco...</>
+          ) : estoqueAnalisado ? (
+            <><CheckCircle2 className="w-5 h-5" /> Estoque Analisado</>
+          ) : (
+            <><Database className="w-5 h-5" /> Analisar Estoque do Sistema</>
+          )}
+        </button>
 
+        {/* Botões de Ação */}
         <div className="grid grid-cols-3 gap-2">
           <button onClick={exportPDF} className="h-11 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
             <FileText className="w-4 h-4" /> PDF
@@ -906,29 +949,28 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
             {sendStatus === "sent"    && <CheckCircle2 className="w-4 h-4" />}
             {sendStatus === "error"   && <XCircle className="w-4 h-4" />}
             {sendStatus === "idle"    && <Share2 className="w-4 h-4" />}
-            {sendStatus === "sending" ? "Enviando…" :
-             sendStatus === "sent"    ? "Enviado!" :
-             sendStatus === "error"   ? "Tentar de novo" :
-             "ClickUp"}
+            {sendStatus === "sending" ? "Enviando…" : sendStatus === "sent" ? "Enviado!" : sendStatus === "error" ? "Tentar de novo" : "ClickUp"}
           </button>
         </div>
+
+        {/* LISTA DE PRODUTOS COLORIDA APÓS ANÁLISE */}
         <div className="space-y-2">
           {items.map((item, idx) => {
             const label = getStatusLabel(item.status);
             const StatusIcon = label.icon;
             
-            // 👈 LÓGICA DE CORES DA ANÁLISE
-            let corFundo = getStatusColor(item.status);
+            // Lógica das Cores (Mágica Visual)
+            let corFundo = getStatusColor(item.status); // Cor Padrão do app
             if (estoqueAnalisado) {
               if (item.estoque_sistema !== undefined && item.estoque_sistema > 0) {
-                corFundo = "border-l-4 border-l-[hsl(var(--success))] bg-[hsl(var(--success)/0.1)]"; // Fundo verde
+                corFundo = "border-l-4 border-l-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]"; // Verde (Tem no Supabase)
               } else {
-                corFundo = "border-l-4 border-l-destructive bg-destructive/10"; // Fundo vermelho
+                corFundo = "border-l-4 border-l-destructive bg-destructive/10"; // Vermelho (Zero no Supabase)
               }
             }
 
             return (
-              <div key={item.id} className={`rounded-xl p-3 shadow-sm flex gap-3 items-center ${corFundo} transition-colors`}>
+              <div key={item.id} className={`rounded-xl p-3 shadow-sm flex gap-3 items-center transition-colors duration-300 ${corFundo}`}>
                 {item.photo && <img src={item.photo} alt={item.codigo} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-muted-foreground">#{idx + 1}</p>
@@ -938,17 +980,14 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
                     Pedido: <strong>{item.quantidadePedida}</strong> • Real: <strong>{item.quantidadeReal}</strong>
                   </p>
                 </div>
-                
-                {/* Lado Direito: Status e Estoque */}
-                <div className="flex flex-col items-end gap-1">
-                  <div className={`flex items-center gap-1 text-xs font-semibold ${label.color}`}>
-                    <StatusIcon className="w-4 h-4" /> {label.text}
+                <div className="flex flex-col items-end gap-1.5">
+                  <div className={`flex items-center gap-1 text-[11px] font-bold ${label.color} bg-background/50 px-2 py-0.5 rounded-full`}>
+                    <StatusIcon className="w-3.5 h-3.5" /> {label.text}
                   </div>
-                  
-                  {/* Badge de estoque após análise */}
+                  {/* Etiqueta de Estoque do Sistema aparece aqui */}
                   {estoqueAnalisado && (
-                    <div className={`text-[10px] font-bold px-2 py-0.5 rounded-md ${item.estoque_sistema! > 0 ? "bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))]" : "bg-destructive text-destructive-foreground"}`}>
-                      Sis: {item.estoque_sistema}
+                    <div className={`flex items-center gap-1 text-[11px] font-bold px-2 py-0.5 rounded-md ${item.estoque_sistema! > 0 ? "bg-[hsl(var(--success))] text-[hsl(var(--success-foreground))]" : "bg-destructive text-destructive-foreground"}`}>
+                      <Database className="w-3 h-3" /> Sis: {item.estoque_sistema}
                     </div>
                   )}
                 </div>
