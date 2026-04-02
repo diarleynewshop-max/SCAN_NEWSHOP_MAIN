@@ -1,14 +1,4 @@
 import { task } from "@trigger.dev/sdk/v3";
-import * as jsPDFModule from "jspdf";
-import * as autoTableModule from "jspdf-autotable";
-
-// ── Fix ESM/CJS interop ──────────────────────────────────────────────────────
-const jsPDFConstructor = (jsPDFModule as any).default?.jsPDF
-  ?? (jsPDFModule as any).jsPDF
-  ?? (jsPDFModule as any).default
-  ?? jsPDFModule;
-
-const autoTable = (autoTableModule as any).default ?? autoTableModule;
 
 // ── Credenciais NEWSHOP ───────────────────────────────────────────────────────
 const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN!;
@@ -108,13 +98,29 @@ async function anexarTxtNaTarefa(
   }
 }
 
-async function anexarPDFNaTarefa(
+async function anexarFotoNaTarefa(
   taskId: string,
-  pdfBuffer: Buffer,
+  photoBase64: string,
   filename: string
 ) {
   try {
-    const blob = new Blob([pdfBuffer], { type: "application/pdf" });
+    let raw = photoBase64;
+
+    // Detecta formato
+    let mimeType = "image/jpeg";
+    if (raw.includes("data:image/png")) {
+      mimeType = "image/png";
+    }
+
+    // Remove prefixo data URI
+    if (raw.includes(";base64,")) {
+      raw = raw.split(";base64,")[1];
+    }
+
+    // Converte base64 → Buffer → Blob
+    const imgBuffer = Buffer.from(raw, "base64");
+    const blob = new Blob([imgBuffer], { type: mimeType });
+
     const formData = new FormData();
     formData.append("attachment", blob, filename);
 
@@ -129,364 +135,12 @@ async function anexarPDFNaTarefa(
       }
     );
 
-    const responseText = await response.text();
-    console.log(
-      `PDF anexado — Status: ${response.status} — Resposta: ${responseText}`
-    );
-
-    if (!response.ok) {
-      throw new Error(
-        `Erro ao anexar PDF: ${response.status} — ${responseText}`
-      );
-    }
+    console.log(`📸 Foto "${filename}" — Status: ${response.status}`);
+    return response.ok;
   } catch (err) {
-    console.error("Erro ao anexar PDF:", err);
-    throw err;
+    console.error(`❌ Erro ao anexar foto "${filename}":`, err);
+    return false;
   }
-}
-
-// ── Gerar PDF de Conferência com FOTOS e STATUS ──────────────────────────────
-function gerarPDFConferencia(payload: any): Buffer {
-  // Debug: mostra o que foi resolvido
-  console.log("jsPDFConstructor type:", typeof jsPDFConstructor);
-  console.log("jsPDFConstructor keys:", Object.keys(jsPDFConstructor || {}));
-
-  const doc = new jsPDFConstructor();
-  const pageWidth = doc.internal.pageSize.getWidth();
-
-  // ═══════════════════════════════════════════
-  // CABEÇALHO
-  // ═══════════════════════════════════════════
-  doc.setFillColor(41, 128, 185);
-  doc.rect(0, 0, pageWidth, 40, "F");
-
-  doc.setTextColor(255, 255, 255);
-  doc.setFontSize(22);
-  doc.setFont("helvetica", "bold");
-  doc.text("RELATÓRIO DE CONFERÊNCIA", pageWidth / 2, 18, {
-    align: "center",
-  });
-
-  doc.setFontSize(12);
-  doc.setFont("helvetica", "normal");
-  doc.text(
-    `${payload.empresa ?? "NEWSHOP"} — ${payload.flag === "cd" ? "CD" : "LOJA"}`,
-    pageWidth / 2,
-    30,
-    { align: "center" }
-  );
-
-  // ═══════════════════════════════════════════
-  // INFORMAÇÕES GERAIS
-  // ═══════════════════════════════════════════
-  doc.setTextColor(0, 0, 0);
-  doc.setFontSize(11);
-
-  const dataFormatada = payload.dataConferencia
-    ? new Date(payload.dataConferencia).toLocaleString("pt-BR")
-    : new Date().toLocaleString("pt-BR");
-
-  const infoY = 50;
-  doc.setFont("helvetica", "bold");
-  doc.text("Conferente:", 14, infoY);
-  doc.setFont("helvetica", "normal");
-  doc.text(payload.conferente ?? "-", 50, infoY);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Data:", 14, infoY + 7);
-  doc.setFont("helvetica", "normal");
-  doc.text(dataFormatada, 50, infoY + 7);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Tempo:", 14, infoY + 14);
-  doc.setFont("helvetica", "normal");
-  doc.text(payload.tempo ?? "-", 50, infoY + 14);
-
-  doc.setFont("helvetica", "bold");
-  doc.text("Total itens:", 14, infoY + 21);
-  doc.setFont("helvetica", "normal");
-  doc.text(
-    String(payload.totalItens ?? payload.itens?.length ?? 0),
-    50,
-    infoY + 21
-  );
-
-  // ═══════════════════════════════════════════
-  // RESUMO (cards coloridos)
-  // ═══════════════════════════════════════════
-  const resumoY = infoY + 32;
-  const resumo = payload.resumo ?? {
-    separado: 0,
-    naoTem: 0,
-    parcial: 0,
-    pendente: 0,
-  };
-
-  const cards = [
-    {
-      label: "Separado",
-      value: resumo.separado,
-      color: [39, 174, 96] as [number, number, number],
-    },
-    {
-      label: "Não tem",
-      value: resumo.naoTem,
-      color: [231, 76, 60] as [number, number, number],
-    },
-    {
-      label: "Parcial",
-      value: resumo.parcial,
-      color: [243, 156, 18] as [number, number, number],
-    },
-    {
-      label: "Pendente",
-      value: resumo.pendente,
-      color: [149, 165, 166] as [number, number, number],
-    },
-  ];
-
-  const cardWidth = (pageWidth - 28 - 15) / 4;
-  cards.forEach((card, i) => {
-    const x = 14 + i * (cardWidth + 5);
-    doc.setFillColor(card.color[0], card.color[1], card.color[2]);
-    doc.roundedRect(x, resumoY, cardWidth, 20, 3, 3, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(9);
-    doc.setFont("helvetica", "normal");
-    doc.text(card.label, x + cardWidth / 2, resumoY + 8, {
-      align: "center",
-    });
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text(String(card.value ?? 0), x + cardWidth / 2, resumoY + 17, {
-      align: "center",
-    });
-  });
-
-  // ═══════════════════════════════════════════
-  // TABELA DE ITENS
-  // ═══════════════════════════════════════════
-  doc.setTextColor(0, 0, 0);
-
-  const statusLabel: Record<string, string> = {
-    separado: "SEPARADO",
-    nao_tem: "NÃO TEM",
-    nao_tem_tudo: "PARCIAL",
-    pendente: "PENDENTE",
-  };
-
-  const statusColor: Record<string, [number, number, number]> = {
-    separado: [39, 174, 96],
-    nao_tem: [231, 76, 60],
-    nao_tem_tudo: [243, 156, 18],
-    pendente: [149, 165, 166],
-  };
-
-  const tableData = (payload.itens || []).map((item: any, idx: number) => [
-    String(idx + 1),
-    item.codigo ?? "-",
-    item.sku || "-",
-    String(item.quantidadePedida ?? "-"),
-    String(item.quantidadeReal ?? "-"),
-    statusLabel[item.status] ?? item.status,
-    item.photo ? "SIM" : "NÃO",
-  ]);
-
-  autoTable(doc, {
-    startY: resumoY + 28,
-    head: [["#", "Código", "SKU", "Pedido", "Real", "Status", "Foto"]],
-    body: tableData,
-    theme: "grid",
-    styles: { fontSize: 8, cellPadding: 3 },
-    headStyles: {
-      fillColor: [41, 128, 185],
-      textColor: 255,
-      fontStyle: "bold",
-    },
-    columnStyles: {
-      0: { cellWidth: 10, halign: "center" },
-      3: { halign: "center" },
-      4: { halign: "center" },
-      5: { halign: "center" },
-      6: { halign: "center" },
-    },
-    didParseCell: (data: any) => {
-      if (data.section === "body" && data.column.index === 5) {
-        const item = (payload.itens || [])[data.row.index];
-        if (item && statusColor[item.status]) {
-          data.cell.styles.fillColor = statusColor[item.status];
-          data.cell.styles.textColor = [255, 255, 255];
-          data.cell.styles.fontStyle = "bold";
-        }
-      }
-    },
-  });
-
-  // ═══════════════════════════════════════════
-  // PÁGINAS DE FOTOS
-  // ═══════════════════════════════════════════
-  const itensComFoto = (payload.itens || []).filter(
-    (item: any) => item.photo
-  );
-
-  if (itensComFoto.length > 0) {
-    doc.addPage();
-
-    doc.setFillColor(41, 128, 185);
-    doc.rect(0, 0, pageWidth, 25, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFontSize(16);
-    doc.setFont("helvetica", "bold");
-    doc.text("FOTOS DOS ITENS", pageWidth / 2, 16, { align: "center" });
-
-    let yPos = 35;
-    const fotoWidth = 55;
-    const fotoHeight = 55;
-    const blocoHeight = fotoHeight + 25;
-
-    itensComFoto.forEach((item: any, idx: number) => {
-      if (yPos + blocoHeight > doc.internal.pageSize.getHeight() - 15) {
-        doc.addPage();
-        yPos = 20;
-      }
-
-      const cardX = 12;
-      const cardW = pageWidth - 24;
-
-      doc.setFillColor(245, 245, 245);
-      doc.roundedRect(cardX, yPos - 5, cardW, blocoHeight, 3, 3, "F");
-
-      const borderColor = statusColor[item.status] ?? [149, 165, 166];
-      doc.setDrawColor(
-        borderColor[0],
-        borderColor[1],
-        borderColor[2]
-      );
-      doc.setLineWidth(1.5);
-      doc.roundedRect(cardX, yPos - 5, cardW, blocoHeight, 3, 3, "S");
-
-      const badgeColor = statusColor[item.status] ?? [149, 165, 166];
-      const badgeText = statusLabel[item.status] ?? item.status;
-      const badgeWidth = doc.getTextWidth(badgeText) + 10;
-      doc.setFillColor(
-        badgeColor[0],
-        badgeColor[1],
-        badgeColor[2]
-      );
-      doc.roundedRect(
-        cardX + cardW - badgeWidth - 5,
-        yPos - 2,
-        badgeWidth,
-        10,
-        2,
-        2,
-        "F"
-      );
-      doc.setTextColor(255, 255, 255);
-      doc.setFontSize(8);
-      doc.setFont("helvetica", "bold");
-      doc.text(
-        badgeText,
-        cardX + cardW - badgeWidth / 2 - 5,
-        yPos + 5,
-        { align: "center" }
-      );
-
-      const infoX = cardX + fotoWidth + 15;
-      doc.setTextColor(0, 0, 0);
-
-      doc.setFontSize(12);
-      doc.setFont("helvetica", "bold");
-      doc.text(`#${idx + 1}`, cardX + 5, yPos + 5);
-
-      doc.setFontSize(10);
-      doc.setFont("helvetica", "bold");
-      doc.text("Código:", infoX, yPos + 5);
-      doc.setFont("helvetica", "normal");
-      doc.text(item.codigo ?? "-", infoX + 22, yPos + 5);
-
-      doc.setFont("helvetica", "bold");
-      doc.text("SKU:", infoX, yPos + 13);
-      doc.setFont("helvetica", "normal");
-      doc.text(item.sku || "-", infoX + 22, yPos + 13);
-
-      doc.setFont("helvetica", "bold");
-      doc.text("Pedido:", infoX, yPos + 21);
-      doc.setFont("helvetica", "normal");
-      doc.text(String(item.quantidadePedida ?? "-"), infoX + 22, yPos + 21);
-
-      doc.setFont("helvetica", "bold");
-      doc.text("Real:", infoX, yPos + 29);
-      doc.setFont("helvetica", "normal");
-      doc.text(String(item.quantidadeReal ?? "-"), infoX + 22, yPos + 29);
-
-            // ── FOTO (compatível com Node.js / Trigger.dev) ──
-      try {
-        let raw = item.photo as string;
-
-        // 1. Detecta o formato real da imagem
-        let format: "JPEG" | "PNG" = "JPEG";
-        if (raw.includes("data:image/png")) {
-          format = "PNG";
-        }
-
-        // 2. Remove o prefixo data URI → fica só o base64 puro
-        if (raw.includes(";base64,")) {
-          raw = raw.split(";base64,")[1];
-        }
-
-        // 3. Converte base64 → Buffer → Uint8Array (funciona no Node)
-        const imgBuffer = Buffer.from(raw, "base64");
-        const uint8 = new Uint8Array(imgBuffer);
-
-        console.log(
-          `Foto #${idx + 1} (${item.codigo}): ${format}, ${imgBuffer.length} bytes`
-        );
-
-        // 4. Adiciona usando Uint8Array (compatível com jsPDF no Node.js)
-        doc.addImage(
-          uint8,
-          format,
-          cardX + 5,
-          yPos + 10,
-          fotoWidth,
-          fotoHeight
-        );
-
-        console.log(`Foto #${idx + 1} adicionada ao PDF com sucesso`);
-      } catch (err) {
-        console.error(
-          `❌ Erro ao adicionar foto do item ${item.codigo}:`,
-          err
-        );
-        // Desenha placeholder quando a foto falha
-        doc.setFillColor(230, 230, 230);
-        doc.rect(cardX + 5, yPos + 10, fotoWidth, fotoHeight, "F");
-        doc.setTextColor(150, 0, 0);
-        doc.setFontSize(9);
-        doc.setFont("helvetica", "bold");
-        doc.text("FOTO INDISPONÍVEL", cardX + 8, yPos + 40);
-        doc.setTextColor(0, 0, 0);
-      }
-
-  // ═══════════════════════════════════════════
-  // RODAPÉ
-  // ═══════════════════════════════════════════
-  const totalPages = doc.getNumberOfPages();
-  for (let i = 1; i <= totalPages; i++) {
-    doc.setPage(i);
-    doc.setFontSize(8);
-    doc.setTextColor(150, 150, 150);
-    doc.setFont("helvetica", "normal");
-    doc.text(
-      `SCAN NEWSHOP — Página ${i} de ${totalPages}`,
-      pageWidth / 2,
-      doc.internal.pageSize.getHeight() - 8,
-      { align: "center" }
-    );
-  }
-
-  return Buffer.from(doc.output("arraybuffer"));
 }
 
 // ── TASK 1 — Lista baixada ────────────────────────────────────────────────────
@@ -552,7 +206,7 @@ Data: ${dataFormatada}`,
   },
 });
 
-// ── TASK 2 — Conferência finalizada ──────────────────────────────────────────
+// ── TASK 2 — Conferência finalizada (COM FOTOS DIRETAS) ──────────────────────
 export const conferenciaBaixada = task({
   id: "conferencia-baixada",
   machine: "micro",
@@ -576,15 +230,9 @@ export const conferenciaBaixada = task({
       pendente: "⏳ Pendente",
     };
 
-    const itensS = payload.itens.filter(
-      (i: any) => i.digito === "S"
-    );
-    const itensM = payload.itens.filter(
-      (i: any) => i.digito === "M"
-    );
-    const itensSemDigito = payload.itens.filter(
-      (i: any) => !i.digito
-    );
+    const itensS = payload.itens.filter((i: any) => i.digito === "S");
+    const itensM = payload.itens.filter((i: any) => i.digito === "M");
+    const itensSemDigito = payload.itens.filter((i: any) => !i.digito);
 
     const formatarItem = (item: any, idx: number) =>
       `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`;
@@ -627,21 +275,23 @@ ${itensTexto}`,
 
     console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
 
-    // ── 2. Gera PDF e envia para lista de COMPRAS (TO-DO) ──
+    // ── 2. Cria tarefa de COMPRAS com fotos diretas ──
     try {
-      console.log("Gerando PDF da conferência...");
-      const pdfBuffer = gerarPDFConferencia(payload);
-      console.log(`PDF gerado — ${pdfBuffer.length} bytes`);
-
       const itensNaoTem = (payload.itens || []).filter(
-        (i: any) =>
-          i.status === "nao_tem" || i.status === "nao_tem_tudo"
+        (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
       );
 
       const listaFaltantes = itensNaoTem
         .map(
           (item: any, idx: number) =>
             `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0} | ${statusMap[item.status] ?? item.status}`
+        )
+        .join("\n");
+
+      const listaTodos = (payload.itens || [])
+        .map(
+          (item: any, idx: number) =>
+            `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | ${statusMap[item.status] ?? item.status} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0}${item.photo ? " 📸" : ""}`
         )
         .join("\n");
 
@@ -666,21 +316,31 @@ Total itens conferidos: ${payload.totalItens}
 🛒 ITENS FALTANTES (${itensNaoTem.length})
 ${listaFaltantes || "Nenhum item faltante."}
 
-📎 PDF com fotos anexado abaixo.`,
+📦 TODOS OS ITENS
+${listaTodos}
+
+📸 Fotos anexadas abaixo (itens marcados com 📸)`,
         "to do"
       );
 
       console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
 
-      const nomeArquivo = `conferencia_${payload.conferente}_${Date.now()}.pdf`;
-      await anexarPDFNaTarefa(todoTaskId, pdfBuffer, nomeArquivo);
-      console.log("PDF anexado com sucesso na tarefa de COMPRAS!");
-
-    } catch (err) {
-      console.error(
-        "Erro ao criar tarefa de COMPRAS ou anexar PDF:",
-        err
+      // ── 3. Anexa cada foto como imagem separada ──
+      const itensComFoto = (payload.itens || []).filter(
+        (i: any) => i.photo && i.photo.length > 0
       );
+
+      console.log(`Itens com foto: ${itensComFoto.length}`);
+
+      for (const item of itensComFoto) {
+        const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+        const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
+        await anexarFotoNaTarefa(todoTaskId, item.photo, filename);
+      }
+
+      console.log("✅ Todas as fotos anexadas!");
+    } catch (err) {
+      console.error("Erro ao criar tarefa de COMPRAS:", err);
     }
   },
 });
