@@ -14,6 +14,7 @@ interface EstoqueResult {
   quantidade_lista: number;
   quantidade_sistema: number;
   photo?: string | null;
+  status: "ok" | "parcial" | "zero"; // ✅ NOVO
 }
 
 interface ListHistoryProps {
@@ -68,7 +69,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     toast({ title: "Lista marcada como excluída" });
   };
 
-  // Função de Análise do Supabase
+  // ✅ Função de Análise do Supabase com 3 status
   const analisarEstoque = async (list: ListData) => {
     setAnalisandoId(list.id);
     try {
@@ -76,7 +77,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
       const { data, error } = await supabase
         .from('estoque')
-        .select('codigo, quantidade')
+        .select('codigo, estoque')
         .in('codigo', codigosParaBuscar);
 
       if (error) throw error;
@@ -84,17 +85,29 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
       const mapaEstoque = new Map<string, number>();
       if (data) {
         data.forEach((row: any) => {
-          mapaEstoque.set(row.codigo, Number(row.quantidade));
+          mapaEstoque.set(String(row.codigo), Number(row.estoque));
         });
       }
 
-      const resultados: EstoqueResult[] = list.products.map(p => ({
-        codigo: p.barcode,
-        sku: p.sku || "",
-        quantidade_lista: p.quantity,
-        quantidade_sistema: mapaEstoque.get(p.barcode) ?? 0,
-        photo: p.photo || null,
-      }));
+      const resultados: EstoqueResult[] = list.products.map(p => {
+        const qtdSistema = mapaEstoque.has(p.barcode)
+          ? mapaEstoque.get(p.barcode)!
+          : -1;
+
+        let status: "ok" | "parcial" | "zero";
+        if (qtdSistema <= 0)              status = "zero";
+        else if (qtdSistema < p.quantity) status = "parcial";
+        else                              status = "ok";
+
+        return {
+          codigo: p.barcode,
+          sku: p.sku || "",
+          quantidade_lista: p.quantity,
+          quantidade_sistema: qtdSistema === -1 ? 0 : qtdSistema,
+          photo: p.photo || null,
+          status,
+        };
+      });
 
       setEstoqueResultados(resultados);
       setEstoqueListTitle(list.title);
@@ -354,9 +367,10 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     );
   }
 
-  // Contadores para o modal de análise
-  const estoquePositivo = estoqueResultados.filter(r => r.quantidade_sistema > 0).length;
-  const estoqueZero = estoqueResultados.filter(r => r.quantidade_sistema <= 0).length;
+  // ✅ Contadores para o modal de análise (3 status)
+  const estoqueOk      = estoqueResultados.filter(r => r.status === "ok").length;
+  const estoqueParcial = estoqueResultados.filter(r => r.status === "parcial").length;
+  const estoqueZero    = estoqueResultados.filter(r => r.status === "zero").length;
 
   return (
     <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
@@ -477,30 +491,63 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
             </DialogDescription>
           </DialogHeader>
 
-          {/* Resumo */}
+          {/* ✅ Resumo com 3 cards: Verde / Amarelo / Vermelho */}
           <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "hsl(var(--success) / 0.1)", border: "1px solid hsl(var(--success) / 0.2)", textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--success))", fontFamily: "var(--font-serif)" }}>{estoquePositivo}</div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--success))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Tem estoque</div>
+            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10,
+              background: "hsl(var(--success) / 0.1)",
+              border: "1px solid hsl(var(--success) / 0.2)", textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--success))", fontFamily: "var(--font-serif)" }}>{estoqueOk}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--success))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Tem tudo</div>
             </div>
-            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "hsl(var(--destructive) / 0.1)", border: "1px solid hsl(var(--destructive) / 0.2)", textAlign: "center" }}>
+            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10,
+              background: "hsl(var(--warning) / 0.1)",
+              border: "1px solid hsl(var(--warning) / 0.2)", textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--warning))", fontFamily: "var(--font-serif)" }}>{estoqueParcial}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--warning))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Parcial</div>
+            </div>
+            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10,
+              background: "hsl(var(--destructive) / 0.1)",
+              border: "1px solid hsl(var(--destructive) / 0.2)", textAlign: "center" }}>
               <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--destructive))", fontFamily: "var(--font-serif)" }}>{estoqueZero}</div>
               <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--destructive))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Sem estoque</div>
             </div>
           </div>
 
-          {/* Lista de Itens */}
+          {/* ✅ Lista de Itens com 3 cores */}
           <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
             {estoqueResultados.map((item, idx) => {
-              const temEstoque = item.quantidade_sistema > 0;
+              const cor = {
+                ok: {
+                  border: "hsl(var(--success) / 0.3)",
+                  bg: "hsl(var(--success) / 0.05)",
+                  left: "hsl(var(--success))",
+                  badge: "hsl(var(--success))",
+                  label: "✅ Tem tudo",
+                  icon: <CheckCircle2 style={{ width: 13, height: 13 }} />,
+                },
+                parcial: {
+                  border: "hsl(var(--warning) / 0.3)",
+                  bg: "hsl(var(--warning) / 0.05)",
+                  left: "hsl(var(--warning))",
+                  badge: "hsl(var(--warning))",
+                  label: "⚠️ Parcial",
+                  icon: <span style={{ fontSize: 11 }}>⚠️</span>,
+                },
+                zero: {
+                  border: "hsl(var(--destructive) / 0.3)",
+                  bg: "hsl(var(--destructive) / 0.05)",
+                  left: "hsl(var(--destructive))",
+                  badge: "hsl(var(--destructive))",
+                  label: "❌ Sem estoque",
+                  icon: <XCircle style={{ width: 13, height: 13 }} />,
+                },
+              }[item.status];
+
               return (
                 <div key={idx} style={{
                   display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
-                  borderRadius: 12, border: "1px solid",
-                  borderColor: temEstoque ? "hsl(var(--success) / 0.3)" : "hsl(var(--destructive) / 0.3)",
-                  background: temEstoque ? "hsl(var(--success) / 0.05)" : "hsl(var(--destructive) / 0.05)",
-                  borderLeftWidth: 4,
-                  borderLeftColor: temEstoque ? "hsl(var(--success))" : "hsl(var(--destructive))",
+                  borderRadius: 12, border: `1px solid ${cor.border}`,
+                  background: cor.bg, borderLeftWidth: 4, borderLeftColor: cor.left,
                 }}>
                   {item.photo && <img src={item.photo} alt={item.codigo} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
                   <div style={{ flex: 1, minWidth: 0 }}>
@@ -512,11 +559,12 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
                     <div style={{
                       display: "inline-flex", alignItems: "center", gap: 4,
                       padding: "4px 10px", borderRadius: 8, fontSize: 12, fontWeight: 800,
-                      background: temEstoque ? "hsl(var(--success))" : "hsl(var(--destructive))",
-                      color: temEstoque ? "hsl(var(--success-foreground))" : "hsl(var(--destructive-foreground))",
+                      background: cor.badge, color: "#fff",
                     }}>
-                      {temEstoque ? <CheckCircle2 style={{ width: 13, height: 13 }} /> : <XCircle style={{ width: 13, height: 13 }} />}
-                      {item.quantidade_sistema}
+                      {cor.icon} {item.quantidade_sistema}
+                    </div>
+                    <div style={{ fontSize: 9, color: "hsl(var(--muted-foreground))", marginTop: 3, fontFamily: "var(--font-mono)" }}>
+                      {cor.label}
                     </div>
                   </div>
                 </div>
@@ -658,3 +706,4 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 };
 
 export default ListHistory;
+
