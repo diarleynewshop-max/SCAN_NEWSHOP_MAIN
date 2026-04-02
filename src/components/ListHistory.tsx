@@ -479,7 +479,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
       {/* ── MODAL ANÁLISE DE ESTOQUE ── */}
       <Dialog open={estoqueDialogOpen} onOpenChange={() => setEstoqueDialogOpen(false)}>
-        <DialogContent className="max-w-sm" style={{ ...dialogStyle, maxHeight: "90vh", overflowY: "auto" }}>
+        <DialogContent aria-describedby={undefined} className="max-w-sm" style={{ ...dialogStyle, maxHeight: "90vh", overflowY: "auto" }}>
           <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700 }}>
@@ -582,7 +582,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
       {/* ── DELETE ── */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
-        <DialogContent className="max-w-sm" style={dialogStyle}>
+        <DialogContent aria-describedby={undefined} className="max-w-sm" style={dialogStyle}>
           <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700 }}>Excluir lista?</DialogTitle>
@@ -603,7 +603,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
       {/* ── DOWNLOAD ── */}
       <Dialog open={!!downloadOpen} onOpenChange={() => setDownloadOpen(null)}>
-        <DialogContent className="max-w-sm" style={dialogStyle}>
+        <DialogContent aria-describedby={undefined} className="max-w-sm" style={dialogStyle}>
           <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700 }}>Compartilhar</DialogTitle>
@@ -639,7 +639,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
       {/* ── EDIT ── */}
       <Dialog open={!!editList} onOpenChange={() => { setEditList(null); setEditProduct(null); }}>
-        <DialogContent className="max-w-sm" style={{ ...dialogStyle, maxHeight: "90vh", overflowY: "auto" }}>
+        <DialogContent aria-describedby={undefined} className="max-w-sm" style={{ ...dialogStyle, maxHeight: "90vh", overflowY: "auto" }}>
           <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700 }}>Editar Produtos</DialogTitle>
