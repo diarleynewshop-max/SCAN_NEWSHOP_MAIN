@@ -1,11 +1,20 @@
 import { useState } from "react";
 import { enviarParaClickUp, WebhookPayload } from "@/lib/webhookRouter";
 import { Product, ListData } from "@/components/ProductCard";
-import { MoreVertical, Pencil, Trash2, Download, FileText, FileSpreadsheet, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
+import { MoreVertical, Pencil, Trash2, Download, FileText, FileSpreadsheet, Share2, FileInput, ChevronLeft, ChevronRight, Monitor, Database, CheckCircle2, XCircle } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
+import { supabase } from "@/lib/supabase";
+
+interface EstoqueResult {
+  codigo: string;
+  sku: string;
+  quantidade_lista: number;
+  quantidade_sistema: number;
+  photo?: string | null;
+}
 
 interface ListHistoryProps {
   lists: ListData[];
@@ -41,6 +50,12 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
   const [editIndex, setEditIndex] = useState(0);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
 
+  // Estados do Supabase
+  const [analisandoId, setAnalisandoId] = useState<string | null>(null);
+  const [estoqueResultados, setEstoqueResultados] = useState<EstoqueResult[]>([]);
+  const [estoqueDialogOpen, setEstoqueDialogOpen] = useState(false);
+  const [estoqueListTitle, setEstoqueListTitle] = useState("");
+
   const sortedLists = [...lists]
     .filter((l) => l.status !== "open")
     .sort((a, b) => b.createdAt.getTime() - a.createdAt.getTime());
@@ -51,6 +66,45 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     onUpdateList({ ...list, status: "red" });
     setDeleteConfirm(null); setMenuOpen(null);
     toast({ title: "Lista marcada como excluída" });
+  };
+
+  // Função de Análise do Supabase
+  const analisarEstoque = async (list: ListData) => {
+    setAnalisandoId(list.id);
+    try {
+      const codigosParaBuscar = list.products.map(p => p.barcode);
+
+      const { data, error } = await supabase
+        .from('estoque')
+        .select('codigo, quantidade')
+        .in('codigo', codigosParaBuscar);
+
+      if (error) throw error;
+
+      const mapaEstoque = new Map<string, number>();
+      if (data) {
+        data.forEach((row: any) => {
+          mapaEstoque.set(row.codigo, Number(row.quantidade));
+        });
+      }
+
+      const resultados: EstoqueResult[] = list.products.map(p => ({
+        codigo: p.barcode,
+        sku: p.sku || "",
+        quantidade_lista: p.quantity,
+        quantidade_sistema: mapaEstoque.get(p.barcode) ?? 0,
+        photo: p.photo || null,
+      }));
+
+      setEstoqueResultados(resultados);
+      setEstoqueListTitle(list.title);
+      setEstoqueDialogOpen(true);
+      toast({ title: "✅ Análise concluída!" });
+    } catch (error: any) {
+      toast({ title: "❌ Erro na análise", description: "Falha ao conectar com o banco de dados.", variant: "destructive" });
+    } finally {
+      setAnalisandoId(null);
+    }
   };
 
   const exportPDF = (list: ListData) => {
@@ -199,7 +253,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     toast({ title: "HTML gerado! Abra no navegador do PC." });
   };
 
-  // ── Roteador central: flag + empresa decide o destino ────────────────────
   const [sendingId, setSendingId] = useState<string | null>(null);
 
   const STORAGE_KEY = "clickup_sent_list_ids";
@@ -222,7 +275,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
   };
 
   const enviarClickUp = async (list: ListData) => {
-    // Bloqueia reenvio
     if (list.sentToClickUp || listaJaFoiEnviada(list.id)) {
       toast({ title: "⚠️ Já enviado!", description: "Esta lista já foi enviada ao ClickUp.", variant: "destructive" });
       return;
@@ -281,7 +333,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     if (next >= 0 && next < updated.products.length) { setEditIndex(next); setEditProduct({ ...updated.products[next] }); }
   };
 
-  const dialogStyle = { background: "#fff", borderRadius: 20, border: "1px solid hsl(var(--border))" };
+  const dialogStyle = { background: "hsl(var(--card))", borderRadius: 20, border: "1px solid hsl(var(--border))" };
 
   if (sortedLists.length === 0) {
     return (
@@ -302,18 +354,22 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
     );
   }
 
+  // Contadores para o modal de análise
+  const estoquePositivo = estoqueResultados.filter(r => r.quantidade_sistema > 0).length;
+  const estoqueZero = estoqueResultados.filter(r => r.quantidade_sistema <= 0).length;
+
   return (
     <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
-      {sortedLists.map((list) => (
-        <div key={list.id} style={{ background: "#fff", borderRadius: 16, border: "1px solid hsl(var(--border))", overflow: "hidden", boxShadow: "var(--shadow-xs)", position: "relative" }}>
+      {sortedLists.map((list) => {
+        const isAnalisando = analisandoId === list.id;
+        return (
+        <div key={list.id} style={{ background: "hsl(var(--card))", borderRadius: 16, border: "1px solid hsl(var(--border))", overflow: "hidden", boxShadow: "var(--shadow-xs)", position: "relative" }}>
           <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: STATUS_LEFT[list.status] ?? STATUS_LEFT.yellow }} />
 
           <div style={{ padding: "16px 16px 12px 20px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <p style={{ fontFamily: "var(--font-serif)", fontSize: 16, fontWeight: 700, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{list.title}</p>
-              {/* Badge flag + empresa — linha própria */}
               {(() => {
-                // empresa salva no campo, ou extraída do title (ex: "NEWSHOP — LOJA" → "NEWSHOP")
                 const emp = list.empresa || list.title.split("—")[0].trim().split(" — ")[0].trim();
                 return (
                   <span style={{
@@ -335,18 +391,15 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
             </div>
           </div>
 
-          <div style={{ display: "flex", gap: 8, padding: "10px 16px 14px 20px", borderTop: "1px solid hsl(var(--muted))" }}>
-            {/* Editar */}
+          <div style={{ display: "flex", gap: 8, padding: "10px 16px 6px 20px", borderTop: "1px solid hsl(var(--muted))" }}>
             <button onClick={() => openEdit(list)}
               style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))" }}>
               <Pencil style={{ width: 13, height: 13 }} /> Editar
             </button>
-            {/* Baixar */}
             <button onClick={() => { setDownloadOpen(list.id); setMenuOpen(null); }}
               style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))" }}>
               <Download style={{ width: 13, height: 13 }} /> Baixar
             </button>
-            {/* ClickUp — com estados visuais e anti-duplicata */}
             {(() => {
               const jaEnviado = list.sentToClickUp || listaJaFoiEnviada(list.id);
               const enviando  = sendingId === list.id;
@@ -372,20 +425,112 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
                 </button>
               );
             })()}
-            {/* Excluir */}
             <button onClick={() => { setDeleteConfirm(list.id); setMenuOpen(null); }}
               style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--destructive) / 0.07)", color: "hsl(var(--destructive))", border: "1px solid hsl(var(--destructive) / 0.2)" }}>
               <Trash2 style={{ width: 13, height: 13 }} /> Excluir
             </button>
           </div>
+
+          {/* BOTÃO ANALISAR ESTOQUE */}
+          <div style={{ padding: "6px 16px 14px 20px" }}>
+            <button
+              onClick={() => analisarEstoque(list)}
+              disabled={isAnalisando}
+              style={{
+                width: "100%", height: 40, borderRadius: 10, fontSize: 13, fontWeight: 700,
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                cursor: isAnalisando ? "wait" : "pointer",
+                background: "hsl(var(--secondary))",
+                color: "hsl(var(--foreground))",
+                border: "1.5px solid hsl(var(--border))",
+                transition: "all 0.2s",
+              }}
+            >
+              {isAnalisando ? (
+                <><span style={{ width: 14, height: 14, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Buscando no Banco...</>
+              ) : (
+                <><Database style={{ width: 15, height: 15 }} /> Analisar Estoque do Sistema</>
+              )}
+            </button>
+          </div>
         </div>
-      ))}
+        );
+      })}
 
       <button onClick={onStartConference}
         style={{ width: "100%", height: 48, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))", borderRadius: 10, fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", marginTop: 4 }}
       >
         <FileInput style={{ width: 17, height: 17 }} /> Importar para Conferência
       </button>
+
+      {/* ── MODAL ANÁLISE DE ESTOQUE ── */}
+      <Dialog open={estoqueDialogOpen} onOpenChange={() => setEstoqueDialogOpen(false)}>
+        <DialogContent className="max-w-sm" style={{ ...dialogStyle, maxHeight: "90vh", overflowY: "auto" }}>
+          <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700 }}>
+              <Database style={{ width: 20, height: 20, display: "inline", marginRight: 8, verticalAlign: "middle" }} />
+              Análise de Estoque
+            </DialogTitle>
+            <DialogDescription style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>
+              {estoqueListTitle} — {estoqueResultados.length} itens verificados
+            </DialogDescription>
+          </DialogHeader>
+
+          {/* Resumo */}
+          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
+            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "hsl(var(--success) / 0.1)", border: "1px solid hsl(var(--success) / 0.2)", textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--success))", fontFamily: "var(--font-serif)" }}>{estoquePositivo}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--success))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Tem estoque</div>
+            </div>
+            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "hsl(var(--destructive) / 0.1)", border: "1px solid hsl(var(--destructive) / 0.2)", textAlign: "center" }}>
+              <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--destructive))", fontFamily: "var(--font-serif)" }}>{estoqueZero}</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--destructive))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Sem estoque</div>
+            </div>
+          </div>
+
+          {/* Lista de Itens */}
+          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
+            {estoqueResultados.map((item, idx) => {
+              const temEstoque = item.quantidade_sistema > 0;
+              return (
+                <div key={idx} style={{
+                  display: "flex", alignItems: "center", gap: 10, padding: "10px 12px",
+                  borderRadius: 12, border: "1px solid",
+                  borderColor: temEstoque ? "hsl(var(--success) / 0.3)" : "hsl(var(--destructive) / 0.3)",
+                  background: temEstoque ? "hsl(var(--success) / 0.05)" : "hsl(var(--destructive) / 0.05)",
+                  borderLeftWidth: 4,
+                  borderLeftColor: temEstoque ? "hsl(var(--success))" : "hsl(var(--destructive))",
+                }}>
+                  {item.photo && <img src={item.photo} alt={item.codigo} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))", fontFamily: "var(--font-mono)" }}>{item.codigo}</p>
+                    {item.sku && <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))" }}>SKU: {item.sku}</p>}
+                    <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))" }}>Lista: <strong>{item.quantidade_lista}</strong></p>
+                  </div>
+                  <div style={{ textAlign: "right", flexShrink: 0 }}>
+                    <div style={{
+                      display: "inline-flex", alignItems: "center", gap: 4,
+                      padding: "4px 10px", borderRadius: 8, fontSize: 12, fontWeight: 800,
+                      background: temEstoque ? "hsl(var(--success))" : "hsl(var(--destructive))",
+                      color: temEstoque ? "hsl(var(--success-foreground))" : "hsl(var(--destructive-foreground))",
+                    }}>
+                      {temEstoque ? <CheckCircle2 style={{ width: 13, height: 13 }} /> : <XCircle style={{ width: 13, height: 13 }} />}
+                      {item.quantidade_sistema}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <button onClick={() => setEstoqueDialogOpen(false)}
+            style={{ width: "100%", height: 44, borderRadius: 10, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", fontWeight: 700, fontSize: 14, cursor: "pointer", marginTop: 12 }}
+          >
+            Fechar
+          </button>
+        </DialogContent>
+      </Dialog>
 
       {/* ── DELETE ── */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
@@ -513,4 +658,3 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 };
 
 export default ListHistory;
-
