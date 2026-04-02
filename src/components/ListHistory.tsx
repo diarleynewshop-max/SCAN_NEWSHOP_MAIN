@@ -83,6 +83,9 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
         .select('codigo, estoque')
         .in('codigo', codigosParaBuscar);
 
+         console.log("🔍 Códigos enviados:", codigosParaBuscar);
+         console.log("📦 Resposta do Supabase:", data, "Erro:", error);
+
       if (error) throw error;
 
       const mapaEstoque = new Map<string, number>();
