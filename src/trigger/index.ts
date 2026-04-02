@@ -143,7 +143,7 @@ async function anexarFotoNaTarefa(
   }
 }
 
-// ── TASK 1 — Lista baixada ────────────────────────────────────────────────────
+// ── TASK 1 — Lista baixada (CRIANDO TAREFA DE COMPRAS SE TIVER ZERO ESTOQUE) ──
 export const listaBaixada = task({
   id: "lista-baixada",
   machine: "micro",
@@ -162,6 +162,7 @@ export const listaBaixada = task({
     const status = isCD ? "EM CONFERENCIA" : "to do";
     const flagLabel = isCD ? "CD" : "LOJA";
 
+    // 1. Cria a Tarefa Principal de Conferência
     const taskId = await criarTarefaClickUp(
       listId,
       `📦 ${payload.titulo} — ${payload.pessoa}`,
@@ -202,6 +203,53 @@ Data: ${dataFormatada}`,
         })()
       ),
     ]);
+
+    // ── NOVO: 2. Verifica se há produtos sem estoque (quantidade 0) para enviar pra COMPRAS
+    try {
+      const itensSemEstoque = payload.produtos.filter(
+        (p: any) => (p.quantidade ?? p.quantity) === 0
+      );
+
+      if (itensSemEstoque.length > 0) {
+        const listaFaltantesStr = itensSemEstoque
+          .map(
+            (p: any, idx: number) =>
+              `${idx + 1}. ${p.barcode} | SKU: ${p.sku || "-"} | ❌ Sem Estoque no Sistema${p.photo ? " 📸" : ""}`
+          )
+          .join("\n");
+
+        const comprasTaskId = await criarTarefaClickUp(
+          CLICKUP_TODO_LIST_ID,
+          `🛒 Compras (Falta Estoque): ${payload.titulo} — ${payload.pessoa}`,
+          `Relatório gerado no momento do envio da lista para conferência.
+Estes itens constam com 0 estoque no sistema.
+
+📋 INFORMAÇÕES
+Empresa: ${payload.empresa ?? "NEWSHOP"}
+Tipo: ${flagLabel}
+Pessoa que fez a lista: ${payload.pessoa}
+Data: ${dataFormatada}
+
+🛒 ITENS SEM ESTOQUE (${itensSemEstoque.length})
+${listaFaltantesStr}
+
+📸 Fotos anexadas abaixo (se houver)`,
+          "to do"
+        );
+
+        console.log(`Tarefa de COMPRAS (Falta Estoque) criada: ${comprasTaskId}`);
+
+        // Anexar fotos dos itens sem estoque (se houver)
+        const itensComFoto = itensSemEstoque.filter((p: any) => p.photo && p.photo.length > 0);
+        for (const item of itensComFoto) {
+          const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+          const filename = `sem_estoque_${item.barcode}_${item.sku || "sem-sku"}.${ext}`;
+          await anexarFotoNaTarefa(comprasTaskId, item.photo, filename);
+        }
+      }
+    } catch (err) {
+      console.error("Erro ao criar tarefa de COMPRAS na Task 1:", err);
+    }
   },
 });
 
