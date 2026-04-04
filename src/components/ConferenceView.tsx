@@ -359,9 +359,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
       else if (n.includes("FACIL"))   empresaDetectada = "FACIL";
       else if (n.includes("SOYE"))    empresaDetectada = "SOYE";
 
-      if (n.includes("_CD_") || n.startsWith("CD_") || n.endsWith("_CD") || n.includes("-CD-"))
-        flagDetectada = "cd";
-      else if (n.includes("_LOJA_") || n.startsWith("LOJA_") || n.endsWith("_LOJA") || n.includes("-LOJA-"))
+      if (n.includes("_LOJA_") || n.startsWith("LOJA_") || n.endsWith("_LOJA") || n.includes("-LOJA-"))
         flagDetectada = "loja";
 
       return { empresaDetectada, flagDetectada };
@@ -783,7 +781,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   if (phase === "import") {
     const flagOptions: { value: string; label: string }[] = [
       { value: "loja", label: "LOJA" },
-      { value: "cd",   label: "CD"   },
     ];
     const empresaOptions: { value: string; label: string; color: string }[] = [
       { value: "NEWSHOP", label: "NEWSHOP", color: "hsl(var(--primary))"  },

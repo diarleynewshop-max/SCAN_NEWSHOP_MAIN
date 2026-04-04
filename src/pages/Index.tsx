@@ -1,5 +1,5 @@
 import { useState, useCallback } from "react";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, Tag, GitCompare, Store, Warehouse, Eye, EyeOff } from "lucide-react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, Tag, GitCompare, Store, Eye, EyeOff } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import BarcodeScanner from "@/components/BarcodeScanner";
@@ -19,16 +19,11 @@ type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
 
 const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
 
-const SENHAS: Record<ListFlag, Record<Empresa, string>> = {
+const SENHAS: Record<"loja", Record<Empresa, string>> = {
   loja: {
     "NEWSHOP":       "1148",
     "SOYE":          "1090",
     "FACIL": "2461",
-  },
-  cd: {
-    "NEWSHOP":       "n91",
-    "SOYE":          "s91",
-    "FACIL": "f91",
   },
 };
 
@@ -131,7 +126,7 @@ const Index = () => {
   };
 
   const handleOpenList = () => {
-    if (!modalFlag)          { toast({ title: "Selecione LOJA ou CD",        variant: "destructive" }); return; }
+    if (!modalFlag)          { toast({ title: "Selecione LOJA",              variant: "destructive" }); return; }
     if (!modalEmpresa)       { toast({ title: "Selecione a empresa",          variant: "destructive" }); return; }
     if (!passwordUnlocked)   { toast({ title: "Confirme a senha primeiro",    variant: "destructive" }); return; }
     if (!modalTitle.trim())  { toast({ title: "Informe o título da lista",    variant: "destructive" }); return; }
@@ -354,13 +349,12 @@ const Index = () => {
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 10 }}>
 
-            {/* ── PASSO 1: LOJA ou CD ── */}
+            {/* ── PASSO 1: Apenas LOJA ── */}
             <div>
               <label style={S.label}>Tipo</label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
                 {([
-                  { flag: "loja" as ListFlag, label: "LOJA", Icon: Store,     selColor: "hsl(var(--primary))" },
-                  { flag: "cd"   as ListFlag, label: "CD",   Icon: Warehouse, selColor: "hsl(var(--success))" },
+                  { flag: "loja" as const, label: "LOJA", Icon: Store, selColor: "hsl(var(--primary))" },
                 ]).map(({ flag, label, Icon, selColor }) => {
                   const sel = modalFlag === flag;
                   return (
@@ -458,9 +452,9 @@ const Index = () => {
                   <span style={{
                     padding: "2px 8px", borderRadius: 5, fontSize: 10, fontWeight: 700,
                     fontFamily: "var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase",
-                    background: modalFlag === "cd" ? "hsl(var(--success)/0.15)" : "hsl(var(--primary)/0.12)",
-                    color: modalFlag === "cd" ? "hsl(var(--success))" : "hsl(var(--primary))",
-                    border: modalFlag === "cd" ? "1px solid hsl(var(--success)/0.3)" : "1px solid hsl(var(--primary)/0.25)",
+                    background: "hsl(var(--primary)/0.12)",
+                    color: "hsl(var(--primary))",
+                    border: "1px solid hsl(var(--primary)/0.25)",
                   }}>
                     {modalFlag!.toUpperCase()} · {modalEmpresa}
                   </span>

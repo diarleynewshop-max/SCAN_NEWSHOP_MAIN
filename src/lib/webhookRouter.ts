@@ -5,16 +5,14 @@
  * TASK 1 (lista-baixada)       TASK 2 (conferencia-baixada)
  * ─────────────────────────────────────────────────────────
  * LOJA NEWSHOP → "lista-baixada"          / "conferencia-baixada"       (CLICKUP_TOKEN)
- * CD   NEWSHOP → "lista-baixada"          / "conferencia-baixada"       (CLICKUP_TOKEN + CD list)
  * LOJA SOYE    → "lista-baixada-sf"       / "conferencia-baixada-sf"    (CLICKUP_TOKEN_SF)
  * LOJA FACIL   → "lista-baixada-sf"       / "conferencia-baixada-sf"    (CLICKUP_TOKEN_SF)
- * CD SOYE/FACIL → não configurado ainda
  */
 
 const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
-type ListFlag = "loja" | "cd";
+type ListFlag = "loja";
 
 export interface WebhookPayload {
   flag:        ListFlag;
@@ -67,17 +65,6 @@ export async function enviarParaClickUp(payload: WebhookPayload): Promise<void> 
     }
   }
 
-  if (flag === "cd") {
-    if (empresa === "NEWSHOP") {
-      await dispararTrigger("lista-baixada", p);     // index.ts → CLICKUP_TOKEN + CD list
-      return;
-    }
-    if (empresa === "SOYE" || empresa === "FACIL") {
-      await dispararTrigger("lista-baixada-sf", p);  // indexSF.ts → CLICKUP_TOKEN_SF + CD list
-      return;
-    }
-  }
-
   console.warn("[webhookRouter] Combinação não reconhecida:", flag, empresa);
 }
 
@@ -94,17 +81,6 @@ export async function enviarConferenciaParaClickUp(payload: object & { flag?: st
     }
     if (empresa === "SOYE" || empresa === "FACIL") {
       await dispararTrigger("conferencia-baixada-sf", p); // indexSF.ts → CLICKUP_TOKEN_SF
-      return;
-    }
-  }
-
-  if (flag === "cd") {
-    if (empresa === "NEWSHOP") {
-      await dispararTrigger("conferencia-baixada", p);    // index.ts → CLICKUP_TOKEN + CD list
-      return;
-    }
-    if (empresa === "SOYE" || empresa === "FACIL") {
-      await dispararTrigger("conferencia-baixada-sf", p); // indexSF.ts → CLICKUP_TOKEN_SF + CD list
       return;
     }
   }

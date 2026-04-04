@@ -256,7 +256,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
 
     setSendingId(list.id);
     const payload: WebhookPayload = {
-      flag:        (list.flag ?? "loja") as "loja" | "cd",
+      flag:        list.flag ?? "loja",
       empresa:     list.empresa ?? "",
       pessoa:      list.person,
       titulo:      list.title,
@@ -348,9 +348,9 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
                     <span style={{
                       display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 5, fontSize: 9, fontWeight: 700,
                       fontFamily: "var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase",
-                      background: list.flag === "cd" ? "hsl(var(--success) / 0.1)" : "hsl(var(--primary) / 0.1)",
-                      color: list.flag === "cd" ? "hsl(var(--success))" : "hsl(var(--primary))",
-                      border: list.flag === "cd" ? "1px solid hsl(var(--success) / 0.2)" : "1px solid hsl(var(--primary) / 0.2)",
+                      background: "hsl(var(--primary) / 0.1)",
+                      color: "hsl(var(--primary))",
+                      border: "1px solid hsl(var(--primary) / 0.2)",
                     }}>
                       {list.flag?.toUpperCase() ?? "LOJA"} · {emp}
                     </span>

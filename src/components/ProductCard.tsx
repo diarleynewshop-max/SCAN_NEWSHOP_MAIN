@@ -11,7 +11,7 @@ export interface Product {
   createdAt: Date;
 }
 
-export type ListFlag = "loja" | "cd";
+export type ListFlag = "loja";
 
 export interface ListData {
   id: string;
@@ -22,7 +22,7 @@ export interface ListData {
   createdAt: Date;
   closedAt?: Date;
   status: "open" | "yellow" | "green" | "red";
-  flag: ListFlag; // "loja" ou "cd"
+  flag: ListFlag; // "loja"
   sentToClickUp?: boolean; // true depois do primeiro envio bem-sucedido
 }
 

@@ -157,10 +157,10 @@ export const listaBaixada = task({
           timeZone: "America/Fortaleza",
         });
 
-    const isCD = payload.flag === "cd";
-    const listId = isCD ? CLICKUP_CD_LIST_ID : CLICKUP_LIST_ID;
-    const status = isCD ? "EM CONFERENCIA" : "to do";
-    const flagLabel = isCD ? "CD" : "LOJA";
+    const isCD = false;
+    const listId = CLICKUP_LIST_ID;
+    const status = "to do";
+    const flagLabel = "LOJA";
 
     // 1. Cria a Tarefa Principal de Conferência
     const taskId = await criarTarefaClickUp(

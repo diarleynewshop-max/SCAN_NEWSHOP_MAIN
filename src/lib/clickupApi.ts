@@ -6,7 +6,7 @@
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 export type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
-export type FlagKey    = "loja" | "cd";
+export type FlagKey    = "loja";
 
 export interface ClickUpTask {
   id:          string;
@@ -27,7 +27,6 @@ export interface ClickUpAttachment {
 interface EmpresaConfig {
   token:    string; // VITE_CLICKUP_TOKEN_xxx
   listId:   string;
-  cdListId: string;
   senha:    string;
 }
 
@@ -36,26 +35,23 @@ const CONFIGS: Record<EmpresaKey, EmpresaConfig> = {
   NEWSHOP: {
     token:    import.meta.env.VITE_CLICKUP_TOKEN_NEWSHOP as string,
     listId:   import.meta.env.VITE_CLICKUP_LIST_ID_NEWSHOP    ?? "901325900510",
-    cdListId: import.meta.env.VITE_CLICKUP_CD_LIST_ID_NEWSHOP ?? "901325900510",
     senha:    "n91",
   },
   SOYE: {
     token:    import.meta.env.VITE_CLICKUP_TOKEN_SF as string,
     listId:   import.meta.env.VITE_CLICKUP_LIST_ID_SOYE    ?? "901326461924",
-    cdListId: import.meta.env.VITE_CLICKUP_CD_LIST_ID_SOYE ?? "901326461924",
     senha:    "s91",
   },
   FACIL: {
     token:    import.meta.env.VITE_CLICKUP_TOKEN_SF as string,
     listId:   import.meta.env.VITE_CLICKUP_LIST_ID_FACIL    ?? "901326461915",
-    cdListId: import.meta.env.VITE_CLICKUP_CD_LIST_ID_FACIL ?? "901326461915",
     senha:    "f91",
   },
 };
 
 function getConfig(empresa: EmpresaKey, flag: FlagKey): EmpresaConfig & { resolvedListId: string } {
   const cfg = CONFIGS[empresa];
-  return { ...cfg, resolvedListId: flag === "cd" ? cfg.cdListId : cfg.listId };
+  return { ...cfg, resolvedListId: cfg.listId };
 }
 
 // ── Validação de senha ────────────────────────────────────────────────────────
