@@ -5,16 +5,25 @@ interface BarcodeInputProps {
   value: string;
   onChange: (value: string) => void;
   onScanPress: () => void;
+  onEnterPress?: () => void;
 }
 
-const BarcodeInput = ({ value, onChange, onScanPress }: BarcodeInputProps) => {
+const BarcodeInput = ({ value, onChange, onScanPress, onEnterPress }: BarcodeInputProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "Enter" && onEnterPress) {
+      onEnterPress();
+    }
+  };
+
   return (
     <div style={{ display: "flex", gap: 8 }}>
       <div style={{ flex: 1, position: "relative" }}>
         <ScanBarcode style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 18, height: 18, color: "hsl(var(--primary))" }} />
         <input ref={inputRef} type="text" inputMode="numeric" placeholder="000000000000"
           value={value} onChange={(e) => onChange(e.target.value)}
+          onKeyDown={handleKeyDown}
           style={{
             width: "100%", height: 48, paddingLeft: 40, paddingRight: 14,
             borderRadius: 10, border: "1.5px solid hsl(var(--border))",

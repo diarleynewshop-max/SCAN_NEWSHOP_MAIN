@@ -1,5 +1,5 @@
-import { useState, useCallback } from "react";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, Tag, GitCompare, Store, Eye, EyeOff } from "lucide-react";
+import { useState, useCallback, useEffect } from "react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, Tag, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import BarcodeScanner from "@/components/BarcodeScanner";
@@ -9,6 +9,7 @@ import ConferenceView from "@/components/ConferenceView";
 import ProductCard from "@/components/ProductCard";
 import { ListFlag } from "@/components/ProductCard";
 import { useInventory } from "@/hooks/useInventory";
+import { useProductLookup } from "@/hooks/useProductLookup";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 
@@ -67,6 +68,7 @@ const Index = () => {
   );
   const [showScanner, setShowScanner] = useState(false);
   const [showOpenModal, setShowOpenModal] = useState(false);
+  const [showProductInfo, setShowProductInfo] = useState(false);
 
   // ── Estado do modal ─────────────────────────────────────────────────────
   const [modalFlag, setModalFlag]         = useState<ListFlag | null>(null);
@@ -79,11 +81,15 @@ const Index = () => {
   const [modalPerson, setModalPerson]     = useState("");
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct } = useInventory();
+  const { productInfo, loading, error, lookupProduct } = useProductLookup();
 
   const handleBarcodeDetected = useCallback((code: string) => {
     setBarcode(code);
     setShowScanner(false);
-  }, []);
+    setShowProductInfo(true);
+    // Buscar informações do produto automaticamente
+    lookupProduct(code);
+  }, [lookupProduct]);
 
   const resetModal = () => {
     setModalFlag(null);
@@ -241,9 +247,60 @@ const Index = () => {
               </div>
             )}
 
+            {/* Exibição das informações do produto */}
+            {showProductInfo && (
+              <div style={{ marginBottom: 16 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
+                  <h3 style={{ fontWeight: 700, fontSize: 16 }}>Informações do Produto</h3>
+                  <button
+                    onClick={() => setShowProductInfo(false)}
+                    style={{ background: "none", border: "none", color: "hsl(var(--muted-foreground))", cursor: "pointer" }}
+                  >
+                    ✕
+                  </button>
+                </div>
+
+                {loading ? (
+                  <div style={{ display: "flex", justifyContent: "center", padding: 20 }}>
+                    <Loader2 className="w-6 h-6 animate-spin" />
+                  </div>
+                ) : error ? (
+                  <div style={{ background: "hsl(var(--destructive) / 0.07)", border: "1px solid hsl(var(--destructive) / 0.15)", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 8 }}>
+                    <AlertCircle style={{ width: 15, height: 15, color: "hsl(var(--destructive))", flexShrink: 0 }} />
+                    <p style={{ fontSize: 13, color: "hsl(var(--destructive))", fontWeight: 500 }}>{error}</p>
+                  </div>
+                ) : productInfo ? (
+                  <div style={{ background: "hsl(var(--secondary))", borderRadius: 10, padding: 16, border: "1px solid hsl(var(--border))" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                      <h4 style={{ fontWeight: 700, fontSize: 15 }}>{productInfo.name}</h4>
+                      <span style={{ fontWeight: 800, fontSize: 16, color: "hsl(var(--primary))" }}>
+                        R$ {productInfo.price?.toFixed(2)}
+                      </span>
+                    </div>
+                    <div style={{ display: "flex", justifyContent: "space-between" }}>
+                      <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Estoque disponível:</span>
+                      <span style={{ fontWeight: 700, fontSize: 14 }}>
+                        {productInfo.stock !== undefined ? productInfo.stock : "N/A"}
+                      </span>
+                    </div>
+                  </div>
+                ) : null}
+              </div>
+            )}
+
             <div>
               <label style={S.label}>Código de Barras</label>
-              <BarcodeInput value={barcode} onChange={setBarcode} onScanPress={() => setShowScanner(true)} />
+              <BarcodeInput
+  value={barcode}
+  onChange={setBarcode}
+  onScanPress={() => setShowScanner(true)}
+  onEnterPress={() => {
+    if (barcode.trim()) {
+      setShowProductInfo(true);
+      lookupProduct(barcode.trim());
+    }
+  }}
+/>
             </div>
 
             <div>
