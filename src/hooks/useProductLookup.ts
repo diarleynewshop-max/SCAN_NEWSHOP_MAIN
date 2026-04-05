@@ -23,70 +23,68 @@ export const useProductLookup = (): UseProductLookupReturn => {
   const [error, setError] = useState<string | null>(null);
 
   const lookupProduct = useCallback(async (barcode: string) => {
+    console.log("Buscando produto com código:", barcode);
     setLoading(true);
     setError(null);
 
     try {
-      // Consultando a tabela 'estoque' como visto em ListHistory.tsx
-      // Vamos tentar diferentes combinações de campos que podem existir na tabela
+      // Primeiro vamos testar se conseguimos acessar a tabela
+      const { data: sampleData, error: sampleError } = await supabase
+        .from('estoque')
+        .select('*')
+        .limit(1);
+
+      if (sampleError) {
+        console.error("Erro ao acessar tabela estoque:", sampleError);
+        throw new Error(`Falha ao acessar tabela: ${sampleError.message}`);
+      }
+
+      // Agora vamos buscar o produto específico
       const { data, error } = await supabase
         .from('estoque')
-        .select(`
-          codigo,
-          estoque,
-          preco,
-          nome_produto,
-          descricao
-        `)
+        .select('*')
         .eq('codigo', barcode)
         .single();
 
+      console.log("Resposta completa do Supabase:", { data, error });
+
       if (error) {
-        // Se ocorrer um erro, vamos tentar uma consulta mais simples
-        const { data: simpleData, error: simpleError } = await supabase
-          .from('estoque')
-          .select('*')
-          .eq('codigo', barcode)
-          .single();
-
-        if (simpleError) {
-          throw new Error(simpleError.message);
-        }
-
-        if (!simpleData) {
-          setError("Produto não encontrado");
+        // Tratar erros específicos
+        if (error.code === "PGRST116") {
+          setError("Produto não encontrado no banco de dados");
           setProductInfo(null);
           return;
         }
 
-        // Usar os dados retornados diretamente
-        setProductInfo({
-          codigo: simpleData.codigo || simpleData.barcode || barcode,
-          estoque: simpleData.estoque || simpleData.quantidade || 0,
-          preco: simpleData.preco || simpleData.valor || undefined,
-          nome_produto: simpleData.nome_produto || simpleData.nome || simpleData.descricao || undefined,
-          descricao: simpleData.descricao || undefined,
-        });
-        return;
-      }
-
-      if (!data) {
-        setError("Produto não encontrado");
+        console.error("Erro na consulta:", error);
+        setError(`Erro na consulta: ${error.message}`);
         setProductInfo(null);
         return;
       }
 
-      // Mapeie os dados conforme a estrutura da tabela 'estoque'
-      setProductInfo({
-        codigo: data.codigo,
-        estoque: data.estoque,
-        preco: data.preco,
-        nome_produto: data.nome_produto || data.descricao,
-        descricao: data.descricao,
-      });
-    } catch (err) {
+      if (!data) {
+        setError("Nenhum dado retornado para este produto");
+        setProductInfo(null);
+        return;
+      }
+
+      console.log("Dados brutos do produto:", data);
+
+      // Converter os dados para o formato esperado com validações adequadas
+      const productData: ProductInfo = {
+        codigo: String(data.codigo || data.barcode || barcode),
+        estoque: Number(data.estoque || data.quantidade_estoque || data.qtd || 0),
+        preco: data.preco !== undefined ? Number(data.preco) :
+               data.valor !== undefined ? Number(data.valor) : undefined,
+        nome_produto: data.nome_produto || data.nome || data.descricao_produto || undefined,
+        descricao: data.descricao || data.descricao_completa || undefined,
+      };
+
+      console.log("Produto processado:", productData);
+      setProductInfo(productData);
+    } catch (err: any) {
       console.error("Erro ao buscar produto:", err);
-      setError("Falha ao buscar informações do produto");
+      setError(err.message || "Falha desconhecida ao buscar informações do produto");
       setProductInfo(null);
     } finally {
       setLoading(false);
