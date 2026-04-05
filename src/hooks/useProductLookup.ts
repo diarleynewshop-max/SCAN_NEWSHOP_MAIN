@@ -1,6 +1,7 @@
 import { useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { buscarProdutoVarejoFacil, salvarProdutoSupabase } from "@/lib/varejoFacilIntegration";
+import { normalizeProductData, isValidProduct } from "@/lib/utils";
 
 interface ProductInfo {
   codigo: string;
@@ -93,10 +94,11 @@ export const useProductLookup = (): UseProductLookupReturn => {
           };
 
           setProductInfo(productData);
-          setError("Produto encontrado mas falha ao salvar localmente");
+          // Não definir erro aqui, pois o produto foi encontrado
         }
       } else {
-        setError("Produto não encontrado");
+        // Se não encontrou em nenhum lugar, mostrar mensagem apropriada
+        setError("Produto não encontrado no banco de dados local nem na API externa");
         setProductInfo(null);
       }
     } catch (err: any) {

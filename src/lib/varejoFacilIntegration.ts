@@ -28,43 +28,77 @@ export const buscarProdutoVarejoFacil = async (codigoBarras: string): Promise<Va
   try {
     console.log("Buscando produto na Varejo Fácil:", codigoBarras);
 
-    // TODO: Substituir pela URL real da API do Varejo Fácil
-    // Esta é uma implementação genérica - você precisará adaptar conforme a documentação real
-    const response = await fetch(`https://mercado.varejofacil.com/api/v1/produtos/${codigoBarras}`, {
+    // Primeiro tentar acesso direto
+    try {
+      const url = `https://newshop.varejofacil.com/api/v1/produtos/${codigoBarras}`;
+      const response = await fetch(url, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+          // Se a API exigir autenticação, adicione aqui:
+          // 'Authorization': 'Bearer SUA_CHAVE_DE_API',
+          // 'X-API-Key': 'SUA_CHAVE_DE_API'
+        }
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        console.log("Dados recebidos diretamente da Varejo Fácil:", data);
+
+        // Adaptar os dados conforme a estrutura real da resposta da API
+        const produto: VarejoFacilProduct = {
+          id: data.id || data.produto_id || '',
+          codigo_barras: data.codigo_barras || data.ean || data.gtin || codigoBarras,
+          descricao: data.descricao || data.nome || data.titulo || '',
+          preco: Number(data.preco || data.valor || data.price || 0),
+          estoque: Number(data.estoque || data.quantidade || data.qtd || 0),
+        };
+
+        // Validar se os dados são válidos
+        if (produto.codigo_barras) {
+          return produto;
+        }
+      } else if (response.status !== 404) {
+        console.log(`Erro HTTP ${response.status} ao acessar Varejo Fácil diretamente`);
+      }
+    } catch (directError) {
+      console.log("Acesso direto à Varejo Fácil falhou:", directError);
+      // Continuar para tentativa via função serverless
+    }
+
+    // Se acesso direto falhar (possivelmente por CORS), tentar via função serverless
+    console.log("Tentando acesso via função serverless...");
+
+    // URL da função serverless do Supabase (ajustar conforme sua configuração)
+    const serverlessUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-varejo-facil?codigo=${codigoBarras}`;
+
+    const serverlessResponse = await fetch(serverlessUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
-        // Se a API exigir autenticação, adicione aqui:
-        // 'Authorization': 'Bearer SUA_CHAVE_DE_API',
-        // 'X-API-Key': 'SUA_CHAVE_DE_API'
       }
     });
 
-    if (!response.ok) {
-      if (response.status === 404) {
-        console.log("Produto não encontrado na Varejo Fácil");
-        return null;
+    if (serverlessResponse.ok) {
+      const result = await serverlessResponse.json();
+
+      if (result.success && result.data) {
+        console.log("Dados recebidos via função serverless:", result.data);
+        return result.data as VarejoFacilProduct;
+      } else if (result.error) {
+        console.log("Erro na função serverless:", result.error);
       }
-      throw new Error(`Erro HTTP: ${response.status} ${response.statusText}`);
+    } else {
+      console.log(`Função serverless retornou status ${serverlessResponse.status}`);
     }
 
-    const data = await response.json();
-    console.log("Dados recebidos da Varejo Fácil:", data);
+    // Se ambas as tentativas falharem
+    console.log("Produto não encontrado na Varejo Fácil (ambas as tentativas)");
+    return null;
 
-    // Adaptar os dados conforme a estrutura real da resposta da API
-    // Esta é uma implementação genérica que você precisará ajustar
-    const produto: VarejoFacilProduct = {
-      id: data.id || data.produto_id,
-      codigo_barras: data.codigo_barras || data.ean || data.gtin || codigoBarras,
-      descricao: data.descricao || data.nome || data.titulo,
-      preco: Number(data.preco || data.valor || data.price || 0),
-      estoque: Number(data.estoque || data.quantidade || data.qtd || 0),
-    };
-
-    return produto;
   } catch (error) {
     console.error("Erro ao buscar produto na Varejo Fácil:", error);
-    throw new Error(`Falha ao buscar produto: ${(error as Error).message}`);
+    return null;
   }
 };
 
