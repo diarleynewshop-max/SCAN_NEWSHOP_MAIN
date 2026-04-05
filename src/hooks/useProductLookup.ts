@@ -2,10 +2,11 @@ import { useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface ProductInfo {
-  id: number;
-  name: string;
-  price: number;
-  stock: number;
+  codigo: string;
+  estoque: number;
+  preco?: number;
+  nome_produto?: string;
+  descricao?: string;
   // Adicione outros campos conforme necessário
 }
 
@@ -26,15 +27,47 @@ export const useProductLookup = (): UseProductLookupReturn => {
     setError(null);
 
     try {
-      // Substitua 'products' pelo nome real da sua tabela no Supabase
+      // Consultando a tabela 'estoque' como visto em ListHistory.tsx
+      // Vamos tentar diferentes combinações de campos que podem existir na tabela
       const { data, error } = await supabase
-        .from('products')
-        .select('*')
-        .eq('barcode', barcode)
+        .from('estoque')
+        .select(`
+          codigo,
+          estoque,
+          preco,
+          nome_produto,
+          descricao
+        `)
+        .eq('codigo', barcode)
         .single();
 
       if (error) {
-        throw new Error(error.message);
+        // Se ocorrer um erro, vamos tentar uma consulta mais simples
+        const { data: simpleData, error: simpleError } = await supabase
+          .from('estoque')
+          .select('*')
+          .eq('codigo', barcode)
+          .single();
+
+        if (simpleError) {
+          throw new Error(simpleError.message);
+        }
+
+        if (!simpleData) {
+          setError("Produto não encontrado");
+          setProductInfo(null);
+          return;
+        }
+
+        // Usar os dados retornados diretamente
+        setProductInfo({
+          codigo: simpleData.codigo || simpleData.barcode || barcode,
+          estoque: simpleData.estoque || simpleData.quantidade || 0,
+          preco: simpleData.preco || simpleData.valor || undefined,
+          nome_produto: simpleData.nome_produto || simpleData.nome || simpleData.descricao || undefined,
+          descricao: simpleData.descricao || undefined,
+        });
+        return;
       }
 
       if (!data) {
@@ -43,13 +76,13 @@ export const useProductLookup = (): UseProductLookupReturn => {
         return;
       }
 
-      // Mapeie os dados conforme a estrutura da sua tabela
+      // Mapeie os dados conforme a estrutura da tabela 'estoque'
       setProductInfo({
-        id: data.id,
-        name: data.name,
-        price: data.price,
-        stock: data.stock,
-        // Adicione outros campos conforme necessário
+        codigo: data.codigo,
+        estoque: data.estoque,
+        preco: data.preco,
+        nome_produto: data.nome_produto || data.descricao,
+        descricao: data.descricao,
       });
     } catch (err) {
       console.error("Erro ao buscar produto:", err);

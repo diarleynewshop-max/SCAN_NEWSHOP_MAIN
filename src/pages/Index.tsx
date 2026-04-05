@@ -272,15 +272,15 @@ const Index = () => {
                 ) : productInfo ? (
                   <div style={{ background: "hsl(var(--secondary))", borderRadius: 10, padding: 16, border: "1px solid hsl(var(--border))" }}>
                     <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
-                      <h4 style={{ fontWeight: 700, fontSize: 15 }}>{productInfo.name}</h4>
+                      <h4 style={{ fontWeight: 700, fontSize: 15 }}>{productInfo.nome_produto || productInfo.descricao || "Produto sem nome"}</h4>
                       <span style={{ fontWeight: 800, fontSize: 16, color: "hsl(var(--primary))" }}>
-                        R$ {productInfo.price?.toFixed(2)}
+                        R$ {productInfo.preco?.toFixed(2) || "N/A"}
                       </span>
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
                       <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Estoque disponível:</span>
                       <span style={{ fontWeight: 700, fontSize: 14 }}>
-                        {productInfo.stock !== undefined ? productInfo.stock : "N/A"}
+                        {productInfo.estoque !== undefined ? productInfo.estoque : "N/A"}
                       </span>
                     </div>
                   </div>
