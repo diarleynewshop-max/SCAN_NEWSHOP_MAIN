@@ -39,12 +39,17 @@ serve(async (_req) => {
     // Usar o domínio correto do Varejo Fácil
     const apiUrl = `https://newshop.varejofacil.com/api/v1/produtos/${codigoBarras}`;
 
+    // Buscar primeiro o produto pelo código de barras para obter o ID interno
+    // Se não tiver endpoint direto, podemos usar uma estratégia diferente
+
     const response = await fetch(apiUrl, {
       method: 'GET',
       headers: {
         'Accept': 'application/json',
-        // Adicione credenciais se necessário:
-        // 'Authorization': 'Bearer SUA_CHAVE_DE_API',
+        // Adicione sua chave de API aqui:
+        'Authorization': 'Bearer ' + Deno.env.get('VAREJOFACIL_API_KEY'),
+        // ou outro header necessário, por exemplo:
+        // 'X-API-Key': Deno.env.get('VAREJOFACIL_API_KEY'),
       }
     });
 
