@@ -244,6 +244,19 @@ const Index = () => {
                   <ClipboardList style={{ width: 15, height: 15, color: "hsl(var(--destructive))", flexShrink: 0 }} />
                   <p style={{ fontSize: 13, color: "hsl(var(--destructive))", fontWeight: 500 }}>Abra uma lista para adicionar produtos</p>
                 </div>
+
+                {/* Botão temporário para testar a API do Varejo Fácil - Remover depois */}
+                {/*
+                <button
+                  onClick={async () => {
+                    const { testarApiVarejoFacil } = await import('@/lib/testApiVarejoFacilUtils');
+                    testarApiVarejoFacil();
+                  }}
+                  style={{ ...S.btnPrimary, background: "hsl(var(--warning))" }}
+                >
+                  Testar API Varejo Fácil
+                </button>
+                */}
               </div>
             )}
 
@@ -286,6 +299,12 @@ const Index = () => {
                       <span style={{ fontWeight: 700, fontSize: 14 }}>
                         {typeof productInfo.estoque === 'number' ? productInfo.estoque : "N/A"}
                       </span>
+                    </div>
+
+                    {/* Indicador de origem dos dados */}
+                    <div style={{ marginTop: 12, padding: 8, background: "hsl(var(--primary) / 0.1)", borderRadius: 6, fontSize: 11, color: "hsl(var(--primary))" }}>
+                      Informações {" "}
+                      {productInfo.nome_produto && typeof productInfo.preco === 'number' ? "atualizadas via API" : "do banco de dados local"}
                     </div>
                   </div>
                 ) : null}

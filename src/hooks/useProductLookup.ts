@@ -1,5 +1,6 @@
 import { useState, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
+import { buscarProdutoVarejoFacil, salvarProdutoSupabase } from "@/lib/varejoFacilIntegration";
 
 interface ProductInfo {
   codigo: string;
@@ -28,63 +29,79 @@ export const useProductLookup = (): UseProductLookupReturn => {
     setError(null);
 
     try {
-      // Primeiro vamos testar se conseguimos acessar a tabela
-      const { data: sampleData, error: sampleError } = await supabase
-        .from('estoque')
-        .select('*')
-        .limit(1);
-
-      if (sampleError) {
-        console.error("Erro ao acessar tabela estoque:", sampleError);
-        throw new Error(`Falha ao acessar tabela: ${sampleError.message}`);
-      }
-
-      // Agora vamos buscar o produto específico
+      // Primeiro tentar buscar no Supabase
       const { data, error } = await supabase
         .from('estoque')
         .select('*')
         .eq('codigo', barcode)
         .single();
 
-      console.log("Resposta completa do Supabase:", { data, error });
+      console.log("Resposta do Supabase:", { data, error });
 
-      if (error) {
-        // Tratar erros específicos
-        if (error.code === "PGRST116") {
-          setError("Produto não encontrado no banco de dados");
-          setProductInfo(null);
-          return;
+      if (error && error.code !== "PGRST116") {
+        // Erro diferente de "não encontrado"
+        console.error("Erro na consulta ao Supabase:", error);
+        throw new Error(`Erro na consulta: ${error.message}`);
+      }
+
+      // Se encontrou no Supabase, usar esses dados
+      if (data) {
+        console.log("Produto encontrado no Supabase:", data);
+
+        // Converter os dados para o formato esperado com validações adequadas
+        const productData: ProductInfo = {
+          codigo: String(data.codigo || data.barcode || barcode),
+          estoque: Number(data.estoque || data.quantidade_estoque || data.qtd || 0),
+          preco: data.preco !== undefined ? Number(data.preco) :
+                 data.valor !== undefined ? Number(data.valor) : undefined,
+          nome_produto: data.nome_produto || data.nome || data.descricao_produto || undefined,
+          descricao: data.descricao || data.descricao_completa || undefined,
+        };
+
+        console.log("Produto processado:", productData);
+        setProductInfo(productData);
+        return;
+      }
+
+      // Se não encontrou no Supabase, buscar na Varejo Fácil
+      console.log("Produto não encontrado no Supabase, buscando na Varejo Fácil...");
+      const produtoVarejoFacil = await buscarProdutoVarejoFacil(barcode);
+
+      if (produtoVarejoFacil) {
+        // Salvar no Supabase para uso futuro
+        try {
+          await salvarProdutoSupabase(produtoVarejoFacil);
+
+          // Converter para o formato esperado
+          const productData: ProductInfo = {
+            codigo: produtoVarejoFacil.codigo_barras,
+            estoque: produtoVarejoFacil.estoque,
+            preco: produtoVarejoFacil.preco,
+            nome_produto: produtoVarejoFacil.descricao,
+          };
+
+          console.log("Produto salvo no Supabase e pronto para uso:", productData);
+          setProductInfo(productData);
+        } catch (saveError) {
+          console.error("Erro ao salvar produto no Supabase:", saveError);
+          // Mesmo assim, mostrar os dados obtidos
+          const productData: ProductInfo = {
+            codigo: produtoVarejoFacil.codigo_barras,
+            estoque: produtoVarejoFacil.estoque,
+            preco: produtoVarejoFacil.preco,
+            nome_produto: produtoVarejoFacil.descricao,
+          };
+
+          setProductInfo(productData);
+          setError("Produto encontrado mas falha ao salvar localmente");
         }
-
-        console.error("Erro na consulta:", error);
-        setError(`Erro na consulta: ${error.message}`);
+      } else {
+        setError("Produto não encontrado");
         setProductInfo(null);
-        return;
       }
-
-      if (!data) {
-        setError("Nenhum dado retornado para este produto");
-        setProductInfo(null);
-        return;
-      }
-
-      console.log("Dados brutos do produto:", data);
-
-      // Converter os dados para o formato esperado com validações adequadas
-      const productData: ProductInfo = {
-        codigo: String(data.codigo || data.barcode || barcode),
-        estoque: Number(data.estoque || data.quantidade_estoque || data.qtd || 0),
-        preco: data.preco !== undefined ? Number(data.preco) :
-               data.valor !== undefined ? Number(data.valor) : undefined,
-        nome_produto: data.nome_produto || data.nome || data.descricao_produto || undefined,
-        descricao: data.descricao || data.descricao_completa || undefined,
-      };
-
-      console.log("Produto processado:", productData);
-      setProductInfo(productData);
     } catch (err: any) {
       console.error("Erro ao buscar produto:", err);
-      setError(err.message || "Falha desconhecida ao buscar informações do produto");
+      setError(err.message || "Falha ao buscar informações do produto");
       setProductInfo(null);
     } finally {
       setLoading(false);
