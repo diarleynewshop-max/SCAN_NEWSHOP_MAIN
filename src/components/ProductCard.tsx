@@ -55,7 +55,7 @@ const ProductCard = ({ product, onDelete }: ProductCardProps) => {
         )}
         <div style={{ display: "flex", alignItems: "baseline", gap: 4, marginTop: 2 }}>
           <span style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 900, color: "hsl(var(--foreground))" }}>{product.quantity}</span>
-          <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>unid. · {product.removeTag ? "Tira etiqueta" : "Não tira"}</span>
+          <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>unid.</span>
         </div>
       </div>
 

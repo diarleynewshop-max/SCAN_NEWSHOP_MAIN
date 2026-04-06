@@ -14,7 +14,7 @@ interface AddProductParams {
   sku: string;
   photo: string | null;
   quantity: number;
-  removeTag: boolean;
+  removeTag?: boolean;
 }
 
 const STORAGE_KEY = "scan_newshop_lists";
@@ -128,15 +128,15 @@ export function useInventory() {
             };
             return { ...l, products: updatedProducts };
           }
-          const newProduct: Product = {
-            id: crypto.randomUUID(),
-            barcode,
-            sku: params.sku.trim(),
-            photo: params.photo,
-            quantity,
-            removeTag: params.removeTag,
-            createdAt: new Date(),
-          };
+           const newProduct: Product = {
+             id: crypto.randomUUID(),
+             barcode,
+             sku: params.sku.trim(),
+             photo: params.photo,
+             quantity,
+             removeTag: params.removeTag ?? false,
+             createdAt: new Date(),
+           };
           return { ...l, products: [...l.products, newProduct] };
         })
       );

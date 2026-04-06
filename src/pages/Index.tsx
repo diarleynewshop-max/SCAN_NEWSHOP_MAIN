@@ -1,5 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, Tag, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import BarcodeScanner from "@/components/BarcodeScanner";
@@ -62,7 +62,6 @@ const Index = () => {
   const [sku, setSku] = useState("");
   const [photo, setPhoto] = useState<string | null>(null);
   const [quantity, setQuantity] = useState("");
-  const [removeTag, setRemoveTag] = useState(false);
   const [view, setView] = useState<"scan" | "list" | "conference">(
     initialTab === "conference" ? "conference" : initialTab === "list" ? "list" : "scan"
   );
@@ -148,8 +147,8 @@ const Index = () => {
   };
 
   const handleAdd = () => {
-    const ok = addProduct({ barcode, sku, photo, quantity: Number(quantity), removeTag });
-    if (ok) { setBarcode(""); setSku(""); setPhoto(null); setQuantity(""); setRemoveTag(false); }
+    const ok = addProduct({ barcode, sku, photo, quantity: Number(quantity) });
+    if (ok) { setBarcode(""); setSku(""); setPhoto(null); setQuantity(""); }
   };
 
   const productCount = activeList?.products.length ?? 0;
@@ -161,9 +160,7 @@ const Index = () => {
   ];
 
   // Badge da flag ativa no banner
-  const flagBadge = activeList?.flag === "cd"
-    ? { bg: "hsl(var(--success)/0.12)", border: "hsl(var(--success)/0.25)", text: "hsl(var(--success))" }
-    : { bg: "hsl(var(--primary)/0.10)", border: "hsl(var(--primary)/0.20)", text: "hsl(var(--primary))" };
+  const flagBadge = { bg: "hsl(var(--primary)/0.10)", border: "hsl(var(--primary)/0.20)", text: "hsl(var(--primary))" };
 
   return (
     <div className="min-h-screen flex flex-col max-w-md mx-auto" style={{ background: "hsl(var(--background))" }}>
@@ -344,26 +341,7 @@ const Index = () => {
               />
             </div>
 
-            <div>
-              <label style={{ ...S.label, display: "flex", alignItems: "center", gap: 6 }}>
-                <Tag style={{ width: 12, height: 12 }} /> Tira Etiqueta?
-              </label>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                {([true, false] as const).map((val) => (
-                  <button key={String(val)} onClick={() => setRemoveTag(val)}
-                    style={{
-                      height: 46, borderRadius: 10, fontWeight: 700, fontSize: 13,
-                      letterSpacing: "0.06em", cursor: "pointer", transition: "all 0.18s",
-                      background: removeTag === val ? "hsl(var(--primary))" : "hsl(var(--secondary))",
-                      color: removeTag === val ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
-                      border: removeTag === val ? "2px solid hsl(var(--primary))" : "2px solid hsl(var(--border))",
-                    }}
-                  >
-                    {val ? "SIM" : "NÃO"}
-                  </button>
-                ))}
-              </div>
-            </div>
+
 
             <button onClick={handleAdd} disabled={!activeList}
               style={{
