@@ -151,6 +151,34 @@ const Index = () => {
     }
   };
 
+  const handleCloseList = () => {
+    if (!activeList) return;
+    if (window.confirm(`Fechar "${activeList.title}"?`)) {
+      closeList();
+      
+      // Tentar abrir nova lista automaticamente com login salvo
+      const login = obterLoginSalvo();
+      if (login && login.tituloPadrao && login.nomePessoa) {
+        // Abrir nova lista automaticamente
+        const ok = openList({
+          title: login.tituloPadrao,
+          person: login.nomePessoa,
+          flag: "loja",
+          empresa: login.empresa,
+        });
+        if (ok) {
+          toast({ title: "Nova lista aberta automaticamente!", description: `${login.tituloPadrao} • ${login.nomePessoa}` });
+        } else {
+          // Se falhar, mostrar modal para abrir manualmente
+          setShowOpenModal(true);
+        }
+      } else {
+        // Sem login salvo, mostrar modal para configurar
+        setShowOpenModal(true);
+      }
+    }
+  };
+
   const handleOpenList = () => {
     if (!modalFlag)          { toast({ title: "Selecione LOJA",              variant: "destructive" }); return; }
     if (!modalEmpresa)       { toast({ title: "Selecione a empresa",          variant: "destructive" }); return; }
@@ -220,7 +248,7 @@ const Index = () => {
             {activeList.flag?.toUpperCase() ?? "LOJA"} · {activeList.empresa ? activeList.empresa.split(" ")[0] : ""}
           </span>
           <button
-            onClick={() => { if (window.confirm(`Fechar "${activeList?.title}"?`)) closeList(); }}
+            onClick={handleCloseList}
             style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(var(--destructive))", background: "transparent", border: "1px solid hsl(var(--destructive) / 0.3)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", letterSpacing: "0.05em", textTransform: "uppercase" }}
           >
             Fechar
