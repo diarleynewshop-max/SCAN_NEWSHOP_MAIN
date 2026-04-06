@@ -22,7 +22,9 @@ const STORAGE_KEY = "scan_newshop_lists";
 function saveLists(lists: ListData[]) {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(lists));
-  } catch {}
+  } catch (err) {
+    console.error('Erro ao salvar listas:', err);
+  }
 }
 
 function loadLists(): ListData[] {

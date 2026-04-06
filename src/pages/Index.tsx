@@ -1,4 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
+import { obterLoginSalvo } from "@/hooks/useAuth";
 import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
@@ -81,6 +82,26 @@ const Index = () => {
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct } = useInventory();
   const { productInfo, loading, error, lookupProduct } = useProductLookup();
+
+  // Preencher modal com dados do login salvo quando abrir
+  useEffect(() => {
+    if (showOpenModal) {
+      const login = obterLoginSalvo();
+      if (login) {
+        // Definir flag como "loja" (única opção)
+        setModalFlag("loja");
+        setModalEmpresa(login.empresa);
+        // Senha já foi validada anteriormente, então desbloquear diretamente
+        setPasswordUnlocked(true);
+        // Preencher título e pessoa com os valores padrão
+        setModalTitle(login.tituloPadrao || "");
+        setModalPerson(login.nomePessoa || "");
+      } else {
+        // Se não há login, resetar modal
+        resetModal();
+      }
+    }
+  }, [showOpenModal]);
 
   const handleBarcodeDetected = useCallback((code: string) => {
     setBarcode(code);
