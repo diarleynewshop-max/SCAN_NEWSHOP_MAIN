@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 
@@ -14,9 +14,9 @@ function getStorageSize(): { kb: number; hasData: boolean; listCount: number; ha
     if (!raw) return { kb: 0, hasData: false, listCount: 0, hasPhotos: false };
     const kb = Math.round((raw.length * 2) / 1024); // UTF-16 aprox
     const parsed = JSON.parse(raw);
-    const listCount = Array.isArray(parsed) ? parsed.filter((l: any) => l.status !== "open").length : 0;
-    const hasPhotos = Array.isArray(parsed) && parsed.some((l: any) =>
-      l.products?.some((p: any) => !!p.photo)
+    const listCount = Array.isArray(parsed) ? parsed.filter((l: Record<string, unknown>) => l.status !== "open").length : 0;
+    const hasPhotos = Array.isArray(parsed) && parsed.some((l: Record<string, unknown>) =>
+      (l.products as Array<Record<string, unknown>> | undefined)?.some((p: Record<string, unknown>) => !!p.photo)
     );
     return { kb, hasData: kb > 0, listCount, hasPhotos };
   } catch {
@@ -28,6 +28,7 @@ const menuItems = [
   { Icon: ScanBarcode,  label: "Escanear",    description: "Leia códigos e registre produtos",    path: "/scanner",                  accent: "hsl(var(--primary))"     },
   { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))"     },
   { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
+  { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },
 ];
 
 const Home = () => {
@@ -35,6 +36,7 @@ const Home = () => {
   const [storage, setStorage] = useState(getStorageSize());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [cleared, setCleared] = useState(false);
+  const [mostrarPerfil, setMostrarPerfil] = useState(false);
 
   // Autenticação
   const { 
@@ -42,6 +44,7 @@ const Home = () => {
     mostrarModalLogin, 
     setMostrarModalLogin, 
     fazerLogin,
+    fazerLogout,
     senhasCorretas 
   } = useAuth();
 
@@ -109,17 +112,23 @@ const Home = () => {
 
       {/* ── Menu Cards ── */}
       <div style={{ flex: 1, padding: "12px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
-        {menuItems.map(({ Icon, label, description, path, accent }) => (
-          <button key={label} onClick={() => navigate(path)}
-            style={{
-              width: "100%", display: "flex", alignItems: "center", gap: 16,
-              padding: "16px 18px", borderRadius: 16,
-              background: "hsl(var(--card))", /* 👈 CORRIGIDO AQUI */
-              border: "1px solid hsl(var(--border))",
-              boxShadow: "var(--shadow-sm)", cursor: "pointer", textAlign: "left",
-              transition: "all 0.18s",
-            }}
-          >
+         {menuItems.map(({ Icon, label, description, path, accent }) => (
+           <button key={label} onClick={() => {
+             if (path === null) {
+               setMostrarPerfil(true);
+             } else {
+               navigate(path);
+             }
+           }}
+             style={{
+               width: "100%", display: "flex", alignItems: "center", gap: 16,
+               padding: "16px 18px", borderRadius: 16,
+               background: "hsl(var(--card))", /* 👈 CORRIGIDO AQUI */
+               border: "1px solid hsl(var(--border))",
+               boxShadow: "var(--shadow-sm)", cursor: "pointer", textAlign: "left",
+               transition: "all 0.18s",
+             }}
+           >
             <div style={{ width: 52, height: 52, borderRadius: 14, flexShrink: 0, background: accent + "14", display: "flex", alignItems: "center", justifyContent: "center" }}>
               <Icon style={{ width: 24, height: 24, color: accent }} />
             </div>
@@ -409,6 +418,134 @@ const Home = () => {
               <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", textAlign: "center", marginTop: 8 }}>
                 Os dados serão salvos localmente e usados automaticamente ao criar novas listas.
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de Perfil ── */}
+      {mostrarPerfil && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setMostrarPerfil(false); }}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+            backdropFilter: "blur(4px)", display: "flex",
+            alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+          }}
+        >
+          <div style={{
+            background: "hsl(var(--card))",
+            width: "100%", maxWidth: 430,
+            borderRadius: "20px 20px 0 0", padding: "24px 20px 36px",
+            animation: "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+          }}>
+            <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />
+
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+              <div style={{ width: 48, height: 48, borderRadius: 14, background: "hsl(var(--warning) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <User style={{ width: 22, height: 22, color: "hsl(var(--warning))" }} />
+              </div>
+              <div>
+                <p style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>Seu Perfil</p>
+                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Dados salvos para uso automático</p>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              
+              {/* Dados do perfil */}
+              {loginSalvo ? (
+                <>
+                  <div style={{ background: "hsl(var(--success) / 0.08)", border: "1px solid hsl(var(--success) / 0.2)", borderRadius: 10, padding: "14px 16px" }}>
+                    <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--success))", marginBottom: 4 }}>Login configurado ✅</p>
+                    <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Seus dados estão salvos e serão usados automaticamente.</p>
+                  </div>
+
+                  <div>
+                    <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Empresa</label>
+                    <div style={{
+                      width: "100%", height: 48, padding: "0 16px",
+                      borderRadius: 10, border: "1.5px solid hsl(var(--border))",
+                      background: "hsl(var(--secondary))", color: "hsl(var(--foreground))",
+                      fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
+                      display: "flex", alignItems: "center",
+                    }}>
+                      {loginSalvo.empresa}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Nome de lista padrão</label>
+                    <div style={{
+                      width: "100%", height: 48, padding: "0 16px",
+                      borderRadius: 10, border: "1.5px solid hsl(var(--border))",
+                      background: "hsl(var(--secondary))", color: "hsl(var(--foreground))",
+                      fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
+                      display: "flex", alignItems: "center",
+                    }}>
+                      {loginSalvo.tituloPadrao || "(não definido)"}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Nome da pessoa</label>
+                    <div style={{
+                      width: "100%", height: 48, padding: "0 16px",
+                      borderRadius: 10, border: "1.5px solid hsl(var(--border))",
+                      background: "hsl(var(--secondary))", color: "hsl(var(--foreground))",
+                      fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
+                      display: "flex", alignItems: "center",
+                    }}>
+                      {loginSalvo.nomePessoa || "(não definido)"}
+                    </div>
+                  </div>
+
+                  <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+                    <button onClick={() => { setMostrarPerfil(false); setMostrarModalLogin(true); }}
+                      style={{
+                        width: "100%", height: 48, background: "hsl(var(--primary))",
+                        color: "hsl(var(--primary-foreground))", border: "none",
+                        borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
+                        cursor: "pointer", display: "flex", alignItems: "center",
+                        justifyContent: "center", gap: 8,
+                      }}
+                    >
+                      <Store style={{ width: 18, height: 18 }} /> Editar Login
+                    </button>
+
+                    <button onClick={() => { fazerLogout(); setMostrarPerfil(false); }}
+                      style={{
+                        width: "100%", height: 48, background: "hsl(var(--destructive) / 0.08)",
+                        color: "hsl(var(--destructive))", border: "1.5px solid hsl(var(--destructive) / 0.3)",
+                        borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
+                        cursor: "pointer", display: "flex", alignItems: "center",
+                        justifyContent: "center", gap: 8,
+                      }}
+                    >
+                      <Trash2 style={{ width: 18, height: 18 }} /> Remover Login
+                    </button>
+                  </div>
+                </>
+              ) : (
+                <div style={{ textAlign: "center", padding: "24px 16px" }}>
+                  <div style={{ width: 64, height: 64, borderRadius: 16, background: "hsl(var(--muted))", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 16px" }}>
+                    <User style={{ width: 28, height: 28, color: "hsl(var(--muted-foreground))" }} />
+                  </div>
+                  <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 6 }}>Nenhum login salvo</p>
+                  <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginBottom: 20 }}>Configure seu login para uso automático das listas.</p>
+                  <button onClick={() => { setMostrarPerfil(false); setMostrarModalLogin(true); }}
+                    style={{
+                      width: "100%", height: 48, background: "hsl(var(--primary))",
+                      color: "hsl(var(--primary-foreground))", border: "none",
+                      borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
+                      cursor: "pointer", display: "flex", alignItems: "center",
+                      justifyContent: "center", gap: 8,
+                    }}
+                  >
+                    <Store style={{ width: 18, height: 18 }} /> Configurar Login
+                  </button>
+                </div>
+              )}
             </div>
           </div>
         </div>
