@@ -1,4 +1,9 @@
 import { task } from "@trigger.dev/sdk/v3";
+import { 
+  salvarListaBaixadaNoSupabase, 
+  salvarConferenciaBaixadaNoSupabase,
+  isSupabaseConfigured 
+} from "./supabaseClient";
 
 // ── Credenciais NEWSHOP ───────────────────────────────────────────────────────
 const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN!;
@@ -149,79 +154,90 @@ export const listaBaixada = task({
   machine: "micro",
   maxDuration: 30,
   run: async (payload: any) => {
-    const dataFormatada = payload.dataDownload
-      ? new Date(payload.dataDownload).toLocaleString("pt-BR", {
-          timeZone: "America/Fortaleza",
-        })
-      : new Date().toLocaleString("pt-BR", {
-          timeZone: "America/Fortaleza",
-        });
+    const startTime = Date.now();
+    let taskId: string | null = null;
+    let comprasTaskId: string | null = null;
+    let error: Error | null = null;
 
-    const isCD = false;
-    const listId = CLICKUP_LIST_ID;
-    const status = "to do";
-    const flagLabel = "LOJA";
+    try {
+      const dataFormatada = payload.dataDownload
+        ? new Date(payload.dataDownload).toLocaleString("pt-BR", {
+            timeZone: "America/Fortaleza",
+          })
+        : new Date().toLocaleString("pt-BR", {
+            timeZone: "America/Fortaleza",
+          });
 
-    // 1. Cria a Tarefa Principal de Conferência
-    const taskId = await criarTarefaClickUp(
-      listId,
-      `📦 ${payload.titulo} — ${payload.pessoa}`,
-      `Pessoa: ${payload.pessoa}
+      const isCD = false;
+      const listId = CLICKUP_LIST_ID;
+      const status = "to do";
+      const flagLabel = "LOJA";
+
+      // 1. Salvar no Supabase (antes do ClickUp para tracking)
+      if (isSupabaseConfigured()) {
+        await salvarListaBaixadaNoSupabase(payload);
+      }
+
+      // 2. Cria a Tarefa Principal de Conferência
+      taskId = await criarTarefaClickUp(
+        listId,
+        `📦 ${payload.titulo} — ${payload.pessoa}`,
+        `Pessoa: ${payload.pessoa}
 Título: ${payload.titulo}
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${flagLabel}
 Itens: ${payload.totalItens}
 Data: ${dataFormatada}`,
-      status
-    );
-
-    await Promise.all([
-      anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
-        type: "conference-file",
-        empresa: payload.empresa ?? "NEWSHOP",
-        flag: payload.flag ?? "loja",
-        items: payload.produtos.map((p: any) => ({
-          codigo: p.barcode,
-          sku: p.sku || "",
-          quantidade: p.quantity ?? p.quantidade,
-          photo: p.photo || null,
-        })),
-      }),
-      anexarTxtNaTarefa(
-        taskId,
-        `lista_${payload.pessoa}`,
-        (() => {
-          const soCodigosBloco = payload.produtos
-            .map((p: any) => p.barcode)
-            .join("\n");
-          const codigoQuantidadeBloco = payload.produtos
-            .map(
-              (p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`
-            )
-            .join("\n");
-          return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
-        })()
-      ),
-    ]);
-
-    // ── NOVO: 2. Verifica se há produtos sem estoque (quantidade 0) para enviar pra COMPRAS
-    try {
-      const itensSemEstoque = payload.produtos.filter(
-        (p: any) => (p.quantidade ?? p.quantity) === 0
+        status
       );
 
-      if (itensSemEstoque.length > 0) {
-        const listaFaltantesStr = itensSemEstoque
-          .map(
-            (p: any, idx: number) =>
-              `${idx + 1}. ${p.barcode} | SKU: ${p.sku || "-"} | ❌ Sem Estoque no Sistema${p.photo ? " 📸" : ""}`
-          )
-          .join("\n");
+      await Promise.all([
+        anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
+          type: "conference-file",
+          empresa: payload.empresa ?? "NEWSHOP",
+          flag: payload.flag ?? "loja",
+          items: payload.produtos.map((p: any) => ({
+            codigo: p.barcode,
+            sku: p.sku || "",
+            quantidade: p.quantity ?? p.quantidade,
+            photo: p.photo || null,
+          })),
+        }),
+        anexarTxtNaTarefa(
+          taskId,
+          `lista_${payload.pessoa}`,
+          (() => {
+            const soCodigosBloco = payload.produtos
+              .map((p: any) => p.barcode)
+              .join("\n");
+            const codigoQuantidadeBloco = payload.produtos
+              .map(
+                (p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`
+              )
+              .join("\n");
+            return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
+          })()
+        ),
+      ]);
 
-        const comprasTaskId = await criarTarefaClickUp(
-          CLICKUP_TODO_LIST_ID,
-          `🛒 Compras (Falta Estoque): ${payload.titulo} — ${payload.pessoa}`,
-          `Relatório gerado no momento do envio da lista para conferência.
+      // 3. Verifica se há produtos sem estoque (quantidade 0) para enviar pra COMPRAS
+      try {
+        const itensSemEstoque = payload.produtos.filter(
+          (p: any) => (p.quantidade ?? p.quantity) === 0
+        );
+
+        if (itensSemEstoque.length > 0) {
+          const listaFaltantesStr = itensSemEstoque
+            .map(
+              (p: any, idx: number) =>
+                `${idx + 1}. ${p.barcode} | SKU: ${p.sku || "-"} | ❌ Sem Estoque no Sistema${p.photo ? " 📸" : ""}`
+            )
+            .join("\n");
+
+          comprasTaskId = await criarTarefaClickUp(
+            CLICKUP_TODO_LIST_ID,
+            `🛒 Compras (Falta Estoque): ${payload.titulo} — ${payload.pessoa}`,
+            `Relatório gerado no momento do envio da lista para conferência.
 Estes itens constam com 0 estoque no sistema.
 
 📋 INFORMAÇÕES
@@ -234,21 +250,38 @@ Data: ${dataFormatada}
 ${listaFaltantesStr}
 
 📸 Fotos anexadas abaixo (se houver)`,
-          "to do"
-        );
+            "to do"
+          );
 
-        console.log(`Tarefa de COMPRAS (Falta Estoque) criada: ${comprasTaskId}`);
+          console.log(`Tarefa de COMPRAS (Falta Estoque) criada: ${comprasTaskId}`);
 
-        // Anexar fotos dos itens sem estoque (se houver)
-        const itensComFoto = itensSemEstoque.filter((p: any) => p.photo && p.photo.length > 0);
-        for (const item of itensComFoto) {
-          const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
-          const filename = `sem_estoque_${item.barcode}_${item.sku || "sem-sku"}.${ext}`;
-          await anexarFotoNaTarefa(comprasTaskId, item.photo, filename);
+          // Anexar fotos dos itens sem estoque (se houver)
+          const itensComFoto = itensSemEstoque.filter((p: any) => p.photo && p.photo.length > 0);
+          for (const item of itensComFoto) {
+            const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+            const filename = `sem_estoque_${item.barcode}_${item.sku || "sem-sku"}.${ext}`;
+            await anexarFotoNaTarefa(comprasTaskId, item.photo, filename);
+          }
         }
+      } catch (err) {
+        console.error("Erro ao criar tarefa de COMPRAS na Task 1:", err);
       }
+
     } catch (err) {
-      console.error("Erro ao criar tarefa de COMPRAS na Task 1:", err);
+      error = err as Error;
+      console.error("Erro na TASK 1 (lista-baixada):", err);
+    } finally {
+      // 4. Atualizar registro no Supabase com resultados
+      const processingTimeMs = Date.now() - startTime;
+      if (isSupabaseConfigured()) {
+        await salvarListaBaixadaNoSupabase(
+          payload,
+          taskId || undefined,
+          comprasTaskId || undefined,
+          processingTimeMs,
+          error || undefined
+        );
+      }
     }
   },
 });
@@ -259,50 +292,61 @@ export const conferenciaBaixada = task({
   machine: "micro",
   maxDuration: 60,
   run: async (payload: any) => {
-    const dataFormatada = payload.dataConferencia
-      ? new Date(payload.dataConferencia).toLocaleString("pt-BR", {
-          timeZone: "America/Fortaleza",
-        })
-      : new Date().toLocaleString("pt-BR", {
-          timeZone: "America/Fortaleza",
-        });
+    const startTime = Date.now();
+    let tarefaOriginalId: string | null = null;
+    let todoTaskId: string | null = null;
+    let error: Error | null = null;
 
-    const isCD = payload.flag === "cd";
-    const listId = isCD ? CLICKUP_CD_LIST_ID : CLICKUP_LIST_ID;
+    try {
+      const dataFormatada = payload.dataConferencia
+        ? new Date(payload.dataConferencia).toLocaleString("pt-BR", {
+            timeZone: "America/Fortaleza",
+          })
+        : new Date().toLocaleString("pt-BR", {
+            timeZone: "America/Fortaleza",
+          });
 
-    const statusMap: Record<string, string> = {
-      separado: "✅ Separado",
-      nao_tem: "❌ Nao tem",
-      nao_tem_tudo: "⚠️ Parcial",
-      pendente: "⏳ Pendente",
-    };
+      const isCD = payload.flag === "cd";
+      const listId = isCD ? CLICKUP_CD_LIST_ID : CLICKUP_LIST_ID;
 
-    const itensS = payload.itens.filter((i: any) => i.digito === "S");
-    const itensM = payload.itens.filter((i: any) => i.digito === "M");
-    const itensSemDigito = payload.itens.filter((i: any) => !i.digito);
+      const statusMap: Record<string, string> = {
+        separado: "✅ Separado",
+        nao_tem: "❌ Nao tem",
+        nao_tem_tudo: "⚠️ Parcial",
+        pendente: "⏳ Pendente",
+      };
 
-    const formatarItem = (item: any, idx: number) =>
-      `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`;
+      const itensS = payload.itens.filter((i: any) => i.digito === "S");
+      const itensM = payload.itens.filter((i: any) => i.digito === "M");
+      const itensSemDigito = payload.itens.filter((i: any) => !i.digito);
 
-    let itensTexto = "";
-    if (itensS.length > 0)
-      itensTexto += `{S}\n${itensS.map(formatarItem).join("\n")}`;
-    if (itensM.length > 0) {
-      if (itensTexto)
-        itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
-      itensTexto += `{M}\n${itensM.map(formatarItem).join("\n")}`;
-    }
-    if (itensSemDigito.length > 0) {
-      if (itensTexto)
-        itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
-      itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
-    }
+      const formatarItem = (item: any, idx: number) =>
+        `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`;
 
-    // ── 1. Cria tarefa original na lista de conferência ──
-    const tarefaOriginalId = await criarTarefaClickUp(
-      listId,
-      `✅ ${payload.conferente} — ${dataFormatada}`,
-      `Conferente: ${payload.conferente}
+      let itensTexto = "";
+      if (itensS.length > 0)
+        itensTexto += `{S}\n${itensS.map(formatarItem).join("\n")}`;
+      if (itensM.length > 0) {
+        if (itensTexto)
+          itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
+        itensTexto += `{M}\n${itensM.map(formatarItem).join("\n")}`;
+      }
+      if (itensSemDigito.length > 0) {
+        if (itensTexto)
+          itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
+        itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
+      }
+
+      // 1. Salvar no Supabase (antes do ClickUp para tracking)
+      if (isSupabaseConfigured()) {
+        await salvarConferenciaBaixadaNoSupabase(payload);
+      }
+
+      // 2. Cria tarefa original na lista de conferência ──
+      tarefaOriginalId = await criarTarefaClickUp(
+        listId,
+        `✅ ${payload.conferente} — ${dataFormatada}`,
+        `Conferente: ${payload.conferente}
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Data: ${dataFormatada}
@@ -317,28 +361,28 @@ Total: ${payload.totalItens} item(ns)
 
 📦 ITENS
 ${itensTexto}`,
-      "complete"
-    );
-
-    console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
-
-    // ── 2. Cria tarefa de COMPRAS com fotos diretas ──
-    try {
-      const itensNaoTem = (payload.itens || []).filter(
-        (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
+        "complete"
       );
 
-      const listaFaltantes = itensNaoTem
-        .map(
-          (item: any, idx: number) =>
-            `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0} | ${statusMap[item.status] ?? item.status}`
-        )
-        .join("\n");
+      console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
 
-      const todoTaskId = await criarTarefaClickUp(
-        CLICKUP_TODO_LIST_ID,
-        `🛒 Compras: ${payload.conferente} — ${dataFormatada}`,
-        `Relatório gerado automaticamente após conferência.
+      // 3. Cria tarefa de COMPRAS com fotos diretas ──
+      try {
+        const itensNaoTem = (payload.itens || []).filter(
+          (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
+        );
+
+        const listaFaltantes = itensNaoTem
+          .map(
+            (item: any, idx: number) =>
+              `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0} | ${statusMap[item.status] ?? item.status}`
+          )
+          .join("\n");
+
+        todoTaskId = await criarTarefaClickUp(
+          CLICKUP_TODO_LIST_ID,
+          `🛒 Compras: ${payload.conferente} — ${dataFormatada}`,
+          `Relatório gerado automaticamente após conferência.
 
 📋 INFORMAÇÕES
 Empresa: ${payload.empresa ?? "NEWSHOP"}
@@ -357,30 +401,47 @@ Total itens conferidos: ${payload.totalItens}
 ${listaFaltantes || "Nenhum item faltante."}
 
 📸 Fotos anexadas abaixo (se houver)`,
-        "to do"
-      );
+          "to do"
+        );
 
-      console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
+        console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
 
-      // ── 3. Anexa cada foto como imagem separada ──
-       const itensComFoto = (payload.itens || []).filter(
-        (i: any) =>
-          i.photo &&
-          i.photo.length > 0 &&
-          (i.status === "nao_tem" || i.status === "nao_tem_tudo")
-      );
+        // 4. Anexa cada foto como imagem separada ──
+        const itensComFoto = (payload.itens || []).filter(
+          (i: any) =>
+            i.photo &&
+            i.photo.length > 0 &&
+            (i.status === "nao_tem" || i.status === "nao_tem_tudo")
+        );
 
-      console.log(`Itens com foto: ${itensComFoto.length}`);
+        console.log(`Itens com foto: ${itensComFoto.length}`);
 
-      for (const item of itensComFoto) {
-        const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
-        const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
-        await anexarFotoNaTarefa(todoTaskId, item.photo, filename);
+        for (const item of itensComFoto) {
+          const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+          const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
+          await anexarFotoNaTarefa(todoTaskId, item.photo, filename);
+        }
+
+        console.log("✅ Todas as fotos anexadas!");
+      } catch (err) {
+        console.error("Erro ao criar tarefa de COMPRAS:", err);
       }
 
-      console.log("✅ Todas as fotos anexadas!");
     } catch (err) {
-      console.error("Erro ao criar tarefa de COMPRAS:", err);
+      error = err as Error;
+      console.error("Erro na TASK 2 (conferencia-baixada):", err);
+    } finally {
+      // 5. Atualizar registro no Supabase com resultados
+      const processingTimeMs = Date.now() - startTime;
+      if (isSupabaseConfigured()) {
+        await salvarConferenciaBaixadaNoSupabase(
+          payload,
+          tarefaOriginalId || undefined,
+          todoTaskId || undefined,
+          processingTimeMs,
+          error || undefined
+        );
+      }
     }
   },
 });

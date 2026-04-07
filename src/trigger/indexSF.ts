@@ -1,4 +1,9 @@
 import { task } from "@trigger.dev/sdk/v3";
+import { 
+  salvarListaBaixadaNoSupabase, 
+  salvarConferenciaBaixadaNoSupabase,
+  isSupabaseConfigured 
+} from "./supabaseClient";
 
 // ── Credenciais SOYE / FACIL ─────────────────────────────────────────────────
 const CLICKUP_TOKEN_SF = process.env.CLICKUP_TOKEN_SF!;
@@ -157,59 +162,87 @@ export const listaBaixadaSF = task({
   machine: "micro",
   maxDuration: 30,
   run: async (payload: any) => {
-    const dataFormatada = payload.dataDownload
-      ? new Date(payload.dataDownload).toLocaleString("pt-BR", {
-          timeZone: "America/Fortaleza",
-        })
-      : new Date().toLocaleString("pt-BR", {
-          timeZone: "America/Fortaleza",
-        });
+    const startTime = Date.now();
+    let taskId: string | null = null;
+    let error: Error | null = null;
 
-    const isCD = payload.flag === "cd";
-    const listId = getListId(payload.empresa ?? "SOYE", isCD);
-    const status = isCD ? "EM CONFERENCIA" : "to do";
-    const flagLabel = isCD ? "CD" : "LOJA";
+    try {
+      const dataFormatada = payload.dataDownload
+        ? new Date(payload.dataDownload).toLocaleString("pt-BR", {
+            timeZone: "America/Fortaleza",
+          })
+        : new Date().toLocaleString("pt-BR", {
+            timeZone: "America/Fortaleza",
+          });
 
-    const taskId = await criarTarefaClickUp(
-      listId,
-      `📦 ${payload.titulo} — ${payload.pessoa}`,
-      `Pessoa: ${payload.pessoa}
+      const isCD = payload.flag === "cd";
+      const listId = getListId(payload.empresa ?? "SOYE", isCD);
+      const status = isCD ? "EM CONFERENCIA" : "to do";
+      const flagLabel = isCD ? "CD" : "LOJA";
+
+      // 1. Salvar no Supabase (antes do ClickUp para tracking)
+      if (isSupabaseConfigured()) {
+        await salvarListaBaixadaNoSupabase(payload);
+      }
+
+      // 2. Cria a Tarefa Principal de Conferência
+      taskId = await criarTarefaClickUp(
+        listId,
+        `📦 ${payload.titulo} — ${payload.pessoa}`,
+        `Pessoa: ${payload.pessoa}
 Título: ${payload.titulo}
 Empresa: ${payload.empresa}
 Tipo: ${flagLabel}
 Itens: ${payload.totalItens}
 Data: ${dataFormatada}`,
-      status
-    );
+        status
+      );
 
-    await Promise.all([
-      anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
-        type: "conference-file",
-        empresa: payload.empresa ?? "SOYE",
-        flag: payload.flag ?? "loja",
-        items: payload.produtos.map((p: any) => ({
-          codigo: p.barcode,
-          sku: p.sku || "",
-          quantidade: p.quantity ?? p.quantidade,
-          photo: p.photo || null,
-        })),
-      }),
-      anexarTxtNaTarefa(
-        taskId,
-        `lista_${payload.pessoa}`,
-        (() => {
-          const soCodigosBloco = payload.produtos
-            .map((p: any) => p.barcode)
-            .join("\n");
-          const codigoQuantidadeBloco = payload.produtos
-            .map(
-              (p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`
-            )
-            .join("\n");
-          return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
-        })()
-      ),
-    ]);
+      await Promise.all([
+        anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
+          type: "conference-file",
+          empresa: payload.empresa ?? "SOYE",
+          flag: payload.flag ?? "loja",
+          items: payload.produtos.map((p: any) => ({
+            codigo: p.barcode,
+            sku: p.sku || "",
+            quantidade: p.quantity ?? p.quantidade,
+            photo: p.photo || null,
+          })),
+        }),
+        anexarTxtNaTarefa(
+          taskId,
+          `lista_${payload.pessoa}`,
+          (() => {
+            const soCodigosBloco = payload.produtos
+              .map((p: any) => p.barcode)
+              .join("\n");
+            const codigoQuantidadeBloco = payload.produtos
+              .map(
+                (p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`
+              )
+              .join("\n");
+            return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
+          })()
+        ),
+      ]);
+
+    } catch (err) {
+      error = err as Error;
+      console.error("Erro na TASK 1 (lista-baixada-sf):", err);
+    } finally {
+      // 3. Atualizar registro no Supabase com resultados
+      const processingTimeMs = Date.now() - startTime;
+      if (isSupabaseConfigured()) {
+        await salvarListaBaixadaNoSupabase(
+          payload,
+          taskId || undefined,
+          undefined, // Não tem tarefa de compras no SF
+          processingTimeMs,
+          error || undefined
+        );
+      }
+    }
   },
 });
 
@@ -219,16 +252,22 @@ export const conferenciaBaixadaSF = task({
   machine: "micro",
   maxDuration: 60,
   run: async (payload: any) => {
-    const dataFormatada = payload.dataConferencia
-      ? new Date(payload.dataConferencia).toLocaleString("pt-BR", {
-          timeZone: "America/Fortaleza",
-        })
-      : new Date().toLocaleString("pt-BR", {
-          timeZone: "America/Fortaleza",
-        });
+    const startTime = Date.now();
+    let tarefaOriginalId: string | null = null;
+    let todoTaskId: string | null = null;
+    let error: Error | null = null;
 
-    const isCD = payload.flag === "cd";
-    const listId = getListId(payload.empresa ?? "SOYE", isCD);
+    try {
+      const dataFormatada = payload.dataConferencia
+        ? new Date(payload.dataConferencia).toLocaleString("pt-BR", {
+            timeZone: "America/Fortaleza",
+          })
+        : new Date().toLocaleString("pt-BR", {
+            timeZone: "America/Fortaleza",
+          });
+
+      const isCD = payload.flag === "cd";
+      const listId = getListId(payload.empresa ?? "SOYE", isCD);
 
     const statusMap: Record<string, string> = {
       separado: "✅ Separado",
@@ -258,8 +297,13 @@ export const conferenciaBaixadaSF = task({
       itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
     }
 
-    // ── 1. Cria tarefa original na lista de conferência ──
-    const tarefaOriginalId = await criarTarefaClickUp(
+    // 1. Salvar no Supabase (antes do ClickUp para tracking)
+    if (isSupabaseConfigured()) {
+      await salvarConferenciaBaixadaNoSupabase(payload);
+    }
+
+    // 2. Cria tarefa original na lista de conferência ──
+    tarefaOriginalId = await criarTarefaClickUp(
       listId,
       `✅ ${payload.conferente} — ${dataFormatada}`,
       `Conferente: ${payload.conferente}
@@ -341,6 +385,23 @@ ${listaFaltantes || "Nenhum item faltante."}
       console.log("✅ Todas as fotos anexadas!");
     } catch (err) {
       console.error("Erro ao criar tarefa de COMPRAS:", err);
+    }
+
+    } catch (err) {
+      error = err as Error;
+      console.error("Erro na TASK 2 (conferencia-baixada-sf):", err);
+    } finally {
+      // 5. Atualizar registro no Supabase com resultados
+      const processingTimeMs = Date.now() - startTime;
+      if (isSupabaseConfigured()) {
+        await salvarConferenciaBaixadaNoSupabase(
+          payload,
+          tarefaOriginalId || undefined,
+          todoTaskId || undefined,
+          processingTimeMs,
+          error || undefined
+        );
+      }
     }
   },
 });
