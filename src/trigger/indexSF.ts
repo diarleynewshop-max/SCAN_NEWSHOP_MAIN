@@ -295,13 +295,6 @@ ${itensTexto}`,
         )
         .join("\n");
 
-      const listaTodos = (payload.itens || [])
-        .map(
-          (item: any, idx: number) =>
-            `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | ${statusMap[item.status] ?? item.status} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0}${item.photo ? " 📸" : ""}`
-        )
-        .join("\n");
-
       const todoTaskId = await criarTarefaClickUp(
         CLICKUP_TODO_LIST_ID_SF,
         `🛒 Compras: ${payload.empresa} — ${payload.conferente} — ${dataFormatada}`,
@@ -323,10 +316,7 @@ Total itens conferidos: ${payload.totalItens}
 🛒 ITENS FALTANTES (${itensNaoTem.length})
 ${listaFaltantes || "Nenhum item faltante."}
 
-📦 TODOS OS ITENS
-${listaTodos}
-
-📸 Fotos anexadas abaixo (itens marcados com 📸)`,
+📸 Fotos anexadas abaixo (se houver)`,
         "to do"
       );
 
