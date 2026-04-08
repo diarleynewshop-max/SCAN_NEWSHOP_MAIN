@@ -31,6 +31,7 @@ const baseMenuItems = [
   { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))"     },
   { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },
+  { Icon: Settings,     label: "Configuração", description: "Modo escuro e layout desktop/mobile", path: null, accent: "hsl(var(--indigo))" },
 ];
 
 // Menu para compras (compras, admin, super)
@@ -52,14 +53,19 @@ interface MenuCardProps {
   accent: string;
   navigate: (path: string) => void;
   setMostrarPerfil: (show: boolean) => void;
+  setMostrarConfiguracoes: (show: boolean) => void;
 }
 
 const MenuCard: React.FC<MenuCardProps> = ({ 
-  Icon, label, description, path, accent, navigate, setMostrarPerfil 
+  Icon, label, description, path, accent, navigate, setMostrarPerfil, setMostrarConfiguracoes 
 }) => (
   <button onClick={() => {
     if (path === null) {
-      setMostrarPerfil(true);
+      if (label === "Perfil") {
+        setMostrarPerfil(true);
+      } else if (label === "Configuração") {
+        setMostrarConfiguracoes(true);
+      }
     } else {
       navigate(path);
     }
@@ -223,53 +229,56 @@ const Home = () => {
       </div>
 
        {/* ── Menu Cards ── */}
-       <div style={{ flex: 1, padding: "12px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
-         {/* Cards base (sempre visíveis) */}
-         {baseMenuItems.map(({ Icon, label, description, path, accent }) => (
-           <MenuCard 
-             key={label}
-             Icon={Icon}
-             label={label}
-             description={description}
-             path={path}
-             accent={accent}
-             navigate={navigate}
-             setMostrarPerfil={setMostrarPerfil}
-           />
-         ))}
-         
-         {/* Cards para compras (se tiver acesso) */}
-         {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
-           comprasMenuItems.map(({ Icon, label, description, path, accent }) => (
-             <MenuCard 
-               key={label}
-               Icon={Icon}
-               label={label}
-               description={description}
-               path={path}
-               accent={accent}
-               navigate={navigate}
-               setMostrarPerfil={setMostrarPerfil}
-             />
-           ))
-         )}
-         
-         {/* Cards para analytics (se tiver acesso) */}
-         {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
-           analyticsMenuItems.map(({ Icon, label, description, path, accent }) => (
-             <MenuCard 
-               key={label}
-               Icon={Icon}
-               label={label}
-               description={description}
-               path={path}
-               accent={accent}
-               navigate={navigate}
-               setMostrarPerfil={setMostrarPerfil}
-             />
-           ))
-         )}
-       </div>
+        <div style={{ flex: 1, padding: "12px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
+          {/* Cards base (sempre visíveis) */}
+          {baseMenuItems.map(({ Icon, label, description, path, accent }) => (
+            <MenuCard 
+              key={label}
+              Icon={Icon}
+              label={label}
+              description={description}
+              path={path}
+              accent={accent}
+              navigate={navigate}
+              setMostrarPerfil={setMostrarPerfil}
+              setMostrarConfiguracoes={setMostrarConfiguracoes}
+            />
+          ))}
+          
+          {/* Cards para compras (se tiver acesso) */}
+          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
+            comprasMenuItems.map(({ Icon, label, description, path, accent }) => (
+              <MenuCard 
+                key={label}
+                Icon={Icon}
+                label={label}
+                description={description}
+                path={path}
+                accent={accent}
+                navigate={navigate}
+                setMostrarPerfil={setMostrarPerfil}
+                setMostrarConfiguracoes={setMostrarConfiguracoes}
+              />
+            ))
+          )}
+          
+          {/* Cards para analytics (se tiver acesso) */}
+          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
+            analyticsMenuItems.map(({ Icon, label, description, path, accent }) => (
+              <MenuCard 
+                key={label}
+                Icon={Icon}
+                label={label}
+                description={description}
+                path={path}
+                accent={accent}
+                navigate={navigate}
+                setMostrarPerfil={setMostrarPerfil}
+                setMostrarConfiguracoes={setMostrarConfiguracoes}
+              />
+            ))
+          )}
+        </div>
 
       {/* ── Storage Card ── */}
       <div style={{ padding: "8px 16px 24px" }}>
@@ -639,18 +648,6 @@ const Home = () => {
                       }}
                     >
                       <Store style={{ width: 18, height: 18 }} /> Editar Login
-                    </button>
-
-                    <button onClick={() => { setMostrarConfiguracoes(true); }}
-                      style={{
-                        width: "100%", height: 48, background: "hsl(var(--secondary))",
-                        color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))",
-                        borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
-                        cursor: "pointer", display: "flex", alignItems: "center",
-                        justifyContent: "center", gap: 8,
-                      }}
-                    >
-                      <Settings style={{ width: 18, height: 18 }} /> Configurações
                     </button>
 
                     <button onClick={() => { fazerLogout(); setMostrarPerfil(false); }}
