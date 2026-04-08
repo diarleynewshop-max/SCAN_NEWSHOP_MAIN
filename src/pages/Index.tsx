@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle } from "lucide-react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import BarcodeScanner from "@/components/BarcodeScanner";
@@ -76,7 +76,12 @@ const Index = () => {
   const [modalPassword, setModalPassword] = useState("");
   const [passwordError, setPasswordError] = useState(false);
   const [passwordUnlocked, setPasswordUnlocked] = useState(false);
-  const [showPassword, setShowPassword]   = useState(false);
+  const [showPassword, setShowPassword] = useState(false);
+  
+  // Estado para modo Desktop
+  const [modoDesktop, setModoDesktop] = useState(() => {
+    return localStorage.getItem('modoDesktop') === 'true';
+  });
   const [modalTitle, setModalTitle]       = useState("");
   const [modalPerson, setModalPerson]     = useState("");
 
@@ -212,24 +217,62 @@ const Index = () => {
   const flagBadge = { bg: "hsl(var(--primary)/0.10)", border: "hsl(var(--primary)/0.20)", text: "hsl(var(--primary))" };
 
   return (
-    <div className="min-h-screen flex flex-col max-w-md mx-auto" style={{ background: "hsl(var(--background))" }}>
+    <div className={`min-h-screen flex flex-col ${modoDesktop ? 'max-w-6xl mx-auto' : 'max-w-md mx-auto'}`} style={{ background: "hsl(var(--background))" }}>
 
       {/* ── Header ── */}
-      <header style={{ background: "hsl(var(--primary))", padding: "14px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", position: "relative", overflow: "hidden" }}>
+      <header style={{ 
+        background: "hsl(var(--primary))", 
+        padding: modoDesktop ? "18px 32px" : "14px 20px", 
+        display: "flex", 
+        alignItems: "center", 
+        justifyContent: "space-between", 
+        position: "relative", 
+        overflow: "hidden" 
+      }}>
         <div style={{ position: "absolute", top: -30, right: -30, width: 100, height: 100, borderRadius: "50%", background: "rgba(255,255,255,0.06)", pointerEvents: "none" }} />
         <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
           <button onClick={() => navigate("/")} style={{ color: "rgba(255,255,255,0.5)", background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex" }}>
-            <ArrowLeft style={{ width: 18, height: 18 }} />
+            <ArrowLeft style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} />
           </button>
-          <img src={LOGO} alt="Newshop" style={{ height: 22, filter: "brightness(0) invert(1)", objectFit: "contain" }} />
+          <img src={LOGO} alt="Newshop" style={{ 
+            height: modoDesktop ? 26 : 22, 
+            filter: "brightness(0) invert(1)", 
+            objectFit: "contain" 
+          }} />
+          {modoDesktop && (
+            <div style={{ marginLeft: 16, paddingLeft: 16, borderLeft: "1px solid rgba(255,255,255,0.2)" }}>
+              <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "rgba(255,255,255,0.6)", letterSpacing: "0.1em", textTransform: "uppercase" }}>
+                SCANNER
+              </p>
+              <p style={{ fontSize: 12, color: "rgba(255,255,255,0.9)", fontWeight: 600, marginTop: 2 }}>
+                Sistema de Leitura de Códigos
+              </p>
+            </div>
+          )}
         </div>
         <div style={{ textAlign: "right" }}>
-          <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "rgba(255,255,255,0.45)", letterSpacing: "0.15em", textTransform: "uppercase" }}>
+          <p style={{ 
+            fontFamily: "var(--font-mono)", 
+            fontSize: modoDesktop ? 10 : 9, 
+            color: "rgba(255,255,255,0.45)", 
+            letterSpacing: "0.15em", 
+            textTransform: "uppercase" 
+          }}>
             {activeList ? activeList.title : "Pedido"}
           </p>
           {activeList && (
-            <p style={{ fontFamily: "var(--font-mono)", fontSize: 11, color: "rgba(255,255,255,0.8)", marginTop: 1 }}>
+            <p style={{ 
+              fontFamily: "var(--font-mono)", 
+              fontSize: modoDesktop ? 12 : 11, 
+              color: "rgba(255,255,255,0.8)", 
+              marginTop: 1 
+            }}>
               {productCount} produto(s)
+            </p>
+          )}
+          {modoDesktop && !activeList && (
+            <p style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>
+              {modoDesktop ? "🖥️ Modo Desktop" : "📱 Modo Mobile"}
             </p>
           )}
         </div>
@@ -237,7 +280,14 @@ const Index = () => {
 
       {/* ── Active banner ── */}
       {activeList && (
-        <div style={{ background: "hsl(38 92% 50% / 0.12)", borderBottom: "1.5px solid hsl(38 92% 50% / 0.2)", padding: "10px 20px", display: "flex", alignItems: "center", gap: 10 }}>
+        <div style={{ 
+          background: "hsl(38 92% 50% / 0.12)", 
+          borderBottom: "1.5px solid hsl(38 92% 50% / 0.2)", 
+          padding: modoDesktop ? "12px 32px" : "10px 20px", 
+          display: "flex", 
+          alignItems: "center", 
+          gap: 10 
+        }}>
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "hsl(var(--warning))", flexShrink: 0, display: "inline-block", animation: "pulse 2s ease-in-out infinite" }} />
           <style>{`@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.85)}}`}</style>
           <p style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "hsl(var(--foreground))" }}>
@@ -257,54 +307,112 @@ const Index = () => {
       )}
 
       {/* ── Tabs ── */}
-      <div style={{ background: "#fff", borderBottom: "1px solid hsl(var(--border))", display: "flex", padding: "0 8px" }}>
+      <div style={{ 
+        background: "#fff", 
+        borderBottom: "1px solid hsl(var(--border))", 
+        display: "flex", 
+        padding: modoDesktop ? "0 32px" : "0 8px" 
+      }}>
         {tabs.map(({ key, label, Icon }) => (
           <button key={key} onClick={() => setView(key)}
             style={{
-              flex: 1, padding: "11px 0 9px", fontSize: 11, fontWeight: 700,
-              letterSpacing: "0.06em", textTransform: "uppercase",
-              display: "flex", flexDirection: "column", alignItems: "center", gap: 4,
-              background: "transparent", border: "none",
+              flex: 1, 
+              padding: modoDesktop ? "14px 0 12px" : "11px 0 9px", 
+              fontSize: modoDesktop ? 12 : 11, 
+              fontWeight: 700,
+              letterSpacing: "0.06em", 
+              textTransform: "uppercase",
+              display: "flex", 
+              flexDirection: modoDesktop ? "row" : "column", 
+              alignItems: "center", 
+              gap: modoDesktop ? 8 : 4,
+              justifyContent: modoDesktop ? "center" : "center",
+              background: "transparent", 
+              border: "none",
               borderBottom: view === key ? "2.5px solid hsl(var(--primary))" : "2.5px solid transparent",
               color: view === key ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
-              cursor: "pointer", transition: "all 0.18s",
+              cursor: "pointer", 
+              transition: "all 0.18s",
             }}
           >
-            <Icon style={{ width: 15, height: 15 }} />
+            <Icon style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15 }} />
             {label}
           </button>
         ))}
       </div>
 
       {/* ── Content ── */}
-      <div style={{ flex: 1, overflowY: "auto", padding: view === "scan" ? "20px" : "0" }}>
+      <div style={{ 
+        flex: 1, 
+        overflowY: "auto", 
+        padding: view === "scan" ? modoDesktop ? "24px 32px" : "20px" : "0" 
+      }}>
         {view === "scan" ? (
-          <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+          <div style={{ 
+            display: "flex", 
+            flexDirection: modoDesktop ? "row" : "column", 
+            gap: modoDesktop ? 24 : 16,
+            alignItems: modoDesktop ? "flex-start" : "stretch"
+          }}>
 
-            {!activeList && (
-              <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                <button onClick={() => setShowOpenModal(true)} style={{ ...S.btnPrimary }}>
-                  <ClipboardList style={{ width: 18, height: 18 }} /> Abrir Nova Lista
-                </button>
-                <div style={{ background: "hsl(var(--destructive) / 0.07)", border: "1px solid hsl(var(--destructive) / 0.15)", borderRadius: 10, padding: "12px 16px", display: "flex", alignItems: "center", gap: 8 }}>
-                  <ClipboardList style={{ width: 15, height: 15, color: "hsl(var(--destructive))", flexShrink: 0 }} />
-                  <p style={{ fontSize: 13, color: "hsl(var(--destructive))", fontWeight: 500 }}>Abra uma lista para adicionar produtos</p>
+            {/* Coluna esquerda - Controles */}
+            <div style={{ 
+              flex: modoDesktop ? 1 : "auto", 
+              display: "flex", 
+              flexDirection: "column", 
+              gap: modoDesktop ? 20 : 16 
+            }}>
+              {!activeList && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+                  <button onClick={() => setShowOpenModal(true)} style={{ 
+                    ...S.btnPrimary,
+                    fontSize: modoDesktop ? 15 : 14,
+                    height: modoDesktop ? 56 : 52
+                  }}>
+                    <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Abrir Nova Lista
+                  </button>
+                  <div style={{ 
+                    background: "hsl(var(--destructive) / 0.07)", 
+                    border: "1px solid hsl(var(--destructive) / 0.15)", 
+                    borderRadius: 10, 
+                    padding: modoDesktop ? "16px 20px" : "12px 16px", 
+                    display: "flex", 
+                    alignItems: "center", 
+                    gap: 8 
+                  }}>
+                    <ClipboardList style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15, color: "hsl(var(--destructive))", flexShrink: 0 }} />
+                    <p style={{ 
+                      fontSize: modoDesktop ? 14 : 13, 
+                      color: "hsl(var(--destructive))", 
+                      fontWeight: 500 
+                    }}>
+                      Abra uma lista para adicionar produtos
+                    </p>
+                  </div>
+
+                  {/* Botão temporário para testar a API do Varejo Fácil - Remover depois */}
+                  <button onClick={() => {
+                    setActiveList({
+                      id: "test-" + Date.now(),
+                      title: "Teste API",
+                      person: "TESTE",
+                      empresa: "NEWSHOP",
+                      flag: "loja",
+                      products: [],
+                      createdAt: new Date(),
+                      status: "open",
+                    });
+                  }} style={{ 
+                    ...S.btnPrimary, 
+                    background: "hsl(var(--warning))", 
+                    color: "hsl(var(--warning-foreground))",
+                    fontSize: modoDesktop ? 15 : 14,
+                    height: modoDesktop ? 56 : 52
+                  }}>
+                    <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Criar Lista de Teste (API)
+                  </button>
                 </div>
-
-                {/* Botão temporário para testar a API do Varejo Fácil - Remover depois */}
-                {/*
-                <button
-                  onClick={async () => {
-                    const { testarApiVarejoFacil } = await import('@/lib/testApiVarejoFacilUtils');
-                    testarApiVarejoFacil();
-                  }}
-                  style={{ ...S.btnPrimary, background: "hsl(var(--warning))" }}
-                >
-                  Testar API Varejo Fácil
-                </button>
-                */}
-              </div>
-            )}
+              )}
 
             {/* Exibição das informações do produto */}
             {showProductInfo && (
@@ -394,15 +502,56 @@ const Index = () => {
 
             <button onClick={handleAdd} disabled={!activeList}
               style={{
-                ...S.btnPrimary, height: 56, fontSize: 15,
+                ...S.btnPrimary, 
+                height: modoDesktop ? 60 : 56, 
+                fontSize: modoDesktop ? 16 : 15,
                 opacity: activeList ? 1 : 0.45,
                 cursor: activeList ? "pointer" : "not-allowed",
               }}
             >
-              <Plus style={{ width: 20, height: 20 }} /> Adicionar Produto
+              <Plus style={{ width: modoDesktop ? 22 : 20, height: modoDesktop ? 22 : 20 }} /> Adicionar Produto
             </button>
 
-            {activeList && activeList.products.length > 0 && (
+            {/* Fechar coluna esquerda */}
+            </div>
+
+            {/* Coluna direita - Lista de produtos (apenas no desktop quando há produtos) */}
+            {modoDesktop && activeList && activeList.products.length > 0 && (
+              <div style={{ 
+                flex: 1, 
+                background: "hsl(var(--card))",
+                border: "1px solid hsl(var(--border))",
+                borderRadius: 16,
+                padding: modoDesktop ? 20 : 16,
+                maxHeight: "70vh",
+                overflowY: "auto"
+              }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 16 }}>
+                  <h3 style={{ 
+                    fontSize: modoDesktop ? 18 : 16, 
+                    fontWeight: 700, 
+                    color: "hsl(var(--foreground))" 
+                  }}>
+                    Produtos Adicionados
+                  </h3>
+                  <span style={{ 
+                    fontSize: modoDesktop ? 14 : 12, 
+                    color: "hsl(var(--muted-foreground))",
+                    fontWeight: 600
+                  }}>
+                    {activeList.products.length} itens
+                  </span>
+                </div>
+                <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                  {activeList.products.map((p) => (
+                    <ProductCard key={p.id} product={p} onDelete={deleteProduct} />
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Lista de produtos para mobile (mantém layout original) */}
+            {!modoDesktop && activeList && activeList.products.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
                 <p style={S.label}>Produtos adicionados</p>
                 {activeList.products.map((p) => (
