@@ -86,13 +86,10 @@ export function useAuth() {
 
   // Verificar se precisa mostrar modal de login ao montar o componente
   useEffect(() => {
-    // Se não há login salvo, mostrar modal após um breve delay
-    const timer = setTimeout(() => {
-      if (!loginSalvo) {
-        setMostrarModalLogin(true);
-      }
-    }, 500); // Delay para carregar a interface primeiro
-    return () => clearTimeout(timer);
+    // Se não há login salvo, mostrar modal imediatamente
+    if (!loginSalvo) {
+      setMostrarModalLogin(true);
+    }
   }, [loginSalvo]);
 
   const fazerLogin = (data: LoginData): boolean => {
