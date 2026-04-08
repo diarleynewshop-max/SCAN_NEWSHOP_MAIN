@@ -522,6 +522,16 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   });
 
   const enviarClickUp = async () => {
+    // Verifica se a conferência tem itens antes de enviar
+    if (items.length === 0) {
+      toast({ 
+        title: "❌ Conferência vazia", 
+        description: "Não é possível enviar conferências com 0 itens para o ClickUp.", 
+        variant: "destructive" 
+      });
+      return;
+    }
+    
     if (jaFoiEnviado() || sendStatus === "sent") {
       toast({ title: "⚠️ Já enviado!", description: "Este pedido já foi compartilhado no ClickUp.", variant: "destructive" });
       return;

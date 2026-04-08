@@ -248,6 +248,16 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
   };
 
   const enviarClickUp = async (list: ListData) => {
+    // Verifica se a lista tem itens antes de enviar
+    if (list.products.length === 0) {
+      toast({ 
+        title: "❌ Lista vazia", 
+        description: "Não é possível enviar listas com 0 itens para o ClickUp.", 
+        variant: "destructive" 
+      });
+      return;
+    }
+    
     if (list.sentToClickUp || listaJaFoiEnviada(list.id)) {
       toast({ title: "⚠️ Já enviado!", description: "Esta lista já foi enviada ao ClickUp.", variant: "destructive" });
       return;

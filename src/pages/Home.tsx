@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3 } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -111,8 +111,46 @@ const Home = () => {
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [erroSenha, setErroSenha] = useState(false);
   const [roleDetectado, setRoleDetectado] = useState<string | null>(null); // NOVO: para mostrar role detectado
+  
+  // Estados para configurações
+  const [modoEscuro, setModoEscuro] = useState(() => {
+    return localStorage.getItem('modoEscuro') === 'true';
+  });
+  const [modoDesktop, setModoDesktop] = useState(() => {
+    return localStorage.getItem('modoDesktop') === 'true';
+  });
+  const [mostrarConfiguracoes, setMostrarConfiguracoes] = useState(false);
 
   useEffect(() => { setStorage(getStorageSize()); }, []);
+
+  // Aplicar tema ao carregar
+  useEffect(() => {
+    if (modoEscuro) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  }, [modoEscuro]);
+
+  // Funções para configurações
+  const toggleModoEscuro = () => {
+    const novoModo = !modoEscuro;
+    setModoEscuro(novoModo);
+    localStorage.setItem('modoEscuro', novoModo.toString());
+    // Aplicar tema escuro/claro
+    if (novoModo) {
+      document.documentElement.classList.add('dark');
+    } else {
+      document.documentElement.classList.remove('dark');
+    }
+  };
+
+  const toggleModoDesktop = () => {
+    const novoModo = !modoDesktop;
+    setModoDesktop(novoModo);
+    localStorage.setItem('modoDesktop', novoModo.toString());
+    // Aqui você pode adicionar lógica para alternar entre layouts mobile/desktop
+  };
 
   const handleClear = () => {
     localStorage.removeItem(STORAGE_KEY);
@@ -603,6 +641,18 @@ const Home = () => {
                       <Store style={{ width: 18, height: 18 }} /> Editar Login
                     </button>
 
+                    <button onClick={() => { setMostrarConfiguracoes(true); }}
+                      style={{
+                        width: "100%", height: 48, background: "hsl(var(--secondary))",
+                        color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))",
+                        borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
+                        cursor: "pointer", display: "flex", alignItems: "center",
+                        justifyContent: "center", gap: 8,
+                      }}
+                    >
+                      <Settings style={{ width: 18, height: 18 }} /> Configurações
+                    </button>
+
                     <button onClick={() => { fazerLogout(); setMostrarPerfil(false); }}
                       style={{
                         width: "100%", height: 48, background: "hsl(var(--destructive) / 0.08)",
@@ -636,6 +686,167 @@ const Home = () => {
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Modal de Configurações ── */}
+      {mostrarConfiguracoes && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) setMostrarConfiguracoes(false); }}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
+            backdropFilter: "blur(4px)", display: "flex",
+            alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+          }}
+        >
+          <div style={{
+            background: "hsl(var(--card))",
+            width: "100%", maxWidth: 430,
+            borderRadius: "20px 20px 0 0", padding: "24px 20px 36px",
+            animation: "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+          }}>
+            <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />
+
+            <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
+              <div style={{ width: 48, height: 48, borderRadius: 14, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Settings style={{ width: 22, height: 22, color: "hsl(var(--primary))" }} />
+              </div>
+              <div>
+                <p style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>Configurações</p>
+                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Personalize sua experiência no app</p>
+              </div>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+              
+              {/* Modo Escuro/Claro */}
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {modoEscuro ? <Moon style={{ width: 18, height: 18, color: "hsl(var(--primary))" }} /> : <Sun style={{ width: 18, height: 18, color: "hsl(var(--primary))" }} />}
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))" }}>Modo {modoEscuro ? "Escuro" : "Claro"}</p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Alternar entre tema escuro e claro</p>
+                    </div>
+                  </div>
+                  <button onClick={toggleModoEscuro}
+                    style={{
+                      width: 52, height: 28, borderRadius: 14,
+                      background: modoEscuro ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                      border: "none", cursor: "pointer", position: "relative",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <div style={{
+                      position: "absolute", top: 2, left: modoEscuro ? 26 : 2,
+                      width: 24, height: 24, borderRadius: "50%",
+                      background: "white", transition: "left 0.2s",
+                      boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                    }} />
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
+                  {modoEscuro ? "Tema escuro ativado para melhor visualização noturna" : "Tema claro ativado para melhor legibilidade diurna"}
+                </p>
+              </div>
+
+              {/* Modo Desktop/Mobile */}
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      {modoDesktop ? <Monitor style={{ width: 18, height: 18, color: "hsl(var(--primary))" }} /> : <Smartphone style={{ width: 18, height: 18, color: "hsl(var(--primary))" }} />}
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))" }}>Modo {modoDesktop ? "Desktop" : "Mobile"}</p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Otimizar layout para {modoDesktop ? "telas grandes" : "dispositivos móveis"}</p>
+                    </div>
+                  </div>
+                  <button onClick={toggleModoDesktop}
+                    style={{
+                      width: 52, height: 28, borderRadius: 14,
+                      background: modoDesktop ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                      border: "none", cursor: "pointer", position: "relative",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <div style={{
+                      position: "absolute", top: 2, left: modoDesktop ? 26 : 2,
+                      width: 24, height: 24, borderRadius: "50%",
+                      background: "white", transition: "left 0.2s",
+                      boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                    }} />
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
+                  {modoDesktop ? "Layout otimizado para uso em computadores e telas grandes" : "Layout otimizado para smartphones e tablets"}
+                </p>
+              </div>
+
+              {/* Informações do Sistema */}
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 8 }}>Informações do Sistema</p>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  <div>
+                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Versão</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>2.1.0</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Empresa</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.empresa || "Não configurado"}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Perfil</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.role ? loginSalvo.role.charAt(0).toUpperCase() + loginSalvo.role.slice(1) : "Não logado"}</p>
+                  </div>
+                  <div>
+                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Interface</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{modoDesktop ? "Desktop" : "Mobile"}</p>
+                  </div>
+                </div>
+              </div>
+
+              {/* Botões de ação */}
+              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+                <button onClick={() => { setMostrarConfiguracoes(false); }}
+                  style={{
+                    width: "100%", height: 48, background: "hsl(var(--primary))",
+                    color: "hsl(var(--primary-foreground))", border: "none",
+                    borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
+                    cursor: "pointer", display: "flex", alignItems: "center",
+                    justifyContent: "center", gap: 8,
+                  }}
+                >
+                  <Settings style={{ width: 18, height: 18 }} /> Salvar Configurações
+                </button>
+
+                <button onClick={() => { 
+                  setModoEscuro(false); 
+                  setModoDesktop(false); 
+                  localStorage.removeItem('modoEscuro');
+                  localStorage.removeItem('modoDesktop');
+                  document.documentElement.classList.remove('dark');
+                  setMostrarConfiguracoes(false); 
+                }}
+                  style={{
+                    width: "100%", height: 48, background: "hsl(var(--secondary))",
+                    color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))",
+                    borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
+                    cursor: "pointer", display: "flex", alignItems: "center",
+                    justifyContent: "center", gap: 8,
+                  }}
+                >
+                  <Trash2 style={{ width: 18, height: 18 }} /> Restaurar Padrões
+                </button>
+              </div>
+
+              <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", textAlign: "center", marginTop: 8 }}>
+                As configurações são salvas automaticamente no seu dispositivo.
+              </p>
             </div>
           </div>
         </div>
