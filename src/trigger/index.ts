@@ -255,9 +255,17 @@ ${listaFaltantesStr}
 
           console.log(`Tarefa de COMPRAS (Falta Estoque) criada: ${comprasTaskId}`);
 
-          // Anexar fotos dos itens sem estoque (se houver)
+          // Anexar fotos dos itens sem estoque (se houver) - com limite para evitar OOM
+          const MAX_FOTOS = 10;
           const itensComFoto = itensSemEstoque.filter((p: any) => p.photo && p.photo.length > 0);
-          for (const item of itensComFoto) {
+          const fotosExcedentes = itensComFoto.length > MAX_FOTOS;
+          const fotosProcessar = fotosExcedentes ? itensComFoto.slice(0, MAX_FOTOS) : itensComFoto;
+
+          if (fotosExcedentes) {
+            console.warn(`⚠️ Limite de ${MAX_FOTOS} fotos atingido. ${itensComFoto.length - MAX_FOTOS} fotos serão ignoradas.`);
+          }
+
+          for (const item of fotosProcessar) {
             const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
             const filename = `sem_estoque_${item.barcode}_${item.sku || "sem-sku"}.${ext}`;
             await anexarFotoNaTarefa(comprasTaskId, item.photo, filename);
@@ -406,17 +414,24 @@ ${listaFaltantes || "Nenhum item faltante."}
 
         console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
 
-        // 4. Anexa cada foto como imagem separada ──
+        // 4. Anexa cada foto como imagem separada (com limite para evitar OOM)
+        const MAX_FOTOS = 10;
         const itensComFoto = (payload.itens || []).filter(
           (i: any) =>
             i.photo &&
             i.photo.length > 0 &&
             (i.status === "nao_tem" || i.status === "nao_tem_tudo")
         );
+        const fotosExcedentes = itensComFoto.length > MAX_FOTOS;
+        const fotosProcessar = fotosExcedentes ? itensComFoto.slice(0, MAX_FOTOS) : itensComFoto;
 
-        console.log(`Itens com foto: ${itensComFoto.length}`);
+        if (fotosExcedentes) {
+          console.warn(`⚠️ Limite de ${MAX_FOTOS} fotos atingido. ${itensComFoto.length - MAX_FOTOS} fotos serão ignoradas.`);
+        }
 
-        for (const item of itensComFoto) {
+        console.log(`Itens com foto: ${fotosProcessar.length}${fotosExcedentes ? ` (de ${itensComFoto.length} total)` : ""}`);
+
+        for (const item of fotosProcessar) {
           const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
           const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
           await anexarFotoNaTarefa(todoTaskId, item.photo, filename);
