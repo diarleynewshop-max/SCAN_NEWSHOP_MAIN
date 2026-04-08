@@ -220,9 +220,7 @@ const Home = () => {
   };
 
   const handleLogin = () => {
-    console.log('handleLogin chamado', { empresa, senha, tituloPadrao, nomePessoa });
     if (!senha.trim()) {
-      console.log('Senha vazia');
       setErroSenha(true);
       setRoleDetectado(null);
       return;
@@ -230,10 +228,8 @@ const Home = () => {
     
     // Primeiro valida a senha para detectar o role
     const { valido, role } = validarSenha(empresa, senha);
-    console.log('Validação resultado:', { valido, role });
     
     if (!valido) {
-      console.log('Senha inválida');
       setErroSenha(true);
       setRoleDetectado(null);
       return;
@@ -248,9 +244,8 @@ const Home = () => {
       senha,
       tituloPadrao: tituloPadrao.trim(),
       nomePessoa: nomePessoa.trim(),
-      role // Adiciona o role aos dados
+      role
     });
-    console.log('fazerLogin retornou:', sucesso);
     
     if (!sucesso) {
       setErroSenha(true);

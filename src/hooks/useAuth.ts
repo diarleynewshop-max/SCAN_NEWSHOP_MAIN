@@ -50,7 +50,6 @@ export function salvarLogin(data: LoginData): void {
   try {
     // Não armazenar a senha correta, apenas marcar que a senha foi validada
     const { senha, ...dadosParaSalvar } = data;
-    console.log('Salvando login:', dadosParaSalvar);
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dadosParaSalvar));
   } catch (err) {
     console.error('Erro ao salvar login:', err);
@@ -94,11 +93,8 @@ export function useAuth() {
   }, [loginSalvo]);
 
   const fazerLogin = (data: LoginData): boolean => {
-    console.log('fazerLogin chamado com:', { empresa: data.empresa, senha: '[HIDDEN]', tituloPadrao: data.tituloPadrao, nomePessoa: data.nomePessoa });
     const { valido, role } = validarSenha(data.empresa, data.senha);
-    console.log('validação:', { valido, role });
     if (!valido) {
-      console.log('Senha inválida');
       return false;
     }
     
@@ -109,10 +105,9 @@ export function useAuth() {
       empresa: data.empresa, 
       tituloPadrao: data.tituloPadrao, 
       nomePessoa: data.nomePessoa,
-      role // NOVO: incluir role no estado
+      role
     });
     setMostrarModalLogin(false);
-    console.log('Login salvo com sucesso');
     return true;
   };
 
