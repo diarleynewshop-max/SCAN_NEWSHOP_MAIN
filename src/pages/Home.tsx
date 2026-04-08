@@ -994,24 +994,18 @@ const Home = () => {
                    </div>
                  )}
                  
-                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                   <div style={{ textAlign: "center", padding: "8px", background: "hsl(var(--muted) / 0.3)", borderRadius: 6 }}>
-                     <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Compras</p>
-                     <p style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--foreground))" }}>Compras1148</p>
-                   </div>
-                   <div style={{ textAlign: "center", padding: "8px", background: "hsl(var(--muted) / 0.3)", borderRadius: 6 }}>
-                     <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Diretoria</p>
-                     <p style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--foreground))" }}>Diretoria1148</p>
-                   </div>
-                   <div style={{ textAlign: "center", padding: "8px", background: "hsl(var(--muted) / 0.3)", borderRadius: 6 }}>
-                     <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Super Admin</p>
-                     <p style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--foreground))" }}>Admin1148</p>
-                   </div>
-                   <div style={{ textAlign: "center", padding: "8px", background: "hsl(var(--muted) / 0.3)", borderRadius: 6 }}>
-                     <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Operador</p>
-                     <p style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--foreground))" }}>Senha padrão</p>
-                   </div>
-                 </div>
+                  <div style={{ 
+                    background: "hsl(var(--muted) / 0.1)", 
+                    border: "1px solid hsl(var(--border))",
+                    borderRadius: 8,
+                    padding: "12px",
+                    marginTop: 8,
+                  }}>
+                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", margin: 0, lineHeight: 1.4 }}>
+                      <strong>Perfis disponíveis:</strong> Operador, Compras, Diretoria e Super Admin.<br/>
+                      Consulte a administração para obter as senhas especiais de cada perfil.
+                    </p>
+                  </div>
                </div>
 
                {/* Informações do Sistema */}
