@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone } from "lucide-react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone, ShoppingCart } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import BarcodeScanner from "@/components/BarcodeScanner";
@@ -217,10 +217,14 @@ const Index = () => {
 
   const productCount = activeList?.products.length ?? 0;
 
+  // Determine if user has 'compras' role to show COMPRADOR tab
+  const currentLogin = obterLoginSalvo();
+  const extraTab = currentLogin?.role === 'compras' ? [{ key: 'compras' as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
   const tabs = [
     { key: "scan"       as const, label: "Escanear",    Icon: ScanBarcode  },
     { key: "list"       as const, label: "Lista",        Icon: ClipboardList },
     { key: "conference" as const, label: "Conferência",  Icon: GitCompare   },
+    ...extraTab
   ];
 
   // Badge da flag ativa no banner
