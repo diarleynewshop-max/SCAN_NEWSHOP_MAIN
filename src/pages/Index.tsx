@@ -108,6 +108,16 @@ const Index = () => {
     }
   }, [showOpenModal]);
 
+  // Atualizar modoDesktop quando mudar no localStorage
+  useEffect(() => {
+    const handleStorageChange = () => {
+      setModoDesktop(localStorage.getItem('modoDesktop') === 'true');
+    };
+
+    window.addEventListener('storage', handleStorageChange);
+    return () => window.removeEventListener('storage', handleStorageChange);
+  }, []);
+
   const handleBarcodeDetected = useCallback((code: string) => {
     setBarcode(code);
     setShowScanner(false);
@@ -544,7 +554,7 @@ const Index = () => {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   {activeList.products.map((p) => (
-                    <ProductCard key={p.id} product={p} onDelete={deleteProduct} />
+                    <ProductCard key={p.id} product={p} onDelete={deleteProduct} modoDesktop={modoDesktop} />
                   ))}
                 </div>
               </div>
@@ -555,15 +565,25 @@ const Index = () => {
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
                 <p style={S.label}>Produtos adicionados</p>
                 {activeList.products.map((p) => (
-                  <ProductCard key={p.id} product={p} onDelete={deleteProduct} />
+                  <ProductCard key={p.id} product={p} onDelete={deleteProduct} modoDesktop={modoDesktop} />
                 ))}
               </div>
             )}
           </div>
         ) : view === "list" ? (
-          <ListHistory lists={lists} onUpdateList={updateList} onStartConference={() => setView("conference")} />
+          <ListHistory 
+            lists={lists} 
+            onUpdateList={updateList} 
+            onStartConference={() => setView("conference")} 
+            modoDesktop={modoDesktop}
+          />
         ) : (
-          <ConferenceView onBack={() => setView("list")} empresa={activeList?.empresa} flag={activeList?.flag} />
+          <ConferenceView 
+            onBack={() => setView("list")} 
+            empresa={activeList?.empresa} 
+            flag={activeList?.flag}
+            modoDesktop={modoDesktop}
+          />
         )}
       </div>
 
@@ -574,9 +594,14 @@ const Index = () => {
           Passo 3: Senha (aparece após empresa)
           Passo 4: Responsável (aparece após senha ok)
       ══════════════════════════════════════════ */}
-      <Dialog open={showOpenModal} onOpenChange={(open) => { setShowOpenModal(open); if (!open) resetModal(); }}>
-        <DialogContent className="max-w-sm" style={{ background: "#fff", borderRadius: 20, border: "1px solid hsl(var(--border))" }}>
-          <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
+       <Dialog open={showOpenModal} onOpenChange={(open) => { setShowOpenModal(open); if (!open) resetModal(); }}>
+        <DialogContent className={modoDesktop ? "max-w-md" : "max-w-sm"} style={{ 
+          background: "#fff", 
+          borderRadius: 20, 
+          border: "1px solid hsl(var(--border))",
+          padding: modoDesktop ? "24px" : "20px"
+        }}>
+          {!modoDesktop && <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />}
 
           <DialogHeader>
             <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 700, color: "hsl(var(--foreground))" }}>

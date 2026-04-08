@@ -55,6 +55,7 @@ interface ConferenceViewProps {
   onBack: () => void;
   empresa?: string;
   flag?: string;
+  modoDesktop?: boolean;
 }
 
 function formatTime(seconds: number): string {
@@ -80,7 +81,7 @@ const ConferenceFileSchema = z.object({
   ).min(1),
 });
 
-const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagProp = "loja" }: ConferenceViewProps) => {
+const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagProp = "loja", modoDesktop = false }: ConferenceViewProps) => {
   const [items, setItems] = useState<ConferenceItem[]>([]);
   const [phase, setPhase] = useState<Phase>("import");
   const [importError, setImportError] = useState<string | null>(null);

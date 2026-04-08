@@ -21,6 +21,7 @@ interface ListHistoryProps {
   lists: ListData[];
   onUpdateList: (list: ListData) => void;
   onStartConference: () => void;
+  modoDesktop?: boolean;
 }
 
 const S_INPUT = {
@@ -42,7 +43,7 @@ const STATUS_LEFT: Record<string, string> = {
   yellow: "hsl(var(--warning))",
 };
 
-const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProps) => {
+const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = false }: ListHistoryProps) => {
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -342,22 +343,57 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
   const estoqueZero = estoqueResultados.filter(r => r.status === "zero").length;
 
   return (
-    <div style={{ padding: 20, display: "flex", flexDirection: "column", gap: 12 }}>
+    <div style={{ 
+      padding: modoDesktop ? 24 : 20, 
+      display: "flex", 
+      flexDirection: "column", 
+      gap: modoDesktop ? 16 : 12 
+    }}>
       {sortedLists.map((list) => {
         const isAnalisando = analisandoId === list.id;
-        return (
-          <div key={list.id} style={{ background: "hsl(var(--card))", borderRadius: 16, border: "1px solid hsl(var(--border))", overflow: "hidden", boxShadow: "var(--shadow-xs)", position: "relative" }}>
-            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: 4, background: STATUS_LEFT[list.status] ?? STATUS_LEFT.yellow }} />
+         return (
+          <div key={list.id} style={{ 
+            background: "hsl(var(--card))", 
+            borderRadius: modoDesktop ? 18 : 16, 
+            border: "1px solid hsl(var(--border))", 
+            overflow: "hidden", 
+            boxShadow: modoDesktop ? "var(--shadow-sm)" : "var(--shadow-xs)", 
+            position: "relative" 
+          }}>
+            <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: modoDesktop ? 6 : 4, background: STATUS_LEFT[list.status] ?? STATUS_LEFT.yellow }} />
 
-            <div style={{ padding: "16px 16px 12px 20px", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+            <div style={{ 
+              padding: modoDesktop ? "20px 20px 16px 24px" : "16px 16px 12px 20px", 
+              display: "flex", 
+              alignItems: "flex-start", 
+              justifyContent: "space-between", 
+              gap: modoDesktop ? 16 : 12 
+            }}>
               <div style={{ flex: 1, minWidth: 0 }}>
-                <p style={{ fontFamily: "var(--font-serif)", fontSize: 16, fontWeight: 700, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{list.title}</p>
-                {(() => {
+                <p style={{ 
+                  fontFamily: "var(--font-serif)", 
+                  fontSize: modoDesktop ? 18 : 16, 
+                  fontWeight: 700, 
+                  color: "hsl(var(--foreground))", 
+                  overflow: "hidden", 
+                  textOverflow: "ellipsis", 
+                  whiteSpace: "nowrap" 
+                }}>
+                  {list.title}
+                </p>
+                 {(() => {
                   const emp = list.empresa || list.title.split("—")[0].trim().split(" — ")[0].trim();
                   return (
                     <span style={{
-                      display: "inline-block", marginTop: 4, padding: "2px 8px", borderRadius: 5, fontSize: 9, fontWeight: 700,
-                      fontFamily: "var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase",
+                      display: "inline-block", 
+                      marginTop: modoDesktop ? 6 : 4, 
+                      padding: modoDesktop ? "3px 10px" : "2px 8px", 
+                      borderRadius: modoDesktop ? 6 : 5, 
+                      fontSize: modoDesktop ? 10 : 9, 
+                      fontWeight: 700,
+                      fontFamily: "var(--font-mono)", 
+                      letterSpacing: "0.08em", 
+                      textTransform: "uppercase",
                       background: "hsl(var(--primary) / 0.1)",
                       color: "hsl(var(--primary))",
                       border: "1px solid hsl(var(--primary) / 0.2)",
@@ -366,22 +402,77 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
                     </span>
                   );
                 })()}
-                <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 3 }}>👤 {list.person} · {list.createdAt.toLocaleDateString("pt-BR")}</p>
+                <p style={{ 
+                  fontSize: modoDesktop ? 13 : 12, 
+                  color: "hsl(var(--muted-foreground))", 
+                  marginTop: modoDesktop ? 4 : 3 
+                }}>
+                  👤 {list.person} · {list.createdAt.toLocaleDateString("pt-BR")}
+                </p>
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <div style={{ fontFamily: "var(--font-serif)", fontSize: 28, fontWeight: 900, color: "hsl(var(--foreground))", lineHeight: 1 }}>{list.products.length}</div>
-                <div style={{ fontFamily: "var(--font-mono)", fontSize: 9, color: "hsl(var(--muted-foreground))", letterSpacing: "0.1em", textTransform: "uppercase" }}>itens</div>
+                <div style={{ 
+                  fontFamily: "var(--font-serif)", 
+                  fontSize: modoDesktop ? 32 : 28, 
+                  fontWeight: 900, 
+                  color: "hsl(var(--foreground))", 
+                  lineHeight: 1 
+                }}>
+                  {list.products.length}
+                </div>
+                <div style={{ 
+                  fontFamily: "var(--font-mono)", 
+                  fontSize: modoDesktop ? 10 : 9, 
+                  color: "hsl(var(--muted-foreground))", 
+                  letterSpacing: "0.1em", 
+                  textTransform: "uppercase" 
+                }}>
+                  itens
+                </div>
               </div>
             </div>
 
-            <div style={{ display: "flex", gap: 8, padding: "10px 16px 6px 20px", borderTop: "1px solid hsl(var(--muted))" }}>
+            <div style={{ 
+              display: "flex", 
+              gap: modoDesktop ? 10 : 8, 
+              padding: modoDesktop ? "12px 20px 8px 24px" : "10px 16px 6px 20px", 
+              borderTop: "1px solid hsl(var(--muted))" 
+            }}>
               <button onClick={() => openEdit(list)}
-                style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))" }}>
-                <Pencil style={{ width: 13, height: 13 }} /> Editar
+                style={{ 
+                  flex: 1, 
+                  height: modoDesktop ? 40 : 36, 
+                  borderRadius: modoDesktop ? 10 : 8, 
+                  fontSize: modoDesktop ? 13 : 12, 
+                  fontWeight: 600, 
+                  display: "flex", 
+                  alignItems: "center", 
+                  justifyContent: "center", 
+                  gap: modoDesktop ? 6 : 5, 
+                  cursor: "pointer", 
+                  background: "hsl(var(--secondary))", 
+                  color: "hsl(var(--foreground))", 
+                  border: "1px solid hsl(var(--border))" 
+                }}>
+                <Pencil style={{ width: modoDesktop ? 14 : 13, height: modoDesktop ? 14 : 13 }} /> Editar
               </button>
               <button onClick={() => { setDownloadOpen(list.id); setMenuOpen(null); }}
-                style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))" }}>
-                <Download style={{ width: 13, height: 13 }} /> Baixar
+                style={{ 
+                  flex: 1, 
+                  height: modoDesktop ? 40 : 36, 
+                  borderRadius: modoDesktop ? 10 : 8, 
+                  fontSize: modoDesktop ? 13 : 12, 
+                  fontWeight: 600, 
+                  display: "flex", 
+                  alignItems: "center", 
+                  justifyContent: "center", 
+                  gap: modoDesktop ? 6 : 5, 
+                  cursor: "pointer", 
+                  background: "hsl(var(--secondary))", 
+                  color: "hsl(var(--foreground))", 
+                  border: "1px solid hsl(var(--border))" 
+                }}>
+                <Download style={{ width: modoDesktop ? 14 : 13, height: modoDesktop ? 14 : 13 }} /> Baixar
               </button>
               {(() => {
                 const jaEnviado = list.sentToClickUp || listaJaFoiEnviada(list.id);
@@ -391,8 +482,15 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
                     onClick={() => enviarClickUp(list)}
                     disabled={enviando || jaEnviado}
                     style={{
-                      flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600,
-                      display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
+                      flex: 1, 
+                      height: modoDesktop ? 40 : 36, 
+                      borderRadius: modoDesktop ? 10 : 8, 
+                      fontSize: modoDesktop ? 13 : 12, 
+                      fontWeight: 600,
+                      display: "flex", 
+                      alignItems: "center", 
+                      justifyContent: "center", 
+                      gap: modoDesktop ? 6 : 5,
                       cursor: (enviando || jaEnviado) ? "not-allowed" : "pointer",
                       opacity: (enviando || jaEnviado) ? 0.75 : 1,
                       transition: "all 0.2s",
@@ -401,9 +499,17 @@ const ListHistory = ({ lists, onUpdateList, onStartConference }: ListHistoryProp
                       border: "none",
                     }}
                   >
-                    {enviando && <span style={{ width: 11, height: 11, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} />}
-                    {jaEnviado && <span style={{ fontSize: 11 }}>✅</span>}
-                    {!enviando && !jaEnviado && <Share2 style={{ width: 13, height: 13 }} />}
+                    {enviando && <span style={{ 
+                      width: modoDesktop ? 12 : 11, 
+                      height: modoDesktop ? 12 : 11, 
+                      border: "2px solid currentColor", 
+                      borderTopColor: "transparent", 
+                      borderRadius: "50%", 
+                      display: "inline-block", 
+                      animation: "spin 0.7s linear infinite" 
+                    }} />}
+                    {jaEnviado && <span style={{ fontSize: modoDesktop ? 12 : 11 }}>✅</span>}
+                    {!enviando && !jaEnviado && <Share2 style={{ width: modoDesktop ? 14 : 13, height: modoDesktop ? 14 : 13 }} />}
                     {enviando ? "Enviando…" : jaEnviado ? "Enviado" : "ClickUp"}
                   </button>
                 );
