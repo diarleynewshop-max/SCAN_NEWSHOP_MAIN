@@ -941,42 +941,128 @@ const Home = () => {
                 </p>
               </div>
 
-              {/* Informações do Sistema */}
-              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
-                <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 8 }}>Informações do Sistema</p>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-                  <div>
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Versão</p>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>2.1.0</p>
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Empresa</p>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.empresa || "Não configurado"}</p>
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Perfil</p>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.role ? loginSalvo.role.charAt(0).toUpperCase() + loginSalvo.role.slice(1) : "Não logado"}</p>
-                  </div>
-                  <div>
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Interface</p>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{modoDesktop ? "Desktop" : "Mobile"}</p>
-                  </div>
-                </div>
-              </div>
+               {/* Alterar Perfil */}
+               <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                 <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 12 }}>Alterar Perfil</p>
+                 <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginBottom: 12 }}>
+                   Digite uma senha especial para alterar seu perfil de acesso:
+                 </p>
+                 <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
+                   <input
+                     type="password"
+                     placeholder="Digite a senha especial"
+                     style={{
+                       flex: 1,
+                       padding: "12px 14px",
+                       borderRadius: 8,
+                       border: "1px solid hsl(var(--border))",
+                       background: "hsl(var(--background))",
+                       color: "hsl(var(--foreground))",
+                       fontSize: 14,
+                       fontFamily: "var(--font-sans)",
+                     }}
+                     onChange={(e) => {
+                       const senha = e.target.value;
+                       // Verificar se é senha especial
+                       if (senha === 'Compras1148') {
+                         setRoleDetectado('compras');
+                       } else if (senha === 'Diretoria1148') {
+                         setRoleDetectado('admin');
+                       } else if (senha === 'Admin1148') {
+                         setRoleDetectado('super');
+                       } else {
+                         setRoleDetectado(null);
+                       }
+                     }}
+                   />
+                 </div>
+                 
+                 {roleDetectado && (
+                   <div style={{ 
+                     background: "hsl(var(--primary) / 0.1)", 
+                     border: "1px solid hsl(var(--primary) / 0.3)",
+                     borderRadius: 8,
+                     padding: "12px",
+                     marginBottom: 12,
+                   }}>
+                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--primary))", marginBottom: 4 }}>
+                       Perfil detectado: {roleDetectado.charAt(0).toUpperCase() + roleDetectado.slice(1)}
+                     </p>
+                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
+                       Clique em "Salvar Configurações" para aplicar o novo perfil
+                     </p>
+                   </div>
+                 )}
+                 
+                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                   <div style={{ textAlign: "center", padding: "8px", background: "hsl(var(--muted) / 0.3)", borderRadius: 6 }}>
+                     <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Compras</p>
+                     <p style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--foreground))" }}>Compras1148</p>
+                   </div>
+                   <div style={{ textAlign: "center", padding: "8px", background: "hsl(var(--muted) / 0.3)", borderRadius: 6 }}>
+                     <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Diretoria</p>
+                     <p style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--foreground))" }}>Diretoria1148</p>
+                   </div>
+                   <div style={{ textAlign: "center", padding: "8px", background: "hsl(var(--muted) / 0.3)", borderRadius: 6 }}>
+                     <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Super Admin</p>
+                     <p style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--foreground))" }}>Admin1148</p>
+                   </div>
+                   <div style={{ textAlign: "center", padding: "8px", background: "hsl(var(--muted) / 0.3)", borderRadius: 6 }}>
+                     <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Operador</p>
+                     <p style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--foreground))" }}>Senha padrão</p>
+                   </div>
+                 </div>
+               </div>
 
-              {/* Botões de ação */}
-              <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-                <button onClick={() => { setMostrarConfiguracoes(false); }}
-                  style={{
-                    width: "100%", height: 48, background: "hsl(var(--primary))",
-                    color: "hsl(var(--primary-foreground))", border: "none",
-                    borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
-                    cursor: "pointer", display: "flex", alignItems: "center",
-                    justifyContent: "center", gap: 8,
-                  }}
-                >
-                  <Settings style={{ width: 18, height: 18 }} /> Salvar Configurações
-                </button>
+               {/* Informações do Sistema */}
+               <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                 <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 8 }}>Informações do Sistema</p>
+                 <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                   <div>
+                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Versão</p>
+                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>2.1.0</p>
+                   </div>
+                   <div>
+                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Empresa</p>
+                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.empresa || "Não configurado"}</p>
+                   </div>
+                   <div>
+                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Perfil Atual</p>
+                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.role ? loginSalvo.role.charAt(0).toUpperCase() + loginSalvo.role.slice(1) : "Não logado"}</p>
+                   </div>
+                   <div>
+                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Interface</p>
+                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{modoDesktop ? "Desktop" : "Mobile"}</p>
+                   </div>
+                 </div>
+               </div>
+
+               {/* Botões de ação */}
+               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
+                 <button onClick={() => { 
+                   // Aplicar novo perfil se detectado
+                   if (roleDetectado && loginSalvo) {
+                     const novoLogin = {
+                       ...loginSalvo,
+                       role: roleDetectado as 'operador' | 'compras' | 'admin' | 'super'
+                     };
+                     localStorage.setItem(STORAGE_KEY, JSON.stringify(novoLogin));
+                     // Atualizar estado
+                     setLoginSalvo(novoLogin);
+                     setRoleDetectado(null);
+                   }
+                   setMostrarConfiguracoes(false); 
+                 }}
+                   style={{
+                     width: "100%", height: 48, background: "hsl(var(--primary))",
+                     color: "hsl(var(--primary-foreground))", border: "none",
+                     borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 14, fontWeight: 700,
+                     cursor: "pointer", display: "flex", alignItems: "center",
+                     justifyContent: "center", gap: 8,
+                   }}
+                 >
+                   <Settings style={{ width: 18, height: 18 }} /> Salvar Configurações
+                 </button>
 
                 <button onClick={() => { 
                   setModoEscuro(false); 
