@@ -1,26 +1,48 @@
 import { useState, useEffect } from "react";
 
 type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
+type UserRole = 'operador' | 'compras' | 'admin' | 'super';
 
 export interface LoginData {
   empresa: Empresa;
   senha: string; // senha digitada (não armazenar a correta)
   tituloPadrao: string;
   nomePessoa: string;
+  role: UserRole; // NOVO: perfil do usuário
 }
 
 const STORAGE_KEY = "scan_newshop_login";
 
-// Senhas fixas (não devem ser expostas no frontend, mas como é um app offline, ficam aqui)
-const SENHAS: Record<Empresa, string> = {
+// Senhas fixas para operadores (não devem ser expostas no frontend, mas como é um app offline, ficam aqui)
+const SENHAS_OPERADOR: Record<Empresa, string> = {
   "NEWSHOP": "1148",
   "SOYE": "1090", 
   "FACIL": "2461"
 };
 
-// Validação de senha
-export function validarSenha(empresa: Empresa, senhaDigitada: string): boolean {
-  return SENHAS[empresa] === senhaDigitada;
+// Senhas especiais para perfis avançados (todas NEWSHOP por enquanto)
+const SENHAS_ESPECIAIS: Record<string, { role: UserRole; empresa: Empresa }> = {
+  'Compras1148': { role: 'compras', empresa: 'NEWSHOP' },
+  'Diretoria1148': { role: 'admin', empresa: 'NEWSHOP' },
+  'Admin1148': { role: 'super', empresa: 'NEWSHOP' },
+  // Adicionar mais senhas especiais conforme necessário
+};
+
+// Validação de senha e detecção de role
+export function validarSenha(empresa: Empresa, senhaDigitada: string): { valido: boolean; role: UserRole } {
+  // Primeiro verifica se é senha especial
+  const senhaEspecial = SENHAS_ESPECIAIS[senhaDigitada];
+  if (senhaEspecial) {
+    // Verifica se a empresa selecionada corresponde à empresa da senha especial
+    if (senhaEspecial.empresa === empresa) {
+      return { valido: true, role: senhaEspecial.role };
+    }
+    return { valido: false, role: 'operador' };
+  }
+  
+  // Depois verifica se é senha de operador normal
+  const valido = SENHAS_OPERADOR[empresa] === senhaDigitada;
+  return { valido, role: 'operador' };
 }
 
 // Salvar login no localStorage
@@ -39,7 +61,14 @@ export function obterLoginSalvo(): Omit<LoginData, 'senha'> | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
-    return JSON.parse(raw);
+    const dados = JSON.parse(raw);
+    
+    // Backward compatibility: se não tiver role, assume 'operador'
+    if (!dados.role) {
+      dados.role = 'operador';
+    }
+    
+    return dados;
   } catch {
     return null;
   }
@@ -67,11 +96,20 @@ export function useAuth() {
   }, [loginSalvo]);
 
   const fazerLogin = (data: LoginData): boolean => {
-    if (!validarSenha(data.empresa, data.senha)) {
+    const { valido, role } = validarSenha(data.empresa, data.senha);
+    if (!valido) {
       return false;
     }
-    salvarLogin(data);
-    setLoginSalvo({ empresa: data.empresa, tituloPadrao: data.tituloPadrao, nomePessoa: data.nomePessoa });
+    
+    // Adiciona o role detectado aos dados de login
+    const dadosComRole = { ...data, role };
+    salvarLogin(dadosComRole);
+    setLoginSalvo({ 
+      empresa: data.empresa, 
+      tituloPadrao: data.tituloPadrao, 
+      nomePessoa: data.nomePessoa,
+      role // NOVO: incluir role no estado
+    });
     setMostrarModalLogin(false);
     return true;
   };
@@ -88,6 +126,7 @@ export function useAuth() {
     setMostrarModalLogin,
     fazerLogin,
     fazerLogout,
-    senhasCorretas: SENHAS // Para referência (não exibir na UI)
+    senhasOperador: SENHAS_OPERADOR, // Para referência (não exibir na UI)
+    senhasEspeciais: SENHAS_ESPECIAIS // Para referência (não exibir na UI)
   };
 }
