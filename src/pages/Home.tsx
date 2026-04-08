@@ -158,8 +158,7 @@ const Home = () => {
     mostrarModalLogin, 
     setMostrarModalLogin, 
     fazerLogin,
-    fazerLogout,
-    senhasCorretas 
+    fazerLogout
   } = useAuth();
 
   // Estados para o formulário de login
@@ -1035,17 +1034,25 @@ const Home = () => {
                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
                  <button onClick={() => { 
                    // Aplicar novo perfil se detectado
+                   let perfilAlterado = false;
                    if (roleDetectado && loginSalvo) {
                      const novoLogin = {
                        ...loginSalvo,
                        role: roleDetectado as 'operador' | 'compras' | 'admin' | 'super'
                      };
-                     localStorage.setItem(STORAGE_KEY, JSON.stringify(novoLogin));
+                      localStorage.setItem("scan_newshop_login", JSON.stringify(novoLogin));
                      // Atualizar estado
                      setLoginSalvo(novoLogin);
                      setRoleDetectado(null);
+                     perfilAlterado = true;
                    }
-                   setMostrarConfiguracoes(false); 
+                   setMostrarConfiguracoes(false);
+                   // Se o perfil foi alterado, recarregar a página para atualizar abas
+                   if (perfilAlterado) {
+                     setTimeout(() => {
+                       window.location.reload();
+                     }, 300);
+                   }
                  }}
                    style={{
                      width: "100%", height: 48, background: "hsl(var(--primary))",

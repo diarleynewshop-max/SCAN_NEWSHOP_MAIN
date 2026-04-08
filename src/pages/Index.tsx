@@ -404,27 +404,7 @@ const Index = () => {
                     </p>
                   </div>
 
-                  {/* Botão temporário para testar a API do Varejo Fácil - Remover depois */}
-                  <button onClick={() => {
-                    setActiveList({
-                      id: "test-" + Date.now(),
-                      title: "Teste API",
-                      person: "TESTE",
-                      empresa: "NEWSHOP",
-                      flag: "loja",
-                      products: [],
-                      createdAt: new Date(),
-                      status: "open",
-                    });
-                  }} style={{ 
-                    ...S.btnPrimary, 
-                    background: "hsl(var(--warning))", 
-                    color: "hsl(var(--warning-foreground))",
-                    fontSize: modoDesktop ? 15 : 14,
-                    height: modoDesktop ? 56 : 52
-                  }}>
-                    <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Criar Lista de Teste (API)
-                  </button>
+
                 </div>
               )}
 
