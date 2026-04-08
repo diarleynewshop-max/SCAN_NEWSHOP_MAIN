@@ -58,39 +58,92 @@ interface MenuCardProps {
 
 const MenuCard: React.FC<MenuCardProps> = ({ 
   Icon, label, description, path, accent, navigate, setMostrarPerfil, setMostrarConfiguracoes 
-}) => (
-  <button onClick={() => {
-    if (path === null) {
-      if (label === "Perfil") {
-        setMostrarPerfil(true);
-      } else if (label === "Configuração") {
-        setMostrarConfiguracoes(true);
+}) => {
+  const isDesktop = window.innerWidth >= 768; // Simples check para desktop
+  
+  return (
+    <button onClick={() => {
+      if (path === null) {
+        if (label === "Perfil") {
+          setMostrarPerfil(true);
+        } else if (label === "Configuração") {
+          setMostrarConfiguracoes(true);
+        }
+      } else {
+        navigate(path);
       }
-    } else {
-      navigate(path);
-    }
-  }}
-    style={{
-      width: "100%", display: "flex", alignItems: "center", gap: 16,
-      padding: "16px 18px", borderRadius: 16,
-      background: "hsl(var(--card))",
-      border: "1px solid hsl(var(--border))",
-      boxShadow: "var(--shadow-sm)", cursor: "pointer", textAlign: "left",
-      transition: "all 0.18s",
     }}
-  >
-    <div style={{ width: 52, height: 52, borderRadius: 14, flexShrink: 0, background: accent + "14", display: "flex", alignItems: "center", justifyContent: "center" }}>
-      <Icon style={{ width: 24, height: 24, color: accent }} />
-    </div>
-    <div style={{ flex: 1, minWidth: 0 }}>
-      <p style={{ fontSize: 15, fontWeight: 700, color: "hsl(var(--foreground))", marginBottom: 2 }}>{label}</p>
-      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", lineHeight: 1.4 }}>{description}</p>
-    </div>
-    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth="2" style={{ opacity: 0.4, flexShrink: 0 }}>
-      <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
-    </svg>
-  </button>
-);
+      style={{
+        width: "100%", 
+        display: "flex", 
+        alignItems: isDesktop ? "flex-start" : "center", 
+        gap: isDesktop ? 20 : 16,
+        padding: isDesktop ? "24px" : "16px 18px", 
+        borderRadius: isDesktop ? 20 : 16,
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--border))",
+        boxShadow: isDesktop ? "var(--shadow-md)" : "var(--shadow-sm)", 
+        cursor: "pointer", 
+        textAlign: "left",
+        transition: "all 0.18s",
+        height: isDesktop ? "auto" : "auto",
+        minHeight: isDesktop ? "140px" : "auto",
+      }}
+    >
+      <div style={{ 
+        width: isDesktop ? 64 : 52, 
+        height: isDesktop ? 64 : 52, 
+        borderRadius: isDesktop ? 16 : 14, 
+        flexShrink: 0, 
+        background: accent + (isDesktop ? "20" : "14"), 
+        display: "flex", 
+        alignItems: "center", 
+        justifyContent: "center" 
+      }}>
+        <Icon style={{ width: isDesktop ? 28 : 24, height: isDesktop ? 28 : 24, color: accent }} />
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <p style={{ 
+          fontSize: isDesktop ? 18 : 15, 
+          fontWeight: 700, 
+          color: "hsl(var(--foreground))", 
+          marginBottom: isDesktop ? 8 : 2 
+        }}>
+          {label}
+        </p>
+        <p style={{ 
+          fontSize: isDesktop ? 13 : 12, 
+          color: "hsl(var(--muted-foreground))", 
+          lineHeight: 1.5,
+          marginBottom: isDesktop ? 12 : 0
+        }}>
+          {description}
+        </p>
+        {isDesktop && path && (
+          <div style={{
+            display: "inline-flex",
+            alignItems: "center",
+            gap: 6,
+            fontSize: 12,
+            color: accent,
+            fontWeight: 600,
+            marginTop: "auto",
+          }}>
+            <span>Acessar</span>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+          </div>
+        )}
+      </div>
+      {!isDesktop && (
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth="2" style={{ opacity: 0.4, flexShrink: 0 }}>
+          <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+        </svg>
+      )}
+    </button>
+  );
+};
 
 const Home = () => {
   const navigate = useNavigate();
@@ -202,54 +255,87 @@ const Home = () => {
   };
 
   return (
-    <div className="min-h-screen flex flex-col max-w-md mx-auto" style={{ background: "hsl(var(--background))" }}>
+    <div className={`min-h-screen flex flex-col ${modoDesktop ? 'max-w-6xl mx-auto' : 'max-w-md mx-auto'}`} style={{ background: "hsl(var(--background))" }}>
 
       {/* ── Header ── */}
-      <header className="relative overflow-hidden pt-5 pb-7 px-5 bg-primary text-primary-foreground border-b border-border">
+      <header className={`relative overflow-hidden ${modoDesktop ? 'pt-6 pb-8 px-8' : 'pt-5 pb-7 px-5'} bg-primary text-primary-foreground border-b border-border`}>
         <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: "currentColor", opacity: 0.05, pointerEvents: "none" }} />
-        {/* AQUI ESTÁ A MÁGICA DA LOGO. Ela inverte a cor dependendo do tema! */}
-        <img 
-          src={LOGO} 
-          alt="Newshop" 
-          className="h-7 object-contain brightness-0 invert dark:invert-0" 
-        />
-        <p className="font-mono text-[10px] uppercase tracking-[0.18em] opacity-60 mt-2">
-          Sistema de Pedido
-        </p>
+        <div className={`${modoDesktop ? 'flex items-center justify-between' : ''}`}>
+          <div>
+            {/* AQUI ESTÁ A MÁGICA DA LOGO. Ela inverte a cor dependendo do tema! */}
+            <img 
+              src={LOGO} 
+              alt="Newshop" 
+              className={`${modoDesktop ? 'h-9' : 'h-7'} object-contain brightness-0 invert dark:invert-0`} 
+            />
+            <p className="font-mono text-[10px] uppercase tracking-[0.18em] opacity-60 mt-2">
+              Sistema de Pedido
+            </p>
+          </div>
+          
+          {modoDesktop && loginSalvo && (
+            <div className="flex items-center gap-4">
+              <div className="px-4 py-2 bg-primary-foreground/10 rounded-lg">
+                <div className="flex items-center gap-2">
+                  <User className="h-4 w-4" />
+                  <span className="text-sm font-medium">{loginSalvo.nomePessoa || "Usuário"}</span>
+                </div>
+                <div className="flex items-center gap-2 mt-1">
+                  <Store className="h-3 w-3" />
+                  <span className="text-xs opacity-80">{loginSalvo.empresa}</span>
+                  <span className="text-xs px-2 py-0.5 bg-primary-foreground/20 rounded">
+                    {loginSalvo.role ? loginSalvo.role.charAt(0).toUpperCase() + loginSalvo.role.slice(1) : "Operador"}
+                  </span>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
       </header>
 
       {/* ── Greeting ── */}
-      <div style={{ padding: "28px 20px 8px" }}>
-        <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.2em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6 }}>
-          Menu Principal
-        </p>
-        <h2 style={{ fontFamily: "var(--font-serif)", fontSize: 26, fontWeight: 900, color: "hsl(var(--foreground))", lineHeight: 1.15 }}>
-          O que deseja fazer?
-        </h2>
+      <div style={{ padding: modoDesktop ? "32px 32px 16px" : "28px 20px 8px" }}>
+        <div className={`${modoDesktop ? 'flex items-end justify-between' : ''}`}>
+          <div>
+            <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.2em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6 }}>
+              Menu Principal
+            </p>
+            <h2 style={{ fontFamily: "var(--font-serif)", fontSize: modoDesktop ? 32 : 26, fontWeight: 900, color: "hsl(var(--foreground))", lineHeight: 1.15 }}>
+              O que deseja fazer?
+            </h2>
+            {modoDesktop && (
+              <p style={{ fontSize: 14, color: "hsl(var(--muted-foreground))", marginTop: 8, maxWidth: "600px" }}>
+                Acesse todas as funcionalidades do sistema de pedidos, conferência e gestão de compras em uma interface otimizada para desktop.
+              </p>
+            )}
+          </div>
+          
+          {modoDesktop && (
+            <div className="flex items-center gap-3">
+              <div className={`px-3 py-1 rounded-full text-xs font-medium ${modoEscuro ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-800'}`}>
+                {modoEscuro ? '🌙 Modo Escuro' : '☀️ Modo Claro'}
+              </div>
+              <div className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
+                🖥️ Modo Desktop
+              </div>
+            </div>
+          )}
+        </div>
       </div>
 
        {/* ── Menu Cards ── */}
-        <div style={{ flex: 1, padding: "12px 16px 8px", display: "flex", flexDirection: "column", gap: 12 }}>
+        <div style={{ 
+          flex: 1, 
+          padding: modoDesktop ? "16px 32px 24px" : "12px 16px 8px", 
+          display: "flex", 
+          flexDirection: modoDesktop ? "row" : "column",
+          flexWrap: modoDesktop ? "wrap" : "nowrap",
+          gap: modoDesktop ? 20 : 12 
+        }}>
           {/* Cards base (sempre visíveis) */}
           {baseMenuItems.map(({ Icon, label, description, path, accent }) => (
-            <MenuCard 
-              key={label}
-              Icon={Icon}
-              label={label}
-              description={description}
-              path={path}
-              accent={accent}
-              navigate={navigate}
-              setMostrarPerfil={setMostrarPerfil}
-              setMostrarConfiguracoes={setMostrarConfiguracoes}
-            />
-          ))}
-          
-          {/* Cards para compras (se tiver acesso) */}
-          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
-            comprasMenuItems.map(({ Icon, label, description, path, accent }) => (
+            <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
               <MenuCard 
-                key={label}
                 Icon={Icon}
                 label={label}
                 description={description}
@@ -259,33 +345,54 @@ const Home = () => {
                 setMostrarPerfil={setMostrarPerfil}
                 setMostrarConfiguracoes={setMostrarConfiguracoes}
               />
+            </div>
+          ))}
+          
+          {/* Cards para compras (se tiver acesso) */}
+          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
+            comprasMenuItems.map(({ Icon, label, description, path, accent }) => (
+              <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
+                <MenuCard 
+                  Icon={Icon}
+                  label={label}
+                  description={description}
+                  path={path}
+                  accent={accent}
+                  navigate={navigate}
+                  setMostrarPerfil={setMostrarPerfil}
+                  setMostrarConfiguracoes={setMostrarConfiguracoes}
+                />
+              </div>
             ))
           )}
           
           {/* Cards para analytics (se tiver acesso) */}
           {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
             analyticsMenuItems.map(({ Icon, label, description, path, accent }) => (
-              <MenuCard 
-                key={label}
-                Icon={Icon}
-                label={label}
-                description={description}
-                path={path}
-                accent={accent}
-                navigate={navigate}
-                setMostrarPerfil={setMostrarPerfil}
-                setMostrarConfiguracoes={setMostrarConfiguracoes}
-              />
+              <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
+                <MenuCard 
+                  Icon={Icon}
+                  label={label}
+                  description={description}
+                  path={path}
+                  accent={accent}
+                  navigate={navigate}
+                  setMostrarPerfil={setMostrarPerfil}
+                  setMostrarConfiguracoes={setMostrarConfiguracoes}
+                />
+              </div>
             ))
           )}
         </div>
 
       {/* ── Storage Card ── */}
-      <div style={{ padding: "8px 16px 24px" }}>
+      <div style={{ padding: modoDesktop ? "16px 32px 32px" : "8px 16px 24px" }}>
         <div style={{
-          background: "hsl(var(--card))", /* 👈 CORRIGIDO AQUI */
-          borderRadius: 16, border: "1px solid hsl(var(--border))",
-          padding: "16px 18px", boxShadow: "var(--shadow-sm)",
+          background: "hsl(var(--card))",
+          borderRadius: modoDesktop ? 20 : 16, 
+          border: "1px solid hsl(var(--border))",
+          padding: modoDesktop ? "24px" : "16px 18px", 
+          boxShadow: modoDesktop ? "var(--shadow-md)" : "var(--shadow-sm)",
         }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 10 }}>
             <div>
@@ -350,10 +457,36 @@ const Home = () => {
       </div>
 
       {/* ── Footer ── */}
-      <div style={{ padding: "0 20px 24px", textAlign: "center" }}>
-        <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(var(--muted-foreground))", letterSpacing: "0.1em" }}>
-          Diarley Duarte © 2025
-        </p>
+      <div style={{ 
+        padding: modoDesktop ? "0 32px 32px" : "0 20px 24px", 
+        textAlign: "center",
+        borderTop: modoDesktop ? "1px solid hsl(var(--border))" : "none",
+        marginTop: modoDesktop ? 16 : 0,
+        paddingTop: modoDesktop ? 24 : 0
+      }}>
+        <div className={`${modoDesktop ? 'flex items-center justify-between' : ''}`}>
+          <p style={{ 
+            fontFamily: "var(--font-mono)", 
+            fontSize: modoDesktop ? 11 : 10, 
+            color: "hsl(var(--muted-foreground))", 
+            letterSpacing: "0.1em" 
+          }}>
+            Diarley Duarte © 2025
+          </p>
+          {modoDesktop && (
+            <div className="flex items-center gap-6">
+              <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
+                Versão 2.1.0
+              </span>
+              <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
+                {loginSalvo?.empresa || "NEWSHOP"}
+              </span>
+              <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
+                {modoEscuro ? "Modo Escuro" : "Modo Claro"}
+              </span>
+            </div>
+          )}
+        </div>
       </div>
 
       {/* ── Modal Confirmação ── */}
@@ -418,17 +551,27 @@ const Home = () => {
           style={{
             position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
             backdropFilter: "blur(4px)", display: "flex",
-            alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+            alignItems: modoDesktop ? "center" : "flex-end", 
+            justifyContent: "center", 
+            zIndex: 1000,
           }}
         >
           <div style={{
             background: "hsl(var(--card))",
-            width: "100%", maxWidth: 430,
-            borderRadius: "20px 20px 0 0", padding: "24px 20px 36px",
-            animation: "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+            width: "100%", 
+            maxWidth: modoDesktop ? 500 : 430,
+            borderRadius: modoDesktop ? 20 : "20px 20px 0 0", 
+            padding: modoDesktop ? "32px" : "24px 20px 36px",
+             animation: modoDesktop ? "fadeIn 0.28s ease" : "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+            margin: modoDesktop ? "auto" : "0",
+            maxHeight: modoDesktop ? "90vh" : "auto",
+            overflowY: modoDesktop ? "auto" : "visible",
           }}>
-            <style>{`@keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}`}</style>
-            <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />
+            <style>{`
+              @keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}
+              @keyframes fadeIn{from{opacity:0;transform:scale(0.95)}to{opacity:1;transform:scale(1)}}
+            `}</style>
+            {!modoDesktop && <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />}
 
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
               <div style={{ width: 48, height: 48, borderRadius: 14, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -560,23 +703,30 @@ const Home = () => {
         </div>
       )}
 
-      {/* ── Modal de Perfil ── */}
+       {/* ── Modal de Perfil ── */}
       {mostrarPerfil && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setMostrarPerfil(false); }}
           style={{
             position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
             backdropFilter: "blur(4px)", display: "flex",
-            alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+            alignItems: modoDesktop ? "center" : "flex-end", 
+            justifyContent: "center", 
+            zIndex: 1000,
           }}
         >
           <div style={{
             background: "hsl(var(--card))",
-            width: "100%", maxWidth: 430,
-            borderRadius: "20px 20px 0 0", padding: "24px 20px 36px",
-            animation: "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+            width: "100%", 
+            maxWidth: modoDesktop ? 500 : 430,
+            borderRadius: modoDesktop ? 20 : "20px 20px 0 0", 
+            padding: modoDesktop ? "32px" : "24px 20px 36px",
+            animation: modoDesktop ? "fadeIn 0.28s ease" : "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+            margin: modoDesktop ? "auto" : "0",
+            maxHeight: modoDesktop ? "90vh" : "auto",
+            overflowY: modoDesktop ? "auto" : "visible",
           }}>
-            <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />
+            {!modoDesktop && <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />}
 
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
               <div style={{ width: 48, height: 48, borderRadius: 14, background: "hsl(var(--warning) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
@@ -688,23 +838,30 @@ const Home = () => {
         </div>
       )}
 
-      {/* ── Modal de Configurações ── */}
+       {/* ── Modal de Configurações ── */}
       {mostrarConfiguracoes && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setMostrarConfiguracoes(false); }}
           style={{
             position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
             backdropFilter: "blur(4px)", display: "flex",
-            alignItems: "flex-end", justifyContent: "center", zIndex: 1000,
+            alignItems: modoDesktop ? "center" : "flex-end", 
+            justifyContent: "center", 
+            zIndex: 1000,
           }}
         >
           <div style={{
             background: "hsl(var(--card))",
-            width: "100%", maxWidth: 430,
-            borderRadius: "20px 20px 0 0", padding: "24px 20px 36px",
-            animation: "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+            width: "100%", 
+            maxWidth: modoDesktop ? 600 : 430,
+            borderRadius: modoDesktop ? 20 : "20px 20px 0 0", 
+            padding: modoDesktop ? "32px" : "24px 20px 36px",
+            animation: modoDesktop ? "fadeIn 0.28s ease" : "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+            margin: modoDesktop ? "auto" : "0",
+            maxHeight: modoDesktop ? "90vh" : "auto",
+            overflowY: modoDesktop ? "auto" : "visible",
           }}>
-            <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />
+            {!modoDesktop && <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />}
 
             <div style={{ display: "flex", alignItems: "center", gap: 14, marginBottom: 16 }}>
               <div style={{ width: 48, height: 48, borderRadius: 14, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
