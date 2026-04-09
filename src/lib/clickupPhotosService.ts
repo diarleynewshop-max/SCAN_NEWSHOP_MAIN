@@ -2,16 +2,54 @@
 import { buscarTasksCompras, ClickUpTask } from "./clickupApi";
 
 // ============================================================
-// Cache com TTL e limite de tentativas
+// Cache de Tasks (evita chamadas repetidas à API)
 // ============================================================
-interface CacheEntry {
+interface TasksCacheEntry {
+  tasks: ClickUpTask[];
+  timestamp: number;
+}
+
+class TasksCache {
+  private cache = new Map<string, TasksCacheEntry>();
+  private TTL = 5 * 60 * 1000; // 5 min
+
+  get(empresa: string): ClickUpTask[] | undefined {
+    const entry = this.cache.get(empresa);
+    if (!entry) return undefined;
+
+    if (Date.now() - entry.timestamp > this.TTL) {
+      this.cache.delete(empresa);
+      return undefined;
+    }
+
+    return entry.tasks;
+  }
+
+  set(empresa: string, tasks: ClickUpTask[]) {
+    this.cache.set(empresa, {
+      tasks,
+      timestamp: Date.now()
+    });
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+const tasksCache = new TasksCache();
+
+// ============================================================
+// Cache de Fotos (URLs individuais)
+// ============================================================
+interface PhotoCacheEntry {
   url: string | null;
   timestamp: number;
   attempts: number;
 }
 
 class PhotoCache {
-  private cache = new Map<string, CacheEntry>();
+  private cache = new Map<string, PhotoCacheEntry>();
   private TTL = 24 * 60 * 60 * 1000; // 24h
   private MAX_FAILED_ATTEMPTS = 3;
 
@@ -117,10 +155,13 @@ export async function findProductTask(
   empresa: "NEWSHOP" | "SOYE" | "FACIL" = "NEWSHOP"
 ): Promise<ClickUpTask | null> {
   try {
-    // Buscar tasks da lista de COMPRAS (onde estão os produtos sem estoque)
-    const tasks = await buscarTasksCompras(empresa);
+    // Verificar cache de tasks primero
+    const cachedTasks = tasksCache.get(empresa);
+    const tasks = cachedTasks || await buscarTasksCompras(empresa);
     
-    console.log("📊 Total de tasks de compras encontradas:", tasks.length);
+    if (!cachedTasks) {
+      tasksCache.set(empresa, tasks);
+    }
     
     // Padrão: "nao_tem_CODIGO_DESCRICAO" nos attachments
     for (const task of tasks) {
@@ -135,35 +176,22 @@ export async function findProductTask(
         });
         
         if (matchingAttachment) {
-          console.log("✅ Match encontrado no attachment:", matchingAttachment.title);
           return task;
         }
       }
     }
     
-    // Estratégia fallback: Buscar por código no nome da task
     const taskMatch = tasks.find(task => 
       task.name.includes(codigo) || 
       task.name.toLowerCase().includes(codigo.toLowerCase())
     );
     
     if (taskMatch) {
-      console.log("✅ Match encontrado no nome da task:", taskMatch.name);
       return taskMatch;
     }
     
-    // Log para debug - mostrar attachments das tasks
-    console.log("🐛 Tasks de compras com attachments:", tasks.map(t => ({
-      name: t.name,
-      attachments: t.attachments?.map(a => ({
-        title: a.title,
-        hasImage: a.mimetype?.startsWith("image/") || a.url?.match(/\.(jpg|jpeg|png|gif|webp)$/i)
-      }))
-    })));
-    
     return null;
   } catch (error) {
-    console.error("❌ Erro ao buscar tarefa do produto:", error);
     return null;
   }
 }
@@ -193,7 +221,6 @@ export async function getProductPhotoFromTask(
       title: firstImage.title || `Imagem do produto`
     };
   } catch (error) {
-    console.error("❌ Erro ao extrair foto da tarefa:", error);
     return null;
   }
 }
@@ -229,7 +256,6 @@ export async function getProductPhoto(
     return photo.url;
     
   } catch (error) {
-    console.error("❌ Erro ao buscar foto:", codigo, error);
     photoCache.set(cacheKey, null);
     return null;
   }
