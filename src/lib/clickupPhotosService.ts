@@ -23,35 +23,41 @@ export async function findProductTask(
     
     console.log("📊 Total de tasks de compras encontradas:", tasks.length);
     
-    // Estratégia 1: Buscar por código exato no nome da task
-    const exactMatch = tasks.find(task => 
+    // Padrão: "nao_tem_CODIGO_DESCRICAO" nos attachments
+    for (const task of tasks) {
+      if (task.attachments && task.attachments.length > 0) {
+        // Procurar attachment que corresponde ao padrão
+        const matchingAttachment = task.attachments.find(attachment => {
+          const fileName = attachment.title || '';
+          // Verifica se o nome do arquivo contém o código no padrão esperado
+          return fileName.toLowerCase().includes(`nao_tem_${codigo.toLowerCase()}`) ||
+                 fileName.toLowerCase().includes(`nao_tem_tudo_${codigo.toLowerCase()}`) ||
+                 fileName.includes(codigo);
+        });
+        
+        if (matchingAttachment) {
+          console.log("✅ Match encontrado no attachment:", matchingAttachment.title);
+          return task;
+        }
+      }
+    }
+    
+    // Estratégia fallback: Buscar por código no nome da task
+    const taskMatch = tasks.find(task => 
       task.name.includes(codigo) || 
-      task.name === codigo ||
       task.name.toLowerCase().includes(codigo.toLowerCase())
     );
     
-    if (exactMatch) {
-      console.log("✅ Match exato encontrado:", exactMatch.name);
-      return exactMatch;
+    if (taskMatch) {
+      console.log("✅ Match encontrado no nome da task:", taskMatch.name);
+      return taskMatch;
     }
     
-    // Estratégia 2: Buscar por padrão mais flexível (código dentro do texto)
-    const flexibleMatch = tasks.find(task => {
-      // Remove espaços e caracteres especiais para busca mais ampla
-      const cleanTaskName = task.name.replace(/[^a-zA-Z0-9]/g, '');
-      const cleanCodigo = codigo.replace(/[^a-zA-Z0-9]/g, '');
-      
-      return cleanTaskName.includes(cleanCodigo) || 
-             cleanCodigo.includes(cleanTaskName);
-    });
-    
-    if (flexibleMatch) {
-      console.log("✅ Match flexível encontrado:", flexibleMatch.name);
-      return flexibleMatch;
-    }
-    
-    // Estratégia 3: Log todas as tasks para debug
-    console.log("🐛 Tasks de compras disponíveis:", tasks.map(t => t.name));
+    // Log para debug
+    console.log("🐛 Tasks de compras disponíveis:", tasks.map(t => ({
+      name: t.name,
+      attachments: t.attachments?.map(a => a.title)
+    })));
     
     return null;
   } catch (error) {
