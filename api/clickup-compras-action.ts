@@ -1,10 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-function getToken(empresa: string): string {
-  return empresa === 'NEWSHOP'
-    ? process.env.CLICKUP_TOKEN!
-    : process.env.CLICKUP_TOKEN_SF!;
-}
+const TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,7 +12,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Método não permitido' });
   }
 
-  const { taskId, acao, empresa = 'NEWSHOP' } = req.body;
+  if (!TOKEN) {
+    return res.status(500).json({ error: 'Token não configurado' });
+  }
+
+  const { taskId, acao } = req.body;
 
   if (!taskId || !acao) {
     return res.status(400).json({ error: 'taskId e ação são obrigatórios' });
@@ -35,14 +35,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const token = getToken(empresa);
-
     const response = await fetch(
       `https://api.clickup.com/api/v2/task/${taskId}`,
       {
         method: 'POST',
         headers: {
-          'Authorization': token,
+          'Authorization': TOKEN,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ status: novoStatus }),

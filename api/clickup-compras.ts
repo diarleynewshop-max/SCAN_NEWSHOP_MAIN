@@ -1,16 +1,7 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-const LIST_IDS: Record<string, string> = {
-  NEWSHOP: '901326684020',
-  SOYE: '901326684020',
-  FACIL: '901326684020',
-};
-
-function getToken(empresa: string): string {
-  return empresa === 'NEWSHOP'
-    ? process.env.CLICKUP_TOKEN!
-    : process.env.CLICKUP_TOKEN_SF!;
-}
+const LIST_ID = process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+const TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
 
 function extrairCodigo(name: string): string {
   const match = name.match(/nao_tem_(\d+)/);
@@ -31,32 +22,40 @@ function getStatus(status: string): string {
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  console.log('=== CLICKUP COMPRAS ===');
+  console.log('TOKEN:', TOKEN ? `EXISTE (${TOKEN.length})` : 'NENHUM');
+  console.log('LIST:', LIST_ID);
+  
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
   if (req.method === 'OPTIONS') return res.status(200).end();
 
-  const empresa = (req.query.empresa as string) || 'NEWSHOP';
+  if (!TOKEN) {
+    console.log('❌ TOKEN NÃO CONFIGURADO');
+    return res.status(500).json({ error: 'Token não configurado' });
+  }
 
   try {
-    const listId = LIST_IDS[empresa] || '901326684020';
-    const token = getToken(empresa);
-
-    console.log('Buscando lista:', listId);
-
+    console.log('🔄 Buscando tasks...');
+    
     const response = await fetch(
-      `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=false`,
-      { headers: { Authorization: token } }
+      `https://api.clickup.com/api/v2/list/${LIST_ID}/task?include_closed=false`,
+      { headers: { Authorization: TOKEN } }
     );
 
+    console.log('📡 Status:', response.status);
+
     if (!response.ok) {
-      return res.status(response.status).json({ error: `ClickUp API: ${response.status}` });
+      const errorText = await response.text();
+      console.log('❌ Erro:', errorText);
+      return res.status(response.status).json({ error: errorText });
     }
 
     const data = await response.json();
     const tasks = data.tasks || [];
 
-    console.log('Tasks:', tasks.length);
+    console.log('✅ Tasks:', tasks.length);
 
     const produtos = tasks.map((t: any) => {
       const attachments = t.attachments || [];
@@ -84,14 +83,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         descricao: t.name,
         foto: foto,
         status: getStatus(t.status?.status),
-        empresa,
         date_created: t.date_created,
       };
     }).filter((p: any) => p.codigo && p.codigo !== p.descricao);
 
+    console.log('📦 Produtos processados:', produtos.length);
+    
     return res.json({ produtos });
   } catch (error) {
-    console.error('Erro:', error);
+    console.error('❌ Erro:', error);
     return res.status(500).json({ error: String(error) });
   }
 }
