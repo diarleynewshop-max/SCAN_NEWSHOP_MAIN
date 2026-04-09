@@ -44,22 +44,29 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
     try {
       console.log("🔍 Buscando itens do Supabase...");
       
-      console.log("🔍 URL do Supabase:", supabase.supabaseUrl);
+      // Verificar se as variáveis de ambiente estão definidas
+      const supabaseUrl = import.meta.env.VITE_SUPABASE_URL;
+      const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
       
-      // Testar primeiro se a tabela existe e tem dados
-      const { data: testData, error: testError } = await supabase
-        .from('conferencia_itens')
-        .select('id')
-        .limit(1);
+      console.log("🌐 Vars check:", { 
+        hasUrl: !!supabaseUrl, 
+        hasKey: !!supabaseKey,
+        urlPrefix: supabaseUrl?.substring(0, 20)
+      });
       
-      console.log("🧪 Teste inicial:", { testData, testError });
-
+      // Testar com schema explícito
       const { data, error: fetchError } = await supabase
-        .from('conferencia_itens')
+        .from('public.conferencia_itens')
         .select('*')
         .order('created_at', { ascending: false });
 
-      console.log("📦 Resposta completa:", { data, error: fetchError, count: data?.length, dataJSON: JSON.stringify(data) });
+      console.log("📦 Resposta completa:", { 
+        data, 
+        error: fetchError, 
+        count: data?.length, 
+        dataJSON: data ? JSON.stringify(data.slice(0, 2)) : 'null',
+        query: 'public.conferencia_itens'
+      });
 
       if (fetchError) {
         console.error("❌ Erro do Supabase:", fetchError);
@@ -68,7 +75,6 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
 
       console.log("📊 Dados recebidos (JSON):", JSON.stringify(data, null, 2));
       setItens(data || []);
-      console.log("✅ Itens carregados:", data?.length || 0);
     } catch (err: any) {
       console.error("❌ Erro ao buscar itens:", err);
       setError(err.message || "Falha ao carregar itens");
