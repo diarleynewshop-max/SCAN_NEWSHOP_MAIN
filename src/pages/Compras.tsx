@@ -12,7 +12,7 @@ const Compras = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const { produtos, loading, error, refetch } = useConferenciaItens();
 
-  console.log("🔥 Compras render:", { produtos: produtos.length, loading, error });
+  console.log("🔥 Compras render:", { produtos: produtos.length, loading, error, primeiraAmostragem: produtos.slice(0, 3) });
 
   const getStatusBadge = (status: string) => {
     switch (status) {

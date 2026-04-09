@@ -56,6 +56,7 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
         throw new Error(fetchError.message);
       }
 
+      console.log("📊 Dados recebidos:", data);
       setItens(data || []);
       console.log("✅ Itens carregados:", data?.length || 0);
     } catch (err: any) {
