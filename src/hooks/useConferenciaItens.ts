@@ -54,10 +54,11 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
         urlPrefix: supabaseUrl?.substring(0, 20)
       });
       
-      // Consultar diretamente a tabela no schema público (sem prefixar o schema)
+      // Buscar apenas itens sem estoque ou parciais (nao_tem e nao_tem_tudo)
       const { data, error: fetchError } = await supabase
         .from('conferencia_itens')
         .select('*')
+        .in('status', ['nao_tem', 'nao_tem_tudo'])
         .order('created_at', { ascending: false });
 
       console.log("📦 Resposta completa:", { 
@@ -65,7 +66,7 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
         error: fetchError, 
         count: data?.length, 
         dataJSON: data ? JSON.stringify(data.slice(0, 2)) : 'null',
-        query: 'public.conferencia_itens'
+        filter: 'status: nao_tem, nao_tem_tudo'
       });
 
       if (fetchError) {
