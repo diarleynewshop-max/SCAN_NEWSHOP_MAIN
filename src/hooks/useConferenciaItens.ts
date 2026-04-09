@@ -46,6 +46,14 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
       
       console.log("🔍 URL do Supabase:", supabase.supabaseUrl);
       
+      // Testar primeiro se a tabela existe e tem dados
+      const { data: testData, error: testError } = await supabase
+        .from('conferencia_itens')
+        .select('id')
+        .limit(1);
+      
+      console.log("🧪 Teste inicial:", { testData, testError });
+
       const { data, error: fetchError } = await supabase
         .from('conferencia_itens')
         .select('*')
