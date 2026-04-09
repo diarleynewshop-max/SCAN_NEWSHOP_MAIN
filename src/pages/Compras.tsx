@@ -186,6 +186,7 @@ const Compras = () => {
                            <div className="flex items-center gap-3">
                              <ProductImage 
                                codigo={produto.codigo} 
+                               sku={produto.nome}
                                size="sm" 
                                className="flex-shrink-0"
                              />

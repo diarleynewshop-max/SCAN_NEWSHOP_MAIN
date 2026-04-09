@@ -3,6 +3,7 @@ import { useProductPhoto } from "@/hooks/useProductPhoto";
 
 interface ProductImageProps {
   codigo: string;
+  sku?: string;
   className?: string;
   size?: "sm" | "md" | "lg";
   fallback?: React.ReactNode;
@@ -10,6 +11,7 @@ interface ProductImageProps {
 
 export const ProductImage = ({ 
   codigo, 
+  sku = "",
   className = "", 
   size = "md", 
   fallback 

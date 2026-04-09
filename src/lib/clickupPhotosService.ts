@@ -1,8 +1,52 @@
 // Serviço para buscar fotos de produtos no ClickUp
 import { buscarTasksCompras, ClickUpTask } from "./clickupApi";
 
-// Cache em memória para evitar múltiplas chamadas
-const photoCache = new Map<string, string>();
+// Padrão base das URLs do ClickUp attachments
+const CLICKUP_ATTACHMENT_BASE = "https://t90133045250.p.clickup-attachments.com/t90133045250";
+
+/**
+ * Constrói URL da foto baseada no padrão do ClickUp
+ */
+export function buildClickUpPhotoUrl(codigo: string, descricao: string): string {
+  // Normalizar descrição: remover acentos, caracteres especiais, substituir espaços
+  const cleanDescricao = descricao
+    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove acentos
+    .replace(/[^a-zA-Z0-9]/g, '_') // Substitui caracteres especiais por _
+    .toUpperCase();
+  
+  // Gerar fileId consistente baseado no código (hash simples)
+  const fileId = generateFileId(codigo);
+  
+  return `${CLICKUP_ATTACHMENT_BASE}/${fileId}/nao_tem_${codigo}_${cleanDescricao}.jpg?view=open`;
+}
+
+/**
+ * Gera fileId consistente baseado no código do produto
+ */
+function generateFileId(codigo: string): string {
+  // Hash simples para gerar ID consistente
+  let hash = 0;
+  for (let i = 0; i < codigo.length; i++) {
+    hash = ((hash << 5) - hash) + codigo.charCodeAt(i);
+    hash = hash & hash; // Convert to 32-bit integer
+  }
+  
+  // Converter para formato UUID-like (8-4-4-4-12)
+  const hex = Math.abs(hash).toString(16).padStart(32, '0');
+  return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}`;
+}
+
+/**
+ * Verifica se uma URL de imagem é acessível
+ */
+export async function isImageAccessible(url: string): Promise<boolean> {
+  try {
+    const response = await fetch(url, { method: 'HEAD' });
+    return response.ok && response.headers.get('content-type')?.startsWith('image/');
+  } catch {
+    return false;
+  }
+}
 
 export interface ProductPhoto {
   url: string;
@@ -104,6 +148,7 @@ export async function getProductPhotoFromTask(
  */
 export async function getProductPhoto(
   codigo: string,
+  sku: string = "",
   empresa: "NEWSHOP" | "SOYE" | "FACIL" = "NEWSHOP"
 ): Promise<string | null> {
   // Verificar cache primeiro
@@ -115,26 +160,35 @@ export async function getProductPhoto(
   try {
     console.log("🔍 Buscando foto para produto:", codigo);
     
-    // Buscar tarefa do produto
+    // Primeiro: tentar buscar via API do ClickUp
     const task = await findProductTask(codigo, empresa);
-    if (!task) {
-      console.log("📭 Tarefa não encontrada para:", codigo);
-      return null;
+    if (task) {
+      const photo = await getProductPhotoFromTask(task);
+      if (photo) {
+        console.log("✅ Foto encontrada via API:", photo.url);
+        photoCache.set(cacheKey, photo.url);
+        return photo.url;
+      }
     }
     
-    // Extrair foto da tarefa
-    const photo = await getProductPhotoFromTask(task);
-    if (!photo) {
-      console.log("📭 Nenhuma foto encontrada na tarefa:", task.id);
-      return null;
+    // Fallback: construir URL baseada no padrão
+    const descricao = sku || codigo;
+    const constructedUrl = buildClickUpPhotoUrl(codigo, descricao);
+    
+    console.log("🛠️ Tentando URL construída:", constructedUrl);
+    
+    // Verificar se a URL construída é acessível
+    const isAccessible = await isImageAccessible(constructedUrl);
+    
+    if (isAccessible) {
+      console.log("✅ URL construída funciona!");
+      photoCache.set(cacheKey, constructedUrl);
+      return constructedUrl;
     }
     
-    console.log("✅ Foto encontrada:", photo.url);
+    console.log("📭 Nenhuma foto encontrada para:", codigo);
+    return null;
     
-    // Armazenar no cache
-    photoCache.set(cacheKey, photo.url);
-    
-    return photo.url;
   } catch (error) {
     console.error("❌ Erro ao buscar foto do produto:", codigo, error);
     return null;

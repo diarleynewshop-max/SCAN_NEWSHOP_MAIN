@@ -25,7 +25,10 @@ export const useProductPhoto = (codigo: string): UseProductPhotoReturn => {
       setError(null);
 
       try {
-        const photoUrl = await getProductPhoto(codigo);
+        // Obter SKU do produto (buscar da lista de produtos se necessário)
+        const sku = ""; // Será passado pelo componente pai
+        
+        const photoUrl = await getProductPhoto(codigo, sku);
         
         if (isMounted) {
           setUrl(photoUrl);
