@@ -1,4 +1,4 @@
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { ProductImage } from "@/components/ProductImage";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -181,9 +181,16 @@ const Compras = () => {
                   <tbody>
                     {filteredProdutos.map((produto) => (
                       <tr key={produto.id} className="border-b hover:bg-gray-50">
-                        <td className="py-3 px-4">
-                          <div className="font-medium">{produto.nome}</div>
-                        </td>
+                         <td className="py-3 px-4">
+                           <div className="flex items-center gap-3">
+                             <ProductImage 
+                               codigo={produto.codigo} 
+                               size="sm" 
+                               className="flex-shrink-0"
+                             />
+                             <div className="font-medium">{produto.nome}</div>
+                           </div>
+                         </td>
                         <td className="py-3 px-4">{produto.fornecedor}</td>
                         <td className="py-3 px-4">
                           <div className="font-bold">{produto.estoque}</div>

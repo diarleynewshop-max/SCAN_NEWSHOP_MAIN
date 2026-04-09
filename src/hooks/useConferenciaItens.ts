@@ -55,27 +55,49 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
       });
       
       // Buscar apenas itens sem estoque ou parciais (nao_tem e nao_tem_tudo)
-      const { data, error: fetchError } = await supabase
-        .from('conferencia_itens')
-        .select('*')
-        .in('status', ['nao_tem', 'nao_tem_tudo'])
-        .order('created_at', { ascending: false });
+      // Com sistema de retry para problemas temporários do Supabase
+      let retries = 3;
+      let lastError;
+      
+      for (let i = 0; i < retries; i++) {
+        try {
+          const { data, error: fetchError } = await supabase
+            .from('conferencia_itens')
+            .select('*')
+            .in('status', ['nao_tem', 'nao_tem_tudo'])
+            .order('created_at', { ascending: false });
 
-      console.log("📦 Resposta completa:", { 
-        data, 
-        error: fetchError, 
-        count: data?.length, 
-        dataJSON: data ? JSON.stringify(data.slice(0, 2)) : 'null',
-        filter: 'status: nao_tem, nao_tem_tudo'
-      });
+          console.log(`📦 Tentativa ${i + 1}/${retries}:`, { 
+            data, 
+            error: fetchError, 
+            count: data?.length, 
+            filter: 'status: nao_tem, nao_tem_tudo'
+          });
 
-      if (fetchError) {
-        console.error("❌ Erro do Supabase:", fetchError);
-        throw new Error(fetchError.message);
+          if (fetchError?.message?.includes('schema cache') || fetchError?.code === '503') {
+            lastError = fetchError;
+            // Esperar antes de tentar novamente (backoff exponencial)
+            await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+            continue;
+          }
+
+          if (fetchError) {
+            throw new Error(fetchError.message);
+          }
+
+          console.log("📊 Dados recebidos (JSON):", JSON.stringify(data, null, 2));
+          setItens(data || []);
+          return; // Sucesso, sair do loop
+          
+        } catch (retryError: any) {
+          lastError = retryError;
+          if (i === retries - 1) {
+            // Última tentativa, deixar propagar o erro
+            throw retryError;
+          }
+          await new Promise(resolve => setTimeout(resolve, 1000 * Math.pow(2, i)));
+        }
       }
-
-      console.log("📊 Dados recebidos (JSON):", JSON.stringify(data, null, 2));
-      setItens(data || []);
     } catch (err: any) {
       console.error("❌ Erro ao buscar itens:", err);
       setError(err.message || "Falha ao carregar itens");

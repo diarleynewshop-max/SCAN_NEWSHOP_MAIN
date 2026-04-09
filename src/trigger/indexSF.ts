@@ -159,8 +159,8 @@ async function anexarFotoNaTarefa(
 // ── TASK 1 — Lista baixada (SOYE / FACIL) ────────────────────────────────────
 export const listaBaixadaSF = task({
   id: "lista-baixada-sf",
-  machine: "micro",
-  maxDuration: 30,
+  machine: "medium-2x",
+  maxDuration: 1000,
   run: async (payload: any) => {
     const startTime = Date.now();
     let taskId: string | null = null;

@@ -151,8 +151,8 @@ async function anexarFotoNaTarefa(
 // ── TASK 1 — Lista baixada (CRIANDO TAREFA DE COMPRAS SE TIVER ZERO ESTOQUE) ──
 export const listaBaixada = task({
   id: "lista-baixada",
-  machine: "micro",
-  maxDuration: 30,
+  machine: "medium-2x",
+  maxDuration: 100,
   run: async (payload: any) => {
     const startTime = Date.now();
     let taskId: string | null = null;
