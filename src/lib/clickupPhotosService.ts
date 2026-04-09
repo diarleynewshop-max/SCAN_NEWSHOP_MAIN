@@ -4,6 +4,9 @@ import { buscarTasksCompras, ClickUpTask } from "./clickupApi";
 // Padrão base das URLs do ClickUp attachments
 const CLICKUP_ATTACHMENT_BASE = "https://t90133045250.p.clickup-attachments.com/t90133045250";
 
+// Cache para armazenar URLs de fotos já verificadas
+const photoCache = new Map<string, string>();
+
 /**
  * Constrói URL da foto baseada no padrão do ClickUp
  */
