@@ -2,24 +2,15 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, Plus, Filter, Download, Eye, Edit, Trash2 } from "lucide-react";
+import { ArrowLeft, Search, Plus, Filter, Download, Eye, Edit, Trash2, Loader2, RefreshCw } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
+import { useConferenciaItens } from "@/hooks/useConferenciaItens";
 
 const Compras = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
-
-  const produtos = [
-    { id: 1, nome: "Smartphone X1", fornecedor: "TechCorp", estoque: 45, minimo: 20, status: "ok", ultimaCompra: "15/04/2025" },
-    { id: 2, nome: "Tablet Pro", fornecedor: "DigitalTech", estoque: 18, minimo: 25, status: "baixo", ultimaCompra: "10/04/2025" },
-    { id: 3, nome: "Fone Bluetooth", fornecedor: "AudioPlus", estoque: 32, minimo: 30, status: "ok", ultimaCompra: "12/04/2025" },
-    { id: 4, nome: "Carregador Rápido", fornecedor: "PowerTech", estoque: 12, minimo: 40, status: "critico", ultimaCompra: "05/04/2025" },
-    { id: 5, nome: "Capa Protetora", fornecedor: "CaseMaster", estoque: 28, minimo: 50, status: "baixo", ultimaCompra: "08/04/2025" },
-    { id: 6, nome: "Cabo USB-C", fornecedor: "CablePro", estoque: 65, minimo: 30, status: "ok", ultimaCompra: "14/04/2025" },
-    { id: 7, nome: "Power Bank", fornecedor: "EnergyPlus", estoque: 8, minimo: 15, status: "critico", ultimaCompra: "03/04/2025" },
-    { id: 8, nome: "Suporte para Celular", fornecedor: "MountTech", estoque: 22, minimo: 25, status: "baixo", ultimaCompra: "11/04/2025" },
-  ];
+  const { produtos, loading, error, refetch } = useConferenciaItens();
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -68,6 +59,10 @@ const Compras = () => {
               <Download className="h-4 w-4 mr-2" />
               Exportar
             </Button>
+            <Button variant="outline" onClick={() => refetch()} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Atualizar
+            </Button>
           </div>
         </div>
 
@@ -75,41 +70,47 @@ const Compras = () => {
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Produtos em Estoque</CardTitle>
+              <CardTitle className="text-lg">Total de Itens</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">230</div>
-              <div className="text-sm text-gray-600 mt-1">Itens disponíveis</div>
+              <div className="text-3xl font-bold">{produtos.length}</div>
+              <div className="text-sm text-gray-600 mt-1">Itens únicos</div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Pedidos Pendentes</CardTitle>
+              <CardTitle className="text-lg">Estoque Crítico</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-yellow-600">8</div>
-              <div className="text-sm text-gray-600 mt-1">Aguardando aprovação</div>
+              <div className="text-3xl font-bold text-red-600">
+                {produtos.filter(p => p.status === 'critico').length}
+              </div>
+              <div className="text-sm text-gray-600 mt-1">Precisam reposição</div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Valor em Estoque</CardTitle>
+              <CardTitle className="text-lg">Estoque Baixo</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">R$ 189.450</div>
-              <div className="text-sm text-gray-600 mt-1">Valor total</div>
+              <div className="text-3xl font-bold text-yellow-600">
+                {produtos.filter(p => p.status === 'baixo').length}
+              </div>
+              <div className="text-sm text-gray-600 mt-1">Atenção</div>
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Fornecedores</CardTitle>
+              <CardTitle className="text-lg">Estoque OK</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold">24</div>
-              <div className="text-sm text-gray-600 mt-1">Ativos</div>
+              <div className="text-3xl font-bold text-green-600">
+                {produtos.filter(p => p.status === 'ok').length}
+              </div>
+              <div className="text-sm text-gray-600 mt-1">Itens OK</div>
             </CardContent>
           </Card>
         </div>
@@ -144,7 +145,25 @@ const Compras = () => {
             </CardDescription>
           </CardHeader>
           <CardContent>
-            <div className="overflow-x-auto">
+            {loading && (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-blue-600" />
+                <span className="ml-3 text-gray-600">Carregando itens...</span>
+              </div>
+            )}
+            {error && (
+              <div className="flex flex-col items-center justify-center py-12 text-red-600">
+                <p className="font-medium">Erro ao carregar dados</p>
+                <p className="text-sm">{error}</p>
+              </div>
+            )}
+            {!loading && !error && produtos.length === 0 && (
+              <div className="text-center py-12 text-gray-500">
+                Nenhum item encontrado na tabela conferencia_itens
+              </div>
+            )}
+            {!loading && !error && produtos.length > 0 && (
+              <div className="overflow-x-auto">
               <table className="w-full">
                 <thead>
                   <tr className="border-b">
