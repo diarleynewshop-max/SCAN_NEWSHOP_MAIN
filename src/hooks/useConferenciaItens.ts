@@ -54,9 +54,9 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
         urlPrefix: supabaseUrl?.substring(0, 20)
       });
       
-      // Testar com schema explícito
+      // Consultar diretamente a tabela no schema público (sem prefixar o schema)
       const { data, error: fetchError } = await supabase
-        .from('public.conferencia_itens')
+        .from('conferencia_itens')
         .select('*')
         .order('created_at', { ascending: false });
 
