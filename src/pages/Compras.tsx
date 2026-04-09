@@ -12,6 +12,8 @@ const Compras = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const { produtos, loading, error, refetch } = useConferenciaItens();
 
+  console.log("🔥 Compras render:", { produtos: produtos.length, loading, error });
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "ok":
@@ -164,53 +166,48 @@ const Compras = () => {
             )}
             {!loading && !error && produtos.length > 0 && (
               <div className="overflow-x-auto">
-              <table className="w-full">
-                <thead>
-                  <tr className="border-b">
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Produto</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Fornecedor</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Estoque</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Mínimo</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Status</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Última Compra</th>
-                    <th className="text-left py-3 px-4 font-medium text-gray-700">Ações</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {filteredProdutos.map((produto) => (
-                    <tr key={produto.id} className="border-b hover:bg-gray-50">
-                      <td className="py-3 px-4">
-                        <div className="font-medium">{produto.nome}</div>
-                      </td>
-                      <td className="py-3 px-4">{produto.fornecedor}</td>
-                      <td className="py-3 px-4">
-                        <div className="font-bold">{produto.estoque}</div>
-                      </td>
-                      <td className="py-3 px-4">{produto.minimo}</td>
-                      <td className="py-3 px-4">{getStatusBadge(produto.status)}</td>
-                      <td className="py-3 px-4">{produto.ultimaCompra}</td>
-                      <td className="py-3 px-4">
-                        <div className="flex gap-2">
-                          <Button size="sm" variant="ghost">
-                            <Eye className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="ghost">
-                            <Edit className="h-4 w-4" />
-                          </Button>
-                          <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700">
-                            <Trash2 className="h-4 w-4" />
-                          </Button>
-                        </div>
-                      </td>
+                <table className="w-full">
+                  <thead>
+                    <tr className="border-b">
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">Produto</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">Fornecedor</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">Estoque</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">Mínimo</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">Status</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">Última Compra</th>
+                      <th className="text-left py-3 px-4 font-medium text-gray-700">Ações</th>
                     </tr>
-                  ))}
-                </tbody>
+                  </thead>
+                  <tbody>
+                    {filteredProdutos.map((produto) => (
+                      <tr key={produto.id} className="border-b hover:bg-gray-50">
+                        <td className="py-3 px-4">
+                          <div className="font-medium">{produto.nome}</div>
+                        </td>
+                        <td className="py-3 px-4">{produto.fornecedor}</td>
+                        <td className="py-3 px-4">
+                          <div className="font-bold">{produto.estoque}</div>
+                        </td>
+                        <td className="py-3 px-4">{produto.minimo}</td>
+                        <td className="py-3 px-4">{getStatusBadge(produto.status)}</td>
+                        <td className="py-3 px-4">{produto.ultimaCompra}</td>
+                        <td className="py-3 px-4">
+                          <div className="flex gap-2">
+                            <Button size="sm" variant="ghost">
+                              <Eye className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost">
+                              <Edit className="h-4 w-4" />
+                            </Button>
+                            <Button size="sm" variant="ghost" className="text-red-600 hover:text-red-700">
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </div>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
               </table>
-            </div>
-
-            {filteredProdutos.length === 0 && (
-              <div className="text-center py-8 text-gray-500">
-                Nenhum produto encontrado com o termo "{searchTerm}"
               </div>
             )}
           </CardContent>

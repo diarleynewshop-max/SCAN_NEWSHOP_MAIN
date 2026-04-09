@@ -8,6 +8,7 @@ import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Analytics from "./pages/Analytics";
 import Comprador from "./pages/Comprador";
+import Compras from "./pages/Compras";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
 // 1. IMPORTAMOS O BOTÃO AQUI
@@ -40,7 +41,7 @@ const App = () => (
           
           <Route path="/compras" element={
             <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
-              <Comprador />
+              <Compras />
             </ProtectedRoute>
           } />
           
