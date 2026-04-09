@@ -69,10 +69,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const taskStatus = t.status?.status?.toLowerCase() ?? 'open';
         const mappedStatus = STATUS_MAP[taskStatus] ?? 'novo';
         
-        const imageAttachment = (t.attachments ?? []).find((a: any) => 
-          a.mimetype?.startsWith('image/') || 
-          /\.(jpg|jpeg|png|gif|webp)$/i.test(a.title ?? a.file_name ?? '')
-        );
+        const imageAttachment = (t.attachments ?? []).find((a: any) => {
+          const url = a.url ?? '';
+          if (!url || url.length < 20) return false;
+          if (url.startsWith('data:')) return false;
+          if (!url.startsWith('http://') && !url.startsWith('https://')) return false;
+          const title = a.title ?? a.file_name ?? '';
+          const isImage = a.mimetype?.startsWith('image/') || 
+            /\.(jpg|jpeg|png|gif|webp)$/i.test(title);
+          return isImage;
+        });
 
         return {
           id: t.id,
