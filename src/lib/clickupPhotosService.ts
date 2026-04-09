@@ -21,16 +21,37 @@ export async function findProductTask(
     // Buscar todas as tasks analisadas (já tem cache no proxy)
     const tasks = await buscarTasksAnalisado(empresa, "loja");
     
-    // Estratégia 1: Buscar por código no nome da task
-    const taskByName = tasks.find(task => 
+    console.log("📊 Total de tasks encontradas:", tasks.length);
+    
+    // Estratégia 1: Buscar por código exato no nome da task
+    const exactMatch = tasks.find(task => 
       task.name.includes(codigo) || 
+      task.name === codigo ||
       task.name.toLowerCase().includes(codigo.toLowerCase())
     );
     
-    if (taskByName) return taskByName;
+    if (exactMatch) {
+      console.log("✅ Match exato encontrado:", exactMatch.name);
+      return exactMatch;
+    }
     
-    // Estratégia 2: Buscar em attachments (se houver metadados)
-    // Esta parte pode ser expandida se os attachments tiverem nomes com códigos
+    // Estratégia 2: Buscar por padrão mais flexível (código dentro do texto)
+    const flexibleMatch = tasks.find(task => {
+      // Remove espaços e caracteres especiais para busca mais ampla
+      const cleanTaskName = task.name.replace(/[^a-zA-Z0-9]/g, '');
+      const cleanCodigo = codigo.replace(/[^a-zA-Z0-9]/g, '');
+      
+      return cleanTaskName.includes(cleanCodigo) || 
+             cleanCodigo.includes(cleanTaskName);
+    });
+    
+    if (flexibleMatch) {
+      console.log("✅ Match flexível encontrado:", flexibleMatch.name);
+      return flexibleMatch;
+    }
+    
+    // Estratégia 3: Log todas as tasks para debug
+    console.log("🐛 Tasks disponíveis para debug:", tasks.map(t => t.name));
     
     return null;
   } catch (error) {
