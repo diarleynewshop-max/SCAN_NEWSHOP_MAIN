@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 
 interface ConferenciaItem {
@@ -36,33 +36,40 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  const fetchItens = async () => {
+  const fetchItens = useCallback(async () => {
+    console.log("🔄 refetch chamado!");
     setLoading(true);
     setError(null);
 
     try {
+      console.log("🔍 Buscando itens do Supabase...");
+      
       const { data, error: fetchError } = await supabase
         .from('conferencia_itens')
         .select('*')
         .order('created_at', { ascending: false });
 
+      console.log("📦 Resposta do Supabase:", { data, error: fetchError });
+
       if (fetchError) {
+        console.error("❌ Erro do Supabase:", fetchError);
         throw new Error(fetchError.message);
       }
 
       setItens(data || []);
+      console.log("✅ Itens carregados:", data?.length || 0);
     } catch (err: any) {
-      console.error("Erro ao buscar itens:", err);
+      console.error("❌ Erro ao buscar itens:", err);
       setError(err.message || "Falha ao carregar itens");
       setItens([]);
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
   useEffect(() => {
     fetchItens();
-  }, []);
+  }, [fetchItens]);
 
   const produtos = useMemo(() => {
     const uniqueMap = new Map<string, ConferenciaItem>();
