@@ -115,7 +115,10 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
     const uniqueMap = new Map<string, ConferenciaItem>();
     
     for (const item of itens) {
-      if (!uniqueMap.has(item.codigo)) {
+      const existing = uniqueMap.get(item.codigo);
+      
+      // Manter o registro mais recente (com base no created_at)
+      if (!existing || new Date(item.created_at) > new Date(existing.created_at)) {
         uniqueMap.set(item.codigo, item);
       }
     }

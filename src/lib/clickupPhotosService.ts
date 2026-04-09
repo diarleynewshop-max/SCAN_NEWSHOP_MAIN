@@ -53,10 +53,13 @@ export async function findProductTask(
       return taskMatch;
     }
     
-    // Log para debug
-    console.log("🐛 Tasks de compras disponíveis:", tasks.map(t => ({
+    // Log para debug - mostrar attachments das tasks
+    console.log("🐛 Tasks de compras com attachments:", tasks.map(t => ({
       name: t.name,
-      attachments: t.attachments?.map(a => a.title)
+      attachments: t.attachments?.map(a => ({
+        title: a.title,
+        hasImage: a.mimetype?.startsWith("image/") || a.url?.match(/\.(jpg|jpeg|png|gif|webp)$/i)
+      }))
     })));
     
     return null;
