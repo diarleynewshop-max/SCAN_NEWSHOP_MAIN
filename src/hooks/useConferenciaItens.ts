@@ -44,19 +44,21 @@ export const useConferenciaItens = (): UseConferenciaItensReturn => {
     try {
       console.log("🔍 Buscando itens do Supabase...");
       
+      console.log("🔍 URL do Supabase:", supabase.supabaseUrl);
+      
       const { data, error: fetchError } = await supabase
         .from('conferencia_itens')
         .select('*')
         .order('created_at', { ascending: false });
 
-      console.log("📦 Resposta do Supabase:", { data, error: fetchError });
+      console.log("📦 Resposta completa:", { data, error: fetchError, count: data?.length, dataJSON: JSON.stringify(data) });
 
       if (fetchError) {
         console.error("❌ Erro do Supabase:", fetchError);
         throw new Error(fetchError.message);
       }
 
-      console.log("📊 Dados recebidos:", data);
+      console.log("📊 Dados recebidos (JSON):", JSON.stringify(data, null, 2));
       setItens(data || []);
       console.log("✅ Itens carregados:", data?.length || 0);
     } catch (err: any) {
