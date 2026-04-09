@@ -1,52 +1,104 @@
 // Serviço para buscar fotos de produtos no ClickUp
 import { buscarTasksCompras, ClickUpTask } from "./clickupApi";
 
-// Padrão base das URLs do ClickUp attachments
-const CLICKUP_ATTACHMENT_BASE = "https://t90133045250.p.clickup-attachments.com/t90133045250";
-
-// Cache para armazenar URLs de fotos já verificadas
-const photoCache = new Map<string, string>();
-
-/**
- * Constrói URL da foto baseada no padrão do ClickUp
- */
-export function buildClickUpPhotoUrl(codigo: string, descricao: string): string {
-  // Normalizar descrição: remover acentos, caracteres especiais, substituir espaços
-  const cleanDescricao = descricao
-    .normalize('NFD').replace(/[\u0300-\u036f]/g, '') // Remove acentos
-    .replace(/[^a-zA-Z0-9]/g, '_') // Substitui caracteres especiais por _
-    .toUpperCase();
-  
-  // Gerar fileId consistente baseado no código (hash simples)
-  const fileId = generateFileId(codigo);
-  
-  return `${CLICKUP_ATTACHMENT_BASE}/${fileId}/nao_tem_${codigo}_${cleanDescricao}.jpg?view=open`;
+// ============================================================
+// Cache com TTL e limite de tentativas
+// ============================================================
+interface CacheEntry {
+  url: string | null;
+  timestamp: number;
+  attempts: number;
 }
 
-/**
- * Gera fileId consistente baseado no código do produto
- */
-function generateFileId(codigo: string): string {
-  // Hash simples para gerar ID consistente
-  let hash = 0;
-  for (let i = 0; i < codigo.length; i++) {
-    hash = ((hash << 5) - hash) + codigo.charCodeAt(i);
-    hash = hash & hash; // Convert to 32-bit integer
+class PhotoCache {
+  private cache = new Map<string, CacheEntry>();
+  private TTL = 24 * 60 * 60 * 1000; // 24h
+  private MAX_FAILED_ATTEMPTS = 3;
+
+  get(key: string): string | null | undefined {
+    const entry = this.cache.get(key);
+    if (!entry) return undefined;
+
+    if (Date.now() - entry.timestamp > this.TTL) {
+      this.cache.delete(key);
+      return undefined;
+    }
+
+    if (entry.url === null && entry.attempts >= this.MAX_FAILED_ATTEMPTS) {
+      return null;
+    }
+
+    return entry.url;
+  }
+
+  set(key: string, url: string | null) {
+    const existing = this.cache.get(key);
+    this.cache.set(key, {
+      url,
+      timestamp: Date.now(),
+      attempts: url === null ? (existing?.attempts || 0) + 1 : 0
+    });
+  }
+
+  clear() {
+    this.cache.clear();
+  }
+}
+
+const photoCache = new PhotoCache();
+
+// ============================================================
+// Retry Logic
+// ============================================================
+async function fetchWithRetry<T>(
+  fn: () => Promise<T>,
+  maxRetries: number = 3,
+  delayMs: number = 1000
+): Promise<T> {
+  let lastError: Error | null = null;
+  
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await fn();
+    } catch (error) {
+      lastError = error instanceof Error ? error : new Error(String(error));
+      
+      if (attempt === maxRetries) break;
+      
+      const isNetworkError = error instanceof TypeError || 
+        (error instanceof Error && error.message.includes('fetch'));
+      
+      if (!isNetworkError) break;
+      
+      await new Promise(resolve => setTimeout(resolve, delayMs * attempt));
+    }
   }
   
-  // Converter para formato UUID-like (8-4-4-4-12)
-  const hex = Math.abs(hash).toString(16).padStart(32, '0');
-  return `${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}`;
+  throw lastError || new Error('Unknown error');
 }
 
-/**
- * Verifica se uma URL de imagem é acessível
- */
-export async function isImageAccessible(url: string): Promise<boolean> {
+// ============================================================
+// Validação de imagem com timeout
+// ============================================================
+export async function isImageAccessible(url: string, timeout: number = 5000): Promise<boolean> {
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeout);
+
   try {
-    const response = await fetch(url, { method: 'HEAD' });
+    const response = await fetch(url, {
+      method: 'GET',
+      headers: { 'Range': 'bytes=0-1024' },
+      signal: controller.signal,
+      credentials: 'include'
+    });
+
+    clearTimeout(timeoutId);
     return response.ok && response.headers.get('content-type')?.startsWith('image/');
-  } catch {
+  } catch (error) {
+    clearTimeout(timeoutId);
+    if (error instanceof Error && error.name === 'AbortError') {
+      console.warn('⏱️ Timeout verificando imagem:', url);
+    }
     return false;
   }
 }
@@ -147,53 +199,38 @@ export async function getProductPhotoFromTask(
 }
 
 /**
- * Serviço principal para buscar foto de produto
+ * Serviço principal para buscar foto de produto (API Only)
  */
 export async function getProductPhoto(
   codigo: string,
-  sku: string = "",
   empresa: "NEWSHOP" | "SOYE" | "FACIL" = "NEWSHOP"
 ): Promise<string | null> {
-  // Verificar cache primeiro
   const cacheKey = `${empresa}:${codigo}`;
-  if (photoCache.has(cacheKey)) {
-    return photoCache.get(cacheKey) || null;
-  }
   
+  const cached = photoCache.get(cacheKey);
+  if (cached !== undefined) {
+    return cached;
+  }
+   
   try {
-    console.log("🔍 Buscando foto para produto:", codigo);
-    
-    // Primeiro: tentar buscar via API do ClickUp
     const task = await findProductTask(codigo, empresa);
-    if (task) {
-      const photo = await getProductPhotoFromTask(task);
-      if (photo) {
-        console.log("✅ Foto encontrada via API:", photo.url);
-        photoCache.set(cacheKey, photo.url);
-        return photo.url;
-      }
+    if (!task) {
+      photoCache.set(cacheKey, null);
+      return null;
     }
     
-    // Fallback: construir URL baseada no padrão
-    const descricao = sku || codigo;
-    const constructedUrl = buildClickUpPhotoUrl(codigo, descricao);
-    
-    console.log("🛠️ Tentando URL construída:", constructedUrl);
-    
-    // Verificar se a URL construída é acessível
-    const isAccessible = await isImageAccessible(constructedUrl);
-    
-    if (isAccessible) {
-      console.log("✅ URL construída funciona!");
-      photoCache.set(cacheKey, constructedUrl);
-      return constructedUrl;
+    const photo = await getProductPhotoFromTask(task);
+    if (!photo) {
+      photoCache.set(cacheKey, null);
+      return null;
     }
     
-    console.log("📭 Nenhuma foto encontrada para:", codigo);
-    return null;
+    photoCache.set(cacheKey, photo.url);
+    return photo.url;
     
   } catch (error) {
-    console.error("❌ Erro ao buscar foto do produto:", codigo, error);
+    console.error("❌ Erro ao buscar foto:", codigo, error);
+    photoCache.set(cacheKey, null);
     return null;
   }
 }
