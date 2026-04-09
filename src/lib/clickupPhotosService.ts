@@ -1,5 +1,5 @@
 // Serviço para buscar fotos de produtos no ClickUp
-import { buscarTasksAnalisado, ClickUpTask } from "./clickupApi";
+import { buscarTasksCompras, ClickUpTask } from "./clickupApi";
 
 // Cache em memória para evitar múltiplas chamadas
 const photoCache = new Map<string, string>();
@@ -18,10 +18,10 @@ export async function findProductTask(
   empresa: "NEWSHOP" | "SOYE" | "FACIL" = "NEWSHOP"
 ): Promise<ClickUpTask | null> {
   try {
-    // Buscar todas as tasks analisadas (já tem cache no proxy)
-    const tasks = await buscarTasksAnalisado(empresa, "loja");
+    // Buscar tasks da lista de COMPRAS (onde estão os produtos sem estoque)
+    const tasks = await buscarTasksCompras(empresa);
     
-    console.log("📊 Total de tasks encontradas:", tasks.length);
+    console.log("📊 Total de tasks de compras encontradas:", tasks.length);
     
     // Estratégia 1: Buscar por código exato no nome da task
     const exactMatch = tasks.find(task => 
@@ -51,7 +51,7 @@ export async function findProductTask(
     }
     
     // Estratégia 3: Log todas as tasks para debug
-    console.log("🐛 Tasks disponíveis para debug:", tasks.map(t => t.name));
+    console.log("🐛 Tasks de compras disponíveis:", tasks.map(t => t.name));
     
     return null;
   } catch (error) {

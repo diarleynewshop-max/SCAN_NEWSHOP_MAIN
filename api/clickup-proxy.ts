@@ -1,9 +1,9 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
 const LIST_IDS: Record<string, Record<string, string>> = {
-  NEWSHOP: { loja: '901325900510', cd: '901325900510' },
-  SOYE:    { loja: '901326607319', cd: '901326607319' },
-  FACIL:   { loja: '901326607320', cd: '901326607320' },
+  NEWSHOP: { loja: '901325900510', cd: '901325900510', compras: '901326684020' },
+  SOYE:    { loja: '901326607319', cd: '901326607319', compras: '901326684020' },
+  FACIL:   { loja: '901326607320', cd: '901326607320', compras: '901326684020' },
 };
 
 function getToken(empresa: string): string {
@@ -48,8 +48,32 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }));
   return res.status(200).json({ tasks });
 }
+    if (action === 'buscar-tasks-compras') {
+      const listId = LIST_IDS[empresa]?.['compras'] ?? '901326684020';
+      console.log('empresa:', empresa, 'lista compras:', listId, 'token:', token?.slice(0,20));
+      
+      const r = await fetch(
+        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=false`,
+        { headers: { Authorization: token } }
+      );
+      const d = await r.json();
+      console.log('tasks de compras retornadas:', JSON.stringify(
+        (d.tasks ?? []).map((t: any) => ({ name: t.name, status: t.status?.status }))
+      ));
+
+      const tasks = (d.tasks ?? [])
+        .map((t: any) => ({
+          id: t.id, name: t.name,
+          status: t.status?.status ?? '',
+          date_created: t.date_created ?? '',
+          attachments: (t.attachments ?? []).map((a: any) => ({
+            id: a.id, title: a.title ?? a.file_name ?? '',
+            url: a.url, mimetype: a.mimetype ?? '',
+          })),
+        }));
+      return res.status(200).json({ tasks });
+    }
     if (action === 'baixar-json') {
-      if (!taskId) return res.status(400).json({ error: 'taskId obrigatório' });
       // Busca task completa com attachments
       const r = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
         headers: { Authorization: token },

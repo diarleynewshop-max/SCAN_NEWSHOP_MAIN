@@ -27,6 +27,7 @@ export interface ClickUpAttachment {
 interface EmpresaConfig {
   token:    string; // VITE_CLICKUP_TOKEN_xxx
   listId:   string;
+  todoListId: string; // Nova: lista de compras/TODO
   senha:    string;
 }
 
@@ -35,16 +36,19 @@ const CONFIGS: Record<EmpresaKey, EmpresaConfig> = {
   NEWSHOP: {
     token:    import.meta.env.VITE_CLICKUP_TOKEN_NEWSHOP as string,
     listId:   import.meta.env.VITE_CLICKUP_LIST_ID_NEWSHOP    ?? "901325900510",
+    todoListId: import.meta.env.VITE_CLICKUP_TODO_LIST_ID_NEWSHOP ?? "901326684020", // Lista de compras
     senha:    "n91",
   },
   SOYE: {
     token:    import.meta.env.VITE_CLICKUP_TOKEN_SF as string,
     listId:   import.meta.env.VITE_CLICKUP_LIST_ID_SOYE    ?? "901326461924",
+    todoListId: import.meta.env.VITE_CLICKUP_TODO_LIST_ID_SOYE ?? "901326684020",
     senha:    "s91",
   },
   FACIL: {
     token:    import.meta.env.VITE_CLICKUP_TOKEN_SF as string,
     listId:   import.meta.env.VITE_CLICKUP_LIST_ID_FACIL    ?? "901326461915",
+    todoListId: import.meta.env.VITE_CLICKUP_TODO_LIST_ID_FACIL ?? "901326684020",
     senha:    "f91",
   },
 };
@@ -66,6 +70,16 @@ export async function buscarTasksAnalisado(
 ): Promise<ClickUpTask[]> {
   const response = await fetch(`/api/clickup-proxy?action=buscar-tasks&empresa=${empresa}&flag=${flag}`);
   if (!response.ok) throw new Error(`Erro ${response.status} ao buscar tasks`);
+  const data = await response.json();
+  return data.tasks ?? [];
+}
+
+// ── Buscar tasks da lista de Compras/TODO ─────────────────────────────────────
+export async function buscarTasksCompras(
+  empresa: EmpresaKey
+): Promise<ClickUpTask[]> {
+  const response = await fetch(`/api/clickup-proxy?action=buscar-tasks-compras&empresa=${empresa}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao buscar tasks de compras`);
   const data = await response.json();
   return data.tasks ?? [];
 }
