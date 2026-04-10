@@ -9,6 +9,7 @@ export interface Product {
   quantity: number;
   removeTag: boolean;
   createdAt: Date;
+  importedFromSpreadsheet?: boolean;
 }
 
 export type ListFlag = "loja";

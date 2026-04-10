@@ -2,15 +2,57 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, X, Eye, Wifi } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, X, Eye, Upload, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useState } from "react";
+import { useState, useRef } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
 
 const Compras = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
+  const [importando, setImportando] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const { produtos, loading, error, refetch, analisar, aprovar, rejeitar, ultimaAtualizacao } = useProdutosComprar();
+
+  const handleImportarPlanilha = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setImportando(true);
+    
+    try {
+      const base64 = await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => {
+          const result = reader.result as string;
+          const base64Data = result.split(',')[1];
+          resolve(base64Data);
+        };
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+
+      const response = await fetch('/api/clickup-importar', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ base64 }),
+      });
+
+      const data = await response.json();
+      
+      if (data.sucesso) {
+        alert(`Importacao concluida!\n${data.criadas} itens criados\n${data.erros} erros`);
+        refetch();
+      } else {
+        alert(`Erro: ${data.error}`);
+      }
+    } catch (err) {
+      alert('Erro ao importar: ' + String(err));
+    } finally {
+      setImportando(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   const filteredProdutos = produtos.filter(p =>
     p.codigo.includes(searchTerm) ||
@@ -41,18 +83,31 @@ const Compras = () => {
               <ArrowLeft className="h-4 w-4 mr-2" />
               Voltar
             </Button>
-            <h1 className="text-3xl font-bold text-gray-900">Gestão de Compras</h1>
+            <h1 className="text-3xl font-bold text-gray-900">Gestao de Compras</h1>
             <p className="text-gray-600 mt-1">
-              Produtos aguardando análise (ClickUp)
+              Produtos aguardando analise (ClickUp)
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {ultimaAtualizacao && (
-              <div className="flex items-center gap-1.5 text-xs text-green-600">
-                <Wifi className="h-3.5 w-3.5" />
-                <span>Tempo real · {ultimaAtualizacao.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
-              </div>
-            )}
+            <input
+              type="file"
+              ref={fileInputRef}
+              accept=".xlsx,.xls,.csv"
+              onChange={handleImportarPlanilha}
+              className="hidden"
+            />
+            <Button 
+              variant="outline" 
+              onClick={() => fileInputRef.current?.click()}
+              disabled={importando}
+            >
+              {importando ? (
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+              ) : (
+                <Upload className="h-4 w-4 mr-2" />
+              )}
+              Importar Planilha
+            </Button>
             <Button variant="outline" onClick={() => refetch()} disabled={loading}>
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
               Atualizar
@@ -106,7 +161,7 @@ const Compras = () => {
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
               <Input
-                placeholder="Buscar por código..."
+                placeholder="Buscar por codigo..."
                 className="pl-10"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -144,7 +199,7 @@ const Compras = () => {
                         <img src={produto.foto} alt={produto.codigo} className="w-16 h-16 object-cover rounded" />
                       ) : (
                         <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center">
-                          <span className="text-gray-400">sem foto</span>
+                          <span className="text-gray-400 text-xs">sem foto</span>
                         </div>
                       )}
                       <div>
@@ -168,7 +223,7 @@ const Compras = () => {
                       )}
                       {produto.status === 'analisado' && (
                         <>
-                          <Button size="sm" onClick={() => aprovar(produto.id)}>
+                          <Button size="sm" onClick={() => aprobar(produto.id)}>
                             <Check className="h-4 w-4 mr-1" />
                             Aprovar
                           </Button>
@@ -186,7 +241,7 @@ const Compras = () => {
         </Card>
 
         <div className="text-center text-gray-500 text-sm mt-8">
-          <p>Interface de Compras • ClickUp Webhook</p>
+          <p>Interface de Compras - ClickUp</p>
         </div>
       </div>
     </div>

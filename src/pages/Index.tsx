@@ -1,6 +1,7 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone, ShoppingCart } from "lucide-react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone, ShoppingCart, FileUp } from "lucide-react";
+import { parseSpreadsheet, SpreadsheetItem } from "@/lib/spreadsheetParser";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import BarcodeScanner from "@/components/BarcodeScanner";
@@ -85,7 +86,13 @@ const Index = () => {
   const [modalTitle, setModalTitle]       = useState("");
   const [modalPerson, setModalPerson]     = useState("");
 
-  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct } = useInventory();
+  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, addProductsFromSpreadsheet } = useInventory();
+  
+  // Estados para importação de planilha
+  const [showImportModal, setShowImportModal] = useState(false);
+  const [importFile, setImportFile] = useState<File | null>(null);
+  const [importItems, setImportItems] = useState<SpreadsheetItem[]>([]);
+  const [importing, setImporting] = useState(false);
   const { productInfo, loading, error, lookupProduct } = useProductLookup();
 
   // Preencher modal com dados do login salvo quando abrir
@@ -384,6 +391,14 @@ const Index = () => {
                     height: modoDesktop ? 56 : 52
                   }}>
                     <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Abrir Nova Lista
+                  </button>
+                  <button onClick={() => setShowImportModal(true)} style={{ 
+                    ...S.btnPrimary,
+                    fontSize: modoDesktop ? 15 : 14,
+                    height: modoDesktop ? 56 : 52,
+                    background: "hsl(var(--indigo))",
+                  }}>
+                    <FileUp style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Importa Lista
                   </button>
                   <div style={{ 
                     background: "hsl(var(--destructive) / 0.07)", 

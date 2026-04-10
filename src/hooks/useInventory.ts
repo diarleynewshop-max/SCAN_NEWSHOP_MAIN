@@ -15,6 +15,8 @@ interface AddProductParams {
   photo: string | null;
   quantity: number;
   removeTag?: boolean;
+  description?: string;
+  importedFromSpreadsheet?: boolean;
 }
 
 const STORAGE_KEY = "scan_newshop_lists";
@@ -134,10 +136,12 @@ export function useInventory() {
              id: crypto.randomUUID(),
              barcode,
              sku: params.sku.trim(),
+             description: params.description?.trim() || undefined,
              photo: params.photo,
              quantity,
              removeTag: params.removeTag ?? false,
              createdAt: new Date(),
+             importedFromSpreadsheet: params.importedFromSpreadsheet ?? false,
            };
           return { ...l, products: [...l.products, newProduct] };
         })
@@ -168,5 +172,43 @@ export function useInventory() {
     setLists((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
   }, []);
 
-  return { lists, activeList, openList, closeList, addProduct, deleteProduct, updateList };
+  const addProductsFromSpreadsheet = useCallback(
+    (items: AddProductParams[]): boolean => {
+      if (!activeList) { toast({ title: "Abra uma lista primeiro", variant: "destructive" }); return false; }
+      if (items.length === 0) { toast({ title: "Nenhum item para importar", variant: "destructive" }); return false; }
+
+      setLists((prev) =>
+        prev.map((l) => {
+          if (l.id !== activeListId) return l;
+          const newProducts: Product[] = items.map((item) => ({
+            id: crypto.randomUUID(),
+            barcode: item.barcode.trim(),
+            sku: item.sku?.trim() || "",
+            description: item.description?.trim() || undefined,
+            photo: null,
+            quantity: 0,
+            removeTag: false,
+            createdAt: new Date(),
+            importedFromSpreadsheet: true,
+          }));
+          return { ...l, products: [...l.products, ...newProducts] };
+        })
+      );
+      toast({ title: `${items.length} itens importados!`, description: "Preencha COD e QTD em cada item." });
+      return true;
+    },
+    [activeList, activeListId, toast]
+  );
+
+  const updateProduct = useCallback((productId: string, updates: Partial<Product>) => {
+    if (!activeListId) return;
+    setLists((prev) =>
+      prev.map((l) => {
+        if (l.id !== activeListId) return l;
+        return { ...l, products: l.products.map((p) => p.id === productId ? { ...p, ...updates } : p) };
+      })
+    );
+  }, [activeListId]);
+
+  return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, deleteProduct, updateList };
 }
