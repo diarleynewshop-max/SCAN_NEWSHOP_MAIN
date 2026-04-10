@@ -93,6 +93,9 @@ const Index = () => {
   const [importItems, setImportItems] = useState<SpreadsheetItem[]>([]);
   const [importing, setImporting] = useState(false);
   
+  // Estado para item em edição
+  const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  
   // Estados para captura de foto
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
   const [photoProductId, setPhotoProductId] = useState<string | null>(null);
@@ -203,6 +206,37 @@ const Index = () => {
         // Sem login salvo, mostrar modal para configurar
         setShowOpenModal(true);
       }
+    }
+  };
+
+  const handleImportSpreadsheet = async (file: File) => {
+    try {
+      setImporting(true);
+      const items = await parseSpreadsheet(file);
+      if (items.length === 0) {
+        toast({ title: "Nenhum item encontrado", variant: "destructive" });
+        return;
+      }
+      const productItems = items.map(item => ({
+        barcode: "",
+        sku: "",
+        description: item.description,
+        photo: null,
+        quantity: 0,
+      }));
+      addProductsFromSpreadsheet(productItems);
+      const newItems = activeList?.products.slice(-items.length) || [];
+      if (newItems.length > 0) {
+        setEditingProductId(newItems[0].id);
+        toast({ title: `${items.length} itens importados!`, description: "Edite COD e QTD de cada item." });
+      }
+    } catch (err) {
+      toast({ title: "Erro ao importar planilha", variant: "destructive" });
+    } finally {
+      setImporting(false);
+      setShowImportModal(false);
+      setImportFile(null);
+      setImportItems([]);
     }
   };
 
@@ -545,6 +579,115 @@ const Index = () => {
             </div>
 
             {/* Coluna direita - Lista de produtos (apenas no desktop quando há produtos) */}
+            
+            {/* EDITOR INLINE para produtos importados */}
+            {editingProductId && activeList && (() => {
+              const product = activeList.products.find(p => p.id === editingProductId);
+              if (!product) return null;
+              return (
+                <div style={{
+                  background: "#fff",
+                  border: "2px solid hsl(var(--primary))",
+                  borderRadius: 16,
+                  padding: 16,
+                  marginBottom: 16,
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
+                    <h3 style={{ fontSize: 16, fontWeight: 700, color: "hsl(var(--primary))" }}>Editando Item</h3>
+                    <button onClick={() => setEditingProductId(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "hsl(var(--muted-foreground))" }}>✕</button>
+                  </div>
+                  
+                  {/* Descrição (readonly) */}
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>DESCRIÇÃO</label>
+                    <div style={{ padding: "10px 12px", background: "hsl(var(--muted))", borderRadius: 8, fontSize: 13, color: "hsl(var(--foreground))" }}>
+                      {product.description || "Sem descrição"}
+                    </div>
+                  </div>
+                  
+                  {/* Foto */}
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>FOTO</label>
+                    <button 
+                      onClick={() => { setPhotoProductId(product.id); setShowPhotoCapture(true); }}
+                      style={{
+                        width: "100%",
+                        height: 80,
+                        borderRadius: 10,
+                        border: "2px dashed hsl(var(--border))",
+                        background: "hsl(var(--secondary))",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {product.photo ? (
+                        <img src={product.photo} alt="Produto" style={{ width: "100%", height: "100%", borderRadius: 8, objectFit: "cover" }} />
+                      ) : (
+                        <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Clique para adicionar foto</span>
+                      )}
+                    </button>
+                  </div>
+                  
+                  {/* Código de Barras */}
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>CÓDIGO DE BARRAS</label>
+                    <input
+                      type="text"
+                      placeholder="Digite ou bipa o código"
+                      value={product.barcode}
+                      onChange={(e) => updateProduct(product.id, { barcode: e.target.value })}
+                      style={{
+                        width: "100%",
+                        height: 44,
+                        padding: "0 12px",
+                        borderRadius: 8,
+                        border: "1.5px solid hsl(var(--border))",
+                        background: "hsl(var(--secondary))",
+                        fontSize: 14,
+                        fontFamily: "var(--font-mono)",
+                      }}
+                    />
+                  </div>
+                  
+                  {/* Quantidade */}
+                  <div style={{ marginBottom: 12 }}>
+                    <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>QUANTIDADE</label>
+                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                      <button 
+                        onClick={() => updateProduct(product.id, { quantity: Math.max(0, product.quantity - 1) })}
+                        style={{ width: 44, height: 44, borderRadius: 8, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 20, fontWeight: 700, cursor: "pointer" }}
+                      >-</button>
+                      <span style={{ fontSize: 22, fontWeight: 700, color: "hsl(var(--primary))", minWidth: 40, textAlign: "center" }}>{product.quantity}</span>
+                      <button 
+                        onClick={() => updateProduct(product.id, { quantity: product.quantity + 1 })}
+                        style={{ width: 44, height: 44, borderRadius: 8, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 20, fontWeight: 700, cursor: "pointer" }}
+                      >+</button>
+                    </div>
+                  </div>
+                  
+                  {/* Botão Salvar */}
+                  <button
+                    onClick={() => setEditingProductId(null)}
+                    style={{
+                      width: "100%",
+                      height: 44,
+                      borderRadius: 10,
+                      background: "hsl(var(--primary))",
+                      color: "hsl(var(--primary-foreground))",
+                      border: "none",
+                      fontWeight: 700,
+                      fontSize: 14,
+                      cursor: "pointer",
+                    }}
+                  >
+                    Salvar e Fechar
+                  </button>
+                </div>
+              );
+            })()}
+
             {modoDesktop && activeList && activeList.products.length > 0 && (
               <div style={{ 
                 flex: 1, 
@@ -578,7 +721,7 @@ const Index = () => {
 product={p} 
                       onDelete={deleteProduct}
                       onUpdate={updateProduct}
-onMoveToTop={scrollToProduct}
+onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
                       onCapturePhoto={(id) => { setPhotoProductId(id); setShowPhotoCapture(true); }}
                       modoDesktop={modoDesktop} 
                     />
@@ -597,7 +740,7 @@ onMoveToTop={scrollToProduct}
                     product={p} 
                     onDelete={deleteProduct}
                     onUpdate={updateProduct}
-onMoveToTop={() => { setEditProductId(p.id); setShowEditModal(true); }}
+onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
                     onCapturePhoto={(id) => { setPhotoProductId(id); setShowPhotoCapture(true); }}
                     modoDesktop={modoDesktop} 
                   />
@@ -852,27 +995,17 @@ onMoveToTop={() => { setEditProductId(p.id); setShowEditModal(true); }}
             </div>
           )}
 
-          {/* Seleção de arquivo */}
-          {activeList && !importItems.length && (
+{/* Seleção de arquivo */}
+          {activeList && (
             <div style={{ marginBottom: 16 }}>
               <input
-                ref={(el) => el && (el.value = '')}
+                ref={fileInputRef}
                 type="file"
                 id="import-file-input"
                 accept=".xlsx,.xls,.csv"
-                onChange={async (e) => {
+                onChange={(e) => {
                   const file = e.target.files?.[0];
-                  if (!file) return;
-                  setImportFile(file);
-                  setImporting(true);
-                  try {
-                    const items = await parseSpreadsheet(file);
-                    setImportItems(items);
-                  } catch (err) {
-                    toast({ title: "Erro ao ler arquivo", variant: "destructive" });
-                  } finally {
-                    setImporting(false);
-                  }
+                  if (file) handleImportSpreadsheet(file);
                 }}
                 style={{ display: "none" }}
               />
@@ -891,9 +1024,9 @@ onMoveToTop={() => { setEditProductId(p.id); setShowEditModal(true); }}
                 <FileUp style={{ width: 32, height: 32, color: "hsl(var(--muted-foreground))" }} />
                 <div style={{ textAlign: "center" }}>
                   <p style={{ fontSize: 14, fontWeight: 600, color: "hsl(var(--foreground))" }}>
-                    Clique para selecionar
+                    Selecionar Arquivo
                   </p>
-<p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
+                  <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
                     XLSX ou CSV (até 200 itens)
                   </p>
                 </div>
@@ -901,87 +1034,28 @@ onMoveToTop={() => { setEditProductId(p.id); setShowEditModal(true); }}
             </div>
           )}
 
-          {/* Preview dos itens */}
-          {activeList && importItems.length > 0 && (
-            <div style={{ marginBottom: 16, maxHeight: 200, overflowY: "auto" }}>
-              <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "hsl(var(--foreground))" }}>
-                {importItems.length} produto(s) encontrado(s):
-              </p>
-              {importItems.slice(0, 10).map((item, i) => (
-                <div key={i} style={{ padding: "8px 12px", background: "hsl(var(--secondary))", borderRadius: 8, marginBottom: 6 }}>
-                  <p style={{ fontSize: 13, fontWeight: 500, color: "hsl(var(--foreground))" }}>{item.description}</p>
-                </div>
-              ))}
-              {importItems.length > 10 && (
-                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", textAlign: "center" }}>
-                  ...e mais {importItems.length - 10} itens
-                </p>
-              )}
-            </div>
-          )}
-
-          {importing && (
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 20 }}>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span style={{ fontSize: 13 }}>Lendo arquivo...</span>
-            </div>
-          )}
-
           <DialogFooter style={{ marginTop: 16 }}>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-              <button
-                onClick={() => { setShowImportModal(false); setImportFile(null); setImportItems([]); }}
-                style={{
-                  height: 48,
-                  borderRadius: 12,
-                  background: "hsl(var(--secondary))",
-                  color: "hsl(var(--foreground))",
-                  border: "1.5px solid hsl(var(--border))",
-                  fontWeight: 600,
-                  fontSize: 13,
-                  cursor: "pointer",
-                }}
-              >
-                Cancelar
-              </button>
-              <button
-                onClick={() => {
-                  if (importItems.length > 0) {
-                    addProductsFromSpreadsheet(importItems.map(item => ({
-                      barcode: "",
-                      sku: "",
-                      description: item.description,
-                      photo: null,
-                      quantity: 0,
-                    })));
-                    toast({ title: `${importItems.length} produtos importados!`, description: "Preencha o COD e QTD em cada item." });
-                    setShowImportModal(false);
-                    setImportFile(null);
-                    setImportItems([]);
-                  }
-                }}
-                disabled={importItems.length === 0 || !activeList}
-                style={{
-                  height: 48,
-                  borderRadius: 12,
-                  background: importItems.length > 0 && activeList ? "hsl(var(--primary))" : "hsl(var(--muted))",
-                  color: importItems.length > 0 && activeList ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
-                  border: "none",
-                  fontWeight: 700,
-                  fontSize: 13,
-                  cursor: importItems.length > 0 && activeList ? "pointer" : "not-allowed",
-                  opacity: importItems.length > 0 && activeList ? 1 : 0.5,
-                }}
-              >
-                Importar
-              </button>
-            </div>
+            <button
+              onClick={() => { setShowImportModal(false); setImportFile(null); setImportItems([]); }}
+              style={{
+                width: "100%",
+                height: 48,
+                borderRadius: 12,
+                background: "hsl(var(--secondary))",
+                color: "hsl(var(--foreground))",
+                border: "1.5px solid hsl(var(--border))",
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+Fechar
+            </button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
 
       {showScanner && <BarcodeScanner onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />}
-      
       {showPhotoCapture && photoProductId && (
         <PhotoCapture
           photo={activeList?.products.find(p => p.id === photoProductId)?.photo || null}
