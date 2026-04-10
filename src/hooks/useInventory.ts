@@ -226,13 +226,21 @@ export function useInventory() {
   }, [activeListId]);
 
   const scrollToProduct = useCallback((productId: string) => {
-    setTimeout(() => {
-      const element = document.getElementById(`product-${productId}`);
-      if (element) {
-        element.scrollIntoView({ behavior: "smooth", block: "start" });
-      }
-    }, 100);
-  }, []);
+    if (!activeListId) return;
+    setLists((prev) => {
+      const newLists = prev.map((l) => {
+        if (l.id !== activeListId) return l;
+        const productIndex = l.products.findIndex((p) => p.id === productId);
+        if (productIndex <= 0) return l;
+        const updatedProducts = [...l.products];
+        const [product] = updatedProducts.splice(productIndex, 1);
+        updatedProducts.unshift(product);
+        return { ...l, products: updatedProducts };
+      });
+      setTimeout(() => window.scrollTo({ top: 0, behavior: "instant" }), 50);
+      return newLists;
+    });
+  }, [activeListId]);
 
   return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, deleteProduct, updateList, moveProductToTop, scrollToProduct };
 }

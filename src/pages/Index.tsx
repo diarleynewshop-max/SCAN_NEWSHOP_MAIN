@@ -85,7 +85,7 @@ const Index = () => {
   const [modalTitle, setModalTitle]       = useState("");
   const [modalPerson, setModalPerson]     = useState("");
 
-  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, addProductsFromSpreadsheet, updateProduct, moveProductToTop } = useInventory();
+  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, addProductsFromSpreadsheet, updateProduct, scrollToProduct, moveProductToTop } = useInventory();
   
   // Estados para importação de planilha
   const [showImportModal, setShowImportModal] = useState(false);
@@ -582,7 +582,7 @@ const Index = () => {
 product={p} 
                       onDelete={deleteProduct}
                       onUpdate={updateProduct}
-                      onMoveToTop={() => { setEditProductId(p.id); setShowEditModal(true); }}
+onMoveToTop={scrollToProduct}
                       onCapturePhoto={(id) => { setPhotoProductId(id); setShowPhotoCapture(true); }}
                       modoDesktop={modoDesktop} 
                     />
