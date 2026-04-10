@@ -1,6 +1,6 @@
 import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone, ShoppingCart, FileUp, Camera } from "lucide-react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone, ShoppingCart, FileUp } from "lucide-react";
 import { parseSpreadsheet, SpreadsheetItem } from "@/lib/spreadsheetParser";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
@@ -96,10 +96,6 @@ const Index = () => {
   // Estados para captura de foto
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
   const [photoProductId, setPhotoProductId] = useState<string | null>(null);
-  
-  // Estados para edição de produto importado
-  const [showEditModal, setShowEditModal] = useState(false);
-  const [editProductId, setEditProductId] = useState<string | null>(null);
   
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { productInfo, loading, error, lookupProduct } = useProductLookup();
@@ -1005,185 +1001,6 @@ onMoveToTop={() => { setEditProductId(p.id); setShowEditModal(true); }}
           }}
         />
       )}
-
-      {/* Modal de Edição do Produto Importado */}
-      <Dialog open={showEditModal} onOpenChange={(open) => { setShowEditModal(open); if (!open) setEditProductId(null); }}>
-        <DialogContent className={modoDesktop ? "max-w-md" : "max-w-sm"} style={{ 
-          background: "#fff", 
-          borderRadius: 20, 
-          border: "1px solid hsl(var(--border))",
-          padding: modoDesktop ? "24px" : "20px"
-        }}>
-          {!modoDesktop && <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />}
-
-          <DialogHeader>
-            <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>
-              Editar Produto
-            </DialogTitle>
-          </DialogHeader>
-
-          {editProductId && activeList?.products.find(p => p.id === editProductId) && (
-            ((product: Product) => (
-              <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
-                {/* Foto */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 8, display: "block" }}>
-                    FOTO
-                  </label>
-                  <div style={{ display: "flex", gap: 8 }}>
-                    <button 
-                      onClick={() => { setPhotoProductId(product.id); setShowPhotoCapture(true); }}
-                      style={{
-                        width: 80,
-                        height: 80,
-                        borderRadius: 12,
-                        border: "2px dashed hsl(var(--primary))",
-                        background: "hsl(var(--primary) / 0.1)",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {product.photo ? (
-                        <img src={product.photo} alt="Produto" style={{ width: "100%", height: "100%", borderRadius: 10, objectFit: "cover" }} />
-                      ) : (
-                        <Camera style={{ width: 24, height: 24, color: "hsl(var(--primary))" }} />
-                      )}
-                    </button>
-                    {product.photo && (
-                      <button 
-                        onClick={() => { updateProduct(product.id, { photo: null }); }}
-                        style={{
-                          height: 40,
-                          padding: "0 12px",
-                          borderRadius: 8,
-                          background: "hsl(var(--destructive) / 0.1)",
-                          color: "hsl(var(--destructive))",
-                          border: "1px solid hsl(var(--destructive) / 0.2)",
-                          fontSize: 12,
-                          fontWeight: 600,
-                          cursor: "pointer",
-                        }}
-                      >
-                        Remover
-                      </button>
-                    )}
-                  </div>
-                </div>
-
-                {/* Código de Barras */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 8, display: "block" }}>
-                    CÓDIGO DE BARRAS
-                  </label>
-                  <input
-                    type="text"
-                    placeholder="Digite ou bipa o código"
-                    value={product.barcode}
-                    onChange={(e) => updateProduct(product.id, { barcode: e.target.value })}
-                    style={{
-                      width: "100%",
-                      height: 48,
-                      padding: "0 14px",
-                      borderRadius: 10,
-                      border: "1.5px solid hsl(var(--border))",
-                      background: "hsl(var(--secondary))",
-                      fontSize: 14,
-                      fontFamily: "var(--font-mono)",
-                    }}
-                  />
-                </div>
-
-                {/* Quantidade */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 8, display: "block" }}>
-                    QUANTIDADE
-                  </label>
-                  <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                    <button 
-                      onClick={() => updateProduct(product.id, { quantity: Math.max(0, product.quantity - 1) })}
-                      style={{
-                        width: 48,
-                        height: 48,
-                        borderRadius: 10,
-                        background: "hsl(var(--secondary))",
-                        border: "1.5px solid hsl(var(--border))",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                        fontSize: 20,
-                        fontWeight: 700,
-                      }}
-                    >
-                      -
-                    </button>
-                    <span style={{ fontSize: 24, fontWeight: 700, color: "hsl(var(--primary))", minWidth: 40, textAlign: "center" }}>
-                      {product.quantity}
-                    </span>
-                    <button 
-                      onClick={() => updateProduct(product.id, { quantity: product.quantity + 1 })}
-                      style={{
-                        width: 48,
-                        height: 48,
-                        borderRadius: 10,
-                        background: "hsl(var(--secondary))",
-                        border: "1.5px solid hsl(var(--border))",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                        fontSize: 20,
-                        fontWeight: 700,
-                      }}
-                    >
-                      +
-                    </button>
-                  </div>
-                </div>
-
-                {/* Descrição (sóleitura) */}
-                <div>
-                  <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 8, display: "block" }}>
-                    DESCRIÇÃO
-                  </label>
-                  <div style={{
-                    width: "100%",
-                    padding: "12px 14px",
-                    borderRadius: 10,
-                    border: "1.5px solid hsl(var(--border))",
-                    background: "hsl(var(--muted))",
-                    fontSize: 13,
-                    color: "hsl(var(--foreground))",
-                  }}>
-                    {product.description || "Sem descrição"}
-                  </div>
-                </div>
-              </div>
-            ))(activeList.products.find(p => p.id === editProductId) as Product)
-          )}
-
-          <DialogFooter style={{ marginTop: 16 }}>
-            <button
-              onClick={() => { setShowEditModal(false); setEditProductId(null); }}
-              style={{
-                width: "100%",
-                height: 48,
-                borderRadius: 10,
-                background: "hsl(var(--primary))",
-                color: "hsl(var(--primary-foreground))",
-                border: "none",
-                fontWeight: 700,
-                fontSize: 14,
-                cursor: "pointer",
-              }}
-            >
-              Salvar
-            </button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 };
