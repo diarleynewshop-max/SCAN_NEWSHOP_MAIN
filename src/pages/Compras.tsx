@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, X, Eye } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, X, Eye, Wifi } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
@@ -10,7 +10,7 @@ import { useProdutosComprar } from "@/hooks/useProdutosComprar";
 const Compras = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
-  const { produtos, loading, error, refetch, analisar, aprobar, rejeitar } = useProdutosComprar();
+  const { produtos, loading, error, refetch, analisar, aprovar, rejeitar, ultimaAtualizacao } = useProdutosComprar();
 
   const filteredProdutos = produtos.filter(p =>
     p.codigo.includes(searchTerm) ||
@@ -46,10 +46,18 @@ const Compras = () => {
               Produtos aguardando análise (ClickUp)
             </p>
           </div>
-          <Button variant="outline" onClick={() => refetch()} disabled={loading}>
-            <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
-            Atualizar
-          </Button>
+          <div className="flex items-center gap-3">
+            {ultimaAtualizacao && (
+              <div className="flex items-center gap-1.5 text-xs text-green-600">
+                <Wifi className="h-3.5 w-3.5" />
+                <span>Tempo real · {ultimaAtualizacao.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+              </div>
+            )}
+            <Button variant="outline" onClick={() => refetch()} disabled={loading}>
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              Atualizar
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
@@ -160,7 +168,7 @@ const Compras = () => {
                       )}
                       {produto.status === 'analisado' && (
                         <>
-                          <Button size="sm" onClick={() => aprobar(produto.id)}>
+                          <Button size="sm" onClick={() => aprovar(produto.id)}>
                             <Check className="h-4 w-4 mr-1" />
                             Aprovar
                           </Button>
