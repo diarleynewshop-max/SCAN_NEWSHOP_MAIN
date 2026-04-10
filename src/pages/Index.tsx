@@ -86,13 +86,17 @@ const Index = () => {
   const [modalTitle, setModalTitle]       = useState("");
   const [modalPerson, setModalPerson]     = useState("");
 
-  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, addProductsFromSpreadsheet } = useInventory();
+  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, addProductsFromSpreadsheet, updateProduct } = useInventory();
   
   // Estados para importação de planilha
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importItems, setImportItems] = useState<SpreadsheetItem[]>([]);
   const [importing, setImporting] = useState(false);
+  
+  // Estados para captura de foto
+  const [showPhotoCapture, setShowPhotoCapture] = useState(false);
+  const [photoProductId, setPhotoProductId] = useState<string | null>(null);
   const { productInfo, loading, error, lookupProduct } = useProductLookup();
 
   // Preencher modal com dados do login salvo quando abrir
@@ -568,7 +572,14 @@ const Index = () => {
                 </div>
                 <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                   {activeList.products.map((p) => (
-                    <ProductCard key={p.id} product={p} onDelete={deleteProduct} modoDesktop={modoDesktop} />
+                    <ProductCard 
+                      key={p.id} 
+                      product={p} 
+                      onDelete={deleteProduct}
+                      onUpdate={updateProduct}
+                      onCapturePhoto={(id) => { setPhotoProductId(id); setShowPhotoCapture(true); }}
+                      modoDesktop={modoDesktop} 
+                    />
                   ))}
                 </div>
               </div>
@@ -579,7 +590,14 @@ const Index = () => {
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
                 <p style={S.label}>Produtos adicionados</p>
                 {activeList.products.map((p) => (
-                  <ProductCard key={p.id} product={p} onDelete={deleteProduct} modoDesktop={modoDesktop} />
+                  <ProductCard 
+                    key={p.id} 
+                    product={p} 
+                    onDelete={deleteProduct}
+                    onUpdate={updateProduct}
+                    onCapturePhoto={(id) => { setPhotoProductId(id); setShowPhotoCapture(true); }}
+                    modoDesktop={modoDesktop} 
+                  />
                 ))}
               </div>
             )}
@@ -958,6 +976,26 @@ const Index = () => {
       </Dialog>
 
       {showScanner && <BarcodeScanner onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />}
+      
+      {showPhotoCapture && photoProductId && (
+        <PhotoCapture
+          photo={activeList?.products.find(p => p.id === photoProductId)?.photo || null}
+          onCapture={(photo) => {
+            if (photoProductId) {
+              updateProduct(photoProductId, { photo });
+              setShowPhotoCapture(false);
+              setPhotoProductId(null);
+            }
+          }}
+          onRemove={() => {
+            if (photoProductId) {
+              updateProduct(photoProductId, { photo: null });
+              setShowPhotoCapture(false);
+              setPhotoProductId(null);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };

@@ -1,4 +1,4 @@
-import { Package, Trash2 } from "lucide-react";
+import { Package, Trash2, Camera, Hash, Minus, Plus } from "lucide-react";
 
 export interface Product {
   id: string;
@@ -30,10 +30,15 @@ export interface ListData {
 interface ProductCardProps {
   product: Product;
   onDelete: (id: string) => void;
+  onUpdate?: (id: string, updates: Partial<Product>) => void;
+  onCapturePhoto?: (id: string) => void;
   modoDesktop?: boolean;
 }
 
-const ProductCard = ({ product, onDelete, modoDesktop = false }: ProductCardProps) => {
+const ProductCard = ({ product, onDelete, onUpdate, onCapturePhoto, modoDesktop = false }: ProductCardProps) => {
+  const isImported = product.importedFromSpreadsheet;
+  const needsInput = isImported && (!product.barcode || product.quantity === 0);
+  
   return (
     <div style={{
       background: "#fff", 
@@ -46,44 +51,69 @@ const ProductCard = ({ product, onDelete, modoDesktop = false }: ProductCardProp
       boxShadow: modoDesktop ? "var(--shadow-sm)" : "var(--shadow-xs)",
     }}>
       {product.photo ? (
-        <img src={product.photo} alt="Produto" style={{ 
-          width: modoDesktop ? 60 : 52, 
-          height: modoDesktop ? 60 : 52, 
-          borderRadius: modoDesktop ? 10 : 8, 
-          objectFit: "cover", 
-          flexShrink: 0 
-        }} />
+        <div style={{ position: "relative", width: modoDesktop ? 60 : 52, height: modoDesktop ? 60 : 52, flexShrink: 0 }}>
+          <img src={product.photo} alt="Produto" style={{ width: "100%", height: "100%", borderRadius: modoDesktop ? 10 : 8, objectFit: "cover" }} />
+          {isImported && onCapturePhoto && (
+            <button onClick={() => onCapturePhoto(product.id)} style={{ position: "absolute", inset: 0, background: "rgba(0,0,0,0.5)", border: "none", borderRadius: modoDesktop ? 10 : 8, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <Camera style={{ width: modoDesktop ? 18 : 16, height: modoDesktop ? 18 : 16, color: "#fff" }} />
+            </button>
+          )}
+        </div>
       ) : (
-        <div style={{ 
+        <button onClick={() => onCapturePhoto?.(product.id)} disabled={!isImported} style={{ 
           width: modoDesktop ? 60 : 52, 
           height: modoDesktop ? 60 : 52, 
           borderRadius: modoDesktop ? 10 : 8, 
-          background: "hsl(var(--muted))", 
+          background: isImported ? "hsl(var(--primary) / 0.1)" : "hsl(var(--muted))", 
+          border: isImported ? "2px dashed hsl(var(--primary))" : "none",
           display: "flex", 
           alignItems: "center", 
           justifyContent: "center", 
-          flexShrink: 0 
+          flexShrink: 0,
+          cursor: isImported ? "pointer" : "default"
         }}>
-          <Package style={{ 
-            width: modoDesktop ? 22 : 20, 
-            height: modoDesktop ? 22 : 20, 
-            color: "hsl(var(--muted-foreground))" 
-          }} />
-        </div>
+          {isImported ? (
+            <Camera style={{ width: modoDesktop ? 22 : 20, height: modoDesktop ? 22 : 20, color: "hsl(var(--primary))" }} />
+          ) : (
+            <Package style={{ width: modoDesktop ? 22 : 20, height: modoDesktop ? 22 : 20, color: "hsl(var(--muted-foreground))" }} />
+          )}
+        </button>
       )}
 
       <div style={{ flex: 1, minWidth: 0 }}>
-        <p style={{ 
-          fontFamily: "var(--font-mono)", 
-          fontSize: modoDesktop ? 13 : 12, 
-          fontWeight: 500, 
-          color: "hsl(var(--foreground))", 
-          overflow: "hidden", 
-          textOverflow: "ellipsis", 
-          whiteSpace: "nowrap" 
-        }}>
-          {product.barcode}
-        </p>
+        {isImported ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 4 }}>
+            <Hash style={{ width: 12, height: 12, color: "hsl(var(--muted-foreground))" }} />
+            <input
+              type="text"
+              placeholder="COD (bipar)"
+              value={product.barcode}
+              onChange={(e) => onUpdate?.(product.id, { barcode: e.target.value })}
+              style={{
+                flex: 1,
+                padding: "6px 10px",
+                borderRadius: 6,
+                border: "1px solid hsl(var(--border))",
+                background: "hsl(var(--secondary))",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+                fontWeight: 500,
+              }}
+            />
+          </div>
+        ) : (
+          <p style={{ 
+            fontFamily: "var(--font-mono)", 
+            fontSize: modoDesktop ? 13 : 12, 
+            fontWeight: 500, 
+            color: "hsl(var(--foreground))", 
+            overflow: "hidden", 
+            textOverflow: "ellipsis", 
+            whiteSpace: "nowrap" 
+          }}>
+            {product.barcode}
+          </p>
+        )}
         <p style={{ 
           fontSize: modoDesktop ? 14 : 13, 
           fontWeight: 600, 
@@ -96,14 +126,32 @@ const ProductCard = ({ product, onDelete, modoDesktop = false }: ProductCardProp
         }}>
           {product.description || product.sku || "Produto sem descrição"}
         </p>
-        <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 4 }}>
-          <span style={{ 
-            fontSize: modoDesktop ? 13 : 12, 
-            fontWeight: 700, 
-            color: "hsl(var(--primary))" 
-          }}>
-            Qtd: {product.quantity}
-          </span>
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginTop: 4 }}>
+          {isImported ? (
+            <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+              <button
+                onClick={() => onUpdate?.(product.id, { quantity: Math.max(0, product.quantity - 1) })}
+                style={{ width: 28, height: 28, borderRadius: 6, background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <Minus style={{ width: 12, height: 12 }} />
+              </button>
+              <span style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--primary))", minWidth: 24, textAlign: "center" }}>
+                {product.quantity}
+              </span>
+              <button
+                onClick={() => onUpdate?.(product.id, { quantity: product.quantity + 1 })}
+                style={{ width: 28, height: 28, borderRadius: 6, background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer" }}>
+                <Plus style={{ width: 12, height: 12 }} />
+              </button>
+            </div>
+          ) : (
+            <span style={{ 
+              fontSize: modoDesktop ? 13 : 12, 
+              fontWeight: 700, 
+              color: "hsl(var(--primary))" 
+            }}>
+              Qtd: {product.quantity}
+            </span>
+          )}
           {product.removeTag && (
             <span style={{ 
               fontSize: modoDesktop ? 11 : 10, 
