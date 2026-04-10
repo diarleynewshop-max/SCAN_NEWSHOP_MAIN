@@ -392,6 +392,11 @@ const Index = () => {
                   }}>
                     <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Abrir Nova Lista
                   </button>
+                </div>
+              )}
+
+              {activeList && (
+                <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
                   <button onClick={() => setShowImportModal(true)} style={{ 
                     width: "100%",
                     height: modoDesktop ? 56 : 52,
@@ -407,28 +412,29 @@ const Index = () => {
                     justifyContent: "center",
                     gap: 8,
                   }}>
-                    <FileUp style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Importa Lista
+                    <FileUp style={{ width: modoDesktop ? 20 : 18, height:modoDesktop ? 20 : 18 }} /> Importa Lista
                   </button>
-                  <div style={{ 
-                    background: "hsl(var(--destructive) / 0.07)", 
-                    border: "1px solid hsl(var(--destructive) / 0.15)", 
-                    borderRadius: 10, 
-                    padding: modoDesktop ? "16px 20px" : "12px 16px", 
-                    display: "flex", 
-                    alignItems: "center", 
-                    gap: 8 
+                </div>
+              )}
+
+              {!activeList && (
+                <div style={{ 
+                  background: "hsl(var(--destructive) / 0.07)", 
+                  border: "1px solid hsl(var(--destructive) / 0.15)", 
+                  borderRadius: 10, 
+                  padding: modoDesktop ? "16px 20px" : "12px 16px", 
+                  display: "flex", 
+                  alignItems: "center", 
+                  gap: 8 
+                }}>
+                  <ClipboardList style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15, color: "hsl(var(--destructive))", flexShrink: 0 }} />
+                  <p style={{ 
+                    fontSize: modoDesktop ? 14 : 13, 
+                    color: "hsl(var(--destructive))", 
+                    fontWeight: 500 
                   }}>
-                    <ClipboardList style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15, color: "hsl(var(--destructive))", flexShrink: 0 }} />
-                    <p style={{ 
-                      fontSize: modoDesktop ? 14 : 13, 
-                      color: "hsl(var(--destructive))", 
-                      fontWeight: 500 
-                    }}>
-                      Abra uma lista para adicionar produtos
-                    </p>
-                  </div>
-
-
+                    Abra uma lista para adicionar produtos
+                  </p>
                 </div>
               )}
 
