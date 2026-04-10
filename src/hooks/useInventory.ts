@@ -225,5 +225,14 @@ export function useInventory() {
     );
   }, [activeListId]);
 
-  return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, deleteProduct, updateList, moveProductToTop };
+  const scrollToProduct = useCallback((productId: string) => {
+    setTimeout(() => {
+      const element = document.getElementById(`product-${productId}`);
+      if (element) {
+        element.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    }, 100);
+  }, []);
+
+  return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, deleteProduct, updateList, moveProductToTop, scrollToProduct };
 }
