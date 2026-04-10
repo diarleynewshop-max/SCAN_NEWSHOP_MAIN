@@ -21,7 +21,7 @@ const BarcodeInput = ({ value, onChange, onScanPress, onEnterPress }: BarcodeInp
     <div style={{ display: "flex", gap: 8 }}>
       <div style={{ flex: 1, position: "relative" }}>
         <ScanBarcode style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 18, height: 18, color: "hsl(var(--primary))" }} />
-        <input ref={inputRef} type="text" inputMode="numeric" placeholder="000000000000"
+        <input ref={inputRef} type="text" inputMode="numeric" placeholder="000000000000" data-tut="barcode-input"
           value={value} onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           style={{

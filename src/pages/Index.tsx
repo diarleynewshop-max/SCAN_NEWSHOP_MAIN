@@ -557,6 +557,7 @@ const Index = () => {
               <label style={S.label}>Quantidade</label>
               <input type="number" inputMode="numeric" min="1" placeholder="0" value={quantity}
                 onChange={(e) => setQuantity(e.target.value)}
+                data-tut="scanner-quantity"
                 style={{ ...S.inputBase, fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 700 }}
               />
             </div>
@@ -564,6 +565,7 @@ const Index = () => {
 
 
             <button onClick={handleAdd} disabled={!activeList}
+              data-tut="scanner-add"
               style={{
                 ...S.btnPrimary, 
                 height: modoDesktop ? 60 : 56, 

@@ -615,6 +615,7 @@ const Home = () => {
                       type={mostrarSenha ? "text" : "password"}
                       inputMode="numeric"
                       placeholder="Digite a senha"
+                      data-tut="login-senha"
                       value={senha}
                       onChange={(e) => { setSenha(e.target.value); setErroSenha(false); }}
                       onKeyDown={(e) => e.key === "Enter" && handleLogin()}
@@ -648,6 +649,7 @@ const Home = () => {
                 <input
                   type="text"
                   placeholder="Ex: Utilidade"
+                  data-tut="login-lista"
                   value={tituloPadrao}
                   onChange={(e) => setTituloPadrao(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleLogin()}
@@ -667,6 +669,7 @@ const Home = () => {
                 <input
                   type="text"
                   placeholder="Ex: LUCAS"
+                  data-tut="login-pessoa"
                   value={nomePessoa}
                   onChange={(e) => setNomePessoa(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleLogin()}

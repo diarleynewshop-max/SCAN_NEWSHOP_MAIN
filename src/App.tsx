@@ -13,6 +13,8 @@ import { ProtectedRoute } from "@/components/ProtectedRoute";
 
 // 1. IMPORTAMOS O BOTÃO AQUI
 import { ThemeToggle } from "@/components/ui/theme-toggle"; 
+import TutorialButton from "@/components/TutorialButton";
+import TourGuide from "@/components/TourGuide";
 
 const queryClient = new QueryClient();
 
@@ -26,6 +28,14 @@ const App = () => (
       <div className="fixed top-4 right-4 z-50">
         <ThemeToggle />
       </div>
+
+      {/* Botão para iniciar o Tutorial (acima do conteúdo) */}
+      <div className="fixed top-4 right-12 z-50" style={{ display: 'flex', gap: 8 }}>
+        <TutorialButton />
+      </div>
+
+      {/* Guia de Tour global (inicia oculto; ativado pelo TutorialButton) */}
+      <TourGuide />
 
       <BrowserRouter>
         <Routes>
