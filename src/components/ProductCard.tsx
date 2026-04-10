@@ -1,4 +1,4 @@
-import { Package, Trash2, Camera, Hash, Minus, Plus } from "lucide-react";
+import { Package, Trash2, Camera, Hash, Minus, Plus, ArrowUp } from "lucide-react";
 
 export interface Product {
   id: string;
@@ -32,10 +32,11 @@ interface ProductCardProps {
   onDelete: (id: string) => void;
   onUpdate?: (id: string, updates: Partial<Product>) => void;
   onCapturePhoto?: (id: string) => void;
+  onMoveToTop?: (id: string) => void;
   modoDesktop?: boolean;
 }
 
-const ProductCard = ({ product, onDelete, onUpdate, onCapturePhoto, modoDesktop = false }: ProductCardProps) => {
+const ProductCard = ({ product, onDelete, onUpdate, onCapturePhoto, onMoveToTop, modoDesktop = false }: ProductCardProps) => {
   const isImported = product.importedFromSpreadsheet;
   const needsInput = isImported && (!product.barcode || product.quantity === 0);
   
@@ -167,16 +168,30 @@ const ProductCard = ({ product, onDelete, onUpdate, onCapturePhoto, modoDesktop 
         </div>
       </div>
 
-      <button onClick={() => onDelete(product.id)} style={{ 
-        background: "none", 
-        border: "none", 
-        cursor: "pointer", 
-        color: "hsl(var(--destructive))", 
-        padding: 4, 
-        display: "flex" 
-      }}>
-        <Trash2 style={{ width: modoDesktop ? 18 : 16, height: modoDesktop ? 18 : 16 }} />
-      </button>
+      <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+        {onMoveToTop && (
+          <button onClick={() => onMoveToTop(product.id)} title="Mover para cima" style={{ 
+            background: "none", 
+            border: "none", 
+            cursor: "pointer", 
+            color: "hsl(var(--primary))", 
+            padding: 4, 
+            display: "flex" 
+          }}>
+            <ArrowUp style={{ width: modoDesktop ? 18 : 16, height: modoDesktop ? 18 : 16 }} />
+          </button>
+        )}
+        <button onClick={() => onDelete(product.id)} title="Excluir" style={{ 
+          background: "none", 
+          border: "none", 
+          cursor: "pointer", 
+          color: "hsl(var(--destructive))", 
+          padding: 4, 
+          display: "flex" 
+        }}>
+          <Trash2 style={{ width: modoDesktop ? 18 : 16, height: modoDesktop ? 18 : 16 }} />
+        </button>
+      </div>
     </div>
   );
 };

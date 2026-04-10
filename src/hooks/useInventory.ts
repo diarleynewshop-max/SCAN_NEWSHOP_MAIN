@@ -210,5 +210,20 @@ export function useInventory() {
     );
   }, [activeListId]);
 
-  return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, deleteProduct, updateList };
+  const moveProductToTop = useCallback((productId: string) => {
+    if (!activeListId) return;
+    setLists((prev) =>
+      prev.map((l) => {
+        if (l.id !== activeListId) return l;
+        const productIndex = l.products.findIndex((p) => p.id === productId);
+        if (productIndex <= 0) return l;
+        const updatedProducts = [...l.products];
+        const [product] = updatedProducts.splice(productIndex, 1);
+        updatedProducts.unshift(product);
+        return { ...l, products: updatedProducts };
+      })
+    );
+  }, [activeListId]);
+
+  return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, deleteProduct, updateList, moveProductToTop };
 }

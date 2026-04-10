@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, useMemo } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone, ShoppingCart, FileUp } from "lucide-react";
 import { parseSpreadsheet, SpreadsheetItem } from "@/lib/spreadsheetParser";
@@ -86,7 +86,7 @@ const Index = () => {
   const [modalTitle, setModalTitle]       = useState("");
   const [modalPerson, setModalPerson]     = useState("");
 
-  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, addProductsFromSpreadsheet, updateProduct } = useInventory();
+  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, addProductsFromSpreadsheet, updateProduct, moveProductToTop } = useInventory();
   
   // Estados para importação de planilha
   const [showImportModal, setShowImportModal] = useState(false);
@@ -577,6 +577,7 @@ const Index = () => {
                       product={p} 
                       onDelete={deleteProduct}
                       onUpdate={updateProduct}
+onMoveToTop={moveProductToTop}
                       onCapturePhoto={(id) => { setPhotoProductId(id); setShowPhotoCapture(true); }}
                       modoDesktop={modoDesktop} 
                     />
@@ -595,6 +596,7 @@ const Index = () => {
                     product={p} 
                     onDelete={deleteProduct}
                     onUpdate={updateProduct}
+                    onMoveToTop={moveProductToTop}
                     onCapturePhoto={(id) => { setPhotoProductId(id); setShowPhotoCapture(true); }}
                     modoDesktop={modoDesktop} 
                   />
@@ -852,7 +854,28 @@ const Index = () => {
           {/* Seleção de arquivo */}
           {activeList && !importItems.length && (
             <div style={{ marginBottom: 16 }}>
-              <label style={{ 
+              <input
+                ref={(el) => el && (el.value = '')}
+                type="file"
+                id="import-file-input"
+                accept=".xlsx,.xls,.csv"
+                onChange={async (e) => {
+                  const file = e.target.files?.[0];
+                  if (!file) return;
+                  setImportFile(file);
+                  setImporting(true);
+                  try {
+                    const items = await parseSpreadsheet(file);
+                    setImportItems(items);
+                  } catch (err) {
+                    toast({ title: "Erro ao ler arquivo", variant: "destructive" });
+                  } finally {
+                    setImporting(false);
+                  }
+                }}
+                style={{ display: "none" }}
+              />
+              <label htmlFor="import-file-input" style={{ 
                 display: "flex", 
                 flexDirection: "column", 
                 alignItems: "center", 
@@ -869,29 +892,10 @@ const Index = () => {
                   <p style={{ fontSize: 14, fontWeight: 600, color: "hsl(var(--foreground))" }}>
                     Clique para selecionar
                   </p>
-                  <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
+<p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
                     XLSX ou CSV (até 200 itens)
                   </p>
                 </div>
-                <input
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={async (e) => {
-                    const file = e.target.files?.[0];
-                    if (!file) return;
-                    setImportFile(file);
-                    setImporting(true);
-                    try {
-                      const items = await parseSpreadsheet(file);
-                      setImportItems(items);
-                    } catch (err) {
-                      toast({ title: "Erro ao ler arquivo", variant: "destructive" });
-                    } finally {
-                      setImporting(false);
-                    }
-                  }}
-                  style={{ display: "none" }}
-                />
               </label>
             </div>
           )}
