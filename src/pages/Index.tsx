@@ -393,10 +393,19 @@ const Index = () => {
                     <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Abrir Nova Lista
                   </button>
                   <button onClick={() => setShowImportModal(true)} style={{ 
-                    ...S.btnPrimary,
-                    fontSize: modoDesktop ? 15 : 14,
+                    width: "100%",
                     height: modoDesktop ? 56 : 52,
-                    background: "hsl(var(--indigo))",
+                    borderRadius: 14,
+                    background: "hsl(263.4, 70%, 50.4%)",
+                    color: "#fff",
+                    border: "none",
+                    fontSize: modoDesktop ? 15 : 14,
+                    fontWeight: 700,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
                   }}>
                     <FileUp style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Importa Lista
                   </button>
@@ -779,6 +788,165 @@ const Index = () => {
             >
               <ClipboardList style={{ width: 18, height: 18 }} /> Abrir Lista
             </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {showScanner && <BarcodeScanner onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />}
+      
+      {/* Modal Importa Lista */}
+      <Dialog open={showImportModal} onOpenChange={(open) => { setShowImportModal(open); if (!open) { setImportFile(null); setImportItems([]); } }}>
+        <DialogContent className={modoDesktop ? "max-w-md" : "max-w-sm"} style={{ 
+          background: "#fff", 
+          borderRadius: 20, 
+          border: "1px solid hsl(var(--border))",
+          padding: modoDesktop ? "24px" : "20px"
+        }}>
+          {!modoDesktop && <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />}
+
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 700, color: "hsl(var(--foreground))" }}>
+              Importa Lista
+            </DialogTitle>
+            <DialogDescription style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 4 }}>
+              Selecione um arquivo XLSX ou CSV com produtos na Coluna A
+            </DialogDescription>
+          </DialogHeader>
+
+          {!activeList && (
+            <div style={{ padding: "16px", background: "hsl(var(--destructive) / 0.08)", borderRadius: 10, marginBottom: 16 }}>
+              <p style={{ fontSize: 13, color: "hsl(var(--destructive))", fontWeight: 600, display: "flex", alignItems: "center", gap: 8 }}>
+                <AlertCircle style={{ width: 16, height: 16 }} />
+                Abra uma lista primeiro
+              </p>
+              <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 4 }}>
+                É necessário ter uma lista aberta para importar produtos.
+              </p>
+            </div>
+          )}
+
+          {/* Seleção de arquivo */}
+          {activeList && !importItems.length && (
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ 
+                display: "flex", 
+                flexDirection: "column", 
+                alignItems: "center", 
+                justifyContent: "center", 
+                gap: 12,
+                padding: "32px 20px",
+                border: "2px dashed hsl(var(--border))",
+                borderRadius: 14,
+                cursor: "pointer",
+                background: "hsl(var(--secondary))",
+              }}>
+                <FileUp style={{ width: 32, height: 32, color: "hsl(var(--muted-foreground))" }} />
+                <div style={{ textAlign: "center" }}>
+                  <p style={{ fontSize: 14, fontWeight: 600, color: "hsl(var(--foreground))" }}>
+                    Clique para selecionar
+                  </p>
+                  <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
+                    XLSX ou CSV (até 200 itens)
+                  </p>
+                </div>
+                <input
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={async (e) => {
+                    const file = e.target.files?.[0];
+                    if (!file) return;
+                    setImportFile(file);
+                    setImporting(true);
+                    try {
+                      const items = await parseSpreadsheet(file);
+                      setImportItems(items);
+                    } catch (err) {
+                      toast({ title: "Erro ao ler arquivo", variant: "destructive" });
+                    } finally {
+                      setImporting(false);
+                    }
+                  }}
+                  style={{ display: "none" }}
+                />
+              </label>
+            </div>
+          )}
+
+          {/* Preview dos itens */}
+          {activeList && importItems.length > 0 && (
+            <div style={{ marginBottom: 16, maxHeight: 200, overflowY: "auto" }}>
+              <p style={{ fontSize: 12, fontWeight: 600, marginBottom: 8, color: "hsl(var(--foreground))" }}>
+                {importItems.length} produto(s) encontrado(s):
+              </p>
+              {importItems.slice(0, 10).map((item, i) => (
+                <div key={i} style={{ padding: "8px 12px", background: "hsl(var(--secondary))", borderRadius: 8, marginBottom: 6 }}>
+                  <p style={{ fontSize: 13, fontWeight: 500, color: "hsl(var(--foreground))" }}>{item.description}</p>
+                </div>
+              ))}
+              {importItems.length > 10 && (
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", textAlign: "center" }}>
+                  ...e mais {importItems.length - 10} itens
+                </p>
+              )}
+            </div>
+          )}
+
+          {importing && (
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: 8, padding: 20 }}>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span style={{ fontSize: 13 }}>Lendo arquivo...</span>
+            </div>
+          )}
+
+          <DialogFooter style={{ marginTop: 16 }}>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <button
+                onClick={() => { setShowImportModal(false); setImportFile(null); setImportItems([]); }}
+                style={{
+                  height: 48,
+                  borderRadius: 12,
+                  background: "hsl(var(--secondary))",
+                  color: "hsl(var(--foreground))",
+                  border: "1.5px solid hsl(var(--border))",
+                  fontWeight: 600,
+                  fontSize: 13,
+                  cursor: "pointer",
+                }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => {
+                  if (importItems.length > 0) {
+                    addProductsFromSpreadsheet(importItems.map(item => ({
+                      barcode: "",
+                      sku: "",
+                      description: item.description,
+                      photo: null,
+                      quantity: 0,
+                    })));
+                    toast({ title: `${importItems.length} produtos importados!`, description: "Preencha o COD e QTD em cada item." });
+                    setShowImportModal(false);
+                    setImportFile(null);
+                    setImportItems([]);
+                  }
+                }}
+                disabled={importItems.length === 0 || !activeList}
+                style={{
+                  height: 48,
+                  borderRadius: 12,
+                  background: importItems.length > 0 && activeList ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                  color: importItems.length > 0 && activeList ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
+                  border: "none",
+                  fontWeight: 700,
+                  fontSize: 13,
+                  cursor: importItems.length > 0 && activeList ? "pointer" : "not-allowed",
+                  opacity: importItems.length > 0 && activeList ? 1 : 0.5,
+                }}
+              >
+                Importar
+              </button>
+            </div>
           </DialogFooter>
         </DialogContent>
       </Dialog>
