@@ -1,12 +1,11 @@
 import * as XLSX from "xlsx";
 
 export interface SpreadsheetItem {
-  description: string;  // Coluna B — descrição do produto
-  sku: string;          // Coluna A — código/referência do produto
-  qtdPlanilha: number;  // Coluna D — quantidade da NF (nunca exibida ao usuário)
+  description: string;
+  sku: string;
+  qtdPlanilha: number;
 }
 
-// Palavras que indicam linha de cabeçalho — será ignorada
 const HEADER_WORDS = [
   "descr", "descricao", "descrição", "material", "produto", "item",
   "codigo", "código", "cod", "sku", "ref", "qtd", "quant", "quantidade",
@@ -20,55 +19,53 @@ function isHeaderRow(row: any[]): boolean {
     .some((t) => HEADER_WORDS.some((kw) => t.startsWith(kw)));
 }
 
-// Lê o arquivo como ArrayBuffer usando FileReader (mais compatível com Android/iOS)
-function readFileAsArrayBuffer(file: File): Promise<ArrayBuffer> {
+// Lê o arquivo como base64 — método mais compatível com Android Chrome
+function readFileAsBase64(file: File): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onload = (e) => {
-      const result = e.target?.result;
-      if (result instanceof ArrayBuffer) {
-        resolve(result);
-      } else {
-        reject(new Error("Falha ao ler arquivo como ArrayBuffer"));
+      const result = e.target?.result as string;
+      if (!result) {
+        reject(new Error("FileReader retornou vazio"));
+        return;
       }
+      // Remove o prefixo "data:...;base64," e retorna só o base64
+      const base64 = result.includes(",") ? result.split(",")[1] : result;
+      resolve(base64);
     };
-    reader.onerror = () => reject(new Error("Erro ao ler arquivo: " + reader.error?.message));
-    reader.readAsArrayBuffer(file);
+    reader.onerror = () => reject(new Error("Erro ao ler arquivo: " + (reader.error?.message ?? "desconhecido")));
+    reader.readAsDataURL(file);
   });
 }
 
-function parseBuffer(buffer: ArrayBuffer): SpreadsheetItem[] {
-  const workbook = XLSX.read(new Uint8Array(buffer), { type: "array" });
+// Lê CSV como texto puro
+function readFileAsText(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = (e) => resolve((e.target?.result as string) ?? "");
+    reader.onerror = () => reject(new Error("Erro ao ler CSV"));
+    reader.readAsText(file, "UTF-8");
+  });
+}
 
-  // Prefere aba "Nota", senão usa a primeira
-  const sheetName =
-    workbook.SheetNames.find((n) => n.toLowerCase().includes("nota")) ??
-    workbook.SheetNames[0];
-
-  const worksheet = workbook.Sheets[sheetName];
-  const jsonData = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
-
+function extractItems(jsonData: any[][]): SpreadsheetItem[] {
   const items: SpreadsheetItem[] = [];
 
-  for (let i = 0; i < jsonData.length; i++) {
-    const row = jsonData[i];
+  for (const row of jsonData) {
     if (!row || row.length === 0) continue;
     if (isHeaderRow(row)) continue;
 
-    const colA = row[0]; // Código / Referência
-    const colB = row[1]; // Descrição do produto
-    const colD = row[3]; // Quantidade (Quant.)
+    const colA = row[0];
+    const colB = row[1];
+    const colD = row[3];
 
     const descricao = colB ? String(colB).trim() : colA ? String(colA).trim() : "";
     const codigo = colA ? String(colA).trim() : "";
 
     if (!descricao && !codigo) continue;
-
-    // Ignora linhas de total (coluna A vazia e coluna F contém "total")
     if (!colA && String(row[5] ?? "").toLowerCase().includes("total")) continue;
 
     const qtd = Number(colD);
-
     items.push({
       description: descricao,
       sku: codigo,
@@ -79,38 +76,20 @@ function parseBuffer(buffer: ArrayBuffer): SpreadsheetItem[] {
   return items.slice(0, 500);
 }
 
-// Para CSV: lê como texto e converte para ArrayBuffer via Blob
-function readFileAsText(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = (e) => resolve(e.target?.result as string ?? "");
-    reader.onerror = () => reject(new Error("Erro ao ler CSV"));
-    reader.readAsText(file, "UTF-8");
-  });
-}
-
-function parseCSV(text: string): SpreadsheetItem[] {
+function parseCSVText(text: string): SpreadsheetItem[] {
   const lines = text.split(/\r?\n/).filter(Boolean);
   const items: SpreadsheetItem[] = [];
 
   for (const line of lines) {
-    // Suporta ; e , como separador
     const sep = line.includes(";") ? ";" : ",";
     const cols = line.split(sep).map((c) => c.trim().replace(/^"|"$/g, ""));
+    if (isHeaderRow(cols)) continue;
 
-    const row = cols;
-    if (isHeaderRow(row)) continue;
-
-    const colA = cols[0] ?? "";
-    const colB = cols[1] ?? "";
-    const colD = cols[3] ?? "";
-
-    const descricao = colB || colA;
-    const codigo = colA;
-
+    const descricao = cols[1] || cols[0] || "";
+    const codigo = cols[0] || "";
     if (!descricao && !codigo) continue;
 
-    const qtd = Number(colD);
+    const qtd = Number(cols[3]);
     items.push({
       description: descricao,
       sku: codigo,
@@ -122,18 +101,42 @@ function parseCSV(text: string): SpreadsheetItem[] {
 }
 
 export async function parseSpreadsheet(file: File): Promise<SpreadsheetItem[]> {
-  const isCSV = file.name.toLowerCase().endsWith(".csv") 
+  const isCSV =
+    file.name.toLowerCase().endsWith(".csv") ||
     file.type === "text/csv" ||
     file.type === "text/plain";
 
   if (isCSV) {
     const text = await readFileAsText(file);
-    if (!text.trim()) throw new Error("Arquivo CSV vazio ou ilegível");
-    return parseCSV(text);
+    if (!text.trim()) throw new Error("CSV vazio ou sem permissão de leitura");
+    return parseCSVText(text);
   }
 
-  // XLSX / XLS — usa FileReader (mais confiável no Android que file.arrayBuffer())
-  const buffer = await readFileAsArrayBuffer(file);
-  if (buffer.byteLength === 0) throw new Error("Arquivo vazio ou sem permissão de leitura");
-  return parseBuffer(buffer);
+  // XLSX/XLS — lê como base64 (mais confiável no Android que arrayBuffer)
+  const base64 = await readFileAsBase64(file);
+
+  if (!base64 || base64.length < 10) {
+    throw new Error(
+      "Arquivo ilegível. Certifique-se de que o arquivo está na pasta Downloads do dispositivo e tente novamente."
+    );
+  }
+
+  const workbook = XLSX.read(base64, { type: "base64" });
+
+  const sheetName =
+    workbook.SheetNames.find((n) => n.toLowerCase().includes("nota")) ??
+    workbook.SheetNames[0];
+
+  const worksheet = workbook.Sheets[sheetName];
+  const jsonData = XLSX.utils.sheet_to_json<any[]>(worksheet, { header: 1 });
+
+  const items = extractItems(jsonData);
+
+  if (items.length === 0) {
+    throw new Error(
+      "Nenhum produto encontrado. Verifique se a planilha tem dados nas colunas A e B a partir da linha 2."
+    );
+  }
+
+  return items;
 }
