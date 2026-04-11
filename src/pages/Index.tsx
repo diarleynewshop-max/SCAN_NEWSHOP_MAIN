@@ -1004,29 +1004,44 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
 {/* Seleção de arquivo */}
           {activeList && (
             <div style={{ marginBottom: 16 }}>
+              {/* input escondido — acionado por onClick para funcionar no iOS/Android */}
               <input
                 ref={fileInputRef}
                 type="file"
-                id="import-file-input"
                 accept=".xlsx,.xls,.csv"
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) handleImportSpreadsheet(file);
+                  // Limpa o valor para permitir selecionar o mesmo arquivo novamente
+                  e.target.value = "";
                 }}
-                style={{ display: "none" }}
+                style={{ display: "none", position: "absolute", opacity: 0, pointerEvents: "none" }}
               />
-              <label htmlFor="import-file-input" style={{ 
-                display: "flex", 
-                flexDirection: "column", 
-                alignItems: "center", 
-                justifyContent: "center", 
-                gap: 12,
-                padding: "32px 20px",
-                border: "2px dashed hsl(var(--border))",
-                borderRadius: 14,
-                cursor: "pointer",
-                background: "hsl(var(--secondary))",
-              }}>
+              <button
+                type="button"
+                onClick={() => {
+                  // Usa o ref diretamente — compatível com iOS Safari e Android Chrome
+                  if (fileInputRef.current) {
+                    fileInputRef.current.value = "";
+                    fileInputRef.current.click();
+                  }
+                }}
+                style={{ 
+                  width: "100%",
+                  display: "flex", 
+                  flexDirection: "column", 
+                  alignItems: "center", 
+                  justifyContent: "center", 
+                  gap: 12,
+                  padding: "32px 20px",
+                  border: "2px dashed hsl(var(--border))",
+                  borderRadius: 14,
+                  cursor: "pointer",
+                  background: "hsl(var(--secondary))",
+                  WebkitAppearance: "none",
+                  appearance: "none",
+                }}
+              >
                 <FileUp style={{ width: 32, height: 32, color: "hsl(var(--muted-foreground))" }} />
                 <div style={{ textAlign: "center" }}>
                   <p style={{ fontSize: 14, fontWeight: 600, color: "hsl(var(--foreground))" }}>
@@ -1036,7 +1051,7 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
                     XLSX ou CSV (até 200 itens)
                   </p>
                 </div>
-              </label>
+              </button>
             </div>
           )}
 
