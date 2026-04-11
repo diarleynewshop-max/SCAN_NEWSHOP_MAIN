@@ -95,6 +95,7 @@ const Index = () => {
   
   // Estado para item em edição
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
+  const [pendingEditProductId, setPendingEditProductId] = useState<string | null>(null); // produto aguardando scan no modal
   
   // Estados para captura de foto
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
@@ -134,12 +135,21 @@ const Index = () => {
   }, []);
 
   const handleBarcodeDetected = useCallback((code: string) => {
-    setBarcode(code);
     setShowScanner(false);
+
+    // Se o scan foi disparado de dentro do modal de edição, atualiza o produto direto
+    if (pendingEditProductId) {
+      updateProduct(pendingEditProductId, { barcode: code });
+      setPendingEditProductId(null);
+      // Reabre o modal do produto (mantém editingProductId)
+      return;
+    }
+
+    // Scan normal: preenche o campo de barcode da tela principal
+    setBarcode(code);
     setShowProductInfo(true);
-    // Buscar informações do produto automaticamente
     lookupProduct(code);
-  }, [lookupProduct]);
+  }, [lookupProduct, pendingEditProductId, updateProduct]);
 
   const resetModal = () => {
     setModalFlag(null);
@@ -608,113 +618,146 @@ const Index = () => {
 
             {/* Coluna direita - Lista de produtos (apenas no desktop quando há produtos) */}
             
-            {/* EDITOR INLINE para produtos importados */}
-            {editingProductId && activeList && (() => {
-              const product = activeList.products.find(p => p.id === editingProductId);
-              if (!product) return null;
-              return (
-                <div style={{
-                  background: "#fff",
-                  border: "2px solid hsl(var(--primary))",
-                  borderRadius: 16,
-                  padding: 16,
-                  marginBottom: 16,
-                }}>
-                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 12 }}>
-                    <h3 style={{ fontSize: 16, fontWeight: 700, color: "hsl(var(--primary))" }}>Editando Item</h3>
-                    <button onClick={() => setEditingProductId(null)} style={{ background: "none", border: "none", cursor: "pointer", fontSize: 18, color: "hsl(var(--muted-foreground))" }}>✕</button>
-                  </div>
-                  
-                  {/* Descrição (readonly) */}
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>DESCRIÇÃO</label>
-                    <div style={{ padding: "10px 12px", background: "hsl(var(--muted))", borderRadius: 8, fontSize: 13, color: "hsl(var(--foreground))" }}>
-                      {product.description || "Sem descrição"}
+            {/* MODAL de edição — abre ao clicar na seta ↑ do produto importado */}
+            <Dialog open={!!editingProductId} onOpenChange={(open) => { if (!open) setEditingProductId(null); }}>
+              <DialogContent
+                style={{
+                  background: "hsl(var(--card))",
+                  borderRadius: 20,
+                  border: "1px solid hsl(var(--border))",
+                  padding: 0,
+                  overflow: "hidden",
+                  maxWidth: 420,
+                  width: "calc(100vw - 32px)",
+                }}
+              >
+                {(() => {
+                  const product = activeList?.products.find(p => p.id === editingProductId);
+                  if (!product) return null;
+                  return (
+                    <div style={{ padding: 20 }}>
+
+                      {/* Header */}
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                        <div>
+                          <p style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase" }}>Editando Item</p>
+                          <h3 style={{ fontSize: 16, fontWeight: 700, color: "hsl(var(--foreground))", marginTop: 2 }}>
+                            {product.sku || "Produto importado"}
+                          </h3>
+                        </div>
+                        <button onClick={() => setEditingProductId(null)} style={{ background: "hsl(var(--secondary))", border: "none", borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 16, color: "hsl(var(--muted-foreground))" }}>✕</button>
+                      </div>
+
+                      {/* Descrição */}
+                      <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>Descrição</label>
+                        <div style={{ padding: "10px 12px", background: "hsl(var(--muted))", borderRadius: 8, fontSize: 13, fontWeight: 500, color: "hsl(var(--foreground))" }}>
+                          {product.description || "Sem descrição"}
+                        </div>
+                      </div>
+
+                      {/* Foto */}
+                      <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>Foto</label>
+                        <PhotoCapture
+                          photo={product.photo}
+                          onCapture={(photo) => updateProduct(product.id, { photo })}
+                          onRemove={() => updateProduct(product.id, { photo: null })}
+                        />
+                      </div>
+
+                      {/* Código de Barras + botão Scan */}
+                      <div style={{ marginBottom: 14 }}>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>Código de Barras</label>
+                        <div style={{ display: "flex", gap: 8 }}>
+                          <input
+                            type="text"
+                            placeholder="Digite ou escaneie o código"
+                            value={product.barcode}
+                            onChange={(e) => updateProduct(product.id, { barcode: e.target.value })}
+                            style={{
+                              flex: 1,
+                              height: 48,
+                              padding: "0 12px",
+                              borderRadius: 10,
+                              border: "1.5px solid hsl(var(--border))",
+                              background: "hsl(var(--secondary))",
+                              fontSize: 14,
+                              fontFamily: "var(--font-mono)",
+                              fontWeight: 500,
+                              color: "hsl(var(--foreground))",
+                              outline: "none",
+                            }}
+                          />
+                          <button
+                            onClick={() => {
+                              // Salva o id antes de abrir o scanner
+                              setPendingEditProductId(product.id);
+                              setShowScanner(true);
+                            }}
+                            style={{
+                              height: 48,
+                              padding: "0 14px",
+                              borderRadius: 10,
+                              background: "hsl(var(--foreground))",
+                              color: "hsl(var(--background))",
+                              border: "none",
+                              fontWeight: 700,
+                              fontSize: 13,
+                              cursor: "pointer",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: 6,
+                              flexShrink: 0,
+                            }}
+                          >
+                            <ScanBarcode style={{ width: 16, height: 16 }} /> Scan
+                          </button>
+                        </div>
+                      </div>
+
+                      {/* Quantidade */}
+                      <div style={{ marginBottom: 20 }}>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>Quantidade</label>
+                        <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+                          <button
+                            onClick={() => updateProduct(product.id, { quantity: Math.max(0, product.quantity - 1) })}
+                            style={{ width: 48, height: 48, borderRadius: 10, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 22, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >−</button>
+                          <span style={{ flex: 1, textAlign: "center", fontSize: 26, fontWeight: 800, color: "hsl(var(--primary))" }}>
+                            {product.quantity}
+                          </span>
+                          <button
+                            onClick={() => updateProduct(product.id, { quantity: product.quantity + 1 })}
+                            style={{ width: 48, height: 48, borderRadius: 10, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 22, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
+                          >+</button>
+                        </div>
+                      </div>
+
+                      {/* Salvar */}
+                      <button
+                        onClick={() => setEditingProductId(null)}
+                        style={{
+                          width: "100%",
+                          height: 50,
+                          borderRadius: 12,
+                          background: "hsl(var(--primary))",
+                          color: "hsl(var(--primary-foreground))",
+                          border: "none",
+                          fontWeight: 700,
+                          fontSize: 15,
+                          cursor: "pointer",
+                          boxShadow: "var(--shadow-md)",
+                        }}
+                      >
+                        ✓ Salvar e Fechar
+                      </button>
+
                     </div>
-                  </div>
-                  
-                  {/* Foto */}
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>FOTO</label>
-                    <button 
-                      onClick={() => { setPhotoProductId(product.id); setShowPhotoCapture(true); }}
-                      style={{
-                        width: "100%",
-                        height: 80,
-                        borderRadius: 10,
-                        border: "2px dashed hsl(var(--border))",
-                        background: "hsl(var(--secondary))",
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center",
-                        cursor: "pointer",
-                      }}
-                    >
-                      {product.photo ? (
-                        <img src={product.photo} alt="Produto" style={{ width: "100%", height: "100%", borderRadius: 8, objectFit: "cover" }} />
-                      ) : (
-                        <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Clique para adicionar foto</span>
-                      )}
-                    </button>
-                  </div>
-                  
-                  {/* Código de Barras */}
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>CÓDIGO DE BARRAS</label>
-                    <input
-                      type="text"
-                      placeholder="Digite ou bipa o código"
-                      value={product.barcode}
-                      onChange={(e) => updateProduct(product.id, { barcode: e.target.value })}
-                      style={{
-                        width: "100%",
-                        height: 44,
-                        padding: "0 12px",
-                        borderRadius: 8,
-                        border: "1.5px solid hsl(var(--border))",
-                        background: "hsl(var(--secondary))",
-                        fontSize: 14,
-                        fontFamily: "var(--font-mono)",
-                      }}
-                    />
-                  </div>
-                  
-                  {/* Quantidade */}
-                  <div style={{ marginBottom: 12 }}>
-                    <label style={{ fontSize: 11, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>QUANTIDADE</label>
-                    <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-                      <button 
-                        onClick={() => updateProduct(product.id, { quantity: Math.max(0, product.quantity - 1) })}
-                        style={{ width: 44, height: 44, borderRadius: 8, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 20, fontWeight: 700, cursor: "pointer" }}
-                      >-</button>
-                      <span style={{ fontSize: 22, fontWeight: 700, color: "hsl(var(--primary))", minWidth: 40, textAlign: "center" }}>{product.quantity}</span>
-                      <button 
-                        onClick={() => updateProduct(product.id, { quantity: product.quantity + 1 })}
-                        style={{ width: 44, height: 44, borderRadius: 8, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 20, fontWeight: 700, cursor: "pointer" }}
-                      >+</button>
-                    </div>
-                  </div>
-                  
-                  {/* Botão Salvar */}
-                  <button
-                    onClick={() => setEditingProductId(null)}
-                    style={{
-                      width: "100%",
-                      height: 44,
-                      borderRadius: 10,
-                      background: "hsl(var(--primary))",
-                      color: "hsl(var(--primary-foreground))",
-                      border: "none",
-                      fontWeight: 700,
-                      fontSize: 14,
-                      cursor: "pointer",
-                    }}
-                  >
-                    Salvar e Fechar
-                  </button>
-                </div>
-              );
-            })()}
+                  );
+                })()}
+              </DialogContent>
+            </Dialog>
 
             {modoDesktop && activeList && activeList.products.length > 0 && (
               <div style={{ 
