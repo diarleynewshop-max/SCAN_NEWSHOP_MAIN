@@ -249,8 +249,8 @@ Data: ${dataFormatada}`,
 // ── TASK 2 — Conferência finalizada (SOYE / FACIL) COM FOTOS ─────────────────
 export const conferenciaBaixadaSF = task({
   id: "conferencia-baixada-sf",
-  machine: "micro",
-  maxDuration: 60,
+  machine: "medium-2x",
+  maxDuration: 1000,
   run: async (payload: any) => {
     const startTime = Date.now();
     let tarefaOriginalId: string | null = null;

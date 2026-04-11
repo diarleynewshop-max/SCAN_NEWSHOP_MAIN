@@ -223,6 +223,7 @@ const Index = () => {
         description: item.description,
         photo: null,
         quantity: 0,
+        qtdPlanilha: item.qtdPlanilha ?? 0,
       }));
       addProductsFromSpreadsheet(productItems);
       const newItems = activeList?.products.slice(-items.length) || [];
@@ -1085,4 +1086,5 @@ Fechar
 };
 
 export default Index;
+
 

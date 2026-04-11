@@ -177,7 +177,18 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
   };
 
   const exportCSV = (list: ListData) => {
-    const blob = new Blob([list.products.map((p) => `${p.barcode};${p.quantity}`).join("\n")], { type: "text/csv;charset=utf-8;" });
+    const header = "DESCRICAO;CODIGO;QTD_CONFERIDA;QTD_PLANILHA;DIVERGENCIA;DIVERGENTE";
+    const rows = list.products.map((p) => {
+      const desc = (p.description || p.sku || "").replace(/;/g, ",");
+      const codigo = p.barcode || "";
+      const qtdConferida = p.quantity;
+      const qtdPlanilha = p.qtdPlanilha ?? 0;
+      const divergencia = qtdPlanilha - qtdConferida;
+      const divergente = divergencia !== 0 ? "SIM" : "NAO";
+      return `${desc};${codigo};${qtdConferida};${qtdPlanilha};${divergencia};${divergente}`;
+    });
+    const csv = [header, ...rows].join("\n");
+    const blob = new Blob(["\uFEFF" + csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `lista_${list.person.replace(/\s/g,"_")}.csv`; a.click();
     URL.revokeObjectURL(url); setDownloadOpen(null);

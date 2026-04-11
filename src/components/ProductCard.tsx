@@ -10,6 +10,7 @@ export interface Product {
   removeTag: boolean;
   createdAt: Date;
   importedFromSpreadsheet?: boolean;
+  qtdPlanilha?: number; // Quantidade vinda da planilha (coluna D) — nunca exibida ao usuário
 }
 
 export type ListFlag = "loja";
@@ -197,4 +198,5 @@ const ProductCard = ({ product, onDelete, onUpdate, onCapturePhoto, onMoveToTop,
 };
 
 export default ProductCard;
+
 

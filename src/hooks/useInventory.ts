@@ -17,6 +17,7 @@ interface AddProductParams {
   removeTag?: boolean;
   description?: string;
   importedFromSpreadsheet?: boolean;
+  qtdPlanilha?: number;
 }
 
 const STORAGE_KEY = "scan_newshop_lists";
@@ -190,6 +191,7 @@ export function useInventory() {
             removeTag: false,
             createdAt: new Date(),
             importedFromSpreadsheet: true,
+            qtdPlanilha: item.qtdPlanilha ?? 0,
           }));
           return { ...l, products: [...l.products, ...newProducts] };
         })
