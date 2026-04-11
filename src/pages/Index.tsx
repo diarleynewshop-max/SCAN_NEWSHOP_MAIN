@@ -212,27 +212,49 @@ const Index = () => {
   const handleImportSpreadsheet = async (file: File) => {
     try {
       setImporting(true);
-      const items = await parseSpreadsheet(file);
-      if (items.length === 0) {
-        toast({ title: "Nenhum item encontrado", variant: "destructive" });
+
+      // Valida tamanho mínimo — arquivo 0 bytes = sem permissão no Android
+      if (file.size === 0) {
+        toast({
+          title: "Arquivo ilegível",
+          description: "O app não conseguiu ler o arquivo. Tente mover para a pasta Downloads e importar de lá.",
+          variant: "destructive",
+        });
         return;
       }
+
+      const items = await parseSpreadsheet(file);
+
+      if (items.length === 0) {
+        toast({
+          title: "Nenhum item encontrado",
+          description: "Verifique se o arquivo tem dados nas colunas A e B.",
+          variant: "destructive",
+        });
+        return;
+      }
+
       const productItems = items.map(item => ({
         barcode: "",
-        sku: "",
+        sku: item.sku ?? "",
         description: item.description,
         photo: null,
         quantity: 0,
         qtdPlanilha: item.qtdPlanilha ?? 0,
       }));
+
       addProductsFromSpreadsheet(productItems);
       const newItems = activeList?.products.slice(-items.length) || [];
       if (newItems.length > 0) {
         setEditingProductId(newItems[0].id);
         toast({ title: `${items.length} itens importados!`, description: "Edite COD e QTD de cada item." });
       }
-    } catch (err) {
-      toast({ title: "Erro ao importar planilha", variant: "destructive" });
+    } catch (err: any) {
+      toast({
+        title: "Erro ao importar planilha",
+        description: err?.message ?? "Erro desconhecido. Tente com o arquivo na pasta Downloads.",
+        variant: "destructive",
+      });
     } finally {
       setImporting(false);
       setShowImportModal(false);
