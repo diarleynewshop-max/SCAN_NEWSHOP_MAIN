@@ -151,32 +151,38 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
               <p className="text-primary-foreground/70 text-sm">
                 A câmera do seu dispositivo será aberta para capturar a imagem
               </p>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="image/*"
-                capture="environment"
-                onChange={handleFileCapture}
-                className="hidden"
-              />
-              <button
-                onClick={() => fileInputRef.current?.click()}
-                className="w-full h-14 bg-primary text-primary-foreground rounded-xl font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg"
-              >
-                <Camera className="w-5 h-5" /> Abrir Câmera
-              </button>
-              <button
-                onClick={() => {
-                  const input = document.createElement("input");
-                  input.type = "file";
-                  input.accept = "image/*";
-                  input.onchange = (ev) => handleFileCapture(ev as any);
-                  input.click();
-                }}
-                className="w-full h-12 bg-card/20 text-primary-foreground rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
-              >
-                <Upload className="w-4 h-4" /> Escolher da Galeria
-              </button>
+              {/* Câmera — label direto no input, único jeito confiável no Safari iOS */}
+              <label style={{ display: "block", width: "100%" }}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  capture="environment"
+                  onChange={handleFileCapture}
+                  style={{ display: "none", position: "absolute", opacity: 0, pointerEvents: "none" }}
+                />
+                <span
+                  className="w-full h-14 bg-primary text-primary-foreground rounded-xl font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg"
+                  style={{ cursor: "pointer" }}
+                >
+                  <Camera className="w-5 h-5" /> Abrir Câmera
+                </span>
+              </label>
+
+              {/* Galeria — label direto no input sem capture */}
+              <label style={{ display: "block", width: "100%" }}>
+                <input
+                  type="file"
+                  accept="image/*"
+                  onChange={handleFileCapture}
+                  style={{ display: "none", position: "absolute", opacity: 0, pointerEvents: "none" }}
+                />
+                <span
+                  className="w-full h-12 bg-card/20 text-primary-foreground rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+                  style={{ cursor: "pointer" }}
+                >
+                  <Upload className="w-4 h-4" /> Escolher da Galeria
+                </span>
+              </label>
             </div>
           ) : (
             <div className="space-y-3">
@@ -217,3 +223,4 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
 };
 
 export default BarcodeScanner;
+
