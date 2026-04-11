@@ -1,6 +1,6 @@
-import React, { useEffect, useState, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { useLocation } from "react-router-dom";
-import { ChevronRight, X, Play } from "lucide-react";
+import { ChevronRight, X } from "lucide-react";
 
 type TourStep = {
   id: string;
@@ -29,16 +29,14 @@ const TOUR_STEPS_BY_ROUTE: Record<string, TourStep[]> = {
   ],
   "/scanner?tab=list": [
     { id: "list-fechada", target: "[data-tut='fechar-lista']", title: "Lista Fechada", content: "Após fechar a lista, ela aparecerá aqui", placement: "bottom" },
-    { id: "list-clickup", target: "[data-tut='clickup-btn']", title: "2. Botão ClickUp", content: "Clique no botão ClickUp para enviar", placement: "top" },
-    { id: "list-aguarde", target: "[data-tut='clickup-btn']", title: "3. Aguarde", content: "Espere até ficar verde", placement: "top" },
-    { id: "list-sucesso", target: "[data-tut='clickup-btn']", title: "4. Parabéns!", content: "Pronto! Lista enviada com sucesso", placement: "top" },
   ],
 };
 
 const getRouteKey = (pathname: string): string => {
   if (pathname.startsWith("/scanner")) {
-    const [path, query] = pathname.split("?");
-    const params = new URLSearchParams(query || "");
+    const parts = pathname.split("?");
+    const query = parts[1] || "";
+    const params = new URLSearchParams(query);
     const tab = params.get("tab");
     if (tab === "list") return "/scanner?tab=list";
     return "/scanner";
@@ -46,19 +44,18 @@ const getRouteKey = (pathname: string): string => {
   return pathname;
 };
 
-const TourArrow: React.FC<{ placement: "top" | "bottom" | "left" | "right" }> = ({ placement }) => {
-  const rotation: Record<string, number> = { top: 180, bottom: 0, left: 90, right: -90 };
+const TourArrow: React.FC<{ placement: "top" | "bottom" }> = ({ placement }) => {
+  const rotation = placement === "bottom" ? 180 : 0;
   return (
     <svg
-      width="24"
-      height="24"
+      width="20"
+      height="20"
       viewBox="0 0 24 24"
       fill="currentColor"
       style={{
         position: "absolute",
-        transform: `rotate(${rotation[placement]}deg)`,
+        transform: `rotate(${rotation}deg)`,
         color: "hsl(var(--primary))",
-        filter: "drop-shadow(0 2px 4px rgba(0,0,0,0.2))",
       }}
     >
       <path d="M12 2L2 12h3v8h14v-8h3L12 2z" />
@@ -66,45 +63,26 @@ const TourArrow: React.FC<{ placement: "top" | "bottom" | "left" | "right" }> = 
   );
 };
 
-const PulseGlow: React.FC = () => (
-  <div
-    style={{
-      position: "absolute",
-      inset: -4,
-      borderRadius: 12,
-      background: "hsl(var(--primary) / 0.2)",
-      animation: "pulse 2s ease-in-out infinite",
-      zIndex: -1,
-    }}
-  >
-    <style>{`@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(1.05)}}`}</style>
+const Particles: React.FC = () => (
+  <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 12, pointerEvents: "none" }}>
+    {[...Array(4)].map((_, i) => (
+      <div
+        key={i}
+        style={{
+          position: "absolute",
+          width: 3,
+          height: 3,
+          borderRadius: "50%",
+          background: "hsl(var(--primary) / 0.5)",
+          left: `${30 + i * 15}%`,
+          top: `${30 + i * 10}%`,
+          animation: `float ${2 + i * 0.5}s ease-in-out infinite`,
+        }}
+      />
+    ))}
+    <style>{`@keyframes float{0%,100%{opacity:0.4;transform:translateY(0)}50%{opacity:1;transform:translateY(-6px)}}`}</style>
   </div>
 );
-
-const Particles: React.FC = () => {
-  const particles = Array.from({ length: 6 });
-  return (
-    <div style={{ position: "absolute", inset: 0, overflow: "hidden", borderRadius: 12, pointerEvents: "none" }}>
-      {particles.map((_, i) => (
-        <div
-          key={i}
-          style={{
-            position: "absolute",
-            width: 4,
-            height: 4,
-            borderRadius: "50%",
-            background: "hsl(var(--primary) / 0.6)",
-            left: `${20 + Math.random() * 60}%`,
-            top: `${20 + Math.random() * 60}%`,
-            animation: `float ${2 + Math.random()}s ease-in-out infinite`,
-            animationDelay: `${Math.random()}s`,
-          }}
-        />
-      ))}
-      <style>{`@keyframes float{0%,100%{transform:translateY(0);opacity:0.6}50%{transform:translateY(-8px);opacity:1}}`}</style>
-    </div>
-  );
-};
 
 const TourBubble: React.FC<{
   step: TourStep;
@@ -116,72 +94,62 @@ const TourBubble: React.FC<{
 
   useEffect(() => {
     const updatePos = () => {
-      const el = document.querySelector(step.target) as HTMLElement | null;
-      if (el) {
-        const rect = el.getBoundingClientRect();
-        setTargetPos({
-          top: rect.top + window.scrollY,
-          left: rect.left + window.scrollX,
-          width: rect.width,
-          height: rect.height,
-        });
-      } else {
+      try {
+        const el = document.querySelector(step.target) as HTMLElement | null;
+        if (el) {
+          const rect = el.getBoundingClientRect();
+          setTargetPos({
+            top: rect.top + window.scrollY,
+            left: rect.left + window.scrollX,
+            width: rect.width,
+            height: rect.height,
+          });
+        } else {
+          setTargetPos(null);
+        }
+      } catch (e) {
         setTargetPos(null);
       }
     };
     updatePos();
+    const timeoutId = setTimeout(updatePos, 100);
     window.addEventListener("resize", updatePos);
-    window.addEventListener("scroll", updatePos);
     return () => {
+      clearTimeout(timeoutId);
       window.removeEventListener("resize", updatePos);
-      window.removeEventListener("scroll", updatePos);
     };
   }, [step.target]);
 
-  const bubbleStyle: React.CSSProperties = {
-    position: "absolute",
-    zIndex: 9999,
-    background: "hsl(var(--card))",
-    border: "1px solid hsl(var(--border))",
-    borderRadius: 12,
-    padding: 16,
-    minWidth: 280,
-    maxWidth: 340,
-    boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
-  };
-
-  let bubbleTop = 0;
-  let bubbleLeft = 0;
+  let bubbleTop = window.innerHeight * 0.3;
+  let bubbleLeft = window.innerWidth * 0.5;
 
   if (targetPos) {
-    switch (step.placement) {
-      case "bottom":
-        bubbleTop = targetPos.top + targetPos.height + 12;
-        bubbleLeft = targetPos.left + targetPos.width / 2;
-        break;
-      case "top":
-        bubbleTop = targetPos.top - 120;
-        bubbleLeft = targetPos.left + targetPos.width / 2;
-        break;
-      case "left":
-        bubbleTop = targetPos.top + targetPos.height / 2 - 60;
-        bubbleLeft = targetPos.left - 300;
-        break;
-      case "right":
-        bubbleTop = targetPos.top + targetPos.height / 2 - 60;
-        bubbleLeft = targetPos.left + targetPos.width + 20;
-        break;
-      default:
-        bubbleTop = targetPos.top + targetPos.height + 12;
-        bubbleLeft = targetPos.left + targetPos.width / 2;
+    if (step.placement === "bottom") {
+      bubbleTop = targetPos.top + targetPos.height + 16;
+      bubbleLeft = targetPos.left + targetPos.width / 2;
+    } else {
+      bubbleTop = targetPos.top - 140;
+      bubbleLeft = targetPos.left + targetPos.width / 2;
     }
-  } else {
-    bubbleTop = window.innerHeight * 0.3;
-    bubbleLeft = window.innerWidth * 0.5;
   }
 
   return (
-    <div style={{ ...bubbleStyle, top: bubbleTop, left: bubbleLeft, transform: "translateX(-50%)" }}>
+    <div
+      style={{
+        position: "fixed",
+        top: bubbleTop,
+        left: bubbleLeft,
+        transform: "translateX(-50%)",
+        zIndex: 9999,
+        background: "hsl(var(--card))",
+        border: "1px solid hsl(var(--border))",
+        borderRadius: 12,
+        padding: 16,
+        minWidth: 260,
+        maxWidth: 320,
+        boxShadow: "0 8px 32px rgba(0,0,0,0.15)",
+      }}
+    >
       <Particles />
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
         <span style={{ fontSize: 10, fontWeight: 700, letterSpacing: "0.1em", color: "hsl(var(--primary))", textTransform: "uppercase" }}>
@@ -191,18 +159,18 @@ const TourBubble: React.FC<{
           <X size={16} />
         </button>
       </div>
-      <h3 style={{ fontSize: 16, fontWeight: 700, color: "hsl(var(--foreground))", marginBottom: 8 }}>{step.title}</h3>
-      <p style={{ fontSize: 14, color: "hsl(var(--muted-foreground))", lineHeight: 1.5, marginBottom: 16 }}>{step.content}</p>
+      <h3 style={{ fontSize: 15, fontWeight: 700, color: "hsl(var(--foreground))", marginBottom: 6 }}>{step.title}</h3>
+      <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", lineHeight: 1.4, marginBottom: 14 }}>{step.content}</p>
       <div style={{ display: "flex", justifyContent: "flex-end", gap: 8 }}>
-        <button onClick={onClose} style={{ padding: "8px 12px", borderRadius: 6, border: "1px solid hsl(var(--border))", background: "transparent", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "hsl(var(--foreground))" }}>
+        <button onClick={onClose} style={{ padding: "6px 10px", borderRadius: 6, border: "1px solid hsl(var(--border))", background: "transparent", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "hsl(var(--foreground))" }}>
           Fechar
         </button>
-        <button onClick={onNext} style={{ padding: "8px 16px", borderRadius: 6, border: "none", background: "hsl(var(--primary))", fontSize: 13, fontWeight: 600, cursor: "pointer", color: "hsl(var(--primary-foreground))", display: "flex", alignItems: "center", gap: 6 }}>
-          {isLast ? "Concluir" : "Próximo"} <ChevronRight size={14} />
+        <button onClick={onNext} style={{ padding: "6px 14px", borderRadius: 6, border: "none", background: "hsl(var(--primary))", fontSize: 12, fontWeight: 600, cursor: "pointer", color: "hsl(var(--primary-foreground))", display: "flex", alignItems: "center", gap: 4 }}>
+          {isLast ? "Concluir" : "Próximo"} <ChevronRight size={12} />
         </button>
       </div>
       {targetPos && step.placement && (
-        <div style={{ position: "absolute", ...(step.placement === "bottom" ? { top: -12, left: "50%", transform: "translateX(-50%) rotate(180deg)" } : step.placement === "top" ? { bottom: -12, left: "50%", transform: "translateX(-50%)" } : {}), pointerEvents: "none" }}>
+        <div style={{ position: "absolute", [step.placement === "bottom" ? "top" : "bottom"]: -10, left: "50%", transform: "translateX(-50%) rotate(" + (step.placement === "bottom" ? "180deg" : "0deg") + ")", pointerEvents: "none" }}>
           <TourArrow placement={step.placement} />
         </div>
       )}
@@ -214,70 +182,102 @@ const TourGuide: React.FC = () => {
   const location = useLocation();
   const [isOpen, setIsOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(0);
-  const [highlightTarget, setHighlightTarget] = useState<string | null>(null);
+  const stepRef = useRef(0);
+  const stepsRef = useRef<TourStep[]>([]);
 
   const routeKey = getRouteKey(location.pathname);
   const steps = TOUR_STEPS_BY_ROUTE[routeKey] || [];
+  stepsRef.current = steps;
 
   useEffect(() => {
     const handleStartTour = () => {
       if (steps.length > 0) {
         setIsOpen(true);
         setCurrentStep(0);
-        setHighlightTarget(steps[0]?.target || null);
+        stepRef.current = 0;
       }
     };
     window.addEventListener("start-tour", handleStartTour);
     return () => window.removeEventListener("start-tour", handleStartTour);
-  }, [steps]);
+  }, []);
 
   useEffect(() => {
     if (!isOpen || steps.length === 0) return;
-
+    
     const currentStepData = steps[currentStep];
     if (!currentStepData) return;
 
-    const applyHighlight = () => {
+    try {
       const prevHighlighted = document.querySelector("[data-tut-highlight]");
       if (prevHighlighted) {
         prevHighlighted.removeAttribute("data-tut-highlight");
       }
+      
       const el = document.querySelector(currentStepData.target) as HTMLElement | null;
       if (el) {
         el.setAttribute("data-tut-highlight", "true");
       }
-    };
-    applyHighlight();
+    } catch (e) {
+      // Ignore selector errors
+    }
 
     return () => {
-      const highlighted = document.querySelector("[data-tut-highlight]");
-      if (highlighted) {
-        highlighted.removeAttribute("data-tut-highlight");
+      try {
+        const highlighted = document.querySelector("[data-tut-highlight]");
+        if (highlighted) {
+          highlighted.removeAttribute("data-tut-highlight");
+        }
+      } catch (e) {
+        // Ignore
       }
     };
   }, [isOpen, currentStep, steps]);
 
-  const handleNext = useCallback(() => {
+  const goNext = () => {
     if (currentStep < steps.length - 1) {
-      setCurrentStep((prev) => prev + 1);
+      setCurrentStep(currentStep + 1);
+      stepRef.current = currentStep + 1;
     } else {
       setIsOpen(false);
+      stepRef.current = 0;
     }
-  }, [currentStep, steps.length]);
+  };
 
-  const handleClose = useCallback(() => {
+  const closeTour = () => {
     setIsOpen(false);
-  }, []);
+    stepRef.current = 0;
+  };
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (!isOpen) return;
-      if (e.key === "Enter" || e.key === "ArrowRight") handleNext();
-      if (e.key === "Escape") handleClose();
+      if (e.key === "Enter" || e.key === "ArrowRight") goNext();
+      if (e.key === "Escape") closeTour();
     };
     window.addEventListener("keydown", handleKeyDown);
     return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [isOpen, handleNext, handleClose]);
+  }, [isOpen, currentStep]);
+
+  useEffect(() => {
+    const style = document.createElement("style");
+    style.textContent = `
+      [data-tut-highlight] { position: relative; z-index: 9998; }
+      [data-tut-highlight]::after {
+        content: '';
+        position: absolute;
+        inset: -4px;
+        border: 2px solid hsl(var(--primary));
+        border-radius: 8px;
+        animation: highlight-pulse 1.5s ease-in-out infinite;
+      }
+      @keyframes highlight-pulse {
+        0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4); }
+        50% { box-shadow: 0 0 0 8px hsl(var(--primary) / 0); }
+      }
+    `;
+    document.head.appendChild(style);
+    return () => { document.head.removeChild(style); };
+  }, []);
 
   if (!isOpen || steps.length === 0) return null;
 
@@ -285,34 +285,12 @@ const TourGuide: React.FC = () => {
   if (!currentStepData) return null;
 
   return (
-    <>
-      {highlightTarget && (
-        <style>{`
-          [data-tut-highlight] {
-            position: relative;
-            z-index: 9998;
-          }
-          [data-tut-highlight]::after {
-            content: '';
-            position: absolute;
-            inset: -4px;
-            border: 2px solid hsl(var(--primary));
-            border-radius: 8px;
-            animation: highlight-pulse 1.5s ease-in-out infinite;
-          }
-          @keyframes highlight-pulse {
-            0%, 100% { box-shadow: 0 0 0 0 hsl(var(--primary) / 0.4); }
-            50% { box-shadow: 0 0 0 8px hsl(var(--primary) / 0); }
-          }
-        `}</style>
-      )}
-      <TourBubble
-        step={currentStepData}
-        onNext={handleNext}
-        onClose={handleClose}
-        isLast={currentStep === steps.length - 1}
-      />
-    </>
+    <TourBubble
+      step={currentStepData}
+      onNext={goNext}
+      onClose={closeTour}
+      isLast={currentStep === steps.length - 1}
+    />
   );
 };
 
