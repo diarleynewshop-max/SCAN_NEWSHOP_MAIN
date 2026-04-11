@@ -29,13 +29,13 @@ const App = () => (
         <ThemeToggle />
       </div>
 
-      {/* Botão para iniciar o Tutorial (acima do conteúdo) */}
-      <div className="fixed top-4 right-20 z-50" style={{ display: 'flex', gap: 8 }}>
+{/* Botão para iniciar o Tutorial (acima do conteúdo) */}
+      {/* <div className="fixed top-4 right-20 z-50" style={{ display: 'flex', gap: 8 }}>
         <TutorialButton />
-      </div>
+      </div> */}
 
       {/* Guia de Tour global (inicia oculto; ativado pelo TutorialButton) */}
-      <TourGuide />
+      {/* <TourGuide /> */}
 
       <BrowserRouter>
         <Routes>
