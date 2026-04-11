@@ -140,8 +140,10 @@ const Index = () => {
     // Se o scan foi disparado de dentro do modal de edição, atualiza o produto direto
     if (pendingEditProductId) {
       updateProduct(pendingEditProductId, { barcode: code });
+      const idToReopen = pendingEditProductId;
       setPendingEditProductId(null);
-      // Reabre o modal do produto (mantém editingProductId)
+      // Reabre o modal do produto após o scan
+      setEditingProductId(idToReopen);
       return;
     }
 
@@ -691,8 +693,9 @@ const Index = () => {
                           />
                           <button
                             onClick={() => {
-                              // Salva o id antes de abrir o scanner
+                              // Salva o id, fecha o dialog (evita sobrepor o scanner) e abre o scanner
                               setPendingEditProductId(product.id);
+                              setEditingProductId(null);
                               setShowScanner(true);
                             }}
                             style={{
@@ -724,9 +727,31 @@ const Index = () => {
                             onClick={() => updateProduct(product.id, { quantity: Math.max(0, product.quantity - 1) })}
                             style={{ width: 48, height: 48, borderRadius: 10, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 22, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
                           >−</button>
-                          <span style={{ flex: 1, textAlign: "center", fontSize: 26, fontWeight: 800, color: "hsl(var(--primary))" }}>
-                            {product.quantity}
-                          </span>
+                          <input
+                            type="number"
+                            inputMode="numeric"
+                            min="0"
+                            value={product.quantity}
+                            onChange={(e) => {
+                              const val = parseInt(e.target.value, 10);
+                              if (!isNaN(val) && val >= 0) {
+                                updateProduct(product.id, { quantity: val });
+                              }
+                            }}
+                            style={{
+                              flex: 1,
+                              height: 48,
+                              textAlign: "center",
+                              fontSize: 26,
+                              fontWeight: 800,
+                              color: "hsl(var(--primary))",
+                              border: "1.5px solid hsl(var(--border))",
+                              borderRadius: 10,
+                              background: "hsl(var(--secondary))",
+                              outline: "none",
+                              width: 0,
+                            }}
+                          />
                           <button
                             onClick={() => updateProduct(product.id, { quantity: product.quantity + 1 })}
                             style={{ width: 48, height: 48, borderRadius: 10, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 22, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
@@ -1166,5 +1191,6 @@ Fechar
 };
 
 export default Index;
+
 
 
