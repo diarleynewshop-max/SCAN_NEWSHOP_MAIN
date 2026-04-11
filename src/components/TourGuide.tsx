@@ -37,7 +37,8 @@ const TOUR_STEPS_BY_ROUTE: Record<string, TourStep[]> = {
 
 const getRouteKey = (pathname: string): string => {
   if (pathname.startsWith("/scanner")) {
-    const params = new URLSearchParams(pathname.split("?")[1]);
+    const [path, query] = pathname.split("?");
+    const params = new URLSearchParams(query || "");
     const tab = params.get("tab");
     if (tab === "list") return "/scanner?tab=list";
     return "/scanner";
@@ -231,9 +232,29 @@ const TourGuide: React.FC = () => {
   }, [steps]);
 
   useEffect(() => {
-    if (isOpen && steps[currentStep]) {
-      setHighlightTarget(steps[currentStep].target);
-    }
+    if (!isOpen || steps.length === 0) return;
+
+    const currentStepData = steps[currentStep];
+    if (!currentStepData) return;
+
+    const applyHighlight = () => {
+      const prevHighlighted = document.querySelector("[data-tut-highlight]");
+      if (prevHighlighted) {
+        prevHighlighted.removeAttribute("data-tut-highlight");
+      }
+      const el = document.querySelector(currentStepData.target) as HTMLElement | null;
+      if (el) {
+        el.setAttribute("data-tut-highlight", "true");
+      }
+    };
+    applyHighlight();
+
+    return () => {
+      const highlighted = document.querySelector("[data-tut-highlight]");
+      if (highlighted) {
+        highlighted.removeAttribute("data-tut-highlight");
+      }
+    };
   }, [isOpen, currentStep, steps]);
 
   const handleNext = useCallback(() => {
@@ -241,13 +262,11 @@ const TourGuide: React.FC = () => {
       setCurrentStep((prev) => prev + 1);
     } else {
       setIsOpen(false);
-      setHighlightTarget(null);
     }
   }, [currentStep, steps.length]);
 
   const handleClose = useCallback(() => {
     setIsOpen(false);
-    setHighlightTarget(null);
   }, []);
 
   useEffect(() => {
@@ -287,14 +306,6 @@ const TourGuide: React.FC = () => {
           }
         `}</style>
       )}
-      {(() => {
-        const el = document.querySelector(highlightTarget) as HTMLElement | null;
-        if (el) {
-          el.setAttribute("data-tut-highlight", "true");
-          return () => el?.removeAttribute("data-tut-highlight");
-        }
-        return () => {};
-      })()}
       <TourBubble
         step={currentStepData}
         onNext={handleNext}
