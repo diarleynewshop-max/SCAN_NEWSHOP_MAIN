@@ -30,7 +30,7 @@ const App = () => (
       </div>
 
       {/* Botão para iniciar o Tutorial (acima do conteúdo) */}
-      <div className="fixed top-4 right-12 z-50" style={{ display: 'flex', gap: 8 }}>
+      <div className="fixed top-4 right-20 z-50" style={{ display: 'flex', gap: 8 }}>
         <TutorialButton />
       </div>
 

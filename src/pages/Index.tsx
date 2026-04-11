@@ -359,6 +359,7 @@ const Index = () => {
           </span>
           <button
             onClick={handleCloseList}
+            data-tut="fechar-lista"
             style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(var(--destructive))", background: "transparent", border: "1px solid hsl(var(--destructive) / 0.3)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", letterSpacing: "0.05em", textTransform: "uppercase" }}
           >
             Fechar
@@ -424,7 +425,7 @@ const Index = () => {
             }}>
               {!activeList && (
                 <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                  <button onClick={() => setShowOpenModal(true)} style={{ 
+                  <button onClick={() => setShowOpenModal(true)} data-tut="abrir-lista" style={{ 
                     ...S.btnPrimary,
                     fontSize: modoDesktop ? 15 : 14,
                     height: modoDesktop ? 56 : 52
@@ -543,14 +544,16 @@ const Index = () => {
 />
             </div>
 
-            <div>
+            <div data-tut="scanner-descricao">
               <label style={S.label}>SKU</label>
               <input type="text" placeholder="Ex: BM-5050" value={sku} onChange={(e) => setSku(e.target.value)} style={S.inputBase} />
             </div>
 
             <div>
               <label style={S.label}>Foto do Produto</label>
-              <PhotoCapture photo={photo} onCapture={setPhoto} onRemove={() => setPhoto(null)} />
+              <div data-tut="scanner-foto">
+                <PhotoCapture photo={photo} onCapture={setPhoto} onRemove={() => setPhoto(null)} />
+              </div>
             </div>
 
             <div>

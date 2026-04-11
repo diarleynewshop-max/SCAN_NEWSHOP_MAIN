@@ -585,7 +585,7 @@ const Home = () => {
             <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
 
               {/* Empresa */}
-              <div>
+              <div data-tut="login-empresa">
                 <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Empresa</label>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {(["NEWSHOP", "SOYE", "FACIL"] as const).map((emp) => (
@@ -685,6 +685,7 @@ const Home = () => {
 
               {/* Botão de login */}
               <button onClick={handleLogin}
+                data-tut="login-salvar"
                 style={{
                   width: "100%", height: 52, background: "hsl(var(--primary))",
                   color: "hsl(var(--primary-foreground))", border: "none",
