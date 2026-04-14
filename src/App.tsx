@@ -7,7 +7,6 @@ import Home from "./pages/Home";
 import Index from "./pages/Index";
 import NotFound from "./pages/NotFound";
 import Analytics from "./pages/Analytics";
-import Comprador from "./pages/Comprador";
 import Compras from "./pages/Compras";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 

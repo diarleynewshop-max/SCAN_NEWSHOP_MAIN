@@ -322,6 +322,13 @@ const Index = () => {
 
   // Determine if user has 'compras' role to show COMPRADOR tab
   const currentLogin = obterLoginSalvo();
+  const handleTabChange = (key: "scan" | "list" | "conference" | "compras") => {
+    if (key === "compras") {
+      navigate("/compras");
+      return;
+    }
+    setView(key);
+  };
   const extraTab = currentLogin?.role === 'compras' ? [{ key: 'compras' as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
   const tabs = [
     { key: "scan"       as const, label: "Escanear",    Icon: ScanBarcode  },
@@ -432,7 +439,7 @@ const Index = () => {
         padding: modoDesktop ? "0 32px" : "0 8px" 
       }}>
         {tabs.map(({ key, label, Icon }) => (
-          <button key={key} onClick={() => setView(key)}
+          <button key={key} onClick={() => handleTabChange(key)}
             style={{
               flex: 1, 
               padding: modoDesktop ? "14px 0 12px" : "11px 0 9px", 

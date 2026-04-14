@@ -1,7 +1,7 @@
 import { useState, useEffect } from "react";
 
 type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
-type UserRole = 'operador' | 'compras' | 'admin' | 'super';
+export type UserRole = 'operador' | 'compras' | 'admin' | 'super';
 
 export interface LoginData {
   empresa: Empresa;

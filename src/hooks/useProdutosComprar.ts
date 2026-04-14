@@ -1,51 +1,60 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
+import { obterLoginSalvo } from '@/hooks/useAuth';
 import { supabase } from '@/lib/supabase';
 
-// ─── Tipos ────────────────────────────────────────────────────────────────────
 export interface ProdutoComprar {
-  id:           string;
-  codigo:       string;
-  sku:          string | null;
-  descricao:    string;
-  foto:         string | null;
-  status:       'novo' | 'analisado' | 'comprado' | 'reprovado';
+  id: string;
+  codigo: string;
+  sku: string | null;
+  descricao: string;
+  foto: string | null;
+  status: 'novo' | 'analisado' | 'comprado' | 'reprovado';
   date_created: string;
 }
 
 interface UseProdutosComprarReturn {
-  produtos:          ProdutoComprar[];
-  loading:           boolean;
-  error:             string | null;
+  produtos: ProdutoComprar[];
+  loading: boolean;
+  error: string | null;
   ultimaAtualizacao: Date | null;
-  refetch:           () => Promise<void>;
-  analisar:          (taskId: string) => Promise<void>;
-  aprovar:           (taskId: string) => Promise<void>;
-  rejeitar:          (taskId: string) => Promise<void>;
+  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL';
+  refetch: () => Promise<void>;
+  analisar: (taskId: string) => Promise<void>;
+  aprovar: (taskId: string) => Promise<void>;
+  rejeitar: (taskId: string) => Promise<void>;
 }
 
-// ─── Status map (espelho do webhook) ─────────────────────────────────────────
 const STATUS_MAP: Record<string, ProdutoComprar['status']> = {
-  comprado:  'comprado',
+  comprado: 'comprado',
   analisado: 'analisado',
   reprovado: 'reprovado',
-  novo:      'novo',
+  novo: 'novo',
 };
 
-// ─── Hook principal ───────────────────────────────────────────────────────────
-export const useProdutosComprar = (): UseProdutosComprarReturn => {
-  const [produtos, setProdutos]                   = useState<ProdutoComprar[]>([]);
-  const [loading, setLoading]                     = useState(true);
-  const [error, setError]                         = useState<string | null>(null);
-  const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
-  const realtimeChannelRef                        = useRef<ReturnType<typeof supabase.channel> | null>(null);
+function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
+  const login = obterLoginSalvo();
+  if (login?.empresa === 'SOYE' || login?.empresa === 'FACIL') {
+    return login.empresa;
+  }
+  return 'NEWSHOP';
+}
 
-  // ─── Busca produtos na API Vercel (fonte: ClickUp) ─────────────────────────
+export const useProdutosComprar = (): UseProdutosComprarReturn => {
+  const [produtos, setProdutos] = useState<ProdutoComprar[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
+  const [empresa, setEmpresa] = useState<'NEWSHOP' | 'SOYE' | 'FACIL'>(() => getEmpresaAtual());
+  const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
+
   const fetchProdutos = useCallback(async () => {
+    const empresaAtual = getEmpresaAtual();
+    setEmpresa(empresaAtual);
     setLoading(true);
     setError(null);
 
     try {
-      const response = await fetch('/api/clickup-compras');
+      const response = await fetch(`/api/clickup-compras?empresa=${empresaAtual}`);
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -63,30 +72,50 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     }
   }, []);
 
-  // ─── Realtime: escuta canal publicado pelo webhook Vercel ──────────────────
   useEffect(() => {
+    fetchProdutos();
+
+    const intervalId = window.setInterval(() => {
+      fetchProdutos();
+    }, 60000);
+
+    const onFocus = () => {
+      fetchProdutos();
+    };
+
+    window.addEventListener('focus', onFocus);
+
+    return () => {
+      window.clearInterval(intervalId);
+      window.removeEventListener('focus', onFocus);
+    };
+  }, [fetchProdutos]);
+
+  useEffect(() => {
+    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
+      return;
+    }
+
     const channel = supabase
       .channel('compras-sync')
       .on('broadcast', { event: 'clickup_update' }, (msg) => {
         const payload = msg.payload as {
-          event:       string;
-          task_id:     string;
-          task_name:   string | null;
+          event: string;
+          task_id: string;
           status_app?: string;
-          timestamp:   number;
+          empresa?: string;
         };
 
-        console.log('[Realtime] Evento recebido:', payload);
+        if (payload.empresa && payload.empresa !== getEmpresaAtual()) {
+          return;
+        }
 
-        // Atualização otimista de status — sem refetch completo
         if (payload.event === 'taskStatusUpdated' && payload.status_app) {
           const novoStatus = STATUS_MAP[payload.status_app];
           if (novoStatus) {
-            setProdutos(prev =>
-              prev.map(p =>
-                p.id === payload.task_id
-                  ? { ...p, status: novoStatus }
-                  : p
+            setProdutos((prev) =>
+              prev.map((p) =>
+                p.id === payload.task_id ? { ...p, status: novoStatus } : p
               )
             );
             setUltimaAtualizacao(new Date());
@@ -94,12 +123,9 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
           }
         }
 
-        // Criado / deletado / outro → refetch completo
         fetchProdutos();
       })
-      .subscribe((status) => {
-        console.log('[Realtime] Canal compras-sync:', status);
-      });
+      .subscribe();
 
     realtimeChannelRef.current = channel;
 
@@ -109,50 +135,41 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     };
   }, [fetchProdutos]);
 
-  // ─── Carga inicial ────────────────────────────────────────────────────────
-  useEffect(() => {
-    fetchProdutos();
-  }, [fetchProdutos]);
-
-  // ─── Ações (mudam status no ClickUp via API Vercel) ───────────────────────
   const executarAcao = useCallback(async (taskId: string, acao: string) => {
-    // Atualização otimista imediata
+    const empresaAtual = getEmpresaAtual();
     const previsao: Record<string, ProdutoComprar['status']> = {
       ANALISAR: 'analisado',
-      APROVAR:  'comprado',
+      APROVAR: 'comprado',
       REJEITAR: 'reprovado',
     };
+
     if (previsao[acao]) {
-      setProdutos(prev =>
-        prev.map(p => p.id === taskId ? { ...p, status: previsao[acao] } : p)
+      setProdutos((prev) =>
+        prev.map((p) => (p.id === taskId ? { ...p, status: previsao[acao] } : p))
       );
     }
 
     try {
       const response = await fetch('/api/clickup-compras-action', {
-        method:  'POST',
+        method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({ taskId, acao }),
+        body: JSON.stringify({ taskId, acao, empresa: empresaAtual }),
       });
 
       const data = await response.json();
 
       if (!response.ok) {
-        // Reverte otimismo em caso de erro
         await fetchProdutos();
-        throw new Error(data.error ?? 'Erro ao executar ação');
+        throw new Error(data.error ?? 'Erro ao executar acao');
       }
-
-      console.log('[useProdutosComprar] Ação OK:', { taskId, acao });
-      // O webhook vai confirmar via Realtime — não precisa refetch aqui
     } catch (err: any) {
-      console.error('[useProdutosComprar] Erro na ação:', err);
+      console.error('[useProdutosComprar] Erro na acao:', err);
       throw err;
     }
   }, [fetchProdutos]);
 
   const analisar = useCallback((id: string) => executarAcao(id, 'ANALISAR'), [executarAcao]);
-  const aprovar  = useCallback((id: string) => executarAcao(id, 'APROVAR'),  [executarAcao]);
+  const aprovar = useCallback((id: string) => executarAcao(id, 'APROVAR'), [executarAcao]);
   const rejeitar = useCallback((id: string) => executarAcao(id, 'REJEITAR'), [executarAcao]);
 
   return {
@@ -160,9 +177,11 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     loading,
     error,
     ultimaAtualizacao,
+    empresa,
     refetch: fetchProdutos,
     analisar,
     aprovar,
     rejeitar,
   };
 };
+

@@ -1,6 +1,5 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-
-const TOKEN = process.env.VITE_CLICKUP_API_TOKEN;
+import { getClickUpToken, normalizeEmpresa } from './_clickup';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -9,24 +8,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   if (req.method !== 'POST') {
-    return res.status(405).json({ error: 'Método não permitido' });
+    return res.status(405).json({ error: 'Metodo nao permitido' });
   }
 
-  if (!TOKEN) {
-    return res.status(500).json({ error: 'Token não configurado' });
-  }
+  const { taskId, acao, empresa } = req.body ?? {};
+  const empresaKey = normalizeEmpresa(empresa);
+  const token = getClickUpToken(empresaKey);
 
-  const { taskId, acao } = req.body;
+  if (!token) {
+    return res.status(500).json({ error: 'Token nao configurado' });
+  }
 
   if (!taskId || !acao) {
-    return res.status(400).json({ error: 'taskId e ação são obrigatórios' });
+    return res.status(400).json({ error: 'taskId e acao sao obrigatorios' });
   }
 
-  const acaoUp = acao.toUpperCase();
+  const acaoUp = String(acao).toUpperCase();
   const statusMap: Record<string, string> = {
-    'ANALISAR': 'analisado',
-    'APROVAR': 'done',
-    'REJEITAR': 'cancelled',
+    ANALISAR: 'analisado',
+    APROVAR: 'done',
+    REJEITAR: 'cancelled',
   };
 
   const novoStatus = statusMap[acaoUp];
@@ -40,7 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       {
         method: 'POST',
         headers: {
-          'Authorization': TOKEN,
+          Authorization: token,
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ status: novoStatus }),
@@ -52,9 +53,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Erro ao mover', details: errorText });
     }
 
-    return res.json({ ok: true, taskId, acao: acaoUp.toLowerCase(), status: novoStatus });
+    return res.json({ ok: true, taskId, acao: acaoUp.toLowerCase(), status: novoStatus, empresa: empresaKey });
   } catch (error) {
     console.error('Erro:', error);
     return res.status(500).json({ error: String(error) });
   }
 }
+

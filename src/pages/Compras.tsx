@@ -12,7 +12,7 @@ const Compras = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [importando, setImportando] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { produtos, loading, error, refetch, analisar, aprovar, rejeitar, ultimaAtualizacao } = useProdutosComprar();
+  const { produtos, loading, error, refetch, analisar, aprovar, rejeitar, ultimaAtualizacao, empresa } = useProdutosComprar();
 
   const handleImportarPlanilha = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -35,7 +35,7 @@ const Compras = () => {
       const response = await fetch('/api/clickup-importar', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ base64 }),
+        body: JSON.stringify({ base64, empresa }),
       });
 
       const data = await response.json();
@@ -54,7 +54,7 @@ const Compras = () => {
     }
   };
 
-  const filteredProdutos = produtos.filter(p =>
+  const filteredProdutos = produtos.filter((p) =>
     p.codigo.includes(searchTerm) ||
     p.descricao.toLowerCase().includes(searchTerm.toLowerCase())
   );
@@ -85,8 +85,13 @@ const Compras = () => {
             </Button>
             <h1 className="text-3xl font-bold text-gray-900">Gestao de Compras</h1>
             <p className="text-gray-600 mt-1">
-              Produtos aguardando analise (ClickUp)
+              Produtos aguardando analise no ClickUp ({empresa})
             </p>
+            {ultimaAtualizacao && (
+              <p className="text-xs text-gray-500 mt-1">
+                Ultima atualizacao: {ultimaAtualizacao.toLocaleString('pt-BR')}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-3">
             <input
@@ -130,7 +135,7 @@ const Compras = () => {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-blue-600">
-                {produtos.filter(p => p.status === 'novo').length}
+                {produtos.filter((p) => p.status === 'novo').length}
               </div>
             </CardContent>
           </Card>
@@ -140,7 +145,7 @@ const Compras = () => {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-yellow-600">
-                {produtos.filter(p => p.status === 'analisado').length}
+                {produtos.filter((p) => p.status === 'analisado').length}
               </div>
             </CardContent>
           </Card>
@@ -150,7 +155,7 @@ const Compras = () => {
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-green-600">
-                {produtos.filter(p => p.status === 'comprado').length}
+                {produtos.filter((p) => p.status === 'comprado').length}
               </div>
             </CardContent>
           </Card>
@@ -223,7 +228,7 @@ const Compras = () => {
                       )}
                       {produto.status === 'analisado' && (
                         <>
-                          <Button size="sm" onClick={() => aprobar(produto.id)}>
+                          <Button size="sm" onClick={() => aprovar(produto.id)}>
                             <Check className="h-4 w-4 mr-1" />
                             Aprovar
                           </Button>
@@ -249,3 +254,4 @@ const Compras = () => {
 };
 
 export default Compras;
+
