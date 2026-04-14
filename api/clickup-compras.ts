@@ -18,12 +18,12 @@ function getClickUpToken(empresa: EmpresaKey): string {
 
 function getComprasListId(empresa: EmpresaKey): string {
   if (empresa === 'NEWSHOP') {
-    return process.env.CLICKUP_LIST_ID_COMPRAS_NEWSHOP || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+    return process.env.CLICKUP_TODO_LIST_ID_NEWSHOP || process.env.CLICKUP_TODO_LIST_ID || process.env.CLICKUP_LIST_ID_COMPRAS_NEWSHOP || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
   }
   if (empresa === 'SOYE') {
-    return process.env.CLICKUP_LIST_ID_COMPRAS_SOYE || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+    return process.env.CLICKUP_TODO_LIST_ID_SOYE || process.env.CLICKUP_TODO_LIST_ID_SF || process.env.CLICKUP_TODO_LIST_ID || process.env.CLICKUP_LIST_ID_COMPRAS_SOYE || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
   }
-  return process.env.CLICKUP_LIST_ID_COMPRAS_FACIL || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+  return process.env.CLICKUP_TODO_LIST_ID_FACIL || process.env.CLICKUP_TODO_LIST_ID_SF || process.env.CLICKUP_TODO_LIST_ID || process.env.CLICKUP_LIST_ID_COMPRAS_FACIL || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
 }
 
 function extractCodigo(name: string): string {

@@ -175,6 +175,18 @@ async function anexarFotoNaTarefa(
   }
 }
 
+async function deletarTarefaClickUp(taskId: string): Promise<void> {
+  const response = await fetch(
+    `https://api.clickup.com/api/v2/task/${taskId}`,
+    {
+      method: "DELETE",
+      headers: { Authorization: CLICKUP_TOKEN_SF },
+    }
+  );
+
+  console.log(`Task ${taskId} removida: ${response.ok}`);
+}
+
 // ── Upload paralelo de fotos com limite ───────────────────────────────────────
 async function uploadFotosParalelo(
   taskId: string,
@@ -417,6 +429,57 @@ ${listaFaltantes || "Nenhum item faltante."}
 
       console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
       console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
+
+      const itensComFotoIndividuais = itensNaoTem.filter(
+        (i: any) => i.photo && i.photo.length > 0
+      );
+
+      if (itensComFotoIndividuais.length > 0) {
+        if (todoTaskId) {
+          await deletarTarefaClickUp(todoTaskId);
+          todoTaskId = null;
+        }
+
+        const MAX_FOTOS_INDIVIDUAIS = 10;
+        const fotosProcessar = itensComFotoIndividuais.slice(0, MAX_FOTOS_INDIVIDUAIS);
+
+        if (itensComFotoIndividuais.length > MAX_FOTOS_INDIVIDUAIS) {
+          console.warn(
+            `âš ï¸ Limite de ${MAX_FOTOS_INDIVIDUAIS} fotos atingido. ${itensComFotoIndividuais.length - MAX_FOTOS_INDIVIDUAIS} fotos serÃ£o ignoradas.`
+          );
+        }
+
+        for (const [index, item] of fotosProcessar.entries()) {
+          const taskIdFoto = await criarTarefaClickUp(
+            CLICKUP_TODO_LIST_ID_SF,
+            `${item.status}_${item.codigo}_${item.sku || "sem-sku"}_${payload.conferente}`,
+            `Gerado automaticamente a partir da conferÃªncia.
+
+Empresa: ${payload.empresa ?? "SOYE"}
+Tipo: ${isCD ? "CD" : "LOJA"}
+Conferente: ${payload.conferente}
+Data: ${dataFormatada}
+Status: ${statusMap[item.status] ?? item.status}
+Codigo: ${item.codigo}
+SKU: ${item.sku || "-"}
+Pedido: ${item.quantidadePedida}
+Real: ${item.quantidadeReal ?? 0}
+Foto: ${index + 1} de ${fotosProcessar.length}`,
+            "to do"
+          );
+
+          if (!todoTaskId) {
+            todoTaskId = taskIdFoto;
+          }
+
+          const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+          const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
+          await anexarFotoNaTarefa(taskIdFoto, item.photo, filename);
+        }
+
+        console.log(`âœ… ${fotosProcessar.length} tarefa(s) individuais de COMPRAS criada(s)`);
+        return;
+      }
 
       // 2. Upload paralelo das fotos comprimidas
       const itensComFoto = (payload.itens || []).filter(
