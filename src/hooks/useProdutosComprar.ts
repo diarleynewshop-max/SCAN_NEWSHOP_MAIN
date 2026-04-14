@@ -58,7 +58,9 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
-        throw new Error(body.error ?? `Erro ${response.status}`);
+        const detail = body.error ?? `Erro ${response.status}`;
+        const context = body.empresa ? ` [empresa=${body.empresa}]` : '';
+        throw new Error(`${detail}${context}`);
       }
 
       const data = await response.json();

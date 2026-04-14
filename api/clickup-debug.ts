@@ -1,7 +1,17 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
-const LIST_ID = process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
-const TOKEN = process.env.VITE_CLICKUP_API_TOKEN || '';
+const LIST_ID =
+  process.env.CLICKUP_LIST_ID_COMPRAS_NEWSHOP ||
+  process.env.CLICKUP_LIST_ID_COMPRAS ||
+  process.env.VITE_CLICKUP_LIST_ID_COMPRAS ||
+  '901326684020';
+
+const TOKEN =
+  process.env.CLICKUP_TOKEN ||
+  process.env.CLICKUP_API_TOKEN ||
+  process.env.VITE_CLICKUP_API_TOKEN ||
+  process.env.VITE_CLICKUP_TOKEN_NEWSHOP ||
+  '';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -23,7 +33,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   if (!TOKEN) {
     debug.erro = '❌ TOKEN VAZIO!';
-    debug.solucao = 'Adicionar VITE_CLICKUP_API_TOKEN no Vercel';
+    debug.solucao = 'Adicionar CLICKUP_TOKEN no Vercel';
     console.log('❌ TOKEN VAZIO');
     return res.json(debug);
   }

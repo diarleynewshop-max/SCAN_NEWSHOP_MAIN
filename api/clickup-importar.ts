@@ -1,6 +1,31 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import * as XLSX from 'xlsx';
-import { getClickUpListId, getClickUpToken, normalizeEmpresa } from './_clickup';
+
+type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
+
+function normalizeEmpresa(value: unknown): EmpresaKey {
+  const empresa = String(value ?? 'NEWSHOP').toUpperCase();
+  if (empresa === 'SOYE' || empresa === 'FACIL') return empresa;
+  return 'NEWSHOP';
+}
+
+function getClickUpToken(empresa: EmpresaKey): string {
+  if (empresa === 'NEWSHOP') {
+    return process.env.CLICKUP_TOKEN || process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_TOKEN_NEWSHOP || '';
+  }
+
+  return process.env.CLICKUP_TOKEN_SF || process.env.CLICKUP_API_TOKEN_SF || process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_TOKEN_SF || '';
+}
+
+function getComprasListId(empresa: EmpresaKey): string {
+  if (empresa === 'NEWSHOP') {
+    return process.env.CLICKUP_LIST_ID_COMPRAS_NEWSHOP || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+  }
+  if (empresa === 'SOYE') {
+    return process.env.CLICKUP_LIST_ID_COMPRAS_SOYE || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+  }
+  return process.env.CLICKUP_LIST_ID_COMPRAS_FACIL || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+}
 
 interface ItemPlanilha {
   descricao?: string;
@@ -20,10 +45,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { base64, empresa } = req.body ?? {};
   const empresaKey = normalizeEmpresa(empresa);
   const token = getClickUpToken(empresaKey);
-  const listId = getClickUpListId(empresaKey, 'compras');
+  const listId = getComprasListId(empresaKey);
 
   if (!token) {
-    return res.status(500).json({ error: 'Token nao configurado' });
+    return res.status(500).json({ error: 'Token nao configurado', empresa: empresaKey });
   }
 
   try {

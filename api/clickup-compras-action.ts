@@ -1,5 +1,20 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { getClickUpToken, normalizeEmpresa } from './_clickup';
+
+type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
+
+function normalizeEmpresa(value: unknown): EmpresaKey {
+  const empresa = String(value ?? 'NEWSHOP').toUpperCase();
+  if (empresa === 'SOYE' || empresa === 'FACIL') return empresa;
+  return 'NEWSHOP';
+}
+
+function getClickUpToken(empresa: EmpresaKey): string {
+  if (empresa === 'NEWSHOP') {
+    return process.env.CLICKUP_TOKEN || process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_TOKEN_NEWSHOP || '';
+  }
+
+  return process.env.CLICKUP_TOKEN_SF || process.env.CLICKUP_API_TOKEN_SF || process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_TOKEN_SF || '';
+}
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -16,7 +31,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const token = getClickUpToken(empresaKey);
 
   if (!token) {
-    return res.status(500).json({ error: 'Token nao configurado' });
+    return res.status(500).json({ error: 'Token nao configurado', empresa: empresaKey });
   }
 
   if (!taskId || !acao) {
