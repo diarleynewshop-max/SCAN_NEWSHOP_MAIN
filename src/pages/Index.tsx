@@ -59,10 +59,16 @@ const Index = () => {
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab");
 
-  const [barcode, setBarcode] = useState("");
-  const [sku, setSku] = useState("");
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [quantity, setQuantity] = useState("");
+  const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
+  const [sku, setSku] = useState(() => sessionStorage.getItem("scan_sku") ?? "");
+  const [photo, setPhoto] = useState<string | null>(() => sessionStorage.getItem("scan_photo") ?? null);
+  const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
+
+  // Persistir campos do formulário no sessionStorage para não perder ao trocar de aba
+  useEffect(() => { sessionStorage.setItem("scan_barcode", barcode); }, [barcode]);
+  useEffect(() => { sessionStorage.setItem("scan_sku", sku); }, [sku]);
+  useEffect(() => { sessionStorage.setItem("scan_photo", photo ?? ""); }, [photo]);
+  useEffect(() => { sessionStorage.setItem("scan_quantity", quantity); }, [quantity]);
   const [view, setView] = useState<"scan" | "list" | "conference">(
     initialTab === "conference" ? "conference" : initialTab === "list" ? "list" : "scan"
   );
@@ -152,6 +158,16 @@ const Index = () => {
     setShowProductInfo(true);
     lookupProduct(code);
   }, [lookupProduct, pendingEditProductId, updateProduct]);
+
+  // Quando o produto for encontrado no Supabase, preencher SKU com o campo descricao
+  useEffect(() => {
+    if (productInfo) {
+      const descricao = productInfo.descricao || productInfo.nome_produto;
+      if (descricao) {
+        setSku(descricao);
+      }
+    }
+  }, [productInfo]);
 
   const resetModal = () => {
     setModalFlag(null);
@@ -293,7 +309,13 @@ const Index = () => {
 
   const handleAdd = () => {
     const ok = addProduct({ barcode, sku, photo, quantity: Number(quantity) });
-    if (ok) { setBarcode(""); setSku(""); setPhoto(null); setQuantity(""); }
+    if (ok) {
+      setBarcode(""); setSku(""); setPhoto(null); setQuantity("");
+      sessionStorage.removeItem("scan_barcode");
+      sessionStorage.removeItem("scan_sku");
+      sessionStorage.removeItem("scan_photo");
+      sessionStorage.removeItem("scan_quantity");
+    }
   };
 
   const productCount = activeList?.products.length ?? 0;
@@ -1191,6 +1213,7 @@ Fechar
 };
 
 export default Index;
+
 
 
 
