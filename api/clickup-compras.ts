@@ -9,6 +9,8 @@ import {
   normalizeEmpresa,
 } from './_clickup.js';
 
+type CompraStatusApp = 'todo' | 'produto_bom' | 'produto_ruim' | 'fazer_pedido' | 'concluido';
+
 function extractFirstImageUrl(attachments: unknown): string | null {
   const safeAttachments = Array.isArray(attachments) ? attachments : [];
 
@@ -38,10 +40,29 @@ function extractFirstImageUrl(attachments: unknown): string | null {
   return null;
 }
 
+function normalizeStatusFilter(value: unknown): CompraStatusApp | null {
+  const status = String(value ?? '')
+    .trim()
+    .toLowerCase();
+
+  if (
+    status === 'todo' ||
+    status === 'produto_bom' ||
+    status === 'produto_ruim' ||
+    status === 'fazer_pedido' ||
+    status === 'concluido'
+  ) {
+    return status;
+  }
+
+  return null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const empresa = normalizeEmpresa(req.query.empresa);
   const token = getClickUpToken(empresa);
   const listId = getClickUpListId(empresa, 'compras');
+  const statusFilter = normalizeStatusFilter(req.query.status);
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -114,6 +135,10 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
     }
 
+    const produtosFiltrados = statusFilter
+      ? produtos.filter((produto) => produto.status === statusFilter)
+      : produtos;
+
     if (skippedTasks.length > 0) {
       console.warn('[clickup-compras] tasks ignoradas:', {
         empresa,
@@ -125,10 +150,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     return res.json({
-      produtos,
+      produtos: produtosFiltrados,
       empresa,
-      total: produtos.length,
+      total: produtosFiltrados.length,
       listId,
+      statusFilter,
       skippedCount: skippedTasks.length,
     });
   } catch (error) {

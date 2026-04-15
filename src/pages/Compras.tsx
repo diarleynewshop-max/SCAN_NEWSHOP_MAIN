@@ -7,6 +7,14 @@ import { useNavigate } from "react-router-dom";
 import { useState, useRef } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
 
+const STATUS_SECTIONS = [
+  { key: "todo", title: "TO DO" },
+  { key: "produto_bom", title: "Produto Bom" },
+  { key: "produto_ruim", title: "Produto Ruim" },
+  { key: "fazer_pedido", title: "Fazer Pedido" },
+  { key: "concluido", title: "Concluido" },
+] as const;
+
 const Compras = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
@@ -72,6 +80,11 @@ const Compras = () => {
       (p.sku || "").toLowerCase().includes(termo)
     );
   });
+
+  const produtosPorStatus = STATUS_SECTIONS.map((section) => ({
+    ...section,
+    items: filteredProdutos.filter((produto) => produto.status === section.key),
+  }));
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -214,79 +227,92 @@ const Compras = () => {
               <div className="text-center py-12 text-gray-500">Nenhum produto encontrado</div>
             )}
             {!loading && !error && filteredProdutos.length > 0 && (
-              <div className="space-y-3">
-                {filteredProdutos.map((produto) => (
-                  <div key={produto.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg gap-4">
-                    <div className="flex items-center gap-4 min-w-0">
-                      {produto.foto ? (
-                        <img src={produto.foto} alt={produto.codigo} className="w-16 h-16 object-cover rounded shrink-0" />
-                      ) : (
-                        <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center shrink-0">
-                          <span className="text-gray-400 text-xs">sem foto</span>
+              <div className="space-y-6">
+                {produtosPorStatus.map((section) => (
+                  <div key={section.key} className="space-y-3">
+                    <div className="flex items-center justify-between border-b pb-2">
+                      <h3 className="text-sm font-semibold text-gray-900">{section.title}</h3>
+                      <span className="text-xs text-gray-500">{section.items.length} item(ns)</span>
+                    </div>
+
+                    {section.items.length === 0 && (
+                      <div className="text-sm text-gray-400 py-2">Nenhum item neste status</div>
+                    )}
+
+                    {section.items.map((produto) => (
+                      <div key={produto.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg gap-4">
+                        <div className="flex items-center gap-4 min-w-0">
+                          {produto.foto ? (
+                            <img src={produto.foto} alt={produto.codigo} className="w-16 h-16 object-cover rounded shrink-0" />
+                          ) : (
+                            <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center shrink-0">
+                              <span className="text-gray-400 text-xs">sem foto</span>
+                            </div>
+                          )}
+                          <div className="min-w-0">
+                            <div className="font-bold">{produto.codigo}</div>
+                            <div className="text-sm text-gray-600 break-words">{produto.descricao}</div>
+                            {produto.sku && <div className="text-xs text-gray-400">SKU: {produto.sku}</div>}
+                          </div>
                         </div>
-                      )}
-                      <div className="min-w-0">
-                        <div className="font-bold">{produto.codigo}</div>
-                        <div className="text-sm text-gray-600 break-words">{produto.descricao}</div>
-                        {produto.sku && <div className="text-xs text-gray-400">SKU: {produto.sku}</div>}
+                        <div className="flex items-center gap-2 flex-wrap justify-end">
+                          {getStatusBadge(produto.status)}
+
+                          {produto.status === "todo" && (
+                            <>
+                              <Button size="sm" onClick={() => like(produto.id)}>
+                                <ThumbsUp className="h-4 w-4 mr-1" />
+                                Like
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
+                                <ThumbsDown className="h-4 w-4 mr-1" />
+                                Deslike
+                              </Button>
+                            </>
+                          )}
+
+                          {produto.status === "produto_bom" && (
+                            <>
+                              <Button size="sm" onClick={() => fazerPedido(produto.id)}>
+                                <ShoppingCart className="h-4 w-4 mr-1" />
+                                Fazer Pedido
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
+                                <ThumbsDown className="h-4 w-4 mr-1" />
+                                Deslike
+                              </Button>
+                            </>
+                          )}
+
+                          {produto.status === "produto_ruim" && (
+                            <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
+                              <ThumbsUp className="h-4 w-4 mr-1" />
+                              Like
+                            </Button>
+                          )}
+
+                          {produto.status === "fazer_pedido" && (
+                            <>
+                              <Button size="sm" onClick={() => concluir(produto.id)}>
+                                <Check className="h-4 w-4 mr-1" />
+                                Concluir
+                              </Button>
+                              <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
+                                <ThumbsUp className="h-4 w-4 mr-1" />
+                                Voltar Bom
+                              </Button>
+                            </>
+                          )}
+
+                          {produto.status === "concluido" && (
+                            <Button size="sm" variant="outline" onClick={() => fazerPedido(produto.id)}>
+                              <RefreshCw className="h-4 w-4 mr-1" />
+                              Reabrir
+                            </Button>
+                          )}
+                        </div>
                       </div>
-                    </div>
-                    <div className="flex items-center gap-2 flex-wrap justify-end">
-                      {getStatusBadge(produto.status)}
-
-                      {produto.status === "todo" && (
-                        <>
-                          <Button size="sm" onClick={() => like(produto.id)}>
-                            <ThumbsUp className="h-4 w-4 mr-1" />
-                            Like
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
-                            <ThumbsDown className="h-4 w-4 mr-1" />
-                            Deslike
-                          </Button>
-                        </>
-                      )}
-
-                      {produto.status === "produto_bom" && (
-                        <>
-                          <Button size="sm" onClick={() => fazerPedido(produto.id)}>
-                            <ShoppingCart className="h-4 w-4 mr-1" />
-                            Fazer Pedido
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
-                            <ThumbsDown className="h-4 w-4 mr-1" />
-                            Deslike
-                          </Button>
-                        </>
-                      )}
-
-                      {produto.status === "produto_ruim" && (
-                        <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
-                          <ThumbsUp className="h-4 w-4 mr-1" />
-                          Like
-                        </Button>
-                      )}
-
-                      {produto.status === "fazer_pedido" && (
-                        <>
-                          <Button size="sm" onClick={() => concluir(produto.id)}>
-                            <Check className="h-4 w-4 mr-1" />
-                            Concluir
-                          </Button>
-                          <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
-                            <ThumbsUp className="h-4 w-4 mr-1" />
-                            Voltar Bom
-                          </Button>
-                        </>
-                      )}
-
-                      {produto.status === "concluido" && (
-                        <Button size="sm" variant="outline" onClick={() => fazerPedido(produto.id)}>
-                          <RefreshCw className="h-4 w-4 mr-1" />
-                          Reabrir
-                        </Button>
-                      )}
-                    </div>
+                    ))}
                   </div>
                 ))}
               </div>
