@@ -41,17 +41,21 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     const data = await response.json();
-    const tasks = data.tasks || [];
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
 
-    const produtos = tasks.map((t: any) => {
-      const attachments = t.attachments || [];
+    const produtos = tasks
+      .filter((t: any) => t && typeof t === 'object')
+      .map((t: any) => {
+      const attachments = Array.isArray(t.attachments) ? t.attachments : [];
       let foto = null;
 
       for (const a of attachments) {
-        const url = a.url || '';
-        const title = (a.title || a.file_name || '').toLowerCase();
+        if (!a || typeof a !== 'object') continue;
+
+        const url = String(a.url || '');
+        const title = String(a.title || a.file_name || '').toLowerCase();
         if (url.startsWith('http') && (
-          a.mimetype?.startsWith('image/') ||
+          String(a.mimetype || '').startsWith('image/') ||
           title.endsWith('.jpg') ||
           title.endsWith('.jpeg') ||
           title.endsWith('.png') ||
@@ -64,15 +68,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       return {
-        id: t.id,
+        id: String(t.id ?? ''),
         codigo: extractCodigo(t.name),
         sku: extractSku(t.name),
         descricao: extractDescricao(t.name),
         foto,
         status: mapTaskStatus(t.status?.status),
-        date_created: t.date_created,
+        date_created: String(t.date_created ?? ''),
       };
-    }).filter((p: any) => p.codigo);
+    })
+      .filter((p: any) => p.id && p.codigo);
 
     return res.json({ produtos, empresa, total: produtos.length, listId });
   } catch (error) {

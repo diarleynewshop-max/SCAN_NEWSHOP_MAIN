@@ -109,27 +109,34 @@ export function getClickUpListId(empresa: EmpresaKey, lista: ListaKey): string {
   );
 }
 
-export function extractCodigo(name: string): string {
-  const pipeMatch = name.match(/COD:([^|]+)/i);
-  if (pipeMatch) return pipeMatch[1].trim();
-
-  const match = name.match(/nao_tem(?:_tudo)?_(\d+)/i);
-  return match ? match[1] : name;
+function normalizeTaskName(name: unknown): string {
+  return String(name ?? "").trim();
 }
 
-export function extractSku(name: string): string | null {
-  const pipeMatch = name.match(/SKU:([^|]+)/i);
+export function extractCodigo(name: unknown): string {
+  const normalizedName = normalizeTaskName(name);
+  const pipeMatch = normalizedName.match(/COD:([^|]+)/i);
   if (pipeMatch) return pipeMatch[1].trim();
 
-  const match = name.match(/nao_tem(?:_tudo)?_\d+_([^_\s]+)/i);
+  const match = normalizedName.match(/nao_tem(?:_tudo)?_(\d+)/i);
+  return match ? match[1] : normalizedName;
+}
+
+export function extractSku(name: unknown): string | null {
+  const normalizedName = normalizeTaskName(name);
+  const pipeMatch = normalizedName.match(/SKU:([^|]+)/i);
+  if (pipeMatch) return pipeMatch[1].trim();
+
+  const match = normalizedName.match(/nao_tem(?:_tudo)?_\d+_([^_\s]+)/i);
   return match ? match[1] : null;
 }
 
-export function extractDescricao(name: string): string {
-  const pipeMatch = name.match(/DESC:([^|]+)/i);
+export function extractDescricao(name: unknown): string {
+  const normalizedName = normalizeTaskName(name);
+  const pipeMatch = normalizedName.match(/DESC:([^|]+)/i);
   if (pipeMatch) return pipeMatch[1].trim();
 
-  return name
+  return normalizedName
     .replace(/^nao_tem_tudo_/i, "")
     .replace(/^nao_tem_/i, "")
     .trim();
