@@ -97,7 +97,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const updateRes = await fetch(
         `https://api.clickup.com/api/v2/task/${taskId}`,
         {
-          method: 'POST',
+          method: 'PUT',
           headers: {
             Authorization: token,
             'Content-Type': 'application/json',

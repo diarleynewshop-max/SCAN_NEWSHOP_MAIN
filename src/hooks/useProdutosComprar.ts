@@ -171,7 +171,8 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
 
       if (!response.ok) {
         await fetchProdutos();
-        throw new Error(data.error ?? 'Erro ao executar acao');
+        const detalhe = data.details ? `: ${data.details}` : '';
+        throw new Error((data.error ?? 'Erro ao executar acao') + detalhe);
       }
     } catch (err: any) {
       console.error('[useProdutosComprar] Erro na acao:', err);
