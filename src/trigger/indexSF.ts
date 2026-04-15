@@ -446,7 +446,7 @@ const conferenciaBaixadaSFWorker = task({
       }
 
       const itensNaoTem = (payload.itens || []).filter(
-        (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
+        (i: any) => i.status === "nao_tem"
       );
 
       const listaFaltantes = itensNaoTem
@@ -573,7 +573,7 @@ Foto: ${index + 1} de ${fotosProcessar.length}`,
         (i: any) =>
           i.photo &&
           i.photo.length > 0 &&
-          (i.status === "nao_tem" || i.status === "nao_tem_tudo")
+          i.status === "nao_tem"
       );
 
       if (itensComFoto.length > 0) {

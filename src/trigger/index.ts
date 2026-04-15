@@ -471,7 +471,7 @@ ${itensTexto}`,
       // 3. Cria tarefa de COMPRAS com fotos diretas ──
       try {
         const itensNaoTem = (payload.itens || []).filter(
-          (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
+          (i: any) => i.status === "nao_tem"
         );
 
         for (const item of itensNaoTem) {
