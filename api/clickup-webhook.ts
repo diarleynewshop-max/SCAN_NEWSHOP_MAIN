@@ -1,6 +1,6 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
-import { mapTaskStatus, normalizeEmpresa } from './_clickup';
+import { mapTaskStatus, normalizeEmpresa } from './_clickup.js';
 
 const supabase = createClient(
   process.env.SUPABASE_URL!,

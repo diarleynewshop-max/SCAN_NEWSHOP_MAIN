@@ -7,7 +7,7 @@ import {
   getClickUpToken,
   mapTaskStatus,
   normalizeEmpresa,
-} from './_clickup';
+} from './_clickup.js';
 
 function extractFirstImageUrl(attachments: unknown): string | null {
   const safeAttachments = Array.isArray(attachments) ? attachments : [];

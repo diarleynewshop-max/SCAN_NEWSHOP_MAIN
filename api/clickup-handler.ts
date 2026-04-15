@@ -4,7 +4,7 @@ import {
   extractSku,
   getClickUpToken,
   normalizeEmpresa,
-} from './_clickup';
+} from './_clickup.js';
 
 const CLICKUP_LIST_COMPRAS = '901326684020';
 

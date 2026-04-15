@@ -1,5 +1,5 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { getClickUpToken, normalizeEmpresa } from './_clickup';
+import { getClickUpToken, normalizeEmpresa } from './_clickup.js';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
