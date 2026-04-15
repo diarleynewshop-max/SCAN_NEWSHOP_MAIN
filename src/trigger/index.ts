@@ -148,6 +148,13 @@ async function anexarFotoNaTarefa(
   }
 }
 
+function sanitizeTaskValue(value: unknown): string {
+  return String(value ?? "")
+    .replace(/\s+/g, " ")
+    .replace(/[|]/g, "/")
+    .trim();
+}
+
 // ── TASK 1 — Lista baixada (CRIANDO TAREFA DE COMPRAS SE TIVER ZERO ESTOQUE) ──
 export const listaBaixada = task({
   id: "lista-baixada",
@@ -380,109 +387,47 @@ ${itensTexto}`,
           (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
         );
 
-        const itensComFotoIndividuais = itensNaoTem.filter(
-          (i: any) => i.photo && i.photo.length > 0
-        );
-        const MAX_FOTOS_INDIVIDUAIS = 10;
+        for (const item of itensNaoTem) {
+          const codigo = sanitizeTaskValue(item.codigo);
+          const sku = sanitizeTaskValue(item.sku || "-");
+          const descricao = sanitizeTaskValue(
+            item.descricao || item.sku || item.codigo || "Sem descricao"
+          );
+          const statusCompra = item.status === "nao_tem_tudo" ? "PARCIAL" : "NAO TEM";
 
-        if (itensComFotoIndividuais.length > 0) {
-          const fotosProcessar = itensComFotoIndividuais.slice(0, MAX_FOTOS_INDIVIDUAIS);
-
-          if (itensComFotoIndividuais.length > MAX_FOTOS_INDIVIDUAIS) {
-            console.warn(`âš ï¸ Limite de ${MAX_FOTOS_INDIVIDUAIS} fotos atingido. ${itensComFotoIndividuais.length - MAX_FOTOS_INDIVIDUAIS} fotos serÃ£o ignoradas.`);
-          }
-
-          for (const [index, item] of fotosProcessar.entries()) {
-            const taskIdFoto = await criarTarefaClickUp(
-              CLICKUP_TODO_LIST_ID,
-              `${item.status}_${item.codigo}_${item.sku || "sem-sku"}_${payload.conferente}`,
-              `Gerado automaticamente a partir da conferÃªncia.
+          const taskComprasId = await criarTarefaClickUp(
+            CLICKUP_TODO_LIST_ID,
+            `COMPRA | COD:${codigo} | SKU:${sku} | DESC:${descricao} | STATUS:${statusCompra}`,
+            `Gerado automaticamente a partir da conferencia.
 
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Conferente: ${payload.conferente}
 Data: ${dataFormatada}
-Status: ${statusMap[item.status] ?? item.status}
+Status da conferencia: ${statusMap[item.status] ?? item.status}
 Codigo: ${item.codigo}
 SKU: ${item.sku || "-"}
+Descricao: ${item.descricao || item.sku || "-"}
 Pedido: ${item.quantidadePedida}
 Real: ${item.quantidadeReal ?? 0}
-Foto: ${index + 1} de ${fotosProcessar.length}`,
-              "to do"
-            );
 
-            if (!todoTaskId) {
-              todoTaskId = taskIdFoto;
-            }
+Fluxo esperado:
+TO DO -> PRODUTO RUIM | PRODUTO BOM -> FAZER PEDIDO -> CONCLUIDO`,
+            "to do"
+          );
 
-            const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
-            const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
-            await anexarFotoNaTarefa(taskIdFoto, item.photo, filename);
+          if (!todoTaskId) {
+            todoTaskId = taskComprasId;
           }
 
-          console.log(`âœ… ${fotosProcessar.length} tarefa(s) individuais de COMPRAS criada(s)`);
-          return;
+          if (item.photo && item.photo.length > 0) {
+            const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+            const filename = `compra_${codigo}_${sku}.${ext}`;
+            await anexarFotoNaTarefa(taskComprasId, item.photo, filename);
+          }
         }
 
-        const listaFaltantes = itensNaoTem
-          .map(
-            (item: any, idx: number) =>
-              `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0} | ${statusMap[item.status] ?? item.status}`
-          )
-          .join("\n");
-
-        todoTaskId = await criarTarefaClickUp(
-          CLICKUP_TODO_LIST_ID,
-          `🛒 Compras: ${payload.conferente} — ${dataFormatada}`,
-          `Relatório gerado automaticamente após conferência.
-
-📋 INFORMAÇÕES
-Empresa: ${payload.empresa ?? "NEWSHOP"}
-Tipo: ${isCD ? "CD" : "LOJA"}
-Conferente: ${payload.conferente}
-Data: ${dataFormatada}
-Total itens conferidos: ${payload.totalItens}
-
-📊 RESUMO
-✅ Separado: ${payload.resumo?.separado ?? 0}
-❌ Não tem: ${payload.resumo?.naoTem ?? 0}
-⚠️ Parcial: ${payload.resumo?.parcial ?? 0}
-⏳ Pendente: ${payload.resumo?.pendente ?? 0}
-
-🛒 ITENS FALTANTES (${itensNaoTem.length})
-${listaFaltantes || "Nenhum item faltante."}
-
-📸 Fotos anexadas abaixo (se houver)`,
-          "to do"
-        );
-
-        console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
-
-        // 4. Anexa cada foto como imagem separada (com limite para evitar OOM)
-        const MAX_FOTOS = 10;
-        const itensComFoto = (payload.itens || []).filter(
-          (i: any) =>
-            i.photo &&
-            i.photo.length > 0 &&
-            (i.status === "nao_tem" || i.status === "nao_tem_tudo")
-        );
-        const fotosExcedentes = itensComFoto.length > MAX_FOTOS;
-        const fotosProcessar = fotosExcedentes ? itensComFoto.slice(0, MAX_FOTOS) : itensComFoto;
-
-        if (fotosExcedentes) {
-          console.warn(`⚠️ Limite de ${MAX_FOTOS} fotos atingido. ${itensComFoto.length - MAX_FOTOS} fotos serão ignoradas.`);
-        }
-
-        console.log(`Itens com foto: ${fotosProcessar.length}${fotosExcedentes ? ` (de ${itensComFoto.length} total)` : ""}`);
-
-        for (const item of fotosProcessar) {
-          const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
-          const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
-          await anexarFotoNaTarefa(todoTaskId, item.photo, filename);
-        }
-
-        console.log("✅ Todas as fotos anexadas!");
-      } catch (err) {
+        console.log(`Tarefas individuais de COMPRAS criadas: ${itensNaoTem.length}`);      } catch (err) {
         console.error("Erro ao criar tarefa de COMPRAS:", err);
       }
 
@@ -504,3 +449,5 @@ ${listaFaltantes || "Nenhum item faltante."}
     }
   },
 });
+
+

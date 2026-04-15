@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, X, Eye, Upload, Loader2 } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
@@ -12,34 +12,44 @@ const Compras = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [importando, setImportando] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const { produtos, loading, error, refetch, analisar, aprovar, rejeitar, ultimaAtualizacao, empresa } = useProdutosComprar();
+  const {
+    produtos,
+    loading,
+    error,
+    refetch,
+    like,
+    dislike,
+    fazerPedido,
+    concluir,
+    ultimaAtualizacao,
+    empresa,
+  } = useProdutosComprar();
 
   const handleImportarPlanilha = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
 
     setImportando(true);
-    
+
     try {
       const base64 = await new Promise<string>((resolve, reject) => {
         const reader = new FileReader();
         reader.onload = () => {
           const result = reader.result as string;
-          const base64Data = result.split(',')[1];
-          resolve(base64Data);
+          resolve(result.split(",")[1]);
         };
         reader.onerror = reject;
         reader.readAsDataURL(file);
       });
 
-      const response = await fetch('/api/clickup-importar', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+      const response = await fetch("/api/clickup-importar", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ base64, empresa }),
       });
 
       const data = await response.json();
-      
+
       if (data.sucesso) {
         alert(`Importacao concluida!\n${data.criadas} itens criados\n${data.erros} erros`);
         refetch();
@@ -47,28 +57,34 @@ const Compras = () => {
         alert(`Erro: ${data.error}`);
       }
     } catch (err) {
-      alert('Erro ao importar: ' + String(err));
+      alert("Erro ao importar: " + String(err));
     } finally {
       setImportando(false);
-      if (fileInputRef.current) fileInputRef.current.value = '';
+      if (fileInputRef.current) fileInputRef.current.value = "";
     }
   };
 
-  const filteredProdutos = produtos.filter((p) =>
-    p.codigo.includes(searchTerm) ||
-    p.descricao.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const filteredProdutos = produtos.filter((p) => {
+    const termo = searchTerm.toLowerCase();
+    return (
+      p.codigo.toLowerCase().includes(termo) ||
+      p.descricao.toLowerCase().includes(termo) ||
+      (p.sku || "").toLowerCase().includes(termo)
+    );
+  });
 
   const getStatusBadge = (status: string) => {
     switch (status) {
-      case "novo":
-        return <Badge className="bg-blue-100 text-blue-800">Novo</Badge>;
-      case "analisado":
-        return <Badge className="bg-yellow-100 text-yellow-800">Analisado</Badge>;
-      case "comprado":
-        return <Badge className="bg-green-100 text-green-800">Comprado</Badge>;
-      case "reprovado":
-        return <Badge className="bg-red-100 text-red-800">Reprovado</Badge>;
+      case "todo":
+        return <Badge className="bg-blue-100 text-blue-800">TO DO</Badge>;
+      case "produto_bom":
+        return <Badge className="bg-emerald-100 text-emerald-800">Produto Bom</Badge>;
+      case "produto_ruim":
+        return <Badge className="bg-rose-100 text-rose-800">Produto Ruim</Badge>;
+      case "fazer_pedido":
+        return <Badge className="bg-amber-100 text-amber-800">Fazer Pedido</Badge>;
+      case "concluido":
+        return <Badge className="bg-green-100 text-green-800">Concluido</Badge>;
       default:
         return <Badge>{status}</Badge>;
     }
@@ -84,12 +100,10 @@ const Compras = () => {
               Voltar
             </Button>
             <h1 className="text-3xl font-bold text-gray-900">Gestao de Compras</h1>
-            <p className="text-gray-600 mt-1">
-              Produtos aguardando analise no ClickUp ({empresa})
-            </p>
+            <p className="text-gray-600 mt-1">Puxando o ClickUp de Compras ({empresa})</p>
             {ultimaAtualizacao && (
               <p className="text-xs text-gray-500 mt-1">
-                Ultima atualizacao: {ultimaAtualizacao.toLocaleString('pt-BR')}
+                Ultima atualizacao: {ultimaAtualizacao.toLocaleString("pt-BR")}
               </p>
             )}
           </div>
@@ -101,11 +115,7 @@ const Compras = () => {
               onChange={handleImportarPlanilha}
               className="hidden"
             />
-            <Button 
-              variant="outline" 
-              onClick={() => fileInputRef.current?.click()}
-              disabled={importando}
-            >
+            <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importando}>
               {importando ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
               ) : (
@@ -114,13 +124,13 @@ const Compras = () => {
               Importar Planilha
             </Button>
             <Button variant="outline" onClick={() => refetch()} disabled={loading}>
-              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? 'animate-spin' : ''}`} />
+              <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
               Atualizar
             </Button>
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Total</CardTitle>
@@ -131,31 +141,41 @@ const Compras = () => {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Novos</CardTitle>
+              <CardTitle className="text-lg">TO DO</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-blue-600">
-                {produtos.filter((p) => p.status === 'novo').length}
+                {produtos.filter((p) => p.status === "todo").length}
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Analisando</CardTitle>
+              <CardTitle className="text-lg">Produto Bom</CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="text-3xl font-bold text-yellow-600">
-                {produtos.filter((p) => p.status === 'analisado').length}
+              <div className="text-3xl font-bold text-emerald-600">
+                {produtos.filter((p) => p.status === "produto_bom").length}
               </div>
             </CardContent>
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Comprados</CardTitle>
+              <CardTitle className="text-lg">Fazer Pedido</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-amber-600">
+                {produtos.filter((p) => p.status === "fazer_pedido").length}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Concluido</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-green-600">
-                {produtos.filter((p) => p.status === 'comprado').length}
+                {produtos.filter((p) => p.status === "concluido").length}
               </div>
             </CardContent>
           </Card>
@@ -166,7 +186,7 @@ const Compras = () => {
             <div className="flex-1 relative">
               <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
               <Input
-                placeholder="Buscar por codigo..."
+                placeholder="Buscar por codigo, descricao ou SKU..."
                 className="pl-10"
                 value={searchTerm}
                 onChange={(e) => setSearchTerm(e.target.value)}
@@ -191,51 +211,80 @@ const Compras = () => {
               </div>
             )}
             {!loading && !error && filteredProdutos.length === 0 && (
-              <div className="text-center py-12 text-gray-500">
-                Nenhum produto encontrado
-              </div>
+              <div className="text-center py-12 text-gray-500">Nenhum produto encontrado</div>
             )}
             {!loading && !error && filteredProdutos.length > 0 && (
               <div className="space-y-3">
                 {filteredProdutos.map((produto) => (
-                  <div key={produto.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg">
-                    <div className="flex items-center gap-4">
+                  <div key={produto.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg gap-4">
+                    <div className="flex items-center gap-4 min-w-0">
                       {produto.foto ? (
-                        <img src={produto.foto} alt={produto.codigo} className="w-16 h-16 object-cover rounded" />
+                        <img src={produto.foto} alt={produto.codigo} className="w-16 h-16 object-cover rounded shrink-0" />
                       ) : (
-                        <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center">
+                        <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center shrink-0">
                           <span className="text-gray-400 text-xs">sem foto</span>
                         </div>
                       )}
-                      <div>
+                      <div className="min-w-0">
                         <div className="font-bold">{produto.codigo}</div>
-                        <div className="text-sm text-gray-600">{produto.descricao}</div>
+                        <div className="text-sm text-gray-600 break-words">{produto.descricao}</div>
                         {produto.sku && <div className="text-xs text-gray-400">SKU: {produto.sku}</div>}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap justify-end">
                       {getStatusBadge(produto.status)}
-                      {produto.status === 'novo' && (
+
+                      {produto.status === "todo" && (
                         <>
-                          <Button size="sm" onClick={() => analisar(produto.id)}>
-                            <Eye className="h-4 w-4 mr-1" />
-                            Analisar
+                          <Button size="sm" onClick={() => like(produto.id)}>
+                            <ThumbsUp className="h-4 w-4 mr-1" />
+                            Like
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => rejeitar(produto.id)} className="text-red-600">
-                            <X className="h-4 w-4" />
+                          <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
+                            <ThumbsDown className="h-4 w-4 mr-1" />
+                            Deslike
                           </Button>
                         </>
                       )}
-                      {produto.status === 'analisado' && (
+
+                      {produto.status === "produto_bom" && (
                         <>
-                          <Button size="sm" onClick={() => aprovar(produto.id)}>
-                            <Check className="h-4 w-4 mr-1" />
-                            Aprovar
+                          <Button size="sm" onClick={() => fazerPedido(produto.id)}>
+                            <ShoppingCart className="h-4 w-4 mr-1" />
+                            Fazer Pedido
                           </Button>
-                          <Button size="sm" variant="outline" onClick={() => rejeitar(produto.id)} className="text-red-600">
-                            <X className="h-4 w-4" />
+                          <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
+                            <ThumbsDown className="h-4 w-4 mr-1" />
+                            Deslike
                           </Button>
                         </>
+                      )}
+
+                      {produto.status === "produto_ruim" && (
+                        <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
+                          <ThumbsUp className="h-4 w-4 mr-1" />
+                          Like
+                        </Button>
+                      )}
+
+                      {produto.status === "fazer_pedido" && (
+                        <>
+                          <Button size="sm" onClick={() => concluir(produto.id)}>
+                            <Check className="h-4 w-4 mr-1" />
+                            Concluir
+                          </Button>
+                          <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
+                            <ThumbsUp className="h-4 w-4 mr-1" />
+                            Voltar Bom
+                          </Button>
+                        </>
+                      )}
+
+                      {produto.status === "concluido" && (
+                        <Button size="sm" variant="outline" onClick={() => fazerPedido(produto.id)}>
+                          <RefreshCw className="h-4 w-4 mr-1" />
+                          Reabrir
+                        </Button>
                       )}
                     </div>
                   </div>
@@ -246,7 +295,7 @@ const Compras = () => {
         </Card>
 
         <div className="text-center text-gray-500 text-sm mt-8">
-          <p>Interface de Compras - ClickUp</p>
+          <p>{"Fluxo ClickUp Compras: TO DO -> PRODUTO RUIM | PRODUTO BOM -> FAZER PEDIDO -> CONCLUIDO"}</p>
         </div>
       </div>
     </div>
@@ -254,4 +303,3 @@ const Compras = () => {
 };
 
 export default Compras;
-

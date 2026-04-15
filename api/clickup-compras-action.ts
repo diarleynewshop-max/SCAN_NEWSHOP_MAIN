@@ -1,20 +1,5 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-
-type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
-
-function normalizeEmpresa(value: unknown): EmpresaKey {
-  const empresa = String(value ?? 'NEWSHOP').toUpperCase();
-  if (empresa === 'SOYE' || empresa === 'FACIL') return empresa;
-  return 'NEWSHOP';
-}
-
-function getClickUpToken(empresa: EmpresaKey): string {
-  if (empresa === 'NEWSHOP') {
-    return process.env.CLICKUP_TOKEN || process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_TOKEN_NEWSHOP || '';
-  }
-
-  return process.env.CLICKUP_TOKEN_SF || process.env.CLICKUP_API_TOKEN_SF || process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_TOKEN_SF || '';
-}
+import { getClickUpToken, normalizeEmpresa } from './_clickup';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -40,14 +25,15 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const acaoUp = String(acao).toUpperCase();
   const statusMap: Record<string, string> = {
-    ANALISAR: 'analisado',
-    APROVAR: 'done',
-    REJEITAR: 'cancelled',
+    LIKE: 'produto bom',
+    DISLIKE: 'produto ruim',
+    FAZER_PEDIDO: 'fazer pedido',
+    CONCLUIR: 'concluido',
   };
 
   const novoStatus = statusMap[acaoUp];
   if (!novoStatus) {
-    return res.status(400).json({ error: 'Use: ANALISAR, APROVAR ou REJEITAR' });
+    return res.status(400).json({ error: 'Use: LIKE, DISLIKE, FAZER_PEDIDO ou CONCLUIR' });
   }
 
   try {

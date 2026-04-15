@@ -1,57 +1,18 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-
-type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
-
-function normalizeEmpresa(value: unknown): EmpresaKey {
-  const empresa = String(value ?? 'NEWSHOP').toUpperCase();
-  if (empresa === 'SOYE' || empresa === 'FACIL') return empresa;
-  return 'NEWSHOP';
-}
-
-function getClickUpToken(empresa: EmpresaKey): string {
-  if (empresa === 'NEWSHOP') {
-    return process.env.CLICKUP_TOKEN || process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_TOKEN_NEWSHOP || '';
-  }
-
-  return process.env.CLICKUP_TOKEN_SF || process.env.CLICKUP_API_TOKEN_SF || process.env.CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_API_TOKEN || process.env.VITE_CLICKUP_TOKEN_SF || '';
-}
-
-function getComprasListId(empresa: EmpresaKey): string {
-  if (empresa === 'NEWSHOP') {
-    return process.env.CLICKUP_TODO_LIST_ID_NEWSHOP || process.env.CLICKUP_TODO_LIST_ID || process.env.CLICKUP_LIST_ID_COMPRAS_NEWSHOP || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
-  }
-  if (empresa === 'SOYE') {
-    return process.env.CLICKUP_TODO_LIST_ID_SOYE || process.env.CLICKUP_TODO_LIST_ID_SF || process.env.CLICKUP_TODO_LIST_ID || process.env.CLICKUP_LIST_ID_COMPRAS_SOYE || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
-  }
-  return process.env.CLICKUP_TODO_LIST_ID_FACIL || process.env.CLICKUP_TODO_LIST_ID_SF || process.env.CLICKUP_TODO_LIST_ID || process.env.CLICKUP_LIST_ID_COMPRAS_FACIL || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
-}
-
-function extractCodigo(name: string): string {
-  const match = name.match(/nao_tem(?:_tudo)?_(\d+)/i);
-  return match ? match[1] : name;
-}
-
-function extractSku(name: string): string | null {
-  const match = name.match(/nao_tem(?:_tudo)?_\d+_([^_\s]+)/i);
-  return match ? match[1] : null;
-}
-
-function extractDescricao(name: string): string {
-  return name.replace(/^nao_tem_tudo_/i, '').replace(/^nao_tem_/i, '').trim();
-}
-
-function mapTaskStatus(status: string): 'novo' | 'analisado' | 'comprado' | 'reprovado' {
-  const value = status?.toLowerCase();
-  if (value === 'done' || value === 'completed') return 'comprado';
-  if (value === 'analisado') return 'analisado';
-  if (value === 'cancelled' || value === 'reprovado') return 'reprovado';
-  return 'novo';
-}
+import {
+  extractCodigo,
+  extractDescricao,
+  extractSku,
+  getClickUpListId,
+  getClickUpToken,
+  mapTaskStatus,
+  normalizeEmpresa,
+} from './_clickup';
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const empresa = normalizeEmpresa(req.query.empresa);
   const token = getClickUpToken(empresa);
-  const listId = getComprasListId(empresa);
+  const listId = getClickUpListId(empresa, 'compras');
 
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');

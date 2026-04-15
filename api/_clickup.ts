@@ -102,27 +102,48 @@ export function getClickUpListId(empresa: EmpresaKey, lista: ListaKey): string {
 }
 
 export function extractCodigo(name: string): string {
+  const pipeMatch = name.match(/COD:([^|]+)/i);
+  if (pipeMatch) return pipeMatch[1].trim();
+
   const match = name.match(/nao_tem(?:_tudo)?_(\d+)/i);
   return match ? match[1] : name;
 }
 
 export function extractSku(name: string): string | null {
+  const pipeMatch = name.match(/SKU:([^|]+)/i);
+  if (pipeMatch) return pipeMatch[1].trim();
+
   const match = name.match(/nao_tem(?:_tudo)?_\d+_([^_\s]+)/i);
   return match ? match[1] : null;
 }
 
 export function extractDescricao(name: string): string {
+  const pipeMatch = name.match(/DESC:([^|]+)/i);
+  if (pipeMatch) return pipeMatch[1].trim();
+
   return name
     .replace(/^nao_tem_tudo_/i, "")
     .replace(/^nao_tem_/i, "")
     .trim();
 }
 
-export function mapTaskStatus(status: string): "novo" | "analisado" | "comprado" | "reprovado" {
-  const value = status?.toLowerCase();
-  if (value === "done" || value === "completed") return "comprado";
-  if (value === "analisado") return "analisado";
-  if (value === "cancelled" || value === "reprovado") return "reprovado";
-  return "novo";
+export function normalizeClickUpStatus(status: string): string {
+  return String(status ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
 }
 
+export function mapTaskStatus(
+  status: string
+): "todo" | "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido" {
+  const value = normalizeClickUpStatus(status);
+
+  if (value === "produto bom") return "produto_bom";
+  if (value === "produto ruim") return "produto_ruim";
+  if (value === "fazer pedido") return "fazer_pedido";
+  if (value === "concluido" || value === "done" || value === "completed") return "concluido";
+
+  return "todo";
+}

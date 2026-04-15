@@ -8,7 +8,7 @@ export interface ProdutoComprar {
   sku: string | null;
   descricao: string;
   foto: string | null;
-  status: 'novo' | 'analisado' | 'comprado' | 'reprovado';
+  status: 'todo' | 'produto_bom' | 'produto_ruim' | 'fazer_pedido' | 'concluido';
   date_created: string;
 }
 
@@ -19,16 +19,18 @@ interface UseProdutosComprarReturn {
   ultimaAtualizacao: Date | null;
   empresa: 'NEWSHOP' | 'SOYE' | 'FACIL';
   refetch: () => Promise<void>;
-  analisar: (taskId: string) => Promise<void>;
-  aprovar: (taskId: string) => Promise<void>;
-  rejeitar: (taskId: string) => Promise<void>;
+  like: (taskId: string) => Promise<void>;
+  dislike: (taskId: string) => Promise<void>;
+  fazerPedido: (taskId: string) => Promise<void>;
+  concluir: (taskId: string) => Promise<void>;
 }
 
 const STATUS_MAP: Record<string, ProdutoComprar['status']> = {
-  comprado: 'comprado',
-  analisado: 'analisado',
-  reprovado: 'reprovado',
-  novo: 'novo',
+  todo: 'todo',
+  produto_bom: 'produto_bom',
+  produto_ruim: 'produto_ruim',
+  fazer_pedido: 'fazer_pedido',
+  concluido: 'concluido',
 };
 
 function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
@@ -140,9 +142,10 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const executarAcao = useCallback(async (taskId: string, acao: string) => {
     const empresaAtual = getEmpresaAtual();
     const previsao: Record<string, ProdutoComprar['status']> = {
-      ANALISAR: 'analisado',
-      APROVAR: 'comprado',
-      REJEITAR: 'reprovado',
+      LIKE: 'produto_bom',
+      DISLIKE: 'produto_ruim',
+      FAZER_PEDIDO: 'fazer_pedido',
+      CONCLUIR: 'concluido',
     };
 
     if (previsao[acao]) {
@@ -170,9 +173,10 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     }
   }, [fetchProdutos]);
 
-  const analisar = useCallback((id: string) => executarAcao(id, 'ANALISAR'), [executarAcao]);
-  const aprovar = useCallback((id: string) => executarAcao(id, 'APROVAR'), [executarAcao]);
-  const rejeitar = useCallback((id: string) => executarAcao(id, 'REJEITAR'), [executarAcao]);
+  const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
+  const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
+  const fazerPedido = useCallback((id: string) => executarAcao(id, 'FAZER_PEDIDO'), [executarAcao]);
+  const concluir = useCallback((id: string) => executarAcao(id, 'CONCLUIR'), [executarAcao]);
 
   return {
     produtos,
@@ -181,9 +185,10 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     ultimaAtualizacao,
     empresa,
     refetch: fetchProdutos,
-    analisar,
-    aprovar,
-    rejeitar,
+    like,
+    dislike,
+    fazerPedido,
+    concluir,
   };
 };
 
