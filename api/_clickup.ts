@@ -52,6 +52,8 @@ export function getClickUpListId(empresa: EmpresaKey, lista: ListaKey): string {
   if (lista === "compras") {
     if (empresa === "NEWSHOP") {
       return (
+        process.env.CLICKUP_TODO_LIST_ID_NEWSHOP ||
+        process.env.CLICKUP_TODO_LIST_ID ||
         process.env.CLICKUP_LIST_ID_COMPRAS_NEWSHOP ||
         process.env.CLICKUP_LIST_ID_COMPRAS ||
         process.env.VITE_CLICKUP_LIST_ID_COMPRAS ||
@@ -61,6 +63,9 @@ export function getClickUpListId(empresa: EmpresaKey, lista: ListaKey): string {
 
     if (empresa === "SOYE") {
       return (
+        process.env.CLICKUP_TODO_LIST_ID_SOYE ||
+        process.env.CLICKUP_TODO_LIST_ID_SF ||
+        process.env.CLICKUP_TODO_LIST_ID ||
         process.env.CLICKUP_LIST_ID_COMPRAS_SOYE ||
         process.env.CLICKUP_LIST_ID_COMPRAS_SF ||
         process.env.CLICKUP_LIST_ID_COMPRAS ||
@@ -70,6 +75,9 @@ export function getClickUpListId(empresa: EmpresaKey, lista: ListaKey): string {
     }
 
     return (
+      process.env.CLICKUP_TODO_LIST_ID_FACIL ||
+      process.env.CLICKUP_TODO_LIST_ID_SF ||
+      process.env.CLICKUP_TODO_LIST_ID ||
       process.env.CLICKUP_LIST_ID_COMPRAS_FACIL ||
       process.env.CLICKUP_LIST_ID_COMPRAS_SF ||
       process.env.CLICKUP_LIST_ID_COMPRAS ||
