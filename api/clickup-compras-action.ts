@@ -1,5 +1,20 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { getClickUpToken, normalizeEmpresa } from './_clickup.js';
+import { createClient } from '@supabase/supabase-js';
+import {
+  getClickUpToken,
+  isCompraTransitionAllowed,
+  mapActionToStatus,
+  mapAppStatusToClickUp,
+  normalizeEmpresa,
+} from './_clickup.js';
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+
+const supabase =
+  supabaseUrl && supabaseServiceRoleKey
+    ? createClient(supabaseUrl, supabaseServiceRoleKey)
+    : null;
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -11,7 +26,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Metodo nao permitido' });
   }
 
-  const { taskId, acao, empresa } = req.body ?? {};
+  const { taskId, acao, empresa, currentStatus } = req.body ?? {};
   const empresaKey = normalizeEmpresa(empresa);
   const token = getClickUpToken(empresaKey);
 
@@ -24,16 +39,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   const acaoUp = String(acao).toUpperCase();
-  const statusMap: Record<string, string> = {
-    LIKE: 'produto bom',
-    DISLIKE: 'produto ruim',
-    FAZER_PEDIDO: 'fazer pedido',
-    CONCLUIR: 'concluido',
-  };
-
-  const novoStatus = statusMap[acaoUp];
-  if (!novoStatus) {
+  const novoStatusApp = mapActionToStatus(acaoUp);
+  if (!novoStatusApp) {
     return res.status(400).json({ error: 'Use: LIKE, DISLIKE, FAZER_PEDIDO ou CONCLUIR' });
+  }
+  const novoStatus = mapAppStatusToClickUp(novoStatusApp);
+
+  const statusAtual = String(currentStatus ?? 'todo').trim().toLowerCase();
+  if (!isCompraTransitionAllowed(statusAtual, novoStatusApp)) {
+    return res.status(409).json({
+      error: 'Transicao invalida para o fluxo de compras',
+      currentStatus: statusAtual,
+      nextStatus: novoStatusApp,
+      empresa: empresaKey,
+    });
   }
 
   try {
@@ -54,7 +73,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Erro ao mover', details: errorText });
     }
 
-    return res.json({ ok: true, taskId, acao: acaoUp.toLowerCase(), status: novoStatus, empresa: empresaKey });
+    if (supabase) {
+      try {
+        const channel = supabase.channel('compras-sync');
+        await channel.send({
+          type: 'broadcast',
+          event: 'clickup_update',
+          payload: {
+            event: 'taskStatusUpdated',
+            source: 'clickup-compras-action',
+            task_id: taskId,
+            empresa: empresaKey,
+            previous_status_app: statusAtual,
+            status_app: novoStatusApp,
+            status_clickup: novoStatus,
+            timestamp: Date.now(),
+          },
+        });
+      } catch (broadcastError) {
+        console.error('Erro ao broadcast imediato de compras:', broadcastError);
+      }
+    }
+
+    return res.json({
+      ok: true,
+      taskId,
+      acao: acaoUp.toLowerCase(),
+      previousStatus: statusAtual,
+      status: novoStatus,
+      statusApp: novoStatusApp,
+      empresa: empresaKey,
+    });
   } catch (error) {
     console.error('Erro:', error);
     return res.status(500).json({ error: String(error) });

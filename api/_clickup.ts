@@ -162,3 +162,47 @@ export function mapTaskStatus(
 
   return "todo";
 }
+
+export function mapActionToStatus(
+  action: string
+): "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido" | null {
+  const value = String(action ?? "").trim().toUpperCase();
+
+  if (value === "LIKE") return "produto_bom";
+  if (value === "DISLIKE") return "produto_ruim";
+  if (value === "FAZER_PEDIDO") return "fazer_pedido";
+  if (value === "CONCLUIR") return "concluido";
+
+  return null;
+}
+
+export function mapAppStatusToClickUp(
+  status: string
+): "produto bom" | "produto ruim" | "fazer pedido" | "concluido" | "to do" {
+  const value = String(status ?? "").trim().toLowerCase();
+
+  if (value === "produto_bom") return "produto bom";
+  if (value === "produto_ruim") return "produto ruim";
+  if (value === "fazer_pedido") return "fazer pedido";
+  if (value === "concluido") return "concluido";
+
+  return "to do";
+}
+
+export function isCompraTransitionAllowed(
+  fromStatus: string,
+  toStatus: string
+): boolean {
+  const from = String(fromStatus ?? "todo").trim().toLowerCase();
+  const to = String(toStatus ?? "").trim().toLowerCase();
+
+  const allowed: Record<string, string[]> = {
+    todo: ["produto_bom", "produto_ruim"],
+    produto_bom: ["produto_ruim", "fazer_pedido"],
+    produto_ruim: ["produto_bom"],
+    fazer_pedido: ["produto_bom", "concluido"],
+    concluido: ["fazer_pedido"],
+  };
+
+  return allowed[from]?.includes(to) ?? false;
+}

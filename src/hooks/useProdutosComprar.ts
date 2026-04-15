@@ -141,6 +141,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
 
   const executarAcao = useCallback(async (taskId: string, acao: string) => {
     const empresaAtual = getEmpresaAtual();
+    const produtoAtual = produtos.find((p) => p.id === taskId);
     const previsao: Record<string, ProdutoComprar['status']> = {
       LIKE: 'produto_bom',
       DISLIKE: 'produto_ruim',
@@ -158,7 +159,12 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       const response = await fetch('/api/clickup-compras-action', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ taskId, acao, empresa: empresaAtual }),
+        body: JSON.stringify({
+          taskId,
+          acao,
+          empresa: empresaAtual,
+          currentStatus: produtoAtual?.status ?? 'todo',
+        }),
       });
 
       const data = await response.json();
@@ -171,7 +177,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       console.error('[useProdutosComprar] Erro na acao:', err);
       throw err;
     }
-  }, [fetchProdutos]);
+  }, [fetchProdutos, produtos]);
 
   const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
   const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
