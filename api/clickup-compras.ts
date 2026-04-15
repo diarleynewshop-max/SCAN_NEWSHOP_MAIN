@@ -9,6 +9,35 @@ import {
   normalizeEmpresa,
 } from './_clickup';
 
+function extractFirstImageUrl(attachments: unknown): string | null {
+  const safeAttachments = Array.isArray(attachments) ? attachments : [];
+
+  for (const attachment of safeAttachments) {
+    if (!attachment || typeof attachment !== 'object') continue;
+
+    const candidate = attachment as Record<string, unknown>;
+    const url = String(candidate.url || '');
+    const title = String(candidate.title || candidate.file_name || '').toLowerCase();
+    const mimetype = String(candidate.mimetype || '');
+
+    if (
+      url.startsWith('http') &&
+      (
+        mimetype.startsWith('image/') ||
+        title.endsWith('.jpg') ||
+        title.endsWith('.jpeg') ||
+        title.endsWith('.png') ||
+        title.endsWith('.gif') ||
+        title.endsWith('.webp')
+      )
+    ) {
+      return url;
+    }
+  }
+
+  return null;
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   const empresa = normalizeEmpresa(req.query.empresa);
   const token = getClickUpToken(empresa);
@@ -30,56 +59,78 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
     const response = await fetch(
       `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true`,
-      { headers: { Authorization: token } }
+      {
+        headers: { Authorization: token },
+        signal: controller.signal,
+      }
     );
+    clearTimeout(timeout);
 
     if (!response.ok) {
       const errorText = await response.text();
       return res.status(response.status).json({ error: errorText, empresa, listId });
     }
 
-    const data = await response.json();
+    const rawText = await response.text();
+    const data = rawText ? JSON.parse(rawText) : {};
     const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    const produtos: any[] = [];
+    const skippedTasks: Array<{ id: string; reason: string }> = [];
 
-    const produtos = tasks
-      .filter((t: any) => t && typeof t === 'object')
-      .map((t: any) => {
-      const attachments = Array.isArray(t.attachments) ? t.attachments : [];
-      let foto = null;
-
-      for (const a of attachments) {
-        if (!a || typeof a !== 'object') continue;
-
-        const url = String(a.url || '');
-        const title = String(a.title || a.file_name || '').toLowerCase();
-        if (url.startsWith('http') && (
-          String(a.mimetype || '').startsWith('image/') ||
-          title.endsWith('.jpg') ||
-          title.endsWith('.jpeg') ||
-          title.endsWith('.png') ||
-          title.endsWith('.gif') ||
-          title.endsWith('.webp')
-        )) {
-          foto = url;
-          break;
-        }
+    for (const task of tasks) {
+      if (!task || typeof task !== 'object') {
+        skippedTasks.push({ id: '', reason: 'task-invalida' });
+        continue;
       }
 
-      return {
-        id: String(t.id ?? ''),
-        codigo: extractCodigo(t.name),
-        sku: extractSku(t.name),
-        descricao: extractDescricao(t.name),
-        foto,
-        status: mapTaskStatus(t.status?.status),
-        date_created: String(t.date_created ?? ''),
-      };
-    })
-      .filter((p: any) => p.id && p.codigo);
+      try {
+        const t = task as Record<string, any>;
+        const produto = {
+          id: String(t.id ?? ''),
+          codigo: extractCodigo(t.name),
+          sku: extractSku(t.name),
+          descricao: extractDescricao(t.name),
+          foto: extractFirstImageUrl(t.attachments),
+          status: mapTaskStatus(t.status?.status),
+          date_created: String(t.date_created ?? ''),
+        };
 
-    return res.json({ produtos, empresa, total: produtos.length, listId });
+        if (!produto.id || !produto.codigo) {
+          skippedTasks.push({ id: String(t.id ?? ''), reason: 'sem-id-ou-codigo' });
+          continue;
+        }
+
+        produtos.push(produto);
+      } catch (taskError) {
+        skippedTasks.push({
+          id: String((task as Record<string, any>).id ?? ''),
+          reason: String(taskError),
+        });
+      }
+    }
+
+    if (skippedTasks.length > 0) {
+      console.warn('[clickup-compras] tasks ignoradas:', {
+        empresa,
+        listId,
+        skipped: skippedTasks.slice(0, 10),
+        skippedCount: skippedTasks.length,
+        totalTasks: tasks.length,
+      });
+    }
+
+    return res.json({
+      produtos,
+      empresa,
+      total: produtos.length,
+      listId,
+      skippedCount: skippedTasks.length,
+    });
   } catch (error) {
     console.error('Erro:', error);
     return res.status(500).json({

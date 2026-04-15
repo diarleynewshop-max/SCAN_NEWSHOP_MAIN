@@ -1,9 +1,10 @@
 import { task } from "@trigger.dev/sdk/v3";
-import { 
-  salvarListaBaixadaNoSupabase, 
+import {
+  salvarListaBaixadaNoSupabase,
   salvarConferenciaBaixadaNoSupabase,
-  isSupabaseConfigured 
+  isSupabaseConfigured,
 } from "./supabaseClient";
+import sharp from "sharp";
 
 // ── Credenciais NEWSHOP ───────────────────────────────────────────────────────
 const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN!;
@@ -101,30 +102,54 @@ async function anexarTxtNaTarefa(
   }
 }
 
+// ── Comprime imagem antes de enviar (reduz 4-5MB → ~200-400KB) ───────────────
+async function comprimirImagem(
+  base64: string,
+  maxWidth = 1200,
+  quality = 70
+): Promise<{ data: string; mimeType: string }> {
+  try {
+    const raw = base64.includes(";base64,")
+      ? base64.split(";base64,")[1]
+      : base64;
+    const buffer = Buffer.from(raw, "base64");
+
+    const compressed = await sharp(buffer)
+      .resize({ width: maxWidth, withoutEnlargement: true })
+      .jpeg({ quality })
+      .toBuffer();
+
+    console.log(
+      `Compressão: ${buffer.length} bytes → ${compressed.length} bytes (${Math.round((compressed.length / buffer.length) * 100)}%)`
+    );
+
+    return { data: compressed.toString("base64"), mimeType: "image/jpeg" };
+  } catch (err) {
+    // Fallback: retorna original sem comprimir
+    console.warn("Falha na compressão, usando original:", err);
+    const raw = base64.includes(";base64,")
+      ? base64.split(";base64,")[1]
+      : base64;
+    const mimeType = base64.includes("data:image/png")
+      ? "image/png"
+      : "image/jpeg";
+    return { data: raw, mimeType };
+  }
+}
+
 async function anexarFotoNaTarefa(
   taskId: string,
   photoBase64: string,
   filename: string
 ): Promise<boolean> {
   try {
-    let raw = photoBase64;
+    // Comprime antes de enviar
+    const { data: comprimida, mimeType } = await comprimirImagem(photoBase64);
 
-    // Detecta formato
-    let mimeType = "image/jpeg";
-    if (raw.includes("data:image/png")) {
-      mimeType = "image/png";
-    }
-
-    // Remove prefixo data URI
-    if (raw.includes(";base64,")) {
-      raw = raw.split(";base64,")[1];
-    }
-
-    // Converte base64 → Buffer → Blob
-    const imgBuffer = Buffer.from(raw, "base64");
+    const imgBuffer = Buffer.from(comprimida, "base64");
     const blob = new Blob([imgBuffer], { type: mimeType });
 
-    console.log(`Preparando foto "${filename}" — ${imgBuffer.length} bytes`);
+    console.log(`Preparando foto "${filename}" — ${imgBuffer.length} bytes (após compressão)`);
 
     const formData = new FormData();
     formData.append("attachment", blob, filename);
@@ -133,9 +158,7 @@ async function anexarFotoNaTarefa(
       `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
       {
         method: "POST",
-        headers: {
-          Authorization: CLICKUP_TOKEN,
-        },
+        headers: { Authorization: CLICKUP_TOKEN },
         body: formData,
       }
     );
@@ -148,96 +171,44 @@ async function anexarFotoNaTarefa(
   }
 }
 
-function sanitizeTaskValue(value: unknown): string {
-  return String(value ?? "")
-    .replace(/\s+/g, " ")
-    .replace(/[|]/g, "/")
-    .trim();
-}
+// ── Upload paralelo de fotos com limite de concorrência ──────────────────────
+async function uploadFotosParalelo(
+  taskId: string,
+  itensComFoto: any[],
+  MAX_FOTOS = 10,
+  prefixoStatus?: (item: any) => string
+): Promise<void> {
+  const itensLimitados =
+    itensComFoto.length > MAX_FOTOS
+      ? itensComFoto.slice(0, MAX_FOTOS)
+      : itensComFoto;
 
-const MACHINE_CASCADE = ["small-1x", "medium-1x", "medium-2x"] as const;
-type CascadeMachine = (typeof MACHINE_CASCADE)[number];
-
-function isOutOfMemoryLike(error: unknown): boolean {
-  const raw =
-    typeof error === "string"
-      ? error
-      : error instanceof Error
-        ? `${error.name} ${error.message}`
-        : JSON.stringify(error);
-
-  const text = raw.toLowerCase();
-
-  return (
-    text.includes("outofmemory") ||
-    text.includes("out of memory") ||
-    text.includes("heap out of memory") ||
-    text.includes("memory limit") ||
-    text.includes("oom")
-  );
-}
-
-function getErrorMessage(error: unknown): string {
-  if (typeof error === "string") return error;
-  if (error instanceof Error) return error.message;
-
-  try {
-    return JSON.stringify(error);
-  } catch {
-    return String(error);
-  }
-}
-
-async function executarComCascata(
-  taskLabel: string,
-  payload: any,
-  workerTask: {
-    triggerAndWait: (
-      payload: any,
-      options?: { machine?: CascadeMachine; maxAttempts?: number }
-    ) => Promise<{ ok: boolean; output?: unknown; error?: unknown }>;
-  }
-) {
-  let lastError: unknown;
-
-  for (let index = 0; index < MACHINE_CASCADE.length; index++) {
-    const machine = MACHINE_CASCADE[index];
-    const nextMachine = MACHINE_CASCADE[index + 1];
-
-    const result = await workerTask.triggerAndWait(payload, {
-      machine,
-      maxAttempts: 1,
-    });
-
-    if (result.ok) {
-      console.log(`[${taskLabel}] concluida com machine ${machine}`);
-      return result.output;
-    }
-
-    lastError = result.error;
-
-    if (nextMachine && isOutOfMemoryLike(result.error)) {
-      console.warn(
-        `[${taskLabel}] OOM na machine ${machine}. Escalando para ${nextMachine}.`
-      );
-      continue;
-    }
-
-    throw new Error(
-      `[${taskLabel}] falhou na machine ${machine}: ${getErrorMessage(result.error)}`
+  if (itensComFoto.length > MAX_FOTOS) {
+    console.warn(
+      `⚠️ Limite de ${MAX_FOTOS} fotos atingido. ${itensComFoto.length - MAX_FOTOS} fotos serão ignoradas.`
     );
   }
 
-  throw new Error(
-    `[${taskLabel}] falhou em cascata: ${getErrorMessage(lastError)}`
+  console.log(`Itens com foto: ${itensLimitados.length}${itensComFoto.length > MAX_FOTOS ? ` (de ${itensComFoto.length} total)` : ""}`);
+
+  // Todos em paralelo
+  await Promise.all(
+    itensLimitados.map((item) => {
+      const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+      const prefixo = prefixoStatus ? prefixoStatus(item) : "foto";
+      const filename = `${prefixo}_${item.barcode ?? item.codigo}_${item.sku || "sem-sku"}.${ext}`;
+      return anexarFotoNaTarefa(taskId, item.photo, filename);
+    })
   );
+
+  console.log("✅ Todas as fotos anexadas!");
 }
 
-// ── TASK 1 — Lista baixada (CRIANDO TAREFA DE COMPRAS SE TIVER ZERO ESTOQUE) ──
-const listaBaixadaWorker = task({
-  id: "lista-baixada-worker",
+// ── TASK 1 — Lista baixada ────────────────────────────────────────────────────
+export const listaBaixada = task({
+  id: "lista-baixada",
   machine: "small-1x",
-  maxDuration: 100,
+  maxDuration: 1000,
   run: async (payload: any) => {
     const startTime = Date.now();
     let taskId: string | null = null;
@@ -249,33 +220,33 @@ const listaBaixadaWorker = task({
         ? new Date(payload.dataDownload).toLocaleString("pt-BR", {
             timeZone: "America/Fortaleza",
           })
-        : new Date().toLocaleString("pt-BR", {
-            timeZone: "America/Fortaleza",
-          });
+        : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
 
-      const isCD = false;
       const listId = CLICKUP_LIST_ID;
-      const status = "to do";
       const flagLabel = "LOJA";
 
-      // 1. Salvar no Supabase (antes do ClickUp para tracking)
-      if (isSupabaseConfigured()) {
-        await salvarListaBaixadaNoSupabase(payload);
-      }
-
-      // 2. Cria a Tarefa Principal de Conferência
-      taskId = await criarTarefaClickUp(
-        listId,
-        `📦 ${payload.titulo} — ${payload.pessoa}`,
-        `Pessoa: ${payload.pessoa}
+      // 1. Salvar no Supabase + criar tarefa principal em paralelo
+      const [_, id] = await Promise.all([
+        isSupabaseConfigured()
+          ? salvarListaBaixadaNoSupabase(payload).catch((e) =>
+              console.error("Supabase erro inicial:", e)
+            )
+          : Promise.resolve(),
+        criarTarefaClickUp(
+          listId,
+          `📦 ${payload.titulo} — ${payload.pessoa}`,
+          `Pessoa: ${payload.pessoa}
 Título: ${payload.titulo}
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${flagLabel}
 Itens: ${payload.totalItens}
 Data: ${dataFormatada}`,
-        status
-      );
+          "to do"
+        ),
+      ]);
+      taskId = id;
 
+      // 2. Anexar JSON e TXT em paralelo
       await Promise.all([
         anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
           type: "conference-file",
@@ -305,24 +276,23 @@ Data: ${dataFormatada}`,
         ),
       ]);
 
-      // 3. Verifica se há produtos sem estoque (quantidade 0) para enviar pra COMPRAS
-      try {
-        const itensSemEstoque = payload.produtos.filter(
-          (p: any) => (p.quantidade ?? p.quantity) === 0
-        );
+      // 3. Itens sem estoque → tarefa de COMPRAS
+      const itensSemEstoque = payload.produtos.filter(
+        (p: any) => (p.quantidade ?? p.quantity) === 0
+      );
 
-        if (itensSemEstoque.length > 0) {
-          const listaFaltantesStr = itensSemEstoque
-            .map(
-              (p: any, idx: number) =>
-                `${idx + 1}. ${p.barcode} | SKU: ${p.sku || "-"} | ❌ Sem Estoque no Sistema${p.photo ? " 📸" : ""}`
-            )
-            .join("\n");
+      if (itensSemEstoque.length > 0) {
+        const listaFaltantesStr = itensSemEstoque
+          .map(
+            (p: any, idx: number) =>
+              `${idx + 1}. ${p.barcode} | SKU: ${p.sku || "-"} | ❌ Sem Estoque${p.photo ? " 📸" : ""}`
+          )
+          .join("\n");
 
-          comprasTaskId = await criarTarefaClickUp(
-            CLICKUP_TODO_LIST_ID,
-            `🛒 Compras (Falta Estoque): ${payload.titulo} — ${payload.pessoa}`,
-            `Relatório gerado no momento do envio da lista para conferência.
+        comprasTaskId = await criarTarefaClickUp(
+          CLICKUP_TODO_LIST_ID,
+          `🛒 Compras (Falta Estoque): ${payload.titulo} — ${payload.pessoa}`,
+          `Relatório gerado no momento do envio da lista para conferência.
 Estes itens constam com 0 estoque no sistema.
 
 📋 INFORMAÇÕES
@@ -335,36 +305,28 @@ Data: ${dataFormatada}
 ${listaFaltantesStr}
 
 📸 Fotos anexadas abaixo (se houver)`,
-            "to do"
+          "to do"
+        );
+
+        console.log(`Tarefa de COMPRAS criada: ${comprasTaskId}`);
+
+        // Upload paralelo das fotos comprimidas
+        const itensComFoto = itensSemEstoque.filter(
+          (p: any) => p.photo && p.photo.length > 0
+        );
+        if (itensComFoto.length > 0) {
+          await uploadFotosParalelo(
+            comprasTaskId,
+            itensComFoto,
+            10,
+            () => "sem_estoque"
           );
-
-          console.log(`Tarefa de COMPRAS (Falta Estoque) criada: ${comprasTaskId}`);
-
-          // Anexar fotos dos itens sem estoque (se houver) - com limite para evitar OOM
-          const MAX_FOTOS = 10;
-          const itensComFoto = itensSemEstoque.filter((p: any) => p.photo && p.photo.length > 0);
-          const fotosExcedentes = itensComFoto.length > MAX_FOTOS;
-          const fotosProcessar = fotosExcedentes ? itensComFoto.slice(0, MAX_FOTOS) : itensComFoto;
-
-          if (fotosExcedentes) {
-            console.warn(`⚠️ Limite de ${MAX_FOTOS} fotos atingido. ${itensComFoto.length - MAX_FOTOS} fotos serão ignoradas.`);
-          }
-
-          for (const item of fotosProcessar) {
-            const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
-            const filename = `sem_estoque_${item.barcode}_${item.sku || "sem-sku"}.${ext}`;
-            await anexarFotoNaTarefa(comprasTaskId, item.photo, filename);
-          }
         }
-      } catch (err) {
-        console.error("Erro ao criar tarefa de COMPRAS na Task 1:", err);
       }
-
     } catch (err) {
       error = err as Error;
       console.error("Erro na TASK 1 (lista-baixada):", err);
     } finally {
-      // 4. Atualizar registro no Supabase com resultados
       const processingTimeMs = Date.now() - startTime;
       if (isSupabaseConfigured()) {
         await salvarListaBaixadaNoSupabase(
@@ -373,26 +335,17 @@ ${listaFaltantesStr}
           comprasTaskId || undefined,
           processingTimeMs,
           error || undefined
-        );
+        ).catch((e) => console.error("Supabase erro final:", e));
       }
     }
   },
 });
 
-export const listaBaixada = task({
-  id: "lista-baixada",
+// ── TASK 2 — Conferência finalizada ──────────────────────────────────────────
+export const conferenciaBaixada = task({
+  id: "conferencia-baixada",
   machine: "small-1x",
-  maxDuration: 300,
-  run: async (payload: any) => {
-    await executarComCascata("TASK 1", payload, listaBaixadaWorker);
-  },
-});
-
-// ── TASK 2 — Conferência finalizada (COM FOTOS DIRETAS) ──────────────────────
-const conferenciaBaixadaWorker = task({
-  id: "conferencia-baixada-worker",
-  machine: "small-1x",
-  maxDuration: 60,
+  maxDuration: 1000,
   run: async (payload: any) => {
     const startTime = Date.now();
     let tarefaOriginalId: string | null = null;
@@ -404,9 +357,7 @@ const conferenciaBaixadaWorker = task({
         ? new Date(payload.dataConferencia).toLocaleString("pt-BR", {
             timeZone: "America/Fortaleza",
           })
-        : new Date().toLocaleString("pt-BR", {
-            timeZone: "America/Fortaleza",
-          });
+        : new Date().toLocaleString("pt-BR", { timeZone: "America/Fortaleza" });
 
       const isCD = payload.flag === "cd";
       const listId = isCD ? CLICKUP_CD_LIST_ID : CLICKUP_LIST_ID;
@@ -429,26 +380,37 @@ const conferenciaBaixadaWorker = task({
       if (itensS.length > 0)
         itensTexto += `{S}\n${itensS.map(formatarItem).join("\n")}`;
       if (itensM.length > 0) {
-        if (itensTexto)
-          itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
+        if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
         itensTexto += `{M}\n${itensM.map(formatarItem).join("\n")}`;
       }
       if (itensSemDigito.length > 0) {
-        if (itensTexto)
-          itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
+        if (itensTexto) itensTexto += "\n\n=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-=-\n\n";
         itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
       }
 
-      // 1. Salvar no Supabase (antes do ClickUp para tracking)
-      if (isSupabaseConfigured()) {
-        await salvarConferenciaBaixadaNoSupabase(payload);
-      }
+      const itensNaoTem = (payload.itens || []).filter(
+        (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
+      );
 
-      // 2. Cria tarefa original na lista de conferência ──
-      tarefaOriginalId = await criarTarefaClickUp(
-        listId,
-        `✅ ${payload.conferente} — ${dataFormatada}`,
-        `Conferente: ${payload.conferente}
+      const listaFaltantes = itensNaoTem
+        .map(
+          (item: any, idx: number) =>
+            `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0} | ${statusMap[item.status] ?? item.status}`
+        )
+        .join("\n");
+
+      // 1. Supabase inicial + ambas as tarefas ClickUp em paralelo
+      const [__, conferenciId, comprasId] = await Promise.all([
+        isSupabaseConfigured()
+          ? salvarConferenciaBaixadaNoSupabase(payload).catch((e) =>
+              console.error("Supabase erro inicial:", e)
+            )
+          : Promise.resolve(),
+
+        criarTarefaClickUp(
+          listId,
+          `✅ ${payload.conferente} — ${dataFormatada}`,
+          `Conferente: ${payload.conferente}
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Data: ${dataFormatada}
@@ -463,66 +425,61 @@ Total: ${payload.totalItens} item(ns)
 
 📦 ITENS
 ${itensTexto}`,
-        "complete"
-      );
+          "complete"
+        ),
 
-      console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
+        criarTarefaClickUp(
+          CLICKUP_TODO_LIST_ID,
+          `🛒 Compras: ${payload.conferente} — ${dataFormatada}`,
+          `Relatório gerado automaticamente após conferência.
 
-      // 3. Cria tarefa de COMPRAS com fotos diretas ──
-      try {
-        const itensNaoTem = (payload.itens || []).filter(
-          (i: any) => i.status === "nao_tem"
-        );
-
-        for (const item of itensNaoTem) {
-          const codigo = sanitizeTaskValue(item.codigo);
-          const sku = sanitizeTaskValue(item.sku || "-");
-          const descricao = sanitizeTaskValue(
-            item.descricao || item.sku || item.codigo || "Sem descricao"
-          );
-          const statusCompra = item.status === "nao_tem_tudo" ? "PARCIAL" : "NAO TEM";
-
-          const taskComprasId = await criarTarefaClickUp(
-            CLICKUP_TODO_LIST_ID,
-            `COMPRA | COD:${codigo} | SKU:${sku} | DESC:${descricao} | STATUS:${statusCompra}`,
-            `Gerado automaticamente a partir da conferencia.
-
+📋 INFORMAÇÕES
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Conferente: ${payload.conferente}
 Data: ${dataFormatada}
-Status da conferencia: ${statusMap[item.status] ?? item.status}
-Codigo: ${item.codigo}
-SKU: ${item.sku || "-"}
-Descricao: ${item.descricao || item.sku || "-"}
-Pedido: ${item.quantidadePedida}
-Real: ${item.quantidadeReal ?? 0}
+Total itens conferidos: ${payload.totalItens}
 
-Fluxo esperado:
-TO DO -> PRODUTO RUIM | PRODUTO BOM -> FAZER PEDIDO -> CONCLUIDO`,
-            "to do"
-          );
+📊 RESUMO
+✅ Separado: ${payload.resumo?.separado ?? 0}
+❌ Não tem: ${payload.resumo?.naoTem ?? 0}
+⚠️ Parcial: ${payload.resumo?.parcial ?? 0}
+⏳ Pendente: ${payload.resumo?.pendente ?? 0}
 
-          if (!todoTaskId) {
-            todoTaskId = taskComprasId;
-          }
+🛒 ITENS FALTANTES (${itensNaoTem.length})
+${listaFaltantes || "Nenhum item faltante."}
 
-          if (item.photo && item.photo.length > 0) {
-            const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
-            const filename = `compra_${codigo}_${sku}.${ext}`;
-            await anexarFotoNaTarefa(taskComprasId, item.photo, filename);
-          }
-        }
+📸 Fotos anexadas abaixo (se houver)`,
+          "to do"
+        ),
+      ]);
 
-        console.log(`Tarefas individuais de COMPRAS criadas: ${itensNaoTem.length}`);      } catch (err) {
-        console.error("Erro ao criar tarefa de COMPRAS:", err);
+      tarefaOriginalId = conferenciId;
+      todoTaskId = comprasId;
+
+      console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
+      console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
+
+      // 2. Upload paralelo das fotos comprimidas
+      const itensComFoto = (payload.itens || []).filter(
+        (i: any) =>
+          i.photo &&
+          i.photo.length > 0 &&
+          (i.status === "nao_tem" || i.status === "nao_tem_tudo")
+      );
+
+      if (itensComFoto.length > 0) {
+        await uploadFotosParalelo(
+          todoTaskId,
+          itensComFoto,
+          10,
+          (item) => item.status
+        );
       }
-
     } catch (err) {
       error = err as Error;
       console.error("Erro na TASK 2 (conferencia-baixada):", err);
     } finally {
-      // 5. Atualizar registro no Supabase com resultados
       const processingTimeMs = Date.now() - startTime;
       if (isSupabaseConfigured()) {
         await salvarConferenciaBaixadaNoSupabase(
@@ -531,19 +488,8 @@ TO DO -> PRODUTO RUIM | PRODUTO BOM -> FAZER PEDIDO -> CONCLUIDO`,
           todoTaskId || undefined,
           processingTimeMs,
           error || undefined
-        );
+        ).catch((e) => console.error("Supabase erro final:", e));
       }
     }
   },
 });
-
-export const conferenciaBaixada = task({
-  id: "conferencia-baixada",
-  machine: "small-1x",
-  maxDuration: 300,
-  run: async (payload: any) => {
-    await executarComCascata("TASK 2", payload, conferenciaBaixadaWorker);
-  },
-});
-
-

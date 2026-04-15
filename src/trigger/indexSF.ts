@@ -222,8 +222,9 @@ async function uploadFotosParalelo(
 }
 
 // ── TASK 1 — Lista baixada (SOYE / FACIL) ────────────────────────────────────
-const MACHINE_CASCADE = ["small-1x", "medium-1x", "medium-2x"] as const;
-type CascadeMachine = (typeof MACHINE_CASCADE)[number];
+const TASK_MACHINE_CASCADE = ["micro", "small-1x", "medium-1x"] as const;
+type CascadeMachine =
+  | (typeof TASK_MACHINE_CASCADE)[number];
 
 function isOutOfMemoryLike(error: unknown): boolean {
   const raw =
@@ -258,6 +259,7 @@ function getErrorMessage(error: unknown): string {
 async function executarComCascata(
   taskLabel: string,
   payload: any,
+  machineCascade: readonly CascadeMachine[],
   workerTask: {
     triggerAndWait: (
       payload: any,
@@ -267,9 +269,9 @@ async function executarComCascata(
 ) {
   let lastError: unknown;
 
-  for (let index = 0; index < MACHINE_CASCADE.length; index++) {
-    const machine = MACHINE_CASCADE[index];
-    const nextMachine = MACHINE_CASCADE[index + 1];
+  for (let index = 0; index < machineCascade.length; index++) {
+    const machine = machineCascade[index];
+    const nextMachine = machineCascade[index + 1];
 
     const result = await workerTask.triggerAndWait(payload, {
       machine,
@@ -302,7 +304,7 @@ async function executarComCascata(
 
 const listaBaixadaSFWorker = task({
   id: "lista-baixada-sf-worker",
-  machine: "small-1x",
+  machine: "micro",
   maxDuration: 1000,
   run: async (payload: any) => {
     const startTime = Date.now();
@@ -391,17 +393,17 @@ Data: ${dataFormatada}`,
 
 export const listaBaixadaSF = task({
   id: "lista-baixada-sf",
-  machine: "small-1x",
+  machine: "micro",
   maxDuration: 1200,
   run: async (payload: any) => {
-    await executarComCascata("TASK 1 SF", payload, listaBaixadaSFWorker);
+    await executarComCascata("TASK 1 SF", payload, TASK_MACHINE_CASCADE, listaBaixadaSFWorker);
   },
 });
 
 // ── TASK 2 — Conferência finalizada (SOYE / FACIL) ────────────────────────────
 const conferenciaBaixadaSFWorker = task({
   id: "conferencia-baixada-sf-worker",
-  machine: "small-1x",
+  machine: "micro",
   maxDuration: 1000,
   run: async (payload: any) => {
     const startTime = Date.now();
@@ -604,9 +606,9 @@ Foto: ${index + 1} de ${fotosProcessar.length}`,
 
 export const conferenciaBaixadaSF = task({
   id: "conferencia-baixada-sf",
-  machine: "small-1x",
+  machine: "micro",
   maxDuration: 1200,
   run: async (payload: any) => {
-    await executarComCascata("TASK 2 SF", payload, conferenciaBaixadaSFWorker);
+    await executarComCascata("TASK 2 SF", payload, TASK_MACHINE_CASCADE, conferenciaBaixadaSFWorker);
   },
 });
