@@ -236,11 +236,26 @@ function getCompraStatusAliases(status: CompraStatusApp): string[] {
   return ["to do", "todo", "open", "aberto"];
 }
 
+export function getCompraStatusCandidates(status: CompraStatusApp): string[] {
+  const aliases = getCompraStatusAliases(status);
+  const unique = new Set<string>();
+  const candidates: string[] = [];
+
+  for (const alias of aliases) {
+    const normalized = normalizeClickUpStatus(alias);
+    if (!normalized || unique.has(normalized)) continue;
+    unique.add(normalized);
+    candidates.push(alias);
+  }
+
+  return candidates;
+}
+
 export function resolveCompraClickUpStatus(
   status: CompraStatusApp,
   availableStatuses: string[]
 ): string | null {
-  const aliases = getCompraStatusAliases(status);
+  const aliases = getCompraStatusCandidates(status);
 
   for (const alias of aliases) {
     const matched = availableStatuses.find(

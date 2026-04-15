@@ -1,6 +1,5 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback } from 'react';
 import { obterLoginSalvo } from '@/hooks/useAuth';
-import { supabase } from '@/lib/supabase';
 
 export interface ProdutoComprar {
   id: string;
@@ -25,14 +24,6 @@ interface UseProdutosComprarReturn {
   concluir: (taskId: string) => Promise<void>;
 }
 
-const STATUS_MAP: Record<string, ProdutoComprar['status']> = {
-  todo: 'todo',
-  produto_bom: 'produto_bom',
-  produto_ruim: 'produto_ruim',
-  fazer_pedido: 'fazer_pedido',
-  concluido: 'concluido',
-};
-
 function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
   const login = obterLoginSalvo();
   if (login?.empresa === 'SOYE' || login?.empresa === 'FACIL') {
@@ -47,7 +38,6 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [error, setError] = useState<string | null>(null);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
   const [empresa, setEmpresa] = useState<'NEWSHOP' | 'SOYE' | 'FACIL'>(() => getEmpresaAtual());
-  const realtimeChannelRef = useRef<ReturnType<typeof supabase.channel> | null>(null);
 
   const fetchProdutos = useCallback(async () => {
     const empresaAtual = getEmpresaAtual();
@@ -95,50 +85,6 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     };
   }, [fetchProdutos]);
 
-  useEffect(() => {
-    if (!import.meta.env.VITE_SUPABASE_URL || !import.meta.env.VITE_SUPABASE_ANON_KEY) {
-      return;
-    }
-
-    const channel = supabase
-      .channel('compras-sync')
-      .on('broadcast', { event: 'clickup_update' }, (msg) => {
-        const payload = msg.payload as {
-          event: string;
-          task_id: string;
-          status_app?: string;
-          empresa?: string;
-        };
-
-        if (payload.empresa && payload.empresa !== getEmpresaAtual()) {
-          return;
-        }
-
-        if (payload.event === 'taskStatusUpdated' && payload.status_app) {
-          const novoStatus = STATUS_MAP[payload.status_app];
-          if (novoStatus) {
-            setProdutos((prev) =>
-              prev.map((p) =>
-                p.id === payload.task_id ? { ...p, status: novoStatus } : p
-              )
-            );
-            setUltimaAtualizacao(new Date());
-            return;
-          }
-        }
-
-        fetchProdutos();
-      })
-      .subscribe();
-
-    realtimeChannelRef.current = channel;
-
-    return () => {
-      channel.unsubscribe();
-      realtimeChannelRef.current = null;
-    };
-  }, [fetchProdutos]);
-
   const executarAcao = useCallback(async (taskId: string, acao: string) => {
     const empresaAtual = getEmpresaAtual();
     const produtoAtual = produtos.find((p) => p.id === taskId);
@@ -175,7 +121,10 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
         const statusDisponiveis = Array.isArray(data.availableStatuses) && data.availableStatuses.length > 0
           ? ` | Status disponiveis: ${data.availableStatuses.join(', ')}`
           : '';
-        throw new Error((data.error ?? 'Erro ao executar acao') + detalhe + statusDisponiveis);
+        const statusTentados = Array.isArray(data.attemptedStatuses) && data.attemptedStatuses.length > 0
+          ? ` | Status tentados: ${data.attemptedStatuses.join(', ')}`
+          : '';
+        throw new Error((data.error ?? 'Erro ao executar acao') + detalhe + statusDisponiveis + statusTentados);
       }
     } catch (err: any) {
       console.error('[useProdutosComprar] Erro na acao:', err);

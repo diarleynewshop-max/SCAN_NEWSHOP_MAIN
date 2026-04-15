@@ -4,21 +4,31 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { useState, useRef } from "react";
+import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
 
-const STATUS_SECTIONS = [
-  { key: "todo", title: "TO DO" },
-  { key: "produto_bom", title: "Produto Bom" },
-  { key: "produto_ruim", title: "Produto Ruim" },
-  { key: "fazer_pedido", title: "Fazer Pedido" },
-  { key: "concluido", title: "Concluido" },
-] as const;
+const PAGE_SIZE = 10;
+
+const STATUS_PRIORITY: Record<string, number> = {
+  todo: 0,
+  produto_bom: 1,
+  produto_ruim: 2,
+  fazer_pedido: 3,
+  concluido: 4,
+};
+
+function isValidImageSrc(foto: string | null): boolean {
+  if (!foto) return false;
+  if (foto.startsWith("http://") || foto.startsWith("https://")) return true;
+  return /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(foto);
+}
 
 const Compras = () => {
   const navigate = useNavigate();
   const [searchTerm, setSearchTerm] = useState("");
   const [importando, setImportando] = useState(false);
+  const [paginaAtual, setPaginaAtual] = useState(1);
+  const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     produtos,
@@ -72,19 +82,39 @@ const Compras = () => {
     }
   };
 
-  const filteredProdutos = produtos.filter((p) => {
+  const filteredProdutos = useMemo(() => {
     const termo = searchTerm.toLowerCase();
-    return (
+    return produtos.filter((p) => (
       p.codigo.toLowerCase().includes(termo) ||
       p.descricao.toLowerCase().includes(termo) ||
       (p.sku || "").toLowerCase().includes(termo)
-    );
-  });
+    ));
+  }, [produtos, searchTerm]);
 
-  const produtosPorStatus = STATUS_SECTIONS.map((section) => ({
-    ...section,
-    items: filteredProdutos.filter((produto) => produto.status === section.key),
-  }));
+  const produtosOrdenados = useMemo(() => {
+    return [...filteredProdutos].sort((a, b) => {
+      const prioridadeA = STATUS_PRIORITY[a.status] ?? 99;
+      const prioridadeB = STATUS_PRIORITY[b.status] ?? 99;
+      if (prioridadeA !== prioridadeB) return prioridadeA - prioridadeB;
+      return Number(b.date_created || 0) - Number(a.date_created || 0);
+    });
+  }, [filteredProdutos]);
+
+  const totalPaginas = Math.max(1, Math.ceil(produtosOrdenados.length / PAGE_SIZE));
+
+  useEffect(() => {
+    setPaginaAtual(1);
+  }, [searchTerm, produtos.length]);
+
+  useEffect(() => {
+    if (paginaAtual > totalPaginas) {
+      setPaginaAtual(totalPaginas);
+    }
+  }, [paginaAtual, totalPaginas]);
+
+  const inicio = (paginaAtual - 1) * PAGE_SIZE;
+  const fim = inicio + PAGE_SIZE;
+  const produtosPaginados = produtosOrdenados.slice(inicio, fim);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -227,94 +257,120 @@ const Compras = () => {
               <div className="text-center py-12 text-gray-500">Nenhum produto encontrado</div>
             )}
             {!loading && !error && filteredProdutos.length > 0 && (
-              <div className="space-y-6">
-                {produtosPorStatus.map((section) => (
-                  <div key={section.key} className="space-y-3">
-                    <div className="flex items-center justify-between border-b pb-2">
-                      <h3 className="text-sm font-semibold text-gray-900">{section.title}</h3>
-                      <span className="text-xs text-gray-500">{section.items.length} item(ns)</span>
-                    </div>
+              <div className="space-y-4">
+                <div className="flex items-center justify-between text-xs text-gray-500">
+                  <span>
+                    Mostrando {inicio + 1}-{Math.min(fim, produtosOrdenados.length)} de {produtosOrdenados.length}
+                  </span>
+                  <span>Pagina {paginaAtual} de {totalPaginas}</span>
+                </div>
 
-                    {section.items.length === 0 && (
-                      <div className="text-sm text-gray-400 py-2">Nenhum item neste status</div>
-                    )}
+                {produtosPaginados.map((produto) => {
+                  const podeMostrarImagem = Boolean(
+                    produto.foto &&
+                    isValidImageSrc(produto.foto) &&
+                    !imagemComErro[produto.id]
+                  );
 
-                    {section.items.map((produto) => (
-                      <div key={produto.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg gap-4">
-                        <div className="flex items-center gap-4 min-w-0">
-                          {produto.foto ? (
-                            <img src={produto.foto} alt={produto.codigo} className="w-16 h-16 object-cover rounded shrink-0" />
-                          ) : (
-                            <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center shrink-0">
-                              <span className="text-gray-400 text-xs">sem foto</span>
-                            </div>
-                          )}
-                          <div className="min-w-0">
-                            <div className="font-bold">{produto.codigo}</div>
-                            <div className="text-sm text-gray-600 break-words">{produto.descricao}</div>
-                            {produto.sku && <div className="text-xs text-gray-400">SKU: {produto.sku}</div>}
+                  return (
+                    <div key={produto.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg gap-4">
+                      <div className="flex items-center gap-4 min-w-0">
+                        {podeMostrarImagem ? (
+                          <img
+                            src={produto.foto as string}
+                            alt={produto.codigo}
+                            className="w-16 h-16 object-cover rounded shrink-0"
+                            onError={() => setImagemComErro((prev) => ({ ...prev, [produto.id]: true }))}
+                          />
+                        ) : (
+                          <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center shrink-0">
+                            <span className="text-gray-400 text-xs">sem foto</span>
                           </div>
+                        )}
+                        <div className="min-w-0">
+                          <div className="font-bold">{produto.codigo}</div>
+                          <div className="text-sm text-gray-600 break-words">{produto.descricao}</div>
+                          {produto.sku && <div className="text-xs text-gray-400">SKU: {produto.sku}</div>}
                         </div>
-                        <div className="flex items-center gap-2 flex-wrap justify-end">
-                          {getStatusBadge(produto.status)}
+                      </div>
+                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                        {getStatusBadge(produto.status)}
 
-                          {produto.status === "todo" && (
-                            <>
-                              <Button size="sm" onClick={() => like(produto.id)}>
-                                <ThumbsUp className="h-4 w-4 mr-1" />
-                                Like
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
-                                <ThumbsDown className="h-4 w-4 mr-1" />
-                                Deslike
-                              </Button>
-                            </>
-                          )}
-
-                          {produto.status === "produto_bom" && (
-                            <>
-                              <Button size="sm" onClick={() => fazerPedido(produto.id)}>
-                                <ShoppingCart className="h-4 w-4 mr-1" />
-                                Fazer Pedido
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
-                                <ThumbsDown className="h-4 w-4 mr-1" />
-                                Deslike
-                              </Button>
-                            </>
-                          )}
-
-                          {produto.status === "produto_ruim" && (
-                            <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
+                        {produto.status === "todo" && (
+                          <>
+                            <Button size="sm" onClick={() => like(produto.id)}>
                               <ThumbsUp className="h-4 w-4 mr-1" />
                               Like
                             </Button>
-                          )}
-
-                          {produto.status === "fazer_pedido" && (
-                            <>
-                              <Button size="sm" onClick={() => concluir(produto.id)}>
-                                <Check className="h-4 w-4 mr-1" />
-                                Concluir
-                              </Button>
-                              <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
-                                <ThumbsUp className="h-4 w-4 mr-1" />
-                                Voltar Bom
-                              </Button>
-                            </>
-                          )}
-
-                          {produto.status === "concluido" && (
-                            <Button size="sm" variant="outline" onClick={() => fazerPedido(produto.id)}>
-                              <RefreshCw className="h-4 w-4 mr-1" />
-                              Reabrir
+                            <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
+                              <ThumbsDown className="h-4 w-4 mr-1" />
+                              Deslike
                             </Button>
-                          )}
-                        </div>
+                          </>
+                        )}
+
+                        {produto.status === "produto_bom" && (
+                          <>
+                            <Button size="sm" onClick={() => fazerPedido(produto.id)}>
+                              <ShoppingCart className="h-4 w-4 mr-1" />
+                              Fazer Pedido
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
+                              <ThumbsDown className="h-4 w-4 mr-1" />
+                              Deslike
+                            </Button>
+                          </>
+                        )}
+
+                        {produto.status === "produto_ruim" && (
+                          <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
+                            <ThumbsUp className="h-4 w-4 mr-1" />
+                            Like
+                          </Button>
+                        )}
+
+                        {produto.status === "fazer_pedido" && (
+                          <>
+                            <Button size="sm" onClick={() => concluir(produto.id)}>
+                              <Check className="h-4 w-4 mr-1" />
+                              Concluir
+                            </Button>
+                            <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
+                              <ThumbsUp className="h-4 w-4 mr-1" />
+                              Voltar Bom
+                            </Button>
+                          </>
+                        )}
+
+                        {produto.status === "concluido" && (
+                          <Button size="sm" variant="outline" onClick={() => fazerPedido(produto.id)}>
+                            <RefreshCw className="h-4 w-4 mr-1" />
+                            Reabrir
+                          </Button>
+                        )}
                       </div>
-                    ))}
-                  </div>
-                ))}
+                    </div>
+                  );
+                })}
+
+                <div className="flex items-center justify-center gap-3 pt-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPaginaAtual((p) => Math.max(1, p - 1))}
+                    disabled={paginaAtual === 1}
+                  >
+                    Anterior
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setPaginaAtual((p) => Math.min(totalPaginas, p + 1))}
+                    disabled={paginaAtual === totalPaginas}
+                  >
+                    Proxima
+                  </Button>
+                </div>
               </div>
             )}
           </CardContent>

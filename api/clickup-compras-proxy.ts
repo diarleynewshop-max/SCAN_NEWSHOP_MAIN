@@ -1,9 +1,9 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
-import { createClient } from '@supabase/supabase-js';
 import {
   extractCodigo,
   extractDescricao,
   extractSku,
+  getCompraStatusCandidates,
   getClickUpListId,
   getClickUpToken,
   isCompraTransitionAllowed,
@@ -14,14 +14,6 @@ import {
 } from './_clickup.js';
 
 type CompraStatusApp = 'todo' | 'produto_bom' | 'produto_ruim' | 'fazer_pedido' | 'concluido';
-
-const supabaseUrl = process.env.SUPABASE_URL;
-const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-const supabase =
-  supabaseUrl && supabaseServiceRoleKey
-    ? createClient(supabaseUrl, supabaseServiceRoleKey)
-    : null;
 
 function getSingle(value: unknown): string {
   if (Array.isArray(value)) {
@@ -193,82 +185,63 @@ async function moverStatusCompra(
     });
   }
 
-  const listResponse = await fetch(`https://api.clickup.com/api/v2/list/${listId}`, {
-    headers: { Authorization: token },
-  });
-
-  if (!listResponse.ok) {
-    const errorText = await listResponse.text();
-    return res.status(400).json({
-      error: 'Nao foi possivel carregar os status da lista de compras',
-      details: errorText,
-      empresa,
-      listId,
+  let availableStatuses: string[] = [];
+  try {
+    const listResponse = await fetch(`https://api.clickup.com/api/v2/list/${listId}`, {
+      headers: { Authorization: token },
     });
+    if (listResponse.ok) {
+      const listData = await listResponse.json();
+      availableStatuses = Array.isArray(listData.statuses)
+        ? listData.statuses
+            .map((status: any) => String(status?.status ?? '').trim())
+            .filter(Boolean)
+        : [];
+    }
+  } catch {
+    availableStatuses = [];
   }
-
-  const listData = await listResponse.json();
-  const availableStatuses = Array.isArray(listData.statuses)
-    ? listData.statuses
-        .map((status: any) => String(status?.status ?? '').trim())
-        .filter(Boolean)
-    : [];
 
   const novoStatus = resolveCompraClickUpStatus(novoStatusApp, availableStatuses);
+  const aliases = getCompraStatusCandidates(novoStatusApp);
+  const candidateStatuses = novoStatus
+    ? [novoStatus, ...aliases.filter((alias) => alias.toLowerCase() !== novoStatus.toLowerCase())]
+    : aliases;
 
-  if (!novoStatus) {
+  let statusAplicado: string | null = null;
+  let ultimoErro = '';
+
+  for (const statusCandidate of candidateStatuses) {
+    const updateResponse = await fetch(
+      `https://api.clickup.com/api/v2/task/${taskId}`,
+      {
+        method: 'PUT',
+        headers: {
+          Authorization: token,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ status: statusCandidate }),
+      }
+    );
+
+    if (updateResponse.ok) {
+      statusAplicado = statusCandidate;
+      break;
+    }
+
+    ultimoErro = await updateResponse.text();
+  }
+
+  if (!statusAplicado) {
     return res.status(400).json({
       error: 'Nenhum status compativel encontrado na lista de compras',
+      details: ultimoErro,
       requestedStatus: novoStatusApp,
+      attemptedStatuses: candidateStatuses,
       availableStatuses,
       empresa,
       listId,
     });
-  }
-
-  const updateResponse = await fetch(
-    `https://api.clickup.com/api/v2/task/${taskId}`,
-    {
-      method: 'PUT',
-      headers: {
-        Authorization: token,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({ status: novoStatus }),
-    }
-  );
-
-  if (!updateResponse.ok) {
-    const errorText = await updateResponse.text();
-    return res.status(400).json({
-      error: 'Erro ao mover',
-      details: errorText,
-      availableStatuses,
-      empresa,
-      listId,
-    });
-  }
-
-  if (supabase) {
-    try {
-      const channel = supabase.channel('compras-sync');
-      await channel.send({
-        type: 'broadcast',
-        event: 'clickup_update',
-        payload: {
-          event: 'taskStatusUpdated',
-          source: 'clickup-compras-proxy',
-          task_id: taskId,
-          empresa,
-          previous_status_app: currentStatus,
-          status_app: novoStatusApp,
-          status_clickup: novoStatus,
-          timestamp: Date.now(),
-        },
-      });
-    } catch (broadcastError) {
-      console.error('Erro ao broadcast imediato de compras:', broadcastError);
-    }
   }
 
   return res.json({
@@ -276,7 +249,7 @@ async function moverStatusCompra(
     taskId,
     acao: acaoUp.toLowerCase(),
     previousStatus: currentStatus,
-    status: novoStatus,
+    status: statusAplicado,
     statusApp: novoStatusApp,
     empresa,
   });
