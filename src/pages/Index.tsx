@@ -1,22 +1,27 @@
-import { useState, useCallback, useEffect, useRef, useMemo } from "react";
+﻿import { useState, useCallback, useEffect, useRef, useMemo, lazy, Suspense } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Store, Eye, EyeOff, Loader2, AlertCircle, Monitor, Smartphone, ShoppingCart, FileUp } from "lucide-react";
-import { parseSpreadsheet, SpreadsheetItem } from "@/lib/spreadsheetParser";
+import type { SpreadsheetItem } from "@/lib/spreadsheetParser";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
-import BarcodeScanner from "@/components/BarcodeScanner";
-import PhotoCapture from "@/components/PhotoCapture";
-import ListHistory from "@/components/ListHistory";
-import ConferenceView from "@/components/ConferenceView";
 import ProductCard, { Product, ListFlag } from "@/components/ProductCard";
 import { useInventory } from "@/hooks/useInventory";
 import { useProductLookup } from "@/hooks/useProductLookup";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { useToast } from "@/hooks/use-toast";
 
-const LOGO = "data:image/jpeg;base64,/9j/4QAYRXhpZgAASUkqAAgAAAAAAAAAAAAAAP/sABFEdWNreQABAAQAAABkAAD/4QMwaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLwA8P3hwYWNrZXQgYmVnaW49Iu+7vyIgaWQ9Ilc1TTBNcENlaGlIenJlU3pOVGN6a2M5ZCI/PiA8eDp4bXBtZXRhIHhtbG5zOng9ImFkb2JlOm5zOm1ldGEvIiB4OnhtcHRrPSJBZG9iZSBYTVAgQ29yZSA5LjEtYzAwMiA3OS5hNmE2Mzk2OGEsIDIwMjQvMDMvMDYtMTE6NTI6MDUgICAgICAgICI+IDxyZGY6UkRGIHhtbG5zOnJkZj0iaHR0cDovL3d3dy53My5vcmcvMTk5OS8wMi8yMi1yZGYtc3ludGF4LW5zIyI+IDxyZGY6RGVzY3JpcHRpb24gcmRmOmFib3V0PSIiIHhtbG5zOnhtcD0iaHR0cDovL25zLmFkb2JlLmNvbS94YXAvMS4wLyIgeG1sbnM6eG1wTU09Imh0dHA6Ly9ucy5hZG9iZS5jb20veGFwLzEuMC9tbS8iIHhtbG5zOnN0UmVmPSJodHRwOi8vbnMuYWRvYmUuY29tL3hhcC8xLjAvc1R5cGUvUmVzb3VyY2VSZWYjIiB4bXA6Q3JlYXRvclRvb2w9IkFkb2JlIFBob3Rvc2hvcCAyNS4xMSAoV2luZG93cykiIHhtcE1NOkluc3RhbmNlSUQ9InhtcC5paWQ6QjIwNEU4RUM4MTdBMTFFRkIwQUNBMjBCNTgyOThGQUUiIHhtcE1NOkRvY3VtZW50SUQ9InhtcC5kaWQ6QjIwNEU4RUQ4MTdBMTFFRkIwQUNBMjBCNTgyOThGQUUiPiA8eG1wTU06RGVyaXZlZEZyb20gc3RSZWY6aW5zdGFuY2VJRD0ieG1wLmlpZDpCMjA0RThFQTgxN0ExMUVGQjBBQ0EyMEI1ODI5OEZBRSIgc3RSZWY6ZG9jdW1lbnRJRD0ieG1wLmRpZDpCMjA0RThFQjgxN0ExMUVGQjBBQ0EyMEI1ODI5OEZBRSIvPiA8L3JkZjpEZXNjcmlwdGlvbj4gPC9yZGY6UkRGPiA8L3g6eG1wbWV0YT4gPD94cGFja2V0IGVuZD0iciI/Pv/uAA5BZG9iZQBkwAAAAAH/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAARCAMgAyADASIAAhEBAxEB/8QAHgABAAICAwEBAQAAAAAAAAAAAAgJBwoEBQYCAwH/2wBDAAMCAgICAgMCAgIDAwMDBAYEBAQEBAgGBgUGCQgKCgkICQkKDA8MCgsOCwkJDRENDg8QEBEQCgwSExIQEw8QEBD/wAARCAMgAyADASIAAhEBAxEB/9sAQwADAgICAgIDAgICA";
+const LOGO = "/newshop-logo.jpg";
+const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
+const PhotoCapture = lazy(() => import("@/components/PhotoCapture"));
+const ListHistory = lazy(() => import("@/components/ListHistory"));
+const ConferenceView = lazy(() => import("@/components/ConferenceView"));
+const LAZY_FALLBACK = (
+  <div style={{ padding: 20, textAlign: "center", color: "hsl(var(--muted-foreground))" }}>
+    Carregando...
+  </div>
+);
 
-// ── Configuração de empresas e senhas ────────────────────────────────────────
+// â”€â”€ ConfiguraÃ§Ã£o de empresas e senhas â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
 
 const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
@@ -29,7 +34,7 @@ const SENHAS: Record<"loja", Record<Empresa, string>> = {
   },
 };
 
-/* ── Shared style tokens ── */
+/* â”€â”€ Shared style tokens â”€â”€ */
 const S = {
   inputBase: {
     width: "100%", height: 48, padding: "0 16px",
@@ -64,7 +69,7 @@ const Index = () => {
   const [photo, setPhoto] = useState<string | null>(() => sessionStorage.getItem("scan_photo") ?? null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
 
-  // Persistir campos do formulário no sessionStorage para não perder ao trocar de aba
+  // Persistir campos do formulÃ¡rio no sessionStorage para nÃ£o perder ao trocar de aba
   useEffect(() => { sessionStorage.setItem("scan_barcode", barcode); }, [barcode]);
   useEffect(() => { sessionStorage.setItem("scan_sku", sku); }, [sku]);
   useEffect(() => { sessionStorage.setItem("scan_photo", photo ?? ""); }, [photo]);
@@ -76,7 +81,7 @@ const Index = () => {
   const [showOpenModal, setShowOpenModal] = useState(false);
   const [showProductInfo, setShowProductInfo] = useState(false);
 
-  // ── Estado do modal ─────────────────────────────────────────────────────
+  // â”€â”€ Estado do modal â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
   const [modalFlag, setModalFlag]         = useState<ListFlag | null>(null);
   const [modalEmpresa, setModalEmpresa]   = useState<Empresa | null>(null);
   const [modalPassword, setModalPassword] = useState("");
@@ -93,13 +98,13 @@ const Index = () => {
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, addProductsFromSpreadsheet, updateProduct, scrollToProduct, moveProductToTop } = useInventory();
   
-  // Estados para importação de planilha
+  // Estados para importaÃ§Ã£o de planilha
   const [showImportModal, setShowImportModal] = useState(false);
   const [importFile, setImportFile] = useState<File | null>(null);
   const [importItems, setImportItems] = useState<SpreadsheetItem[]>([]);
   const [importing, setImporting] = useState(false);
   
-  // Estado para item em edição
+  // Estado para item em ediÃ§Ã£o
   const [editingProductId, setEditingProductId] = useState<string | null>(null);
   const [pendingEditProductId, setPendingEditProductId] = useState<string | null>(null); // produto aguardando scan no modal
   
@@ -115,16 +120,16 @@ const Index = () => {
     if (showOpenModal) {
       const login = obterLoginSalvo();
       if (login) {
-        // Definir flag como "loja" (única opção)
+        // Definir flag como "loja" (Ãºnica opÃ§Ã£o)
         setModalFlag("loja");
         setModalEmpresa(login.empresa);
-        // Senha já foi validada anteriormente, então desbloquear diretamente
+        // Senha jÃ¡ foi validada anteriormente, entÃ£o desbloquear diretamente
         setPasswordUnlocked(true);
-        // Preencher título e pessoa com os valores padrão
+        // Preencher tÃ­tulo e pessoa com os valores padrÃ£o
         setModalTitle(login.tituloPadrao || "");
         setModalPerson(login.nomePessoa || "");
       } else {
-        // Se não há login, resetar modal
+        // Se nÃ£o hÃ¡ login, resetar modal
         resetModal();
       }
     }
@@ -143,12 +148,12 @@ const Index = () => {
   const handleBarcodeDetected = useCallback((code: string) => {
     setShowScanner(false);
 
-    // Se o scan foi disparado de dentro do modal de edição, atualiza o produto direto
+    // Se o scan foi disparado de dentro do modal de ediÃ§Ã£o, atualiza o produto direto
     if (pendingEditProductId) {
       updateProduct(pendingEditProductId, { barcode: code });
       const idToReopen = pendingEditProductId;
       setPendingEditProductId(null);
-      // Reabre o modal do produto após o scan
+      // Reabre o modal do produto apÃ³s o scan
       setEditingProductId(idToReopen);
       return;
     }
@@ -225,7 +230,7 @@ const Index = () => {
           empresa: login.empresa,
         });
         if (ok) {
-          toast({ title: "Nova lista aberta automaticamente!", description: `${login.tituloPadrao} • ${login.nomePessoa}` });
+          toast({ title: "Nova lista aberta automaticamente!", description: `${login.tituloPadrao} â€¢ ${login.nomePessoa}` });
         } else {
           // Se falhar, mostrar modal para abrir manualmente
           setShowOpenModal(true);
@@ -241,16 +246,17 @@ const Index = () => {
     try {
       setImporting(true);
 
-      // Valida tamanho mínimo — arquivo 0 bytes = sem permissão no Android
+      // Valida tamanho mÃ­nimo â€” arquivo 0 bytes = sem permissÃ£o no Android
       if (file.size === 0) {
         toast({
-          title: "Arquivo ilegível",
-          description: "O app não conseguiu ler o arquivo. Tente mover para a pasta Downloads e importar de lá.",
+          title: "Arquivo ilegÃ­vel",
+          description: "O app nÃ£o conseguiu ler o arquivo. Tente mover para a pasta Downloads e importar de lÃ¡.",
           variant: "destructive",
         });
         return;
       }
 
+      const { parseSpreadsheet } = await import("@/lib/spreadsheetParser");
       const items = await parseSpreadsheet(file);
 
       if (items.length === 0) {
@@ -295,8 +301,8 @@ const Index = () => {
     if (!modalFlag)          { toast({ title: "Selecione LOJA",              variant: "destructive" }); return; }
     if (!modalEmpresa)       { toast({ title: "Selecione a empresa",          variant: "destructive" }); return; }
     if (!passwordUnlocked)   { toast({ title: "Confirme a senha primeiro",    variant: "destructive" }); return; }
-    if (!modalTitle.trim())  { toast({ title: "Informe o título da lista",    variant: "destructive" }); return; }
-    if (!modalPerson.trim()) { toast({ title: "Informe o responsável",        variant: "destructive" }); return; }
+    if (!modalTitle.trim())  { toast({ title: "Informe o tÃ­tulo da lista",    variant: "destructive" }); return; }
+    if (!modalPerson.trim()) { toast({ title: "Informe o responsÃ¡vel",        variant: "destructive" }); return; }
 
     const ok = openList({
       title: modalTitle.trim(),
@@ -333,7 +339,7 @@ const Index = () => {
   const tabs = [
     { key: "scan"       as const, label: "Escanear",    Icon: ScanBarcode  },
     { key: "list"       as const, label: "Lista",        Icon: ClipboardList },
-    { key: "conference" as const, label: "Conferência",  Icon: GitCompare   },
+    { key: "conference" as const, label: "ConferÃªncia",  Icon: GitCompare   },
     ...extraTab
   ];
 
@@ -343,7 +349,7 @@ const Index = () => {
   return (
     <div className={`min-h-screen flex flex-col ${modoDesktop ? 'max-w-6xl mx-auto' : 'max-w-md mx-auto'}`} style={{ background: "hsl(var(--background))" }}>
 
-      {/* ── Header ── */}
+      {/* â”€â”€ Header â”€â”€ */}
       <header style={{ 
         background: "hsl(var(--primary))", 
         padding: modoDesktop ? "18px 32px" : "14px 20px", 
@@ -369,7 +375,7 @@ const Index = () => {
                 SCANNER
               </p>
               <p style={{ fontSize: 12, color: "rgba(255,255,255,0.9)", fontWeight: 600, marginTop: 2 }}>
-                Sistema de Leitura de Códigos
+                Sistema de Leitura de CÃ³digos
               </p>
             </div>
           )}
@@ -396,13 +402,13 @@ const Index = () => {
           )}
           {modoDesktop && !activeList && (
             <p style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", marginTop: 2 }}>
-              {modoDesktop ? "🖥️ Modo Desktop" : "📱 Modo Mobile"}
+              {modoDesktop ? "ðŸ–¥ï¸ Modo Desktop" : "ðŸ“± Modo Mobile"}
             </p>
           )}
         </div>
       </header>
 
-      {/* ── Active banner ── */}
+      {/* â”€â”€ Active banner â”€â”€ */}
       {activeList && (
         <div style={{ 
           background: "hsl(38 92% 50% / 0.12)", 
@@ -416,10 +422,10 @@ const Index = () => {
           <style>{`@keyframes pulse{0%,100%{opacity:1;transform:scale(1)}50%{opacity:0.5;transform:scale(0.85)}}`}</style>
           <p style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "hsl(var(--foreground))" }}>
             {activeList.title}
-            <span style={{ fontWeight: 400, color: "hsl(var(--muted-foreground))" }}> · {activeList.person}</span>
+            <span style={{ fontWeight: 400, color: "hsl(var(--muted-foreground))" }}> Â· {activeList.person}</span>
           </p>
           <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", background: flagBadge.bg, border: `1px solid ${flagBadge.border}`, color: flagBadge.text }}>
-            {activeList.flag?.toUpperCase() ?? "LOJA"} · {activeList.empresa ? activeList.empresa.split(" ")[0] : ""}
+            {activeList.flag?.toUpperCase() ?? "LOJA"} Â· {activeList.empresa ? activeList.empresa.split(" ")[0] : ""}
           </span>
           <button
             onClick={handleCloseList}
@@ -431,7 +437,7 @@ const Index = () => {
         </div>
       )}
 
-      {/* ── Tabs ── */}
+      {/* â”€â”€ Tabs â”€â”€ */}
       <div style={{ 
         background: "#fff", 
         borderBottom: "1px solid hsl(var(--border))", 
@@ -466,7 +472,7 @@ const Index = () => {
         ))}
       </div>
 
-      {/* ── Content ── */}
+      {/* â”€â”€ Content â”€â”€ */}
       <div style={{ 
         flex: 1, 
         overflowY: "auto", 
@@ -542,16 +548,16 @@ const Index = () => {
                 </div>
               )}
 
-            {/* Exibição das informações do produto */}
+            {/* ExibiÃ§Ã£o das informaÃ§Ãµes do produto */}
             {showProductInfo && (
               <div style={{ marginBottom: 16 }}>
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
-                  <h3 style={{ fontWeight: 700, fontSize: 16 }}>Informações do Produto</h3>
+                  <h3 style={{ fontWeight: 700, fontSize: 16 }}>InformaÃ§Ãµes do Produto</h3>
                   <button
                     onClick={() => setShowProductInfo(false)}
                     style={{ background: "none", border: "none", color: "hsl(var(--muted-foreground))", cursor: "pointer" }}
                   >
-                    ✕
+                    âœ•
                   </button>
                 </div>
 
@@ -577,7 +583,7 @@ const Index = () => {
                       )}
                     </div>
                     <div style={{ display: "flex", justifyContent: "space-between" }}>
-                      <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Estoque disponível:</span>
+                      <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Estoque disponÃ­vel:</span>
                       <span style={{ fontWeight: 700, fontSize: 14 }}>
                         {typeof productInfo.estoque === 'number' ? productInfo.estoque : "N/A"}
                       </span>
@@ -585,7 +591,7 @@ const Index = () => {
 
                     {/* Indicador de origem dos dados */}
                     <div style={{ marginTop: 12, padding: 8, background: "hsl(var(--primary) / 0.1)", borderRadius: 6, fontSize: 11, color: "hsl(var(--primary))" }}>
-                      Informações {" "}
+                      InformaÃ§Ãµes {" "}
                       {productInfo.nome_produto && typeof productInfo.preco === 'number' ? "atualizadas via API" : "do banco de dados local"}
                     </div>
                   </div>
@@ -594,7 +600,7 @@ const Index = () => {
             )}
 
             <div>
-              <label style={S.label}>Código de Barras</label>
+              <label style={S.label}>CÃ³digo de Barras</label>
               <BarcodeInput
   value={barcode}
   onChange={setBarcode}
@@ -647,9 +653,9 @@ const Index = () => {
             {/* Fechar coluna esquerda */}
             </div>
 
-            {/* Coluna direita - Lista de produtos (apenas no desktop quando há produtos) */}
+            {/* Coluna direita - Lista de produtos (apenas no desktop quando hÃ¡ produtos) */}
             
-            {/* MODAL de edição — abre ao clicar na seta ↑ do produto importado */}
+            {/* MODAL de ediÃ§Ã£o â€” abre ao clicar na seta â†‘ do produto importado */}
             <Dialog open={!!editingProductId} onOpenChange={(open) => { if (!open) setEditingProductId(null); }}>
               <DialogContent
                 style={{
@@ -676,14 +682,14 @@ const Index = () => {
                             {product.sku || "Produto importado"}
                           </h3>
                         </div>
-                        <button onClick={() => setEditingProductId(null)} style={{ background: "hsl(var(--secondary))", border: "none", borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 16, color: "hsl(var(--muted-foreground))" }}>✕</button>
+                        <button onClick={() => setEditingProductId(null)} style={{ background: "hsl(var(--secondary))", border: "none", borderRadius: "50%", width: 32, height: 32, display: "flex", alignItems: "center", justifyContent: "center", cursor: "pointer", fontSize: 16, color: "hsl(var(--muted-foreground))" }}>âœ•</button>
                       </div>
 
-                      {/* Descrição */}
+                      {/* DescriÃ§Ã£o */}
                       <div style={{ marginBottom: 14 }}>
-                        <label style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>Descrição</label>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>DescriÃ§Ã£o</label>
                         <div style={{ padding: "10px 12px", background: "hsl(var(--muted))", borderRadius: 8, fontSize: 13, fontWeight: 500, color: "hsl(var(--foreground))" }}>
-                          {product.description || "Sem descrição"}
+                          {product.description || "Sem descriÃ§Ã£o"}
                         </div>
                       </div>
 
@@ -697,13 +703,13 @@ const Index = () => {
                         />
                       </div>
 
-                      {/* Código de Barras + botão Scan */}
+                      {/* CÃ³digo de Barras + botÃ£o Scan */}
                       <div style={{ marginBottom: 14 }}>
-                        <label style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>Código de Barras</label>
+                        <label style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--muted-foreground))", letterSpacing: "0.12em", textTransform: "uppercase", marginBottom: 6, display: "block" }}>CÃ³digo de Barras</label>
                         <div style={{ display: "flex", gap: 8 }}>
                           <input
                             type="text"
-                            placeholder="Digite ou escaneie o código"
+                            placeholder="Digite ou escaneie o cÃ³digo"
                             value={product.barcode}
                             onChange={(e) => updateProduct(product.id, { barcode: e.target.value })}
                             style={{
@@ -755,7 +761,7 @@ const Index = () => {
                           <button
                             onClick={() => updateProduct(product.id, { quantity: Math.max(0, product.quantity - 1) })}
                             style={{ width: 48, height: 48, borderRadius: 10, background: "hsl(var(--secondary))", border: "1.5px solid hsl(var(--border))", fontSize: 22, fontWeight: 700, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
-                          >−</button>
+                          >âˆ’</button>
                           <input
                             type="number"
                             inputMode="numeric"
@@ -804,7 +810,7 @@ const Index = () => {
                           boxShadow: "var(--shadow-md)",
                         }}
                       >
-                        ✓ Salvar e Fechar
+                        âœ“ Salvar e Fechar
                       </button>
 
                     </div>
@@ -855,7 +861,7 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
               </div>
             )}
 
-            {/* Lista de produtos para mobile (mantém layout original) */}
+            {/* Lista de produtos para mobile (mantÃ©m layout original) */}
             {!modoDesktop && activeList && activeList.products.length > 0 && (
               <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
                 <p style={S.label}>Produtos adicionados</p>
@@ -874,29 +880,33 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
             )}
           </div>
         ) : view === "list" ? (
-          <ListHistory 
-            lists={lists} 
-            onUpdateList={updateList} 
-            onStartConference={() => setView("conference")} 
-            modoDesktop={modoDesktop}
-          />
+          <Suspense fallback={LAZY_FALLBACK}>
+            <ListHistory 
+              lists={lists} 
+              onUpdateList={updateList} 
+              onStartConference={() => setView("conference")} 
+              modoDesktop={modoDesktop}
+            />
+          </Suspense>
         ) : (
-          <ConferenceView 
-            onBack={() => setView("list")} 
-            empresa={activeList?.empresa} 
-            flag={activeList?.flag}
-            modoDesktop={modoDesktop}
-          />
+          <Suspense fallback={LAZY_FALLBACK}>
+            <ConferenceView 
+              onBack={() => setView("list")} 
+              empresa={activeList?.empresa} 
+              flag={activeList?.flag}
+              modoDesktop={modoDesktop}
+            />
+          </Suspense>
         )}
       </div>
 
-      {/* ══════════════════════════════════════════
+      {/* â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
           Modal Nova Lista
           Passo 1: LOJA / CD
-          Passo 2: Empresa (aparece após flag)
-          Passo 3: Senha (aparece após empresa)
-          Passo 4: Responsável (aparece após senha ok)
-      ══════════════════════════════════════════ */}
+          Passo 2: Empresa (aparece apÃ³s flag)
+          Passo 3: Senha (aparece apÃ³s empresa)
+          Passo 4: ResponsÃ¡vel (aparece apÃ³s senha ok)
+      â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â• */}
        <Dialog open={showOpenModal} onOpenChange={(open) => { setShowOpenModal(open); if (!open) resetModal(); }}>
         <DialogContent className={modoDesktop ? "max-w-md" : "max-w-sm"} style={{ 
           background: "#fff", 
@@ -915,12 +925,12 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
               {[
                 modalFlag    ? modalFlag.toUpperCase()    : "Tipo",
                 modalEmpresa ? modalEmpresa               : "Empresa",
-                passwordUnlocked ? "✓ Senha"             : "Senha",
+                passwordUnlocked ? "âœ“ Senha"             : "Senha",
               ].map((step, i) => {
                 const done = i === 0 ? !!modalFlag : i === 1 ? !!modalEmpresa : passwordUnlocked;
                 return (
                   <span key={i} style={{ display: "flex", alignItems: "center", gap: 6 }}>
-                    {i > 0 && <span style={{ color: "hsl(var(--border))", fontSize: 12 }}>›</span>}
+                    {i > 0 && <span style={{ color: "hsl(var(--border))", fontSize: 12 }}>â€º</span>}
                     <span style={{
                       fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)",
                       color: done ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))",
@@ -933,7 +943,7 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
 
           <div style={{ display: "flex", flexDirection: "column", gap: 16, marginTop: 10 }}>
 
-            {/* ── PASSO 1: Apenas LOJA ── */}
+            {/* â”€â”€ PASSO 1: Apenas LOJA â”€â”€ */}
             <div>
               <label style={S.label}>Tipo</label>
               <div style={{ display: "grid", gridTemplateColumns: "1fr", gap: 10 }}>
@@ -961,7 +971,7 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
               </div>
             </div>
 
-            {/* ── PASSO 2: Empresa (aparece após escolher tipo) ── */}
+            {/* â”€â”€ PASSO 2: Empresa (aparece apÃ³s escolher tipo) â”€â”€ */}
             {modalFlag && (
               <div>
                 <label style={S.label}>Empresa</label>
@@ -988,10 +998,10 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
               </div>
             )}
 
-            {/* ── PASSO 3: Senha (aparece após escolher empresa, antes de desbloquear) ── */}
+            {/* â”€â”€ PASSO 3: Senha (aparece apÃ³s escolher empresa, antes de desbloquear) â”€â”€ */}
             {modalFlag && modalEmpresa && !passwordUnlocked && (
               <div>
-                <label style={S.label}>Senha — {modalEmpresa} {modalFlag.toUpperCase()}</label>
+                <label style={S.label}>Senha â€” {modalEmpresa} {modalFlag.toUpperCase()}</label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <div style={{ position: "relative", flex: 1 }}>
                     <input
@@ -1022,17 +1032,17 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
                   </button>
                 </div>
                 {passwordError && (
-                  <p style={{ fontSize: 12, color: "hsl(var(--destructive))", marginTop: 5, fontWeight: 600 }}>❌ Senha incorreta</p>
+                  <p style={{ fontSize: 12, color: "hsl(var(--destructive))", marginTop: 5, fontWeight: 600 }}>âŒ Senha incorreta</p>
                 )}
               </div>
             )}
 
-            {/* ── PASSO 4: Título + Responsável ── */}
+            {/* â”€â”€ PASSO 4: TÃ­tulo + ResponsÃ¡vel â”€â”€ */}
             {passwordUnlocked && (
               <>
-                {/* Badge confirmação */}
+                {/* Badge confirmaÃ§Ã£o */}
                 <div style={{ padding: "8px 14px", borderRadius: 10, background: "hsl(var(--success)/0.08)", border: "1px solid hsl(var(--success)/0.2)", display: "flex", alignItems: "center", gap: 8 }}>
-                  <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)", color: "hsl(var(--success))" }}>✅</span>
+                  <span style={{ fontSize: 11, fontWeight: 700, fontFamily: "var(--font-mono)", color: "hsl(var(--success))" }}>âœ…</span>
                   <span style={{
                     padding: "2px 8px", borderRadius: 5, fontSize: 10, fontWeight: 700,
                     fontFamily: "var(--font-mono)", letterSpacing: "0.08em", textTransform: "uppercase",
@@ -1040,15 +1050,15 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
                     color: "hsl(var(--primary))",
                     border: "1px solid hsl(var(--primary)/0.25)",
                   }}>
-                    {modalFlag!.toUpperCase()} · {modalEmpresa}
+                    {modalFlag!.toUpperCase()} Â· {modalEmpresa}
                   </span>
                 </div>
 
                 <div>
-                  <label style={S.label}>Título da Lista</label>
+                  <label style={S.label}>TÃ­tulo da Lista</label>
                   <input
                     type="text"
-                    placeholder="Ex: Pedido Nike, Eletrônicos..."
+                    placeholder="Ex: Pedido Nike, EletrÃ´nicos..."
                     value={modalTitle}
                     onChange={(e) => setModalTitle(e.target.value)}
                     autoFocus
@@ -1057,10 +1067,10 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
                 </div>
 
                 <div>
-                  <label style={S.label}>Responsável</label>
+                  <label style={S.label}>ResponsÃ¡vel</label>
                   <input
                     type="text"
-                    placeholder="Ex: João Silva"
+                    placeholder="Ex: JoÃ£o Silva"
                     value={modalPerson}
                     onChange={(e) => setModalPerson(e.target.value)}
                     onKeyDown={(e) => e.key === "Enter" && handleOpenList()}
@@ -1087,8 +1097,6 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
         </DialogContent>
       </Dialog>
 
-      {showScanner && <BarcodeScanner onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />}
-      
       {/* Modal Importa Lista */}
       <Dialog open={showImportModal} onOpenChange={(open) => { setShowImportModal(open); if (!open) { setImportFile(null); setImportItems([]); } }}>
         <DialogContent className={modoDesktop ? "max-w-md" : "max-w-sm"} style={{ 
@@ -1115,15 +1123,15 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
                 Abra uma lista primeiro
               </p>
               <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 4 }}>
-                É necessário ter uma lista aberta para importar produtos.
+                Ã‰ necessÃ¡rio ter uma lista aberta para importar produtos.
               </p>
             </div>
           )}
 
-{/* Seleção de arquivo */}
+{/* SeleÃ§Ã£o de arquivo */}
           {activeList && (
             <div style={{ marginBottom: 16 }}>
-              {/* input escondido — acionado por onClick para funcionar no iOS/Android */}
+              {/* input escondido â€” acionado por onClick para funcionar no iOS/Android */}
               <input
                 ref={fileInputRef}
                 type="file"
@@ -1139,7 +1147,7 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
               <button
                 type="button"
                 onClick={() => {
-                  // Usa o ref diretamente — compatível com iOS Safari e Android Chrome
+                  // Usa o ref diretamente â€” compatÃ­vel com iOS Safari e Android Chrome
                   if (fileInputRef.current) {
                     fileInputRef.current.value = "";
                     fileInputRef.current.click();
@@ -1167,7 +1175,7 @@ onMoveToTop={(id) => { setEditingProductId(id); scrollToProduct(id); }}
                     Selecionar Arquivo
                   </p>
                   <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
-                    XLSX ou CSV (até 200 itens)
+                    XLSX ou CSV (atÃ© 200 itens)
                   </p>
                 </div>
               </button>
@@ -1195,31 +1203,39 @@ Fechar
         </DialogContent>
       </Dialog>
 
-      {showScanner && <BarcodeScanner onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />}
+      {showScanner && (
+        <Suspense fallback={LAZY_FALLBACK}>
+          <BarcodeScanner onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />
+        </Suspense>
+      )}
       {showPhotoCapture && photoProductId && (
-        <PhotoCapture
-          photo={activeList?.products.find(p => p.id === photoProductId)?.photo || null}
-          onCapture={(photo) => {
-            if (photoProductId) {
-              updateProduct(photoProductId, { photo });
-              setShowPhotoCapture(false);
-              setPhotoProductId(null);
-            }
-          }}
-          onRemove={() => {
-            if (photoProductId) {
-              updateProduct(photoProductId, { photo: null });
-              setShowPhotoCapture(false);
-              setPhotoProductId(null);
-            }
-          }}
-        />
+        <Suspense fallback={LAZY_FALLBACK}>
+          <PhotoCapture
+            photo={activeList?.products.find(p => p.id === photoProductId)?.photo || null}
+            onCapture={(photo) => {
+              if (photoProductId) {
+                updateProduct(photoProductId, { photo });
+                setShowPhotoCapture(false);
+                setPhotoProductId(null);
+              }
+            }}
+            onRemove={() => {
+              if (photoProductId) {
+                updateProduct(photoProductId, { photo: null });
+                setShowPhotoCapture(false);
+                setPhotoProductId(null);
+              }
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );
 };
 
 export default Index;
+
+
 
 
 

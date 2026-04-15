@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import { obterLoginSalvo } from '@/hooks/useAuth';
 
 export interface ProdutoComprar {
@@ -38,15 +38,21 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [error, setError] = useState<string | null>(null);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
   const [empresa, setEmpresa] = useState<'NEWSHOP' | 'SOYE' | 'FACIL'>(() => getEmpresaAtual());
+  const requestControllerRef = useRef<AbortController | null>(null);
 
   const fetchProdutos = useCallback(async () => {
     const empresaAtual = getEmpresaAtual();
     setEmpresa(empresaAtual);
     setLoading(true);
     setError(null);
+    requestControllerRef.current?.abort();
+    const controller = new AbortController();
+    requestControllerRef.current = controller;
 
     try {
-      const response = await fetch(`/api/clickup-compras-proxy?action=buscar-tasks&empresa=${empresaAtual}`);
+      const response = await fetch(`/api/clickup-compras-proxy?action=buscar-tasks&empresa=${empresaAtual}`, {
+        signal: controller.signal,
+      });
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -59,10 +65,15 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       setProdutos(data.produtos ?? []);
       setUltimaAtualizacao(new Date());
     } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        return;
+      }
       console.error('[useProdutosComprar] Erro ao buscar:', err);
       setError(err.message ?? 'Falha ao carregar produtos');
     } finally {
-      setLoading(false);
+      if (requestControllerRef.current === controller) {
+        setLoading(false);
+      }
     }
   }, []);
 
@@ -70,18 +81,28 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     fetchProdutos();
 
     const intervalId = window.setInterval(() => {
-      fetchProdutos();
+      if (document.visibilityState === 'visible') {
+        fetchProdutos();
+      }
     }, 60000);
 
     const onFocus = () => {
       fetchProdutos();
     };
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        fetchProdutos();
+      }
+    };
 
     window.addEventListener('focus', onFocus);
+    document.addEventListener('visibilitychange', onVisibilityChange);
 
     return () => {
       window.clearInterval(intervalId);
       window.removeEventListener('focus', onFocus);
+      document.removeEventListener('visibilitychange', onVisibilityChange);
+      requestControllerRef.current?.abort();
     };
   }, [fetchProdutos]);
 

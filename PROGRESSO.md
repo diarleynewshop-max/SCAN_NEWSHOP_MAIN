@@ -35,23 +35,54 @@
 - No fluxo de compras, preferir ClickUp + Vercel quando Supabase nao for essencial.
 - Sempre comparar alternativas com `Fortes` e `Fracos`.
 
+### 2026-04-15 (sessao compras proxy)
+
+- Criado `api/clickup-compras-proxy.ts` para separar compras da conferencia.
+- Front de compras migrado para proxy novo em `src/hooks/useProdutosComprar.ts`.
+- Removido realtime de compras no frontend (sem websocket Supabase nessa tela).
+- UI de compras alterada para paginacao de 10 itens e ordenacao com `todo` primeiro.
+- Adicionado fallback para imagem invalida na lista de compras.
+
 ## Em Andamento
 
-- Levantamento do fluxo atual de compras, ClickUp e Trigger.
-- Mapeamento de pontos onde Supabase pode estar sobrando.
+- Estabilizar mudanca de status no ClickUp em compras (acao LIKE/DISLIKE/FAZER_PEDIDO/CONCLUIR).
+- Capturar nomes reais de status da lista de compras por empresa para eliminar tentativa por alias.
 
 ## Proximos Passos
 
-- Validar se o broadcast de compras no Supabase pode ser removido sem perda relevante.
-- Blindar inicializacao do client Supabase no frontend para nao quebrar quando env faltar.
-- Revisar importacao de planilha para gerar task mais consistente.
-- Atualizar documentacao minima do fluxo real do projeto.
+- Logar no backend `availableStatuses` e `attemptedStatuses` quando mover status falhar.
+- Definir mapa fixo de status por empresa/lista para reduzir ambiguidade.
+- Validar nomes de status no ClickUp real (NEWSHOP/SOYE/FACIL).
+- Depois de estabilizar status, commitar e fazer deploy.
 
 ## Bugs / Riscos Abertos
 
 - Risco de erro no frontend se Supabase for instanciado sem env valida.
-- Risco de custo desnecessario com sincronismo via Supabase em compras.
 - Risco de parser fraco e duplicidade na importacao de planilha.
+- Erro ainda reportado na tela de compras ao mover status (400 em `mover-status` em alguns cenarios).
+- Possivel divergencia de nomenclatura de status no workflow de compras do ClickUp.
+
+## Ultima Sessao (resumo rapido)
+
+### 2026-04-15
+
+Feito:
+- Proxy novo de compras criado e integrado no frontend.
+- Realtime de compras removido do frontend.
+- Paginacao (10 por pagina) e ordenacao `todo` primeiro implementadas.
+
+Fortes:
+- Conferencia nao foi alterada.
+- Compras ficou isolado em rota propria.
+
+Fracos:
+- Falha de status ainda existe em ambiente real em alguns cliques.
+
+Decisao:
+- Manter caminho via proxy e fechar com mapeamento de status real da lista.
+
+Proximo passo:
+- Coletar status reais da lista de compras e fixar mapeamento definitivo.
 
 ## Modelo de Atualizacao
 
