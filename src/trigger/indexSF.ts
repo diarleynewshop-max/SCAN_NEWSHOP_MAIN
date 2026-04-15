@@ -222,9 +222,87 @@ async function uploadFotosParalelo(
 }
 
 // ── TASK 1 — Lista baixada (SOYE / FACIL) ────────────────────────────────────
-export const listaBaixadaSF = task({
-  id: "lista-baixada-sf",
-  machine: "medium-2x",
+const MACHINE_CASCADE = ["small-1x", "medium-1x", "medium-2x"] as const;
+type CascadeMachine = (typeof MACHINE_CASCADE)[number];
+
+function isOutOfMemoryLike(error: unknown): boolean {
+  const raw =
+    typeof error === "string"
+      ? error
+      : error instanceof Error
+        ? `${error.name} ${error.message}`
+        : JSON.stringify(error);
+
+  const text = raw.toLowerCase();
+
+  return (
+    text.includes("outofmemory") ||
+    text.includes("out of memory") ||
+    text.includes("heap out of memory") ||
+    text.includes("memory limit") ||
+    text.includes("oom")
+  );
+}
+
+function getErrorMessage(error: unknown): string {
+  if (typeof error === "string") return error;
+  if (error instanceof Error) return error.message;
+
+  try {
+    return JSON.stringify(error);
+  } catch {
+    return String(error);
+  }
+}
+
+async function executarComCascata(
+  taskLabel: string,
+  payload: any,
+  workerTask: {
+    triggerAndWait: (
+      payload: any,
+      options?: { machine?: CascadeMachine; maxAttempts?: number }
+    ) => Promise<{ ok: boolean; output?: unknown; error?: unknown }>;
+  }
+) {
+  let lastError: unknown;
+
+  for (let index = 0; index < MACHINE_CASCADE.length; index++) {
+    const machine = MACHINE_CASCADE[index];
+    const nextMachine = MACHINE_CASCADE[index + 1];
+
+    const result = await workerTask.triggerAndWait(payload, {
+      machine,
+      maxAttempts: 1,
+    });
+
+    if (result.ok) {
+      console.log(`[${taskLabel}] concluida com machine ${machine}`);
+      return result.output;
+    }
+
+    lastError = result.error;
+
+    if (nextMachine && isOutOfMemoryLike(result.error)) {
+      console.warn(
+        `[${taskLabel}] OOM na machine ${machine}. Escalando para ${nextMachine}.`
+      );
+      continue;
+    }
+
+    throw new Error(
+      `[${taskLabel}] falhou na machine ${machine}: ${getErrorMessage(result.error)}`
+    );
+  }
+
+  throw new Error(
+    `[${taskLabel}] falhou em cascata: ${getErrorMessage(lastError)}`
+  );
+}
+
+const listaBaixadaSFWorker = task({
+  id: "lista-baixada-sf-worker",
+  machine: "small-1x",
   maxDuration: 1000,
   run: async (payload: any) => {
     const startTime = Date.now();
@@ -311,10 +389,19 @@ Data: ${dataFormatada}`,
   },
 });
 
+export const listaBaixadaSF = task({
+  id: "lista-baixada-sf",
+  machine: "small-1x",
+  maxDuration: 1200,
+  run: async (payload: any) => {
+    await executarComCascata("TASK 1 SF", payload, listaBaixadaSFWorker);
+  },
+});
+
 // ── TASK 2 — Conferência finalizada (SOYE / FACIL) ────────────────────────────
-export const conferenciaBaixadaSF = task({
-  id: "conferencia-baixada-sf",
-  machine: "medium-2x",
+const conferenciaBaixadaSFWorker = task({
+  id: "conferencia-baixada-sf-worker",
+  machine: "small-1x",
   maxDuration: 1000,
   run: async (payload: any) => {
     const startTime = Date.now();
@@ -512,5 +599,14 @@ Foto: ${index + 1} de ${fotosProcessar.length}`,
         ).catch((e) => console.error("Supabase erro final:", e));
       }
     }
+  },
+});
+
+export const conferenciaBaixadaSF = task({
+  id: "conferencia-baixada-sf",
+  machine: "small-1x",
+  maxDuration: 1200,
+  run: async (payload: any) => {
+    await executarComCascata("TASK 2 SF", payload, conferenciaBaixadaSFWorker);
   },
 });
