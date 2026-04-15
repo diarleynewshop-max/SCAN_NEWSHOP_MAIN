@@ -56,7 +56,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     setError(null);
 
     try {
-      const response = await fetch(`/api/clickup-compras?empresa=${empresaAtual}`);
+      const response = await fetch(`/api/clickup-compras-proxy?action=buscar-tasks&empresa=${empresaAtual}`);
 
       if (!response.ok) {
         const body = await response.json().catch(() => ({}));
@@ -156,7 +156,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     }
 
     try {
-      const response = await fetch('/api/clickup-compras-action', {
+      const response = await fetch('/api/clickup-compras-proxy?action=mover-status', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -172,7 +172,10 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       if (!response.ok) {
         await fetchProdutos();
         const detalhe = data.details ? `: ${data.details}` : '';
-        throw new Error((data.error ?? 'Erro ao executar acao') + detalhe);
+        const statusDisponiveis = Array.isArray(data.availableStatuses) && data.availableStatuses.length > 0
+          ? ` | Status disponiveis: ${data.availableStatuses.join(', ')}`
+          : '';
+        throw new Error((data.error ?? 'Erro ao executar acao') + detalhe + statusDisponiveis);
       }
     } catch (err: any) {
       console.error('[useProdutosComprar] Erro na acao:', err);
