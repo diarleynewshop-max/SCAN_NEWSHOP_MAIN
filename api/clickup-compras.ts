@@ -111,13 +111,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       try {
         const t = task as Record<string, any>;
+        const descricao = extractDescricao(t.name);
+        const codigo = extractCodigo(t.name) || descricao || String(t.id ?? '');
         const produto = {
           id: String(t.id ?? ''),
-          codigo: extractCodigo(t.name),
+          codigo,
           sku: extractSku(t.name),
-          descricao: extractDescricao(t.name),
+          descricao,
           foto: extractFirstImageUrl(t.attachments),
           status: mapTaskStatus(t.status?.status),
+          status_clickup: String(t.status?.status ?? ''),
           date_created: String(t.date_created ?? ''),
         };
 

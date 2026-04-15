@@ -1,11 +1,12 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 import { createClient } from '@supabase/supabase-js';
 import {
+  getClickUpListId,
   getClickUpToken,
   isCompraTransitionAllowed,
   mapActionToStatus,
-  mapAppStatusToClickUp,
   normalizeEmpresa,
+  resolveCompraClickUpStatus,
 } from './_clickup.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -29,6 +30,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const { taskId, acao, empresa, currentStatus } = req.body ?? {};
   const empresaKey = normalizeEmpresa(empresa);
   const token = getClickUpToken(empresaKey);
+  const listId = getClickUpListId(empresaKey, 'compras');
 
   if (!token) {
     return res.status(500).json({ error: 'Token nao configurado', empresa: empresaKey });
@@ -43,7 +45,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (!novoStatusApp) {
     return res.status(400).json({ error: 'Use: LIKE, DISLIKE, FAZER_PEDIDO ou CONCLUIR' });
   }
-  const novoStatus = mapAppStatusToClickUp(novoStatusApp);
 
   const statusAtual = String(currentStatus ?? 'todo').trim().toLowerCase();
   if (!isCompraTransitionAllowed(statusAtual, novoStatusApp)) {
@@ -56,6 +57,42 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
+    const listResponse = await fetch(
+      `https://api.clickup.com/api/v2/list/${listId}`,
+      {
+        headers: { Authorization: token },
+      }
+    );
+
+    if (!listResponse.ok) {
+      const errorText = await listResponse.text();
+      return res.status(400).json({
+        error: 'Nao foi possivel carregar os status da lista de compras',
+        details: errorText,
+        empresa: empresaKey,
+        listId,
+      });
+    }
+
+    const listData = await listResponse.json();
+    const availableStatuses = Array.isArray(listData.statuses)
+      ? listData.statuses
+          .map((status: any) => String(status?.status ?? '').trim())
+          .filter(Boolean)
+      : [];
+
+    const novoStatus = resolveCompraClickUpStatus(novoStatusApp, availableStatuses);
+
+    if (!novoStatus) {
+      return res.status(400).json({
+        error: 'Nenhum status compativel encontrado na lista de compras',
+        requestedStatus: novoStatusApp,
+        availableStatuses,
+        empresa: empresaKey,
+        listId,
+      });
+    }
+
     const response = await fetch(
       `https://api.clickup.com/api/v2/task/${taskId}`,
       {

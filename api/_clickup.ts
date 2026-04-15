@@ -2,6 +2,8 @@ type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
 
 type ListaKey = "compras" | "conferencia";
 
+type CompraStatusApp = "todo" | "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido";
+
 const DEFAULT_LISTS: Record<EmpresaKey, { compras: string; conferencia: string }> = {
   NEWSHOP: {
     compras: "901326684020",
@@ -155,9 +157,34 @@ export function mapTaskStatus(
 ): "todo" | "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido" {
   const value = normalizeClickUpStatus(status);
 
-  if (value === "produto bom") return "produto_bom";
-  if (value === "produto ruim") return "produto_ruim";
-  if (value === "fazer pedido") return "fazer_pedido";
+  if (
+    value === "produto bom" ||
+    value === "like" ||
+    value === "bom" ||
+    value === "aprovado" ||
+    value === "analisado"
+  ) {
+    return "produto_bom";
+  }
+
+  if (
+    value === "produto ruim" ||
+    value === "dislike" ||
+    value === "deslike" ||
+    value === "ruim" ||
+    value === "reprovado"
+  ) {
+    return "produto_ruim";
+  }
+
+  if (
+    value === "fazer pedido" ||
+    value === "pedido" ||
+    value === "comprar"
+  ) {
+    return "fazer_pedido";
+  }
+
   if (value === "concluido" || value === "done" || value === "completed") return "concluido";
 
   return "todo";
@@ -187,6 +214,45 @@ export function mapAppStatusToClickUp(
   if (value === "concluido") return "concluido";
 
   return "to do";
+}
+
+function getCompraStatusAliases(status: CompraStatusApp): string[] {
+  if (status === "produto_bom") {
+    return ["produto bom", "like", "bom", "aprovado", "analisado"];
+  }
+
+  if (status === "produto_ruim") {
+    return ["produto ruim", "dislike", "deslike", "ruim", "reprovado"];
+  }
+
+  if (status === "fazer_pedido") {
+    return ["fazer pedido", "pedido", "comprar"];
+  }
+
+  if (status === "concluido") {
+    return ["concluido", "done", "completed", "comprado"];
+  }
+
+  return ["to do", "todo", "open", "aberto"];
+}
+
+export function resolveCompraClickUpStatus(
+  status: CompraStatusApp,
+  availableStatuses: string[]
+): string | null {
+  const aliases = getCompraStatusAliases(status);
+
+  for (const alias of aliases) {
+    const matched = availableStatuses.find(
+      (candidate) => normalizeClickUpStatus(candidate) === normalizeClickUpStatus(alias)
+    );
+
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return null;
 }
 
 export function isCompraTransitionAllowed(
