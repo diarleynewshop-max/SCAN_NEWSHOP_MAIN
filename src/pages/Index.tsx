@@ -85,7 +85,7 @@ const Index = () => {
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
 
-  const { lists, activeList, closeList, addProduct, updateList, deleteProduct, updateProduct, moveProductToTop } = useInventory();
+  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, moveProductToTop } = useInventory();
   const { productInfo, loading, error, lookupProduct } = useProductLookup();
 
   useEffect(() => {
@@ -134,6 +134,29 @@ const Index = () => {
     if (!window.confirm("Fechar lista atual?")) return;
     closeList();
     toast({ title: "Lista fechada" });
+  };
+
+  const handleOpenList = () => {
+    const login = obterLoginSalvo();
+    if (!login?.tituloPadrao || !login?.nomePessoa) {
+      toast({
+        title: "Configure seu perfil antes",
+        description: "Preencha Nome da lista padrão e Nome da pessoa.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    const ok = openList({
+      title: login.tituloPadrao,
+      person: login.nomePessoa,
+      flag: "loja",
+      empresa: login.empresa,
+    });
+
+    if (ok) {
+      toast({ title: "Lista aberta", description: `${login.tituloPadrao} · ${login.nomePessoa}` });
+    }
   };
 
   const handleAdd = () => {
@@ -264,6 +287,15 @@ const Index = () => {
         {view === "scan" ? (
           <div style={{ display: "flex", flexDirection: modoDesktop ? "row" : "column", gap: modoDesktop ? 24 : 16, alignItems: modoDesktop ? "flex-start" : "stretch" }}>
             <div style={{ flex: modoDesktop ? 1 : "auto", display: "flex", flexDirection: "column", gap: modoDesktop ? 20 : 16 }}>
+              {!activeList && (
+                <button
+                  onClick={handleOpenList}
+                  style={{ ...S.btnPrimary, height: modoDesktop ? 56 : 52, fontSize: modoDesktop ? 15 : 14 }}
+                >
+                  <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Abrir Lista
+                </button>
+              )}
+
               {!activeList && (
                 <div style={{ background: "hsl(var(--destructive) / 0.07)", border: "1px solid hsl(var(--destructive) / 0.15)", borderRadius: 10, padding: modoDesktop ? "16px 20px" : "12px 16px", display: "flex", alignItems: "center", gap: 8 }}>
                   <ClipboardList style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15, color: "hsl(var(--destructive))", flexShrink: 0 }} />

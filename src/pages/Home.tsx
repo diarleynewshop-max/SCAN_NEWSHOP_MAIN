@@ -25,23 +25,23 @@ function getStorageSize(): { kb: number; hasData: boolean; listCount: number; ha
   }
 }
 
-// Menu base (sempre visÃ­vel)
+// Menu base (sempre visível)
 const baseMenuItems = [
-  { Icon: ScanBarcode,  label: "Escanear",    description: "Leia cÃ³digos e registre produtos",    path: "/scanner",                  accent: "hsl(var(--primary))"     },
-  { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histÃ³rico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))"     },
-  { Icon: GitCompare,   label: "ConferÃªncia", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
+  { Icon: ScanBarcode,  label: "Escanear",    description: "Leia códigos e registre produtos",    path: "/scanner",                  accent: "hsl(var(--primary))"     },
+  { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))"     },
+  { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },
-  { Icon: Settings,     label: "ConfiguraÃ§Ã£o", description: "Modo escuro e layout desktop/mobile", path: null, accent: "hsl(var(--indigo))" },
+  { Icon: Settings,     label: "Configuração", description: "Modo escuro e layout desktop/mobile", path: null, accent: "hsl(var(--indigo))" },
 ];
 
 // Menu para compras (compras, admin, super)
 const comprasMenuItems = [
-  { Icon: ShoppingCart, label: "Compras",     description: "GestÃ£o de reposiÃ§Ã£o e itens faltantes", path: "/compras", accent: "hsl(var(--indigo))" },
+  { Icon: ShoppingCart, label: "Compras",     description: "Gestão de reposição e itens faltantes", path: "/compras", accent: "hsl(var(--indigo))" },
 ];
 
 // Menu para analytics (admin, super)
 const analyticsMenuItems = [
-  { Icon: BarChart3,    label: "Analytics",   description: "Dashboard executivo e mÃ©tricas",        path: "/analytics", accent: "hsl(var(--violet))" },
+  { Icon: BarChart3,    label: "Analytics",   description: "Dashboard executivo e métricas",        path: "/analytics", accent: "hsl(var(--violet))" },
 ];
 
 // Componente de card do menu
@@ -66,7 +66,7 @@ const MenuCard: React.FC<MenuCardProps> = ({
       if (path === null) {
         if (label === "Perfil") {
           setMostrarPerfil(true);
-        } else if (label === "ConfiguraÃ§Ã£o") {
+        } else if (label === "Configuração") {
           setMostrarConfiguracoes(true);
         }
       } else {
@@ -152,7 +152,7 @@ const Home = () => {
   const [cleared, setCleared] = useState(false);
   const [mostrarPerfil, setMostrarPerfil] = useState(false);
 
-  // AutenticaÃ§Ã£o
+  // Autenticação
   const { 
     loginSalvo, 
     mostrarModalLogin, 
@@ -161,7 +161,7 @@ const Home = () => {
     fazerLogout
   } = useAuth();
 
-  // Estados para o formulÃ¡rio de login
+  // Estados para o formulário de login
   const [empresa, setEmpresa] = useState<"NEWSHOP" | "SOYE" | "FACIL">("NEWSHOP");
   const [senha, setSenha] = useState("");
   const [tituloPadrao, setTituloPadrao] = useState("");
@@ -170,7 +170,7 @@ const Home = () => {
   const [erroSenha, setErroSenha] = useState(false);
   const [roleDetectado, setRoleDetectado] = useState<string | null>(null); // NOVO: para mostrar role detectado
   
-  // Estados para configuraÃ§Ãµes
+  // Estados para configurações
   const [modoEscuro, setModoEscuro] = useState(() => {
     return localStorage.getItem('modoEscuro') === 'true';
   });
@@ -190,7 +190,7 @@ const Home = () => {
     }
   }, [modoEscuro]);
 
-  // FunÃ§Ãµes para configuraÃ§Ãµes
+  // Funções para configurações
   const toggleModoEscuro = () => {
     const novoModo = !modoEscuro;
     setModoEscuro(novoModo);
@@ -207,7 +207,7 @@ const Home = () => {
     const novoModo = !modoDesktop;
     setModoDesktop(novoModo);
     localStorage.setItem('modoDesktop', novoModo.toString());
-    // Aqui vocÃª pode adicionar lÃ³gica para alternar entre layouts mobile/desktop
+    // Aqui você pode adicionar lógica para alternar entre layouts mobile/desktop
   };
 
   const handleClear = () => {
@@ -261,7 +261,7 @@ const Home = () => {
         <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: "currentColor", opacity: 0.05, pointerEvents: "none" }} />
         <div className={`${modoDesktop ? 'flex items-center justify-between' : ''}`}>
           <div>
-            {/* AQUI ESTÃ A MÃGICA DA LOGO. Ela inverte a cor dependendo do tema! */}
+            {/* AQUI ESTÁ A MÁGICA DA LOGO. Ela inverte a cor dependendo do tema! */}
             <img 
               src={LOGO} 
               alt="Newshop" 
@@ -277,7 +277,7 @@ const Home = () => {
               <div className="px-4 py-2 bg-primary-foreground/10 rounded-lg">
                 <div className="flex items-center gap-2">
                   <User className="h-4 w-4" />
-                  <span className="text-sm font-medium">{loginSalvo.nomePessoa || "UsuÃ¡rio"}</span>
+                  <span className="text-sm font-medium">{loginSalvo.nomePessoa || "Usuário"}</span>
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <Store className="h-3 w-3" />
@@ -304,7 +304,7 @@ const Home = () => {
             </h2>
             {modoDesktop && (
               <p style={{ fontSize: 14, color: "hsl(var(--muted-foreground))", marginTop: 8, maxWidth: "600px" }}>
-                Acesse todas as funcionalidades do sistema de pedidos, conferÃªncia e gestÃ£o de compras em uma interface otimizada para desktop.
+                Acesse todas as funcionalidades do sistema de pedidos, conferência e gestão de compras em uma interface otimizada para desktop.
               </p>
             )}
           </div>
@@ -312,10 +312,10 @@ const Home = () => {
           {modoDesktop && (
             <div className="flex items-center gap-3">
               <div className={`px-3 py-1 rounded-full text-xs font-medium ${modoEscuro ? 'bg-gray-800 text-gray-200' : 'bg-gray-100 text-gray-800'}`}>
-                {modoEscuro ? 'ðŸŒ™ Modo Escuro' : 'â˜€ï¸ Modo Claro'}
+                {modoEscuro ? 'Modo Escuro' : 'Modo Claro'}
               </div>
               <div className="px-3 py-1 bg-blue-100 text-blue-800 rounded-full text-xs font-medium">
-                ðŸ–¥ï¸ Modo Desktop
+                 Modo Desktop
               </div>
             </div>
           )}
@@ -331,7 +331,7 @@ const Home = () => {
           flexWrap: modoDesktop ? "wrap" : "nowrap",
           gap: modoDesktop ? 20 : 12 
         }}>
-          {/* Cards base (sempre visÃ­veis) */}
+          {/* Cards base (sempre visíveis) */}
           {baseMenuItems.map(({ Icon, label, description, path, accent }) => (
             <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
               <MenuCard 
@@ -401,14 +401,14 @@ const Home = () => {
               {storage.hasData ? (
                 <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>
                   <span style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 900 }}>{storage.kb}</span>
-                  <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginLeft: 4 }}>KB Â· {storage.listCount} lista(s) no histÃ³rico</span>
+                  <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginLeft: 4 }}>KB · {storage.listCount} lista(s) no histórico</span>
                 </p>
               ) : (
                 <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Nenhum dado salvo</p>
               )}
               {storage.hasPhotos && (
                 <p style={{ fontSize: 11, color: "hsl(var(--warning))", marginTop: 2, display: "flex", alignItems: "center", gap: 4 }}>
-                  <AlertTriangle style={{ width: 11, height: 11 }} /> ContÃ©m fotos (pesado)
+                  <AlertTriangle style={{ width: 11, height: 11 }} /> Contém fotos (pesado)
                 </p>
               )}
             </div>
@@ -450,7 +450,7 @@ const Home = () => {
             display: "flex", alignItems: "center", gap: 8,
             fontSize: 13, fontWeight: 600, color: "hsl(var(--success))",
           }}>
-            âœ… Cache limpo com sucesso!
+            ✅ Cache limpo com sucesso!
           </div>
         )}
       </div>
@@ -475,7 +475,7 @@ const Home = () => {
           {modoDesktop && (
             <div className="flex items-center gap-6">
               <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
-                VersÃ£o 2.1.0
+                Versão 2.1.0
               </span>
               <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
                 {loginSalvo?.empresa || "NEWSHOP"}
@@ -488,7 +488,7 @@ const Home = () => {
         </div>
       </div>
 
-      {/* â”€â”€ Modal ConfirmaÃ§Ã£o â”€â”€ */}
+      {/* â”€â”€ Modal Confirmação â”€â”€ */}
       {confirmOpen && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setConfirmOpen(false); }}
@@ -499,7 +499,7 @@ const Home = () => {
           }}
         >
           <div style={{
-            background: "hsl(var(--card))", /* ðŸ‘ˆ CORRIGIDO AQUI */
+            background: "hsl(var(--card))",
             width: "100%", maxWidth: 430,
             borderRadius: "20px 20px 0 0", padding: "24px 20px 36px",
             animation: "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
@@ -513,17 +513,17 @@ const Home = () => {
               </div>
               <div>
                 <p style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>Limpar cache?</p>
-                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Esta aÃ§Ã£o nÃ£o pode ser desfeita.</p>
+                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Esta ação não pode ser desfeita.</p>
               </div>
             </div>
 
             <div style={{ background: "hsl(var(--destructive) / 0.06)", border: "1px solid hsl(var(--destructive) / 0.15)", borderRadius: 10, padding: "12px 14px", marginBottom: 20 }}>
               <p style={{ fontSize: 13, color: "hsl(var(--foreground))", lineHeight: 1.6 }}>
-                SerÃ£o apagados: <strong>{storage.listCount} lista(s)</strong> do histÃ³rico e todos os dados salvos no celular (<strong>{storage.kb} KB</strong>).
+                Serão apagados: <strong>{storage.listCount} lista(s)</strong> do histórico e todos os dados salvos no celular (<strong>{storage.kb} KB</strong>).
                 {storage.hasPhotos && <span style={{ color: "hsl(var(--destructive))" }}> Inclui fotos.</span>}
               </p>
               <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 6 }}>
-                âš ï¸ Listas jÃ¡ enviadas ao ClickUp <strong>nÃ£o</strong> serÃ£o afetadas.
+                âš ï¸ Listas já enviadas ao ClickUp <strong>não</strong> serão afetadas.
               </p>
             </div>
 
@@ -577,8 +577,8 @@ const Home = () => {
                 <Store style={{ width: 22, height: 22, color: "hsl(var(--primary))" }} />
               </div>
               <div>
-                <p style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>FaÃ§a seu login</p>
-                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Configure seus dados para comeÃ§ar</p>
+                <p style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>Faça seu login</p>
+                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Configure seus dados para começar</p>
               </div>
             </div>
 
@@ -643,9 +643,9 @@ const Home = () => {
                 )}
               </div>
 
-              {/* TÃ­tulo padrÃ£o */}
+              {/* Título padrão */}
               <div>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Nome de lista padrÃ£o</label>
+                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Nome de lista padrão</label>
                 <input
                   type="text"
                   placeholder="Ex: Utilidade"
@@ -683,7 +683,7 @@ const Home = () => {
                 />
               </div>
 
-              {/* BotÃ£o de login */}
+              {/* Botão de login */}
               <button onClick={handleLogin}
                 data-tut="login-salvar"
                 style={{
@@ -699,7 +699,7 @@ const Home = () => {
               </button>
 
               <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", textAlign: "center", marginTop: 8 }}>
-                Os dados serÃ£o salvos localmente e usados automaticamente ao criar novas listas.
+                Os dados serão salvos localmente e usados automaticamente ao criar novas listas.
               </p>
             </div>
           </div>
@@ -737,7 +737,7 @@ const Home = () => {
               </div>
               <div>
                 <p style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>Seu Perfil</p>
-                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Dados salvos para uso automÃ¡tico</p>
+                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Dados salvos para uso automático</p>
               </div>
             </div>
 
@@ -747,8 +747,8 @@ const Home = () => {
               {loginSalvo ? (
                 <>
                   <div style={{ background: "hsl(var(--success) / 0.08)", border: "1px solid hsl(var(--success) / 0.2)", borderRadius: 10, padding: "14px 16px" }}>
-                    <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--success))", marginBottom: 4 }}>Login configurado âœ…</p>
-                    <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Seus dados estÃ£o salvos e serÃ£o usados automaticamente.</p>
+                    <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--success))", marginBottom: 4 }}>Login configurado ✅</p>
+                    <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Seus dados estão salvos e serão usados automaticamente.</p>
                   </div>
 
                   <div>
@@ -765,7 +765,7 @@ const Home = () => {
                   </div>
 
                   <div>
-                    <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Nome de lista padrÃ£o</label>
+                    <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Nome de lista padrão</label>
                     <div style={{
                       width: "100%", height: 48, padding: "0 16px",
                       borderRadius: 10, border: "1.5px solid hsl(var(--border))",
@@ -773,7 +773,7 @@ const Home = () => {
                       fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
                       display: "flex", alignItems: "center",
                     }}>
-                      {loginSalvo.tituloPadrao || "(nÃ£o definido)"}
+                      {loginSalvo.tituloPadrao || "(não definido)"}
                     </div>
                   </div>
 
@@ -786,7 +786,7 @@ const Home = () => {
                       fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
                       display: "flex", alignItems: "center",
                     }}>
-                      {loginSalvo.nomePessoa || "(nÃ£o definido)"}
+                      {loginSalvo.nomePessoa || "(não definido)"}
                     </div>
                   </div>
 
@@ -822,7 +822,7 @@ const Home = () => {
                     <User style={{ width: 28, height: 28, color: "hsl(var(--muted-foreground))" }} />
                   </div>
                   <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 6 }}>Nenhum login salvo</p>
-                  <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginBottom: 20 }}>Configure seu login para uso automÃ¡tico das listas.</p>
+                  <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginBottom: 20 }}>Configure seu login para uso automático das listas.</p>
                   <button onClick={() => { setMostrarPerfil(false); setMostrarModalLogin(true); }}
                     style={{
                       width: "100%", height: 48, background: "hsl(var(--primary))",
@@ -841,7 +841,7 @@ const Home = () => {
         </div>
       )}
 
-       {/* â”€â”€ Modal de ConfiguraÃ§Ãµes â”€â”€ */}
+       {/* Modal de Configurações */}
       {mostrarConfiguracoes && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setMostrarConfiguracoes(false); }}
@@ -871,8 +871,8 @@ const Home = () => {
                 <Settings style={{ width: 22, height: 22, color: "hsl(var(--primary))" }} />
               </div>
               <div>
-                <p style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>ConfiguraÃ§Ãµes</p>
-                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Personalize sua experiÃªncia no app</p>
+                <p style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700, color: "hsl(var(--foreground))" }}>Configurações</p>
+                <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Personalize sua experiência no app</p>
               </div>
             </div>
 
@@ -907,7 +907,7 @@ const Home = () => {
                   </button>
                 </div>
                 <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
-                  {modoEscuro ? "Tema escuro ativado para melhor visualizaÃ§Ã£o noturna" : "Tema claro ativado para melhor legibilidade diurna"}
+                  {modoEscuro ? "Tema escuro ativado para melhor visualização noturna" : "Tema claro ativado para melhor legibilidade diurna"}
                 </p>
               </div>
 
@@ -920,7 +920,7 @@ const Home = () => {
                     </div>
                     <div>
                       <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))" }}>Modo {modoDesktop ? "Desktop" : "Mobile"}</p>
-                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Otimizar layout para {modoDesktop ? "telas grandes" : "dispositivos mÃ³veis"}</p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Otimizar layout para {modoDesktop ? "telas grandes" : "dispositivos móveis"}</p>
                     </div>
                   </div>
                   <button onClick={toggleModoDesktop}
@@ -966,7 +966,7 @@ const Home = () => {
                      }}
                      onChange={(e) => {
                        const senha = e.target.value;
-                       // Verificar se Ã© senha especial
+                       // Verificar se é senha especial
                        if (senha === 'Compras1148') {
                          setRoleDetectado('compras');
                        } else if (senha === 'Diretoria1148') {
@@ -992,7 +992,7 @@ const Home = () => {
                        Perfil detectado: {roleDetectado.charAt(0).toUpperCase() + roleDetectado.slice(1)}
                      </p>
                      <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
-                       Clique em "Salvar ConfiguraÃ§Ãµes" para aplicar o novo perfil
+                       Clique em "Salvar Configurações" para aplicar o novo perfil
                      </p>
                    </div>
                  )}
@@ -1005,27 +1005,27 @@ const Home = () => {
                     marginTop: 8,
                   }}>
                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", margin: 0, lineHeight: 1.4 }}>
-                      <strong>Perfis disponÃ­veis:</strong> Operador, Compras, Diretoria e Super Admin.<br/>
-                      Consulte a administraÃ§Ã£o para obter as senhas especiais de cada perfil.
+                      <strong>Perfis disponíveis:</strong> Operador, Compras, Diretoria e Super Admin.<br/>
+                      Consulte a administração para obter as senhas especiais de cada perfil.
                     </p>
                   </div>
                </div>
 
-               {/* InformaÃ§Ãµes do Sistema */}
+               {/* Informações do Sistema */}
                <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
-                 <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 8 }}>InformaÃ§Ãµes do Sistema</p>
+                 <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 8 }}>Informações do Sistema</p>
                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
                    <div>
-                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>VersÃ£o</p>
+                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Versão</p>
                      <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>2.1.0</p>
                    </div>
                    <div>
                      <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Empresa</p>
-                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.empresa || "NÃ£o configurado"}</p>
+                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.empresa || "Não configurado"}</p>
                    </div>
                    <div>
                      <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Perfil Atual</p>
-                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.role ? loginSalvo.role.charAt(0).toUpperCase() + loginSalvo.role.slice(1) : "NÃ£o logado"}</p>
+                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.role ? loginSalvo.role.charAt(0).toUpperCase() + loginSalvo.role.slice(1) : "Não logado"}</p>
                    </div>
                    <div>
                      <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Interface</p>
@@ -1034,7 +1034,7 @@ const Home = () => {
                  </div>
                </div>
 
-               {/* BotÃµes de aÃ§Ã£o */}
+               {/* Botões de ação */}
                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
                  <button onClick={() => { 
                    // Aplicar novo perfil se detectado
@@ -1045,12 +1045,12 @@ const Home = () => {
                         role: roleDetectado as 'operador' | 'compras' | 'admin' | 'super'
                       };
                       localStorage.setItem("scan_newshop_login", JSON.stringify(novoLogin));
-                      // Atualizar estado (jÃ¡ feito no localStorage)
+                      // Atualizar estado (já feito no localStorage)
                       setRoleDetectado(null);
                       perfilAlterado = true;
                     }
                    setMostrarConfiguracoes(false);
-                   // Se o perfil foi alterado, recarregar a pÃ¡gina para atualizar abas
+                   // Se o perfil foi alterado, recarregar a página para atualizar abas
                    if (perfilAlterado) {
                      setTimeout(() => {
                        window.location.reload();
@@ -1065,7 +1065,7 @@ const Home = () => {
                      justifyContent: "center", gap: 8,
                    }}
                  >
-                   <Settings style={{ width: 18, height: 18 }} /> Salvar ConfiguraÃ§Ãµes
+                   <Settings style={{ width: 18, height: 18 }} /> Salvar Configurações
                  </button>
 
                 <button onClick={() => { 
@@ -1084,12 +1084,12 @@ const Home = () => {
                     justifyContent: "center", gap: 8,
                   }}
                 >
-                  <Trash2 style={{ width: 18, height: 18 }} /> Restaurar PadrÃµes
+                  <Trash2 style={{ width: 18, height: 18 }} /> Restaurar Padrões
                 </button>
               </div>
 
               <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", textAlign: "center", marginTop: 8 }}>
-                As configuraÃ§Ãµes sÃ£o salvas automaticamente no seu dispositivo.
+                As configurações são salvas automaticamente no seu dispositivo.
               </p>
             </div>
           </div>
@@ -1100,4 +1100,5 @@ const Home = () => {
 };
 
 export default Home;
+
 
