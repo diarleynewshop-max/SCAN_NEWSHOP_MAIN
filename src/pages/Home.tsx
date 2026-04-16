@@ -880,8 +880,10 @@ const Home = () => {
             padding: modoDesktop ? "32px" : "24px 20px 36px",
             animation: modoDesktop ? "fadeIn 0.28s ease" : "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
             margin: modoDesktop ? "auto" : "0",
-            maxHeight: modoDesktop ? "90vh" : "auto",
-            overflowY: modoDesktop ? "auto" : "visible",
+            maxHeight: modoDesktop ? "90vh" : "92vh",
+            overflowY: "auto",
+            overscrollBehavior: "contain",
+            WebkitOverflowScrolling: "touch",
           }}>
             {!modoDesktop && <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 20px" }} />}
 
