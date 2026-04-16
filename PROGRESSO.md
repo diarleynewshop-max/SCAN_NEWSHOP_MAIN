@@ -106,3 +106,30 @@ Decisao:
 Proximo passo:
 - 
 ```
+
+## Ultima Sessao (2026-04-16)
+
+Feito:
+- Implementado `Modo Leve` por dispositivo na HOME.
+- `Modo Leve` agora reduz animacao/sombra/transicao e comprime foto antes de salvar.
+- Scanner sem lookup (Supabase/API) quando `Modo Leve` esta ativo.
+- Bloqueio por empresa no scanner: `SOYE` e `FACIL` nao consultam Supabase/API.
+- Bloqueio por empresa na aba Lista: analise de estoque desativada para `SOYE` e `FACIL`.
+- Corrigido bug de tela branca na aba Lista (runtime crash por import faltando de `AlertTriangle`).
+- Corrigido modal de Configuracao na HOME com scroll vertical no mobile.
+
+Fortes:
+- Menos carga em celular fraco sem quebrar fluxo principal de lista local + ClickUp.
+- Regra de empresa ficou explicita no frontend para evitar custo indevido.
+- Correcao de tela branca foi pequena e direta.
+
+Fracos:
+- Sem lookup de produto em `SOYE/FACIL` e no `Modo Leve` (menos conveniencia para operador).
+- Foto comprimida ainda pode pesar se usuario insistir em muitas fotos.
+- Regra de bloqueio esta no frontend; backend ainda pode precisar reforco se houver rotas equivalentes.
+
+Decisao:
+- Manter caminho simples: reduzir custo/complexidade primeiro, preservar operacao principal, e endurecer regras por empresa no cliente.
+
+Proximo passo:
+- Revisar se existe alguma chamada Supabase/API restante em outras telas para `SOYE/FACIL` (ex: Compras/Analytics) e alinhar regra.
