@@ -121,3 +121,21 @@ body {
 @keyframes spin {
   to { transform: rotate(360deg); }
 }
+
+html.light-mode *,
+html.light-mode *::before,
+html.light-mode *::after {
+  animation-duration: 0s !important;
+  animation-delay: 0s !important;
+  transition: none !important;
+  box-shadow: none !important;
+}
+
+html.light-mode body {
+  text-rendering: optimizeSpeed;
+}
+
+html.light-mode [style*="backdropFilter"],
+html.light-mode [style*="backdrop-filter"] {
+  backdrop-filter: none !important;
+}

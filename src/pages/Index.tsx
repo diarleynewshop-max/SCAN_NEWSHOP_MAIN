@@ -7,6 +7,7 @@ import ProductCard from "@/components/ProductCard";
 import { useInventory } from "@/hooks/useInventory";
 import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
+import { getLightModeEnabled } from "@/lib/lightMode";
 
 const LOGO = "/newshop-logo.jpg";
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
@@ -84,9 +85,10 @@ const Index = () => {
   const [photoProductId, setPhotoProductId] = useState<string | null>(null);
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
+  const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, moveProductToTop } = useInventory();
-  const { productInfo, loading, error, lookupProduct } = useProductLookup();
+  const { productInfo, loading, error, lookupProduct } = useProductLookup({ enabled: !modoLeve });
 
   useEffect(() => {
     sessionStorage.setItem("scan_barcode", barcode);
@@ -107,11 +109,17 @@ const Index = () => {
   useEffect(() => {
     const handleStorageChange = () => {
       setModoDesktop(localStorage.getItem("modoDesktop") === "true");
+      setModoLeve(getLightModeEnabled());
     };
 
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
+
+  useEffect(() => {
+    if (!modoLeve) return;
+    setShowProductInfo(false);
+  }, [modoLeve]);
 
   useEffect(() => {
     if (!productInfo) return;
@@ -123,10 +131,11 @@ const Index = () => {
     (code: string) => {
       setShowScanner(false);
       setBarcode(code);
+      if (modoLeve) return;
       setShowProductInfo(true);
       lookupProduct(code);
     },
-    [lookupProduct]
+    [lookupProduct, modoLeve]
   );
 
   const handleCloseList = () => {
@@ -303,7 +312,16 @@ const Index = () => {
                 </div>
               )}
 
-              {showProductInfo && (
+              {modoLeve && (
+                <div style={{ background: "hsl(var(--warning) / 0.10)", border: "1px solid hsl(var(--warning) / 0.22)", borderRadius: 10, padding: modoDesktop ? "14px 18px" : "11px 14px", display: "flex", alignItems: "center", gap: 8 }}>
+                  <AlertCircle style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15, color: "hsl(var(--warning))", flexShrink: 0 }} />
+                  <p style={{ fontSize: modoDesktop ? 13 : 12, color: "hsl(var(--foreground))", fontWeight: 500 }}>
+                    Modo Leve ativo: sem consulta de produto e com foto comprimida.
+                  </p>
+                </div>
+              )}
+
+              {showProductInfo && !modoLeve && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <h3 style={{ fontWeight: 700, fontSize: 16 }}>Informacoes do Produto</h3>
@@ -344,6 +362,7 @@ const Index = () => {
                   onScanPress={() => setShowScanner(true)}
                   onEnterPress={() => {
                     if (!barcode.trim()) return;
+                    if (modoLeve) return;
                     setShowProductInfo(true);
                     lookupProduct(barcode.trim());
                   }}
@@ -358,7 +377,12 @@ const Index = () => {
               <div>
                 <label style={S.label}>Foto do Produto</label>
                 <div data-tut="scanner-foto">
-                  <PhotoCapture photo={photo} onCapture={setPhoto} onRemove={() => setPhoto(null)} />
+                  <PhotoCapture
+                    photo={photo}
+                    onCapture={setPhoto}
+                    onRemove={() => setPhoto(null)}
+                    compressionPreset={modoLeve ? "light" : "default"}
+                  />
                 </div>
               </div>
 
@@ -424,7 +448,13 @@ const Index = () => {
           </div>
         ) : view === "list" ? (
           <Suspense fallback={LAZY_FALLBACK}>
-            <ListHistory lists={lists} onUpdateList={updateList} onStartConference={() => setView("conference")} modoDesktop={modoDesktop} />
+            <ListHistory
+              lists={lists}
+              onUpdateList={updateList}
+              onStartConference={() => setView("conference")}
+              modoDesktop={modoDesktop}
+              modoLeve={modoLeve}
+            />
           </Suspense>
         ) : (
           <Suspense fallback={LAZY_FALLBACK}>
@@ -443,6 +473,7 @@ const Index = () => {
         <Suspense fallback={LAZY_FALLBACK}>
           <PhotoCapture
             photo={activeList?.products.find((p) => p.id === photoProductId)?.photo || null}
+            compressionPreset={modoLeve ? "light" : "default"}
             onCapture={(nextPhoto) => {
               if (!photoProductId) return;
               updateProduct(photoProductId, { photo: nextPhoto });

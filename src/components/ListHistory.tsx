@@ -22,6 +22,7 @@ interface ListHistoryProps {
   onUpdateList: (list: ListData) => void;
   onStartConference: () => void;
   modoDesktop?: boolean;
+  modoLeve?: boolean;
 }
 
 const S_INPUT = {
@@ -43,7 +44,7 @@ const STATUS_LEFT: Record<string, string> = {
   yellow: "hsl(var(--warning))",
 };
 
-const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = false }: ListHistoryProps) => {
+const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = false, modoLeve = false }: ListHistoryProps) => {
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -534,18 +535,21 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
             <div style={{ padding: "6px 16px 14px 20px" }}>
               <button
                 onClick={() => analisarEstoque(list)}
-                disabled={isAnalisando}
+                disabled={isAnalisando || modoLeve}
                 style={{
                   width: "100%", height: 40, borderRadius: 10, fontSize: 13, fontWeight: 700,
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  cursor: isAnalisando ? "wait" : "pointer",
-                  background: "hsl(var(--secondary))",
-                  color: "hsl(var(--foreground))",
-                  border: "1.5px solid hsl(var(--border))",
+                  cursor: modoLeve ? "not-allowed" : isAnalisando ? "wait" : "pointer",
+                  opacity: modoLeve ? 0.65 : 1,
+                  background: modoLeve ? "hsl(var(--muted))" : "hsl(var(--secondary))",
+                  color: modoLeve ? "hsl(var(--muted-foreground))" : "hsl(var(--foreground))",
+                  border: modoLeve ? "1.5px dashed hsl(var(--border))" : "1.5px solid hsl(var(--border))",
                   transition: "all 0.2s",
                 }}
               >
-                {isAnalisando ? (
+                {modoLeve ? (
+                  <><AlertTriangle style={{ width: 15, height: 15 }} /> Modo Leve: análise desativada</>
+                ) : isAnalisando ? (
                   <><span style={{ width: 14, height: 14, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Buscando no Banco...</>
                 ) : (
                   <><Database style={{ width: 15, height: 15 }} /> Analisar Estoque do Sistema</>

@@ -3,6 +3,7 @@ import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, Eye
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
+import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
 
 const LOGO = "/newshop-logo.jpg";
 
@@ -31,7 +32,7 @@ const baseMenuItems = [
   { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))"     },
   { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },
-  { Icon: Settings,     label: "Configuração", description: "Modo escuro e layout desktop/mobile", path: null, accent: "hsl(var(--indigo))" },
+  { Icon: Settings,     label: "Configuração", description: "Tema, layout e Modo Leve", path: null, accent: "hsl(var(--indigo))" },
 ];
 
 // Menu para compras (compras, admin, super)
@@ -177,6 +178,7 @@ const Home = () => {
   const [modoDesktop, setModoDesktop] = useState(() => {
     return localStorage.getItem('modoDesktop') === 'true';
   });
+  const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
   const [mostrarConfiguracoes, setMostrarConfiguracoes] = useState(false);
 
   useEffect(() => { setStorage(getStorageSize()); }, []);
@@ -189,6 +191,17 @@ const Home = () => {
       document.documentElement.classList.remove('dark');
     }
   }, [modoEscuro]);
+
+  useEffect(() => {
+    const onStorage = (event: StorageEvent) => {
+      if (event.key === "modoEscuro") setModoEscuro(localStorage.getItem("modoEscuro") === "true");
+      if (event.key === "modoDesktop") setModoDesktop(localStorage.getItem("modoDesktop") === "true");
+      if (event.key === "scan_newshop_light_mode") setModoLeve(getLightModeEnabled());
+    };
+
+    window.addEventListener("storage", onStorage);
+    return () => window.removeEventListener("storage", onStorage);
+  }, []);
 
   // Funções para configurações
   const toggleModoEscuro = () => {
@@ -208,6 +221,12 @@ const Home = () => {
     setModoDesktop(novoModo);
     localStorage.setItem('modoDesktop', novoModo.toString());
     // Aqui você pode adicionar lógica para alternar entre layouts mobile/desktop
+  };
+
+  const toggleModoLeve = () => {
+    const novoModo = !modoLeve;
+    setModoLeve(novoModo);
+    setLightModeEnabled(novoModo);
   };
 
   const handleClear = () => {
@@ -944,6 +963,41 @@ const Home = () => {
                 </p>
               </div>
 
+              {/* Modo Leve */}
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <Smartphone style={{ width: 18, height: 18, color: "hsl(var(--primary))" }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))" }}>Modo Leve {modoLeve ? "Ativo" : "Inativo"}</p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Menos carga para celular fraco</p>
+                    </div>
+                  </div>
+                  <button onClick={toggleModoLeve}
+                    style={{
+                      width: 52, height: 28, borderRadius: 14,
+                      background: modoLeve ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                      border: "none", cursor: "pointer", position: "relative",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <div style={{
+                      position: "absolute", top: 2, left: modoLeve ? 26 : 2,
+                      width: 24, height: 24, borderRadius: "50%",
+                      background: "white", transition: "left 0.2s",
+                      boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                    }} />
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
+                  {modoLeve
+                    ? "Supabase no scanner e analise de estoque ficam desligados; foto salva comprimida e animacoes reduzidas."
+                    : "Quando ativado, corta consultas pesadas e reduz efeitos visuais para melhorar desempenho."}
+                </p>
+              </div>
+
                {/* Alterar Perfil */}
                <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
                  <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 12 }}>Alterar Perfil</p>
@@ -1027,12 +1081,12 @@ const Home = () => {
                      <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Perfil Atual</p>
                      <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{loginSalvo?.role ? loginSalvo.role.charAt(0).toUpperCase() + loginSalvo.role.slice(1) : "Não logado"}</p>
                    </div>
-                   <div>
-                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Interface</p>
-                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{modoDesktop ? "Desktop" : "Mobile"}</p>
-                   </div>
-                 </div>
-               </div>
+                    <div>
+                      <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Interface</p>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{modoDesktop ? "Desktop" : "Mobile"}{modoLeve ? " · Leve" : ""}</p>
+                    </div>
+                  </div>
+                </div>
 
                {/* Botões de ação */}
                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
@@ -1071,8 +1125,10 @@ const Home = () => {
                 <button onClick={() => { 
                   setModoEscuro(false); 
                   setModoDesktop(false); 
+                  setModoLeve(false);
                   localStorage.removeItem('modoEscuro');
                   localStorage.removeItem('modoDesktop');
+                  setLightModeEnabled(false);
                   document.documentElement.classList.remove('dark');
                   setMostrarConfiguracoes(false); 
                 }}

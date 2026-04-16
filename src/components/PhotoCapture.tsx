@@ -1,20 +1,74 @@
 import { Camera, X, Upload } from "lucide-react";
 
+type CompressionPreset = "default" | "light";
+
 interface PhotoCaptureProps {
   photo: string | null;
   onCapture: (photo: string) => void;
   onRemove: () => void;
+  compressionPreset?: CompressionPreset;
 }
 
-const PhotoCapture = ({ photo, onCapture, onRemove }: PhotoCaptureProps) => {
-  const handleFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+function readAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(reader.result as string);
+    reader.onerror = () => reject(new Error("Falha ao ler imagem"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = () => reject(new Error("Falha ao carregar imagem"));
+    img.src = dataUrl;
+  });
+}
+
+async function compressForLightMode(file: File): Promise<string> {
+  const original = await readAsDataUrl(file);
+  const image = await loadImage(original);
+
+  const maxEdge = 1280;
+  const currentMaxEdge = Math.max(image.width, image.height);
+  const scale = currentMaxEdge > maxEdge ? maxEdge / currentMaxEdge : 1;
+
+  const targetWidth = Math.max(1, Math.round(image.width * scale));
+  const targetHeight = Math.max(1, Math.round(image.height * scale));
+
+  const canvas = document.createElement("canvas");
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return original;
+
+  ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+  return canvas.toDataURL("image/jpeg", 0.55);
+}
+
+const PhotoCapture = ({ photo, onCapture, onRemove, compressionPreset = "default" }: PhotoCaptureProps) => {
+  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) {
-      const reader = new FileReader();
-      reader.onloadend = () => onCapture(reader.result as string);
-      reader.readAsDataURL(file);
+    if (!file) {
+      e.target.value = "";
+      return;
     }
-    e.target.value = "";
+
+    try {
+      const nextPhoto = compressionPreset === "light"
+        ? await compressForLightMode(file)
+        : await readAsDataUrl(file);
+      onCapture(nextPhoto);
+    } catch {
+      // Fallback para nao bloquear fluxo em aparelho antigo
+      const fallback = await readAsDataUrl(file);
+      onCapture(fallback);
+    } finally {
+      e.target.value = "";
+    }
   };
 
   if (photo) {
@@ -42,8 +96,6 @@ const PhotoCapture = ({ photo, onCapture, onRemove }: PhotoCaptureProps) => {
       </p>
 
       <div style={{ display: "flex", gap: 12, width: "100%" }}>
-
-        {/* Tirar foto — label direto no input, único jeito confiável no Safari iOS */}
         <label style={{ flex: 1, display: "block", cursor: "pointer" }}>
           <input
             type="file"
@@ -64,7 +116,6 @@ const PhotoCapture = ({ photo, onCapture, onRemove }: PhotoCaptureProps) => {
           </span>
         </label>
 
-        {/* Galeria — label direto no input sem capture */}
         <label style={{ flex: 1, display: "block", cursor: "pointer" }}>
           <input
             type="file"
@@ -83,7 +134,6 @@ const PhotoCapture = ({ photo, onCapture, onRemove }: PhotoCaptureProps) => {
             <span style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--foreground))" }}>Da galeria</span>
           </span>
         </label>
-
       </div>
     </div>
   );
