@@ -66,11 +66,17 @@ const S = {
   } as React.CSSProperties,
 };
 
+function isEmpresaSemConsulta(empresa?: string | null): boolean {
+  const normalizada = (empresa ?? "").toUpperCase();
+  return normalizada.includes("SOYE") || normalizada.includes("FACIL");
+}
+
 const Index = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab");
+  const currentLogin = obterLoginSalvo();
 
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
   const [sku, setSku] = useState(() => sessionStorage.getItem("scan_sku") ?? "");
@@ -86,9 +92,10 @@ const Index = () => {
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
+  const consultaBloqueadaPorEmpresa = isEmpresaSemConsulta(currentLogin?.empresa);
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, moveProductToTop } = useInventory();
-  const { productInfo, loading, error, lookupProduct } = useProductLookup({ enabled: !modoLeve });
+  const { productInfo, loading, error, lookupProduct } = useProductLookup({ enabled: !modoLeve && !consultaBloqueadaPorEmpresa });
 
   useEffect(() => {
     sessionStorage.setItem("scan_barcode", barcode);
@@ -122,6 +129,11 @@ const Index = () => {
   }, [modoLeve]);
 
   useEffect(() => {
+    if (!consultaBloqueadaPorEmpresa) return;
+    setShowProductInfo(false);
+  }, [consultaBloqueadaPorEmpresa]);
+
+  useEffect(() => {
     if (!productInfo) return;
     const descricao = productInfo.descricao || productInfo.nome_produto;
     if (descricao) setSku(descricao);
@@ -131,11 +143,15 @@ const Index = () => {
     (code: string) => {
       setShowScanner(false);
       setBarcode(code);
+      if (consultaBloqueadaPorEmpresa) {
+        toast({ title: "Consulta bloqueada", description: "Empresa SOYE/FACIL nao consulta Supabase/API." });
+        return;
+      }
       if (modoLeve) return;
       setShowProductInfo(true);
       lookupProduct(code);
     },
-    [lookupProduct, modoLeve]
+    [lookupProduct, modoLeve, consultaBloqueadaPorEmpresa, toast]
   );
 
   const handleCloseList = () => {
@@ -183,7 +199,6 @@ const Index = () => {
   };
 
   const productCount = activeList?.products.length ?? 0;
-  const currentLogin = obterLoginSalvo();
 
   const handleTabChange = (key: "scan" | "list" | "conference" | "compras") => {
     if (key === "compras") {
@@ -312,16 +327,18 @@ const Index = () => {
                 </div>
               )}
 
-              {modoLeve && (
+              {(modoLeve || consultaBloqueadaPorEmpresa) && (
                 <div style={{ background: "hsl(var(--warning) / 0.10)", border: "1px solid hsl(var(--warning) / 0.22)", borderRadius: 10, padding: modoDesktop ? "14px 18px" : "11px 14px", display: "flex", alignItems: "center", gap: 8 }}>
                   <AlertCircle style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15, color: "hsl(var(--warning))", flexShrink: 0 }} />
                   <p style={{ fontSize: modoDesktop ? 13 : 12, color: "hsl(var(--foreground))", fontWeight: 500 }}>
-                    Modo Leve ativo: sem consulta de produto e com foto comprimida.
+                    {consultaBloqueadaPorEmpresa
+                      ? "Empresa SOYE/FACIL: consulta de produto desativada."
+                      : "Modo Leve ativo: sem consulta de produto e com foto comprimida."}
                   </p>
                 </div>
               )}
 
-              {showProductInfo && !modoLeve && (
+              {showProductInfo && !modoLeve && !consultaBloqueadaPorEmpresa && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <h3 style={{ fontWeight: 700, fontSize: 16 }}>Informacoes do Produto</h3>
@@ -362,7 +379,12 @@ const Index = () => {
                   onScanPress={() => setShowScanner(true)}
                   onEnterPress={() => {
                     if (!barcode.trim()) return;
-                    if (modoLeve) return;
+                    if (modoLeve || consultaBloqueadaPorEmpresa) {
+                      if (consultaBloqueadaPorEmpresa) {
+                        toast({ title: "Consulta bloqueada", description: "Empresa SOYE/FACIL nao consulta Supabase/API." });
+                      }
+                      return;
+                    }
                     setShowProductInfo(true);
                     lookupProduct(barcode.trim());
                   }}

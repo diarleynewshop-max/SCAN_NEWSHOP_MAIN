@@ -44,6 +44,11 @@ const STATUS_LEFT: Record<string, string> = {
   yellow: "hsl(var(--warning))",
 };
 
+function isEmpresaSemConsulta(empresa?: string | null): boolean {
+  const normalizada = (empresa ?? "").toUpperCase();
+  return normalizada.includes("SOYE") || normalizada.includes("FACIL");
+}
+
 const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = false, modoLeve = false }: ListHistoryProps) => {
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -76,6 +81,11 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
 
   // ✅ Função de Análise do Supabase
   const analisarEstoque = async (list: ListData) => {
+    if (isEmpresaSemConsulta(list.empresa)) {
+      toast({ title: "Consulta bloqueada", description: "SOYE/FACIL nao consultam Supabase/API." });
+      return;
+    }
+
     setAnalisandoId(list.id);
     try {
       const codigosParaBuscar = list.products.map(p => p.barcode);
@@ -363,6 +373,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     }}>
       {sortedLists.map((list) => {
         const isAnalisando = analisandoId === list.id;
+        const consultaBloqueadaEmpresa = isEmpresaSemConsulta(list.empresa);
          return (
           <div key={list.id} style={{ 
             background: "hsl(var(--card))", 
@@ -535,19 +546,21 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
             <div style={{ padding: "6px 16px 14px 20px" }}>
               <button
                 onClick={() => analisarEstoque(list)}
-                disabled={isAnalisando || modoLeve}
+                disabled={isAnalisando || modoLeve || consultaBloqueadaEmpresa}
                 style={{
                   width: "100%", height: 40, borderRadius: 10, fontSize: 13, fontWeight: 700,
                   display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                  cursor: modoLeve ? "not-allowed" : isAnalisando ? "wait" : "pointer",
-                  opacity: modoLeve ? 0.65 : 1,
-                  background: modoLeve ? "hsl(var(--muted))" : "hsl(var(--secondary))",
-                  color: modoLeve ? "hsl(var(--muted-foreground))" : "hsl(var(--foreground))",
-                  border: modoLeve ? "1.5px dashed hsl(var(--border))" : "1.5px solid hsl(var(--border))",
+                  cursor: (modoLeve || consultaBloqueadaEmpresa) ? "not-allowed" : isAnalisando ? "wait" : "pointer",
+                  opacity: (modoLeve || consultaBloqueadaEmpresa) ? 0.65 : 1,
+                  background: (modoLeve || consultaBloqueadaEmpresa) ? "hsl(var(--muted))" : "hsl(var(--secondary))",
+                  color: (modoLeve || consultaBloqueadaEmpresa) ? "hsl(var(--muted-foreground))" : "hsl(var(--foreground))",
+                  border: (modoLeve || consultaBloqueadaEmpresa) ? "1.5px dashed hsl(var(--border))" : "1.5px solid hsl(var(--border))",
                   transition: "all 0.2s",
                 }}
               >
-                {modoLeve ? (
+                {consultaBloqueadaEmpresa ? (
+                  <><AlertTriangle style={{ width: 15, height: 15 }} /> SOYE/FACIL: consulta bloqueada</>
+                ) : modoLeve ? (
                   <><AlertTriangle style={{ width: 15, height: 15 }} /> Modo Leve: análise desativada</>
                 ) : isAnalisando ? (
                   <><span style={{ width: 14, height: 14, border: "2px solid currentColor", borderTopColor: "transparent", borderRadius: "50%", display: "inline-block", animation: "spin 0.7s linear infinite" }} /> Buscando no Banco...</>
