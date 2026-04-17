@@ -1,139 +1,284 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Camera, X, ScanBarcode, Upload } from "lucide-react";
+import { Camera, X, ScanBarcode, Upload, Loader2 } from "lucide-react";
 
 interface BarcodeScannerProps {
   onDetected: (code: string) => void;
   onClose: () => void;
 }
 
-const hasBarcodeDetector = typeof window !== "undefined" && "BarcodeDetector" in window;
+const NATIVE_BARCODE_FORMATS = [
+  "ean_13",
+  "ean_8",
+  "upc_a",
+  "upc_e",
+  "code_128",
+  "code_39",
+  "code_93",
+  "itf",
+  "qr_code",
+] as const;
+
+type NativeBarcode = {
+  rawValue?: string;
+};
+
+type NativeBarcodeDetector = {
+  detect: (source: CanvasImageSource) => Promise<NativeBarcode[]>;
+};
+
+type NativeBarcodeDetectorConstructor = new (options?: {
+  formats?: readonly string[];
+}) => NativeBarcodeDetector;
+
+function getNativeBarcodeDetector(): NativeBarcodeDetectorConstructor | null {
+  if (typeof window === "undefined" || !("BarcodeDetector" in window)) {
+    return null;
+  }
+
+  return (window as Window & { BarcodeDetector: NativeBarcodeDetectorConstructor }).BarcodeDetector;
+}
+
+const hasNativeBarcodeDetector = Boolean(getNativeBarcodeDetector());
+
+async function detectWithNativeBarcodeDetector(source: CanvasImageSource): Promise<string | null> {
+  const BarcodeDetectorClass = getNativeBarcodeDetector();
+  if (!BarcodeDetectorClass) return null;
+
+  try {
+    const detector = new BarcodeDetectorClass({ formats: NATIVE_BARCODE_FORMATS });
+    const barcodes = await detector.detect(source);
+    const detected = barcodes.find((barcode) => typeof barcode.rawValue === "string" && barcode.rawValue.trim());
+    return detected?.rawValue?.trim() ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function detectWithZxing(image: HTMLImageElement): Promise<string | null> {
+  const {
+    BarcodeFormat,
+    BrowserMultiFormatReader,
+    DecodeHintType,
+  } = await import("@zxing/library");
+
+  const hints = new Map();
+  hints.set(DecodeHintType.POSSIBLE_FORMATS, [
+    BarcodeFormat.EAN_13,
+    BarcodeFormat.EAN_8,
+    BarcodeFormat.UPC_A,
+    BarcodeFormat.UPC_E,
+    BarcodeFormat.CODE_128,
+    BarcodeFormat.CODE_39,
+    BarcodeFormat.CODE_93,
+    BarcodeFormat.ITF,
+    BarcodeFormat.QR_CODE,
+  ]);
+  hints.set(DecodeHintType.TRY_HARDER, true);
+
+  const reader = new BrowserMultiFormatReader(hints, 300);
+
+  try {
+    const result = await reader.decodeFromImageElement(image);
+    const value = result.getText().trim();
+    return value || null;
+  } catch {
+    return null;
+  } finally {
+    reader.reset();
+  }
+}
+
+function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {
+  return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
+    const image = new Image();
+
+    image.onload = () => resolve({ image, objectUrl });
+    image.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Falha ao carregar imagem"));
+    };
+    image.src = objectUrl;
+  });
+}
 
 const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const animFrameRef = useRef<number | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [useFileMode, setUseFileMode] = useState(!hasBarcodeDetector);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const cameraInputRef = useRef<HTMLInputElement>(null);
+  const galleryInputRef = useRef<HTMLInputElement>(null);
   const detectedRef = useRef(false);
 
+  const [error, setError] = useState<string | null>(null);
+  const [processing, setProcessing] = useState(false);
+
+  const useFileMode = !hasNativeBarcodeDetector;
+
   const cleanup = useCallback(() => {
-    if (animFrameRef.current) cancelAnimationFrame(animFrameRef.current);
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+
     if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
     }
   }, []);
 
-  // Video stream mode (Android/Desktop with BarcodeDetector)
   useEffect(() => {
     if (useFileMode) return;
+
     let cancelled = false;
+    detectedRef.current = false;
 
     const start = async () => {
       try {
         const stream = await navigator.mediaDevices.getUserMedia({
-          video: { facingMode: "environment", width: { ideal: 1280 }, height: { ideal: 720 } },
+          video: {
+            facingMode: "environment",
+            width: { ideal: 1280 },
+            height: { ideal: 720 },
+          },
         });
-        if (cancelled) { stream.getTracks().forEach((t) => t.stop()); return; }
+
+        if (cancelled) {
+          stream.getTracks().forEach((track) => track.stop());
+          return;
+        }
+
         streamRef.current = stream;
+
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
         }
 
-        // @ts-ignore - BarcodeDetector exists on supported browsers
-        const detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "code_93", "itf", "qr_code"] });
-
         const scan = async () => {
           if (cancelled || detectedRef.current || !videoRef.current) return;
-          try {
-            const barcodes = await detector.detect(videoRef.current);
-            if (barcodes.length > 0 && !detectedRef.current) {
-              detectedRef.current = true;
-              cleanup();
-              onDetected(barcodes[0].rawValue);
-              return;
-            }
-          } catch {}
+
+          const code = await detectWithNativeBarcodeDetector(videoRef.current);
+          if (code && !detectedRef.current) {
+            detectedRef.current = true;
+            cleanup();
+            onDetected(code);
+            return;
+          }
+
           animFrameRef.current = requestAnimationFrame(scan);
         };
+
         scan();
       } catch {
-        if (!cancelled) setError("Não foi possível acessar a câmera. Verifique as permissões.");
+        if (!cancelled) {
+          setError("Nao foi possivel acessar a camera. Verifique as permissoes.");
+        }
       }
     };
 
     start();
-    return () => { cancelled = true; cleanup(); };
-  }, [useFileMode, onDetected, cleanup]);
 
-  // File/image mode (iOS Safari fallback)
+    return () => {
+      cancelled = true;
+      cleanup();
+    };
+  }, [cleanup, onDetected, useFileMode]);
+
   const handleFileCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
+    e.target.value = "";
     if (!file) return;
 
-    const img = new Image();
-    img.onload = async () => {
-      const canvas = canvasRef.current;
-      if (!canvas) return;
-      canvas.width = img.width;
-      canvas.height = img.height;
-      const ctx = canvas.getContext("2d");
-      if (!ctx) return;
-      ctx.drawImage(img, 0, 0);
+    setError(null);
+    setProcessing(true);
 
-      if (hasBarcodeDetector) {
-        try {
-          // @ts-ignore
-          const detector = new BarcodeDetector({ formats: ["ean_13", "ean_8", "upc_a", "upc_e", "code_128", "code_39", "code_93", "itf", "qr_code"] });
-          const barcodes = await detector.detect(canvas);
-          if (barcodes.length > 0) {
-            onDetected(barcodes[0].rawValue);
-            return;
+    try {
+      const { image, objectUrl } = await loadImageFromFile(file);
+
+      try {
+        const canvas = canvasRef.current;
+        if (canvas) {
+          canvas.width = image.naturalWidth || image.width;
+          canvas.height = image.naturalHeight || image.height;
+
+          const ctx = canvas.getContext("2d");
+          if (ctx) {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            ctx.drawImage(image, 0, 0);
           }
-        } catch {}
+        }
+
+        const nativeCode = canvas ? await detectWithNativeBarcodeDetector(canvas) : null;
+        const fallbackCode = nativeCode || await detectWithZxing(image);
+
+        if (fallbackCode) {
+          onDetected(fallbackCode);
+          return;
+        }
+
+        setError("Nenhum codigo de barras foi identificado. Tente novamente com uma foto mais nitida e o codigo ocupando mais espaco.");
+      } finally {
+        URL.revokeObjectURL(objectUrl);
       }
-      setError("Nenhum código encontrado na imagem. Tente novamente com uma foto mais nítida.");
-    };
-    img.src = URL.createObjectURL(file);
-    e.target.value = "";
+    } catch {
+      setError("Nao foi possivel ler a imagem. Tente novamente.");
+    } finally {
+      setProcessing(false);
+    }
+  };
+
+  const handleClose = () => {
+    cleanup();
+    onClose();
+  };
+
+  const handleRetry = () => {
+    setError(null);
+
+    if (useFileMode) {
+      cameraInputRef.current?.click();
+    }
   };
 
   return (
     <div className="fixed inset-0 z-50 bg-foreground/90 flex flex-col">
-      {/* Header */}
       <div className="flex items-center justify-between px-4 py-3">
         <div className="flex items-center gap-2 text-primary-foreground">
           <ScanBarcode className="w-5 h-5" />
           <span className="font-semibold text-sm">
-            {useFileMode ? "Capturar código" : "Escaneando..."}
+            {useFileMode ? "Capturar codigo" : "Escaneando..."}
           </span>
         </div>
+
         <button
-          onClick={() => { cleanup(); onClose(); }}
+          onClick={handleClose}
           className="w-9 h-9 rounded-full bg-card/20 flex items-center justify-center"
         >
           <X className="w-5 h-5 text-primary-foreground" />
         </button>
       </div>
 
-      {/* Content */}
       <div className="flex-1 flex items-center justify-center px-4">
         <div className="w-full max-w-sm">
-          {error ? (
+          {processing ? (
+            <div className="text-center text-primary-foreground bg-card/20 rounded-xl p-5">
+              <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3" />
+              <p className="font-medium">Lendo codigo da imagem...</p>
+            </div>
+          ) : error ? (
             <div className="text-center text-destructive-foreground bg-destructive/80 rounded-xl p-4">
               <p className="font-medium">{error}</p>
               <div className="flex gap-2 mt-3 justify-center">
                 <button
-                  onClick={() => { setError(null); if (useFileMode) fileInputRef.current?.click(); }}
+                  onClick={handleRetry}
                   className="px-4 py-2 bg-card text-foreground rounded-lg text-sm font-semibold"
                 >
                   Tentar novamente
                 </button>
                 <button
-                  onClick={() => { cleanup(); onClose(); }}
+                  onClick={handleClose}
                   className="px-4 py-2 bg-card text-foreground rounded-lg text-sm font-semibold"
                 >
                   Fechar
@@ -145,15 +290,18 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
               <div className="w-20 h-20 rounded-full bg-card/20 flex items-center justify-center mx-auto">
                 <Camera className="w-10 h-10 text-primary-foreground" />
               </div>
+
               <p className="text-primary-foreground font-semibold">
-                Tire uma foto do código de barras
+                Tire uma foto do codigo de barras
               </p>
+
               <p className="text-primary-foreground/70 text-sm">
-                A câmera do seu dispositivo será aberta para capturar a imagem
+                No iPhone, o codigo sera lido direto da imagem capturada
               </p>
-              {/* Câmera — label direto no input, único jeito confiável no Safari iOS */}
+
               <label style={{ display: "block", width: "100%" }}>
                 <input
+                  ref={cameraInputRef}
                   type="file"
                   accept="image/*"
                   capture="environment"
@@ -164,13 +312,13 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
                   className="w-full h-14 bg-primary text-primary-foreground rounded-xl font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg"
                   style={{ cursor: "pointer" }}
                 >
-                  <Camera className="w-5 h-5" /> Abrir Câmera
+                  <Camera className="w-5 h-5" /> Abrir Camera
                 </span>
               </label>
 
-              {/* Galeria — label direto no input sem capture */}
               <label style={{ display: "block", width: "100%" }}>
                 <input
+                  ref={galleryInputRef}
                   type="file"
                   accept="image/*"
                   onChange={handleFileCapture}
@@ -189,16 +337,17 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
               <div className="rounded-2xl overflow-hidden">
                 <video ref={videoRef} className="w-full rounded-2xl" playsInline muted />
               </div>
-              {/* Botão galeria visível mesmo na câmera ao vivo */}
+
               <input
-                ref={fileInputRef}
+                ref={galleryInputRef}
                 type="file"
                 accept="image/*"
                 onChange={handleFileCapture}
                 className="hidden"
               />
+
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={() => galleryInputRef.current?.click()}
                 className="w-full h-11 bg-card/20 text-primary-foreground rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform border border-white/20"
               >
                 <Upload className="w-4 h-4" /> Escolher da Galeria
@@ -208,12 +357,11 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
         </div>
       </div>
 
-      {/* Hint */}
       <div className="pb-8 pt-4 text-center">
         <p className="text-primary-foreground/70 text-sm">
           {useFileMode
-            ? "Posicione o código de barras no centro da foto"
-            : "Aponte a câmera para o código de barras"}
+            ? "Aproxime bem o codigo e evite sombras na foto"
+            : "Aponte a camera para o codigo de barras"}
         </p>
       </div>
 
@@ -223,4 +371,3 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
 };
 
 export default BarcodeScanner;
-
