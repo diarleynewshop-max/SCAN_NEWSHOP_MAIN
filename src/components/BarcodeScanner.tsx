@@ -18,6 +18,18 @@ const NATIVE_BARCODE_FORMATS = [
   "qr_code",
 ] as const;
 
+const ZXING_MAX_PHOTO_EDGE = 2200;
+
+const PHOTO_SCAN_VARIANTS = [
+  { x: 0, y: 0, width: 1, height: 1, rotate: 0 },
+  { x: 0.04, y: 0.18, width: 0.92, height: 0.64, rotate: 0 },
+  { x: 0.08, y: 0.28, width: 0.84, height: 0.44, rotate: 0 },
+  { x: 0, y: 0, width: 1, height: 1, rotate: 90 },
+  { x: 0.04, y: 0.18, width: 0.92, height: 0.64, rotate: 90 },
+  { x: 0.08, y: 0.28, width: 0.84, height: 0.44, rotate: 90 },
+  { x: 0, y: 0, width: 1, height: 1, rotate: -90 },
+] as const;
+
 type NativeBarcode = {
   rawValue?: string;
 };
@@ -54,11 +66,65 @@ async function detectWithNativeBarcodeDetector(source: CanvasImageSource): Promi
   }
 }
 
-async function detectWithZxing(image: HTMLImageElement): Promise<string | null> {
+function clampBetweenZeroAndOne(value: number): number {
+  return Math.min(1, Math.max(0, value));
+}
+
+function createCanvasVariant(
+  image: HTMLImageElement,
+  variant: (typeof PHOTO_SCAN_VARIANTS)[number]
+): HTMLCanvasElement {
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+
+  const cropX = Math.round(clampBetweenZeroAndOne(variant.x) * sourceWidth);
+  const cropY = Math.round(clampBetweenZeroAndOne(variant.y) * sourceHeight);
+  const cropWidth = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.width) * sourceWidth));
+  const cropHeight = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.height) * sourceHeight));
+
+  const safeCropWidth = Math.min(cropWidth, sourceWidth - cropX);
+  const safeCropHeight = Math.min(cropHeight, sourceHeight - cropY);
+  const scale = Math.min(1, ZXING_MAX_PHOTO_EDGE / Math.max(safeCropWidth, safeCropHeight));
+  const targetWidth = Math.max(1, Math.round(safeCropWidth * scale));
+  const targetHeight = Math.max(1, Math.round(safeCropHeight * scale));
+
+  const canvas = document.createElement("canvas");
+  const isQuarterTurn = Math.abs(variant.rotate) === 90;
+
+  canvas.width = isQuarterTurn ? targetHeight : targetWidth;
+  canvas.height = isQuarterTurn ? targetWidth : targetHeight;
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) {
+    throw new Error("Falha ao preparar leitura da imagem");
+  }
+
+  ctx.translate(canvas.width / 2, canvas.height / 2);
+  ctx.rotate((variant.rotate * Math.PI) / 180);
+  ctx.drawImage(
+    image,
+    cropX,
+    cropY,
+    safeCropWidth,
+    safeCropHeight,
+    -targetWidth / 2,
+    -targetHeight / 2,
+    targetWidth,
+    targetHeight
+  );
+
+  return canvas;
+}
+
+async function decodeCanvasWithZxing(canvas: HTMLCanvasElement): Promise<string | null> {
   const {
     BarcodeFormat,
-    BrowserMultiFormatReader,
+    BinaryBitmap,
     DecodeHintType,
+    GlobalHistogramBinarizer,
+    HTMLCanvasElementLuminanceSource,
+    HybridBinarizer,
+    MultiFormatReader,
   } = await import("@zxing/library");
 
   const hints = new Map();
@@ -75,17 +141,45 @@ async function detectWithZxing(image: HTMLImageElement): Promise<string | null> 
   ]);
   hints.set(DecodeHintType.TRY_HARDER, true);
 
-  const reader = new BrowserMultiFormatReader(hints, 300);
+  const attempts = [
+    () => new BinaryBitmap(new HybridBinarizer(new HTMLCanvasElementLuminanceSource(canvas))),
+    () => new BinaryBitmap(new GlobalHistogramBinarizer(new HTMLCanvasElementLuminanceSource(canvas))),
+    () => new BinaryBitmap(new HybridBinarizer(new HTMLCanvasElementLuminanceSource(canvas, true))),
+    () => new BinaryBitmap(new GlobalHistogramBinarizer(new HTMLCanvasElementLuminanceSource(canvas, true))),
+  ];
 
-  try {
-    const result = await reader.decodeFromImageElement(image);
-    const value = result.getText().trim();
-    return value || null;
-  } catch {
-    return null;
-  } finally {
-    reader.reset();
+  for (const createBitmap of attempts) {
+    try {
+      const reader = new MultiFormatReader();
+      const result = reader.decode(createBitmap(), hints);
+      const value = result.getText().trim();
+      if (value) {
+        return value;
+      }
+    } catch {
+      continue;
+    }
   }
+
+  return null;
+}
+
+async function detectWithZxing(image: HTMLImageElement): Promise<string | null> {
+  for (const variant of PHOTO_SCAN_VARIANTS) {
+    const canvas = createCanvasVariant(image, variant);
+
+    try {
+      const code = await decodeCanvasWithZxing(canvas);
+      if (code) {
+        return code;
+      }
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
+
+  return null;
 }
 
 function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {
