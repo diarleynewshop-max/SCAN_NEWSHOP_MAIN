@@ -222,6 +222,50 @@ async function uploadFotosParalelo(
 }
 
 // ── TASK 1 — Lista baixada (SOYE / FACIL) ────────────────────────────────────
+async function criarTarefasComprasIndividuaisSF(
+  itens: any[],
+  payload: any,
+  dataFormatada: string,
+  isCD: boolean,
+  statusMap: Record<string, string>
+): Promise<string | null> {
+  let primeiraTaskId: string | null = null;
+
+  for (const item of itens) {
+    const taskId = await criarTarefaClickUp(
+      CLICKUP_TODO_LIST_ID_SF,
+      `ðŸ›’ ${item.codigo} â€” ${payload.empresa} â€” ${payload.conferente} â€” ${dataFormatada}`,
+      `RelatÃ³rio gerado automaticamente apÃ³s conferÃªncia.
+
+Empresa: ${payload.empresa ?? "SOYE"}
+Tipo: ${isCD ? "CD" : "LOJA"}
+Conferente: ${payload.conferente}
+Data: ${dataFormatada}
+Status: ${statusMap[item.status] ?? item.status}
+Codigo: ${item.codigo}
+SKU: ${item.sku || "-"}
+Pedido: ${item.quantidadePedida}
+Real: ${item.quantidadeReal ?? 0}
+
+Foto anexada abaixo (se houver)`,
+      "to do"
+    );
+
+    if (!primeiraTaskId) {
+      primeiraTaskId = taskId;
+    }
+
+    if (item.photo && item.photo.length > 0) {
+      const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+      const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
+      await anexarFotoNaTarefa(taskId, item.photo, filename);
+    }
+  }
+
+  console.log(`Tarefas individuais de COMPRAS SF criadas: ${itens.length}`);
+  return primeiraTaskId;
+}
+
 const TASK_MACHINE_CASCADE = ["micro", "small-1x", "medium-1x"] as const;
 type CascadeMachine =
   | (typeof TASK_MACHINE_CASCADE)[number];
@@ -448,7 +492,7 @@ const conferenciaBaixadaSFWorker = task({
       }
 
       const itensNaoTem = (payload.itens || []).filter(
-        (i: any) => i.status === "nao_tem"
+        (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
       );
 
       const listaFaltantes = itensNaoTem
@@ -519,9 +563,26 @@ ${listaFaltantes || "Nenhum item faltante."}
       console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
       console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
 
-      const itensComFotoIndividuais = itensNaoTem.filter(
-        (i: any) => i.photo && i.photo.length > 0
-      );
+      if (todoTaskId) {
+        await deletarTarefaClickUp(todoTaskId);
+        todoTaskId = null;
+      }
+
+      if (itensNaoTem.length > 0) {
+        todoTaskId = await criarTarefasComprasIndividuaisSF(
+          itensNaoTem,
+          payload,
+          dataFormatada,
+          isCD,
+          statusMap
+        );
+      } else {
+        console.log("Nenhum item negativo/parcial para gerar task de compras.");
+      }
+
+      return;
+
+      const itensComFotoIndividuais = itensNaoTem;
 
       if (itensComFotoIndividuais.length > 0) {
         if (todoTaskId) {
@@ -529,7 +590,7 @@ ${listaFaltantes || "Nenhum item faltante."}
           todoTaskId = null;
         }
 
-        const MAX_FOTOS_INDIVIDUAIS = 10;
+        const MAX_FOTOS_INDIVIDUAIS = itensComFotoIndividuais.length;
         const fotosProcessar = itensComFotoIndividuais.slice(0, MAX_FOTOS_INDIVIDUAIS);
 
         if (itensComFotoIndividuais.length > MAX_FOTOS_INDIVIDUAIS) {

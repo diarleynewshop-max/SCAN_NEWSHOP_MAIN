@@ -200,6 +200,53 @@ async function uploadFotosParalelo(
   console.log("Todas as fotos anexadas!");
 }
 
+async function criarTarefasComprasIndividuais(
+  itens: any[],
+  payload: any,
+  dataFormatada: string,
+  isCD: boolean,
+  statusMap: Record<string, string>
+): Promise<string | null> {
+  let primeiraTaskId: string | null = null;
+
+  for (const item of itens) {
+    const taskId = await criarTarefaClickUp(
+      CLICKUP_TODO_LIST_ID,
+      `🛒 ${item.codigo} — ${payload.conferente} — ${dataFormatada}`,
+      `Relatório gerado automaticamente após conferência.
+
+📋 INFORMAÇÕES
+Empresa: ${payload.empresa ?? "NEWSHOP"}
+Tipo: ${isCD ? "CD" : "LOJA"}
+Conferente: ${payload.conferente}
+Data: ${dataFormatada}
+
+🛒 ITEM FALTANTE
+Status: ${statusMap[item.status] ?? item.status}
+Código: ${item.codigo}
+SKU: ${item.sku || "-"}
+Pedido: ${item.quantidadePedida}
+Real: ${item.quantidadeReal ?? 0}
+
+📸 Foto anexada abaixo (se houver)`,
+      "to do"
+    );
+
+    if (!primeiraTaskId) {
+      primeiraTaskId = taskId;
+    }
+
+    if (item.photo && item.photo.length > 0) {
+      const ext = item.photo.includes("data:image/png") ? "png" : "jpg";
+      const filename = `${item.status}_${item.codigo}_${item.sku || "sem-sku"}.${ext}`;
+      await anexarFotoNaTarefa(taskId, item.photo, filename);
+    }
+  }
+
+  console.log(`Tarefas individuais de COMPRAS criadas: ${itens.length}`);
+  return primeiraTaskId;
+}
+
 export const listaBaixada = task({
   id: "lista-baixada",
   machine: "small-1x",
@@ -361,18 +408,10 @@ export const conferenciaBaixada = task({
         (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
       );
 
-      const listaFaltantes = itensNaoTem
-        .map(
-          (item: any, idx: number) =>
-            `${idx + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? 0} | ${statusMap[item.status] ?? item.status}`
-        )
-        .join("\n");
-
-      const [conferenciId, comprasId] = await Promise.all([
-        criarTarefaClickUp(
-          listId,
-          `✅ ${payload.conferente} — ${dataFormatada}`,
-          `Conferente: ${payload.conferente}
+      tarefaOriginalId = await criarTarefaClickUp(
+        listId,
+        `✅ ${payload.conferente} — ${dataFormatada}`,
+        `Conferente: ${payload.conferente}
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Data: ${dataFormatada}
@@ -387,54 +426,21 @@ Total: ${payload.totalItens} item(ns)
 
 📦 ITENS
 ${itensTexto}`,
-          "complete"
-        ),
-        criarTarefaClickUp(
-          CLICKUP_TODO_LIST_ID,
-          `🛒 Compras: ${payload.conferente} — ${dataFormatada}`,
-          `Relatório gerado automaticamente após conferência.
-
-📋 INFORMAÇÕES
-Empresa: ${payload.empresa ?? "NEWSHOP"}
-Tipo: ${isCD ? "CD" : "LOJA"}
-Conferente: ${payload.conferente}
-Data: ${dataFormatada}
-Total itens conferidos: ${payload.totalItens}
-
-📊 RESUMO
-✅ Separado: ${payload.resumo?.separado ?? 0}
-❌ Não tem: ${payload.resumo?.naoTem ?? 0}
-⚠️ Parcial: ${payload.resumo?.parcial ?? 0}
-⏳ Pendente: ${payload.resumo?.pendente ?? 0}
-
-🛒 ITENS FALTANTES (${itensNaoTem.length})
-${listaFaltantes || "Nenhum item faltante."}
-
-📸 Fotos anexadas abaixo (se houver)`,
-          "to do"
-        ),
-      ]);
-
-      tarefaOriginalId = conferenciId;
-      todoTaskId = comprasId;
-
-      console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
-      console.log(`Tarefa de COMPRAS criada: ${todoTaskId}`);
-
-      const itensComFoto = (payload.itens || []).filter(
-        (i: any) =>
-          i.photo &&
-          i.photo.length > 0 &&
-          (i.status === "nao_tem" || i.status === "nao_tem_tudo")
+        "complete"
       );
 
-      if (itensComFoto.length > 0) {
-        await uploadFotosParalelo(
-          todoTaskId,
-          itensComFoto,
-          10,
-          (item) => item.status
+      console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
+
+      if (itensNaoTem.length > 0) {
+        todoTaskId = await criarTarefasComprasIndividuais(
+          itensNaoTem,
+          payload,
+          dataFormatada,
+          isCD,
+          statusMap
         );
+      } else {
+        console.log("Nenhum item negativo/parcial para gerar task de compras.");
       }
     } catch (err) {
       console.error("Erro na TASK 2 (conferencia-baixada):", err);
