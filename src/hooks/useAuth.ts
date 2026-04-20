@@ -22,6 +22,12 @@ const SENHAS_OPERADOR: Record<Empresa, string> = {
   "FACIL": "2461"
 };
 
+const SENHAS_CD: Record<Empresa, string> = {
+  "NEWSHOP": "n91",
+  "SOYE": "s91",
+  "FACIL": "f91"
+};
+
 // Senhas especiais para perfis avançados (todas NEWSHOP por enquanto)
 const SENHAS_ESPECIAIS: Record<string, { role: UserRole; empresa: Empresa }> = {
   'Compras1148': { role: 'compras', empresa: 'NEWSHOP' },
@@ -31,7 +37,7 @@ const SENHAS_ESPECIAIS: Record<string, { role: UserRole; empresa: Empresa }> = {
 };
 
 // Validação de senha e detecção de role
-export function validarSenha(empresa: Empresa, senhaDigitada: string): { valido: boolean; role: UserRole } {
+export function validarSenha(empresa: Empresa, senhaDigitada: string, flag: LoginFlag = 'loja'): { valido: boolean; role: UserRole } {
   // Primeiro verifica se é senha especial
   const senhaEspecial = SENHAS_ESPECIAIS[senhaDigitada];
   if (senhaEspecial) {
@@ -43,7 +49,8 @@ export function validarSenha(empresa: Empresa, senhaDigitada: string): { valido:
   }
   
   // Depois verifica se é senha de operador normal
-  const valido = SENHAS_OPERADOR[empresa] === senhaDigitada;
+  const senhaEsperada = flag === 'cd' ? SENHAS_CD[empresa] : SENHAS_OPERADOR[empresa];
+  const valido = senhaEsperada === senhaDigitada;
   return { valido, role: 'operador' };
 }
 
@@ -103,7 +110,7 @@ export function useAuth() {
   }, [loginSalvo]);
 
   const fazerLogin = (data: LoginData): boolean => {
-    const { valido, role } = validarSenha(data.empresa, data.senha);
+    const { valido, role } = validarSenha(data.empresa, data.senha, data.flag);
     if (!valido) {
       return false;
     }

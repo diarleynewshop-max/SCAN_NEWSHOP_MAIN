@@ -274,7 +274,7 @@ const Home = () => {
     }
     
     // Primeiro valida a senha para detectar o role
-    const { valido, role } = validarSenha(empresa, senha);
+    const { valido, role } = validarSenha(empresa, senha, flag);
     
     if (!valido) {
       setErroSenha(true);
@@ -698,7 +698,7 @@ const Home = () => {
                   <div style={{ position: "relative", flex: 1 }}>
                     <input
                       type={mostrarSenha ? "text" : "password"}
-                      inputMode="numeric"
+                      inputMode={flag === "cd" ? "text" : "numeric"}
                       placeholder="Digite a senha"
                       data-tut="login-senha"
                       value={senha}
