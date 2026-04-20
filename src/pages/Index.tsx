@@ -200,24 +200,27 @@ const Index = () => {
 
   const handleOpenList = () => {
     const login = obterLoginSalvo();
-    if (!login?.tituloPadrao || !login?.nomePessoa) {
+    const isCD = login?.flag === "cd";
+    const titulo = isCD ? "CD" : login?.tituloPadrao?.trim();
+
+    if (!login?.nomePessoa || (!isCD && !titulo)) {
       toast({
         title: "Configure seu perfil antes",
-        description: "Preencha Nome da lista padrão e Nome da pessoa.",
+        description: isCD ? "Preencha o nome da pessoa." : "Preencha a secao e o nome da pessoa.",
         variant: "destructive",
       });
       return;
     }
 
     const ok = openList({
-      title: login.tituloPadrao,
+      title: titulo || "CD",
       person: login.nomePessoa,
-      flag: "loja",
+      flag: isCD ? "cd" : "loja",
       empresa: login.empresa,
     });
 
     if (ok) {
-      toast({ title: "Lista aberta", description: `${login.tituloPadrao} · ${login.nomePessoa}` });
+      toast({ title: "Lista aberta", description: `${titulo || "CD"} · ${login.nomePessoa}` });
     }
   };
 

@@ -12,7 +12,7 @@ type TourStep = {
 
 const TOUR_STEPS_BY_ROUTE: Record<string, TourStep[]> = {
   "/": [
-    { id: "login-empresa", target: "[data-tut='login-empresa']", title: "Selecione a Loja", content: "Escolha NEWSHOP, SOYE ou FACIL", placement: "bottom" },
+    { id: "login-empresa", target: "[data-tut='login-empresa']", title: "Selecione empresa", content: "Escolha a empresa e depois o perfil LOJA ou CD.", placement: "bottom" },
   ],
   "/scanner": [
     { id: "scanner-abrir", target: "[data-tut='abrir-lista']", title: "Abrir Lista", content: "Clique para criar uma lista", placement: "bottom" },

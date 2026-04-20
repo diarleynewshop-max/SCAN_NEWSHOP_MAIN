@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 
 type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
+export type LoginFlag = "loja" | "cd";
 export type UserRole = 'operador' | 'compras' | 'admin' | 'super';
 
 export interface LoginData {
@@ -8,6 +9,7 @@ export interface LoginData {
   senha: string; // senha digitada (não armazenar a correta)
   tituloPadrao: string;
   nomePessoa: string;
+  flag: LoginFlag;
   role: UserRole; // NOVO: perfil do usuário
 }
 
@@ -62,12 +64,20 @@ export function obterLoginSalvo(): Omit<LoginData, 'senha'> | null {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
     const dados = JSON.parse(raw);
-    
+
     // Backward compatibility: se não tiver role, assume 'operador'
     if (!dados.role) {
       dados.role = 'operador';
     }
-    
+
+    if (!dados.flag) {
+      dados.flag = 'loja';
+    }
+
+    if (dados.flag === 'cd' && !dados.tituloPadrao) {
+      dados.tituloPadrao = 'CD';
+    }
+
     return dados;
   } catch {
     return null;
@@ -97,14 +107,27 @@ export function useAuth() {
     if (!valido) {
       return false;
     }
-    
+
+    const flag = data.flag ?? 'loja';
+    const nomePessoa = data.nomePessoa.trim();
+    const tituloPadrao = flag === 'cd' ? 'CD' : data.tituloPadrao.trim();
+
+    if (!nomePessoa) {
+      return false;
+    }
+
+    if (flag === 'loja' && !tituloPadrao) {
+      return false;
+    }
+
     // Adiciona o role detectado aos dados de login
-    const dadosComRole = { ...data, role };
+    const dadosComRole = { ...data, role, flag, nomePessoa, tituloPadrao };
     salvarLogin(dadosComRole);
     setLoginSalvo({ 
       empresa: data.empresa, 
-      tituloPadrao: data.tituloPadrao, 
-      nomePessoa: data.nomePessoa,
+      tituloPadrao,
+      nomePessoa,
+      flag,
       role
     });
     setMostrarModalLogin(false);

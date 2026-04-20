@@ -1,9 +1,10 @@
 ﻿import { useNavigate } from "react-router-dom";
 import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone } from "lucide-react";
 import { useState, useEffect } from "react";
-import { useAuth, validarSenha } from "@/hooks/useAuth";
+import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
+import { useToast } from "@/hooks/use-toast";
 
 const LOGO = "/newshop-logo.jpg";
 
@@ -148,6 +149,7 @@ const MenuCard: React.FC<MenuCardProps> = ({
 
 const Home = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [storage, setStorage] = useState(getStorageSize());
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [cleared, setCleared] = useState(false);
@@ -164,6 +166,7 @@ const Home = () => {
 
   // Estados para o formulário de login
   const [empresa, setEmpresa] = useState<"NEWSHOP" | "SOYE" | "FACIL">("NEWSHOP");
+  const [flag, setFlag] = useState<LoginFlag>("loja");
   const [senha, setSenha] = useState("");
   const [tituloPadrao, setTituloPadrao] = useState("");
   const [nomePessoa, setNomePessoa] = useState("");
@@ -202,6 +205,19 @@ const Home = () => {
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
   }, []);
+
+  useEffect(() => {
+    if (!mostrarModalLogin) return;
+
+    setEmpresa(loginSalvo?.empresa ?? "NEWSHOP");
+    setFlag(loginSalvo?.flag ?? "loja");
+    setTituloPadrao(loginSalvo?.flag === "cd" ? "" : (loginSalvo?.tituloPadrao ?? ""));
+    setNomePessoa(loginSalvo?.nomePessoa ?? "");
+    setSenha("");
+    setMostrarSenha(false);
+    setErroSenha(false);
+    setRoleDetectado(null);
+  }, [mostrarModalLogin, loginSalvo]);
 
   // Funções para configurações
   const toggleModoEscuro = () => {
@@ -244,6 +260,18 @@ const Home = () => {
       setRoleDetectado(null);
       return;
     }
+
+    if (!nomePessoa.trim()) {
+      toast({ title: "Informe o nome", variant: "destructive" });
+      setRoleDetectado(null);
+      return;
+    }
+
+    if (flag === "loja" && !tituloPadrao.trim()) {
+      toast({ title: "Informe a secao", variant: "destructive" });
+      setRoleDetectado(null);
+      return;
+    }
     
     // Primeiro valida a senha para detectar o role
     const { valido, role } = validarSenha(empresa, senha);
@@ -260,8 +288,9 @@ const Home = () => {
     // Faz o login
     const sucesso = fazerLogin({
       empresa,
+      flag,
       senha,
-      tituloPadrao: tituloPadrao.trim(),
+      tituloPadrao: flag === "cd" ? "CD" : tituloPadrao.trim(),
       nomePessoa: nomePessoa.trim(),
       role
     });
@@ -269,7 +298,10 @@ const Home = () => {
     if (!sucesso) {
       setErroSenha(true);
       setRoleDetectado(null);
+      return;
     }
+
+    setRoleDetectado(null);
   };
 
   return (
@@ -300,7 +332,9 @@ const Home = () => {
                 </div>
                 <div className="flex items-center gap-2 mt-1">
                   <Store className="h-3 w-3" />
-                  <span className="text-xs opacity-80">{loginSalvo.empresa}</span>
+                  <span className="text-xs opacity-80">
+                    {loginSalvo.empresa} · {(loginSalvo.flag ?? "loja").toUpperCase()}
+                  </span>
                   <span className="text-xs px-2 py-0.5 bg-primary-foreground/20 rounded">
                     {loginSalvo.role ? loginSalvo.role.charAt(0).toUpperCase() + loginSalvo.role.slice(1) : "Operador"}
                   </span>
@@ -608,7 +642,7 @@ const Home = () => {
                 <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Empresa</label>
                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                   {(["NEWSHOP", "SOYE", "FACIL"] as const).map((emp) => (
-                    <button key={emp} onClick={() => setEmpresa(emp)}
+                    <button key={emp} onClick={() => { setEmpresa(emp); setErroSenha(false); setRoleDetectado(null); }}
                       style={{
                         height: 46, borderRadius: 12, fontWeight: 700, fontSize: 13,
                         display: "flex", alignItems: "center", justifyContent: "center",
@@ -625,9 +659,41 @@ const Home = () => {
                 </div>
               </div>
 
+              <div>
+                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Perfil</label>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                  {([
+                    { value: "loja", label: "LOJA" },
+                    { value: "cd", label: "CD" },
+                  ] as const).map((option) => (
+                    <button
+                      key={option.value}
+                      onClick={() => { setFlag(option.value); setErroSenha(false); setRoleDetectado(null); }}
+                      style={{
+                        height: 46,
+                        borderRadius: 12,
+                        fontWeight: 700,
+                        fontSize: 13,
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        cursor: "pointer",
+                        transition: "all 0.18s",
+                        background: flag === option.value ? "hsl(var(--foreground))" : "hsl(var(--secondary))",
+                        color: flag === option.value ? "hsl(var(--background))" : "hsl(var(--foreground))",
+                        border: flag === option.value ? "2px solid hsl(var(--foreground))" : "2px solid hsl(var(--border))",
+                        letterSpacing: "0.04em",
+                      }}
+                    >
+                      {option.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Senha */}
               <div>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Senha â€” {empresa}</label>
+                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Senha - {empresa} · {flag.toUpperCase()}</label>
                 <div style={{ display: "flex", gap: 8 }}>
                   <div style={{ position: "relative", flex: 1 }}>
                     <input
@@ -662,25 +728,26 @@ const Home = () => {
                 )}
               </div>
 
-              {/* Título padrão */}
-              <div>
-                <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Nome de lista padrão</label>
-                <input
-                  type="text"
-                  placeholder="Ex: Utilidade"
-                  data-tut="login-lista"
-                  value={tituloPadrao}
-                  onChange={(e) => setTituloPadrao(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleLogin()}
-                  style={{
-                    width: "100%", height: 48, padding: "0 16px",
-                    borderRadius: 10, border: "1.5px solid hsl(var(--border))",
-                    background: "hsl(var(--secondary))", color: "hsl(var(--foreground))",
-                    fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
-                    outline: "none", boxSizing: "border-box",
-                  }}
-                />
-              </div>
+              {flag === "loja" && (
+                <div>
+                  <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Secao</label>
+                  <input
+                    type="text"
+                    placeholder="Ex: Utilidade"
+                    data-tut="login-lista"
+                    value={tituloPadrao}
+                    onChange={(e) => setTituloPadrao(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && handleLogin()}
+                    style={{
+                      width: "100%", height: 48, padding: "0 16px",
+                      borderRadius: 10, border: "1.5px solid hsl(var(--border))",
+                      background: "hsl(var(--secondary))", color: "hsl(var(--foreground))",
+                      fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
+                      outline: "none", boxSizing: "border-box",
+                    }}
+                  />
+                </div>
+              )}
 
               {/* Nome da pessoa */}
               <div>
@@ -784,7 +851,7 @@ const Home = () => {
                   </div>
 
                   <div>
-                    <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Nome de lista padrão</label>
+                    <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Perfil</label>
                     <div style={{
                       width: "100%", height: 48, padding: "0 16px",
                       borderRadius: 10, border: "1.5px solid hsl(var(--border))",
@@ -792,7 +859,20 @@ const Home = () => {
                       fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
                       display: "flex", alignItems: "center",
                     }}>
-                      {loginSalvo.tituloPadrao || "(não definido)"}
+                      {(loginSalvo.flag ?? "loja").toUpperCase()}
+                    </div>
+                  </div>
+
+                  <div>
+                    <label style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 6, display: "block" }}>Secao</label>
+                    <div style={{
+                      width: "100%", height: 48, padding: "0 16px",
+                      borderRadius: 10, border: "1.5px solid hsl(var(--border))",
+                      background: "hsl(var(--secondary))", color: "hsl(var(--foreground))",
+                      fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
+                      display: "flex", alignItems: "center",
+                    }}>
+                      {loginSalvo.flag === "cd" ? "Nao se aplica" : (loginSalvo.tituloPadrao || "(nao definido)")}
                     </div>
                   </div>
 
@@ -805,7 +885,7 @@ const Home = () => {
                       fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
                       display: "flex", alignItems: "center",
                     }}>
-                      {loginSalvo.nomePessoa || "(não definido)"}
+                      {loginSalvo.nomePessoa || "(nao definido)"}
                     </div>
                   </div>
 

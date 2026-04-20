@@ -2,8 +2,8 @@ import { VercelRequest, VercelResponse } from '@vercel/node';
 
 const LIST_IDS: Record<string, Record<string, string>> = {
   NEWSHOP: { loja: '901325900510', cd: '901325900510', compras: '901326684020' },
-  SOYE:    { loja: '901326607319', cd: '901326607319', compras: '901326684020' },
-  FACIL:   { loja: '901326607320', cd: '901326607320', compras: '901326684020' },
+  SOYE:    { loja: '901326607319', cd: '901326461924', compras: '901326684020' },
+  FACIL:   { loja: '901326607320', cd: '901326461915', compras: '901326684020' },
 };
 
 function getToken(empresa: string): string {

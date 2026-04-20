@@ -6,7 +6,7 @@
 
 // ── Tipos ─────────────────────────────────────────────────────────────────────
 export type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
-export type FlagKey    = "loja";
+export type FlagKey    = "loja" | "cd";
 
 export interface ClickUpTask {
   id:          string;
@@ -99,11 +99,12 @@ export async function baixarJsonDaTask(
 // ── Buscar attachments de uma task ───────────────────────────────────────────
 export async function buscarAttachmentsDaTask(
   empresa: EmpresaKey,
-  taskId: string
+  taskId: string,
+  flag: FlagKey = "loja"
 ): Promise<ClickUpAttachment[]> {
   // Como o proxy já retorna attachments na buscar-tasks, esta função pode ser simplificada
   // ou você pode adicionar uma action específica no proxy se precisar
-  const response = await fetch(`/api/clickup-proxy?action=buscar-tasks&empresa=${empresa}&flag=loja`);
+  const response = await fetch(`/api/clickup-proxy?action=buscar-tasks&empresa=${empresa}&flag=${flag}`);
   if (!response.ok) throw new Error(`Erro ${response.status} ao buscar attachments`);
   const data = await response.json();
   // Procure a task específica nos resultados

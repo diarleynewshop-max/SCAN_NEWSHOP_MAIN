@@ -15,7 +15,7 @@ export interface Product {
   qtdPlanilha?: number; // Quantidade vinda da planilha (coluna D) — nunca exibida ao usuário
 }
 
-export type ListFlag = "loja";
+export type ListFlag = "loja" | "cd";
 
 export interface ListData {
   id: string;
@@ -26,7 +26,7 @@ export interface ListData {
   createdAt: Date;
   closedAt?: Date;
   status: "open" | "yellow" | "green" | "red";
-  flag: ListFlag; // "loja"
+  flag: ListFlag; // "loja" | "cd"
   sentToClickUp?: boolean; // true depois do primeiro envio bem-sucedido
 }
 

@@ -232,8 +232,10 @@ export function useInventory() {
 
   const openList = useCallback(
     ({ title, person, flag, empresa }: OpenListParams): boolean => {
-      if (!title.trim()) {
-        toast({ title: "Informe a descricao", variant: "destructive" });
+      const normalizedTitle = flag === "cd" ? (title.trim() || "CD") : title.trim();
+
+      if (flag !== "cd" && !normalizedTitle) {
+        toast({ title: "Informe a secao", variant: "destructive" });
         return false;
       }
 
@@ -244,7 +246,7 @@ export function useInventory() {
 
       const newList: ListData = {
         id: crypto.randomUUID(),
-        title: title.trim(),
+        title: normalizedTitle,
         person: person.trim(),
         flag,
         empresa,

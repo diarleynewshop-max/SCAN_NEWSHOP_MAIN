@@ -165,7 +165,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
     try {
       let attachments = task.attachments;
       if (!attachments || attachments.length === 0) {
-        attachments = await buscarAttachmentsDaTask(empresa as EmpresaKey, task.id);
+        attachments = await buscarAttachmentsDaTask(empresa as EmpresaKey, task.id, flag as FlagKey);
       }
       const taskComAnexos = { ...task, attachments };
 
@@ -362,6 +362,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
 
       if (n.includes("_LOJA_") || n.startsWith("LOJA_") || n.endsWith("_LOJA") || n.includes("-LOJA-"))
         flagDetectada = "loja";
+      else if (n.includes("_CD_") || n.startsWith("CD_") || n.endsWith("_CD") || n.includes("-CD-"))
+        flagDetectada = "cd";
 
       return { empresaDetectada, flagDetectada };
     };
@@ -792,6 +794,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagPr
   if (phase === "import") {
     const flagOptions: { value: string; label: string }[] = [
       { value: "loja", label: "LOJA" },
+      { value: "cd", label: "CD" },
     ];
     const empresaOptions: { value: string; label: string; color: string }[] = [
       { value: "NEWSHOP", label: "NEWSHOP", color: "hsl(var(--primary))"  },
