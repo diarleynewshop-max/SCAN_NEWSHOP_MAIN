@@ -7,6 +7,7 @@ import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { supabase } from "@/lib/supabase";
+import { resolvePhotoToDataUrl } from "@/lib/photoUtils";
 
 interface EstoqueResult {
   codigo: string;
@@ -165,19 +166,21 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     });
   };
 
-  const exportPDF = (list: ListData) => {
+  const exportPDF = async (list: ListData) => {
+    const hydratedProducts = await hydrateProductsForExport(list);
     const doc = new jsPDF();
     doc.setFontSize(18); doc.text(list.title || "Lista", 14, 20);
     doc.setFontSize(11); doc.text(`Pessoa: ${list.person}`, 14, 28);
     doc.text(`Data: ${list.createdAt.toLocaleDateString("pt-BR")}`, 14, 35);
     let y = 45; const ph = doc.internal.pageSize.getHeight();
-    list.products.forEach((p, i) => {
-      const h = p.photo ? 45 : 25;
+    hydratedProducts.forEach(({ product, photoDataUrl }, i) => {
+      const p = product;
+      const h = photoDataUrl ? 45 : 25;
       if (y + h > ph - 20) { doc.addPage(); y = 20; }
-      if (p.photo) { try { doc.addImage(p.photo, "JPEG", 14, y, 28, 28); } catch {} }
-      const tx = p.photo ? 48 : 14;
+      if (photoDataUrl) { try { doc.addImage(photoDataUrl, "JPEG", 14, y, 28, 28); } catch {} }
+      const tx = photoDataUrl ? 48 : 14;
       doc.setFontSize(11); doc.setFont("helvetica", "bold");
-      doc.text(`${i + 1}. ${p.barcode}`, tx, y + 6);
+      doc.text(`${i + 1}. ${product.barcode}`, tx, y + 6);
       doc.setFont("helvetica", "normal"); doc.setFontSize(9);
       doc.text(`SKU: ${p.sku || "-"} | Qtd: ${p.quantity} | Etiqueta: ${p.removeTag ? "Sim" : "Não"}`, tx, y + 13);
       y += h;
@@ -214,8 +217,26 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     setDownloadOpen(null);
   };
 
+  const hydrateProductsForExport = async (list: ListData) => {
+    return await Promise.all(
+      list.products.map(async (product) => ({
+        product,
+        photoDataUrl: await resolvePhotoToDataUrl(product),
+      }))
+    );
+  };
+
   const exportJSON = async (list: ListData) => {
-    const data = { type: "conference-file", items: list.products.map((p) => ({ codigo: p.barcode, sku: p.sku || "", quantidade: p.quantity, photo: p.photo || null })) };
+    const hydratedProducts = await hydrateProductsForExport(list);
+    const data = {
+      type: "conference-file",
+      items: hydratedProducts.map(({ product, photoDataUrl }) => ({
+        codigo: product.barcode,
+        sku: product.sku || "",
+        quantidade: product.quantity,
+        photo: photoDataUrl,
+      })),
+    };
     const fileName = list.title.replace(/[\s/]/g, "").replace(/[^a-zA-Z0-9-áéíóúàèìòùâêîôûãõäëïöüçÁÉÍÓÚÀÈÌÒÙÂÊÎÔÛÃÕÄËÏÖÜÇ]/g, "");
     const txt = `Codigo\n${list.products.map((p) => p.barcode).join("\n")}\n\n------------------------\n\nCodigo;Quantidade\n${list.products.map((p) => `${p.barcode};${p.quantity}`).join("\n")}`;
     setDownloadOpen(null);
@@ -236,10 +257,11 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     }
   };
 
-  const exportHTML = (list: ListData) => {
-    const produtosJS = JSON.stringify(list.products.map((p) => ({
-      codigo: p.barcode, sku: p.sku || "", quantidade: p.quantity,
-      removeTag: p.removeTag ?? false, photo: p.photo || null,
+  const exportHTML = async (list: ListData) => {
+    const hydratedProducts = await hydrateProductsForExport(list);
+    const produtosJS = JSON.stringify(hydratedProducts.map(({ product, photoDataUrl }) => ({
+      codigo: product.barcode, sku: product.sku || "", quantidade: product.quantity,
+      removeTag: product.removeTag ?? false, photo: photoDataUrl,
     })));
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>${list.title} — ${list.person}</title><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet"/><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}body{font-family:'DM Sans',sans-serif;background:#f4f3f0;color:#1a1916;padding:32px 24px 60px;}header{max-width:1200px;margin:0 auto 28px;}header h1{font-size:26px;font-weight:900;}header p{font-family:'DM Mono',monospace;font-size:11px;color:#8a8780;margin-top:4px;}.grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;}.card{background:#fff;border-radius:16px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;position:relative;}.card:hover{transform:translateY(-3px);box-shadow:0 12px 32px rgba(0,0,0,.1);}.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:#e2e0da;}.card.has-tag::before{background:#f0a500;}.card-img{width:100%;aspect-ratio:1;object-fit:cover;display:block;}.card-no-img{width:100%;aspect-ratio:1;background:#f0ede8;display:flex;align-items:center;justify-content:center;font-size:42px;color:#e2e0da;}.card-body{padding:11px 13px 13px;border-top:1.5px solid #e2e0da;}.card-code{font-family:'DM Mono',monospace;font-size:12px;font-weight:500;word-break:break-all;}.card-sku{font-size:11px;color:#8a8780;margin-top:2px;}.card-footer{display:flex;align-items:center;justify-content:space-between;margin-top:8px;}.card-qty strong{font-size:20px;font-weight:900;display:block;line-height:1;}.card-qty span{font-size:10px;color:#8a8780;font-family:'DM Mono',monospace;}.tag{font-size:10px;font-weight:700;padding:3px 7px;border-radius:6px;font-family:'DM Mono',monospace;}.tag-etiqueta{background:#fff3e0;color:#a05c00;}.tag-ok{background:#e8f5ee;color:#1e7d4a;}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1916;color:#fff;padding:12px 24px;border-radius:40px;font-size:13px;font-weight:600;opacity:0;transition:all .25s cubic-bezier(.34,1.56,.64,1);pointer-events:none;white-space:nowrap;z-index:999;}.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}</style></head><body><header><h1>📦 ${list.title}</h1><p>👤 ${list.person} · ${list.createdAt.toLocaleDateString("pt-BR")} · Clique no card para copiar o código</p></header><div class="grid" id="grid"></div><div class="toast" id="toast"></div><script>const produtos=${produtosJS};const grid=document.getElementById("grid");produtos.forEach(p=>{const card=document.createElement("div");card.className="card"+(p.removeTag?" has-tag":"");card.onclick=()=>{navigator.clipboard.writeText(p.codigo).then(()=>{const t=document.getElementById("toast");t.textContent="✅ Copiado: "+p.codigo;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2000);});};const img=p.photo?\`<img class="card-img" src="\${p.photo}" alt="\${p.codigo}" loading="lazy">\`:\`<div class="card-no-img">📦</div>\`;card.innerHTML=\`\${img}<div class="card-body"><div class="card-code">\${p.codigo}</div><div class="card-sku">SKU: \${p.sku||"—"}</div><div class="card-footer"><div class="card-qty"><strong>\${p.quantidade}</strong><span>unid</span></div>\${p.removeTag?'<span class="tag tag-etiqueta">Tira etiqueta</span>':'<span class="tag tag-ok">OK</span>'}</div></div>\`;grid.appendChild(card);});</script></body></html>`;
     const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
@@ -288,23 +310,25 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     if (sendingId === list.id) return;
 
     setSendingId(list.id);
-    const payload: WebhookPayload = {
-      flag:        list.flag ?? "loja",
-      empresa:     list.empresa ?? "",
-      pessoa:      list.person,
-      titulo:      list.title,
-      totalItens:  list.products.length,
-      dataCriacao: list.createdAt.toISOString(),
-      produtos:    list.products.map((p) => ({
-        barcode:    p.barcode,
-        sku:        p.sku || "",
-        quantidade: p.quantity,
-        removeTag:  p.removeTag ?? false,
-        photo:      p.photo || null,
-      })),
-    };
 
     try {
+      const hydratedProducts = await hydrateProductsForExport(list);
+      const payload: WebhookPayload = {
+        flag:        list.flag ?? "loja",
+        empresa:     list.empresa ?? "",
+        pessoa:      list.person,
+        titulo:      list.title,
+        totalItens:  list.products.length,
+        dataCriacao: list.createdAt.toISOString(),
+        produtos:    hydratedProducts.map(({ product, photoDataUrl }) => ({
+          barcode:    product.barcode,
+          sku:        product.sku || "",
+          quantidade: product.quantity,
+          removeTag:  product.removeTag ?? false,
+          photo:      photoDataUrl,
+        })),
+      };
+
       await enviarParaClickUp(payload);
       marcarListaEnviada(list.id);
       onUpdateList({ ...list, status: "green", sentToClickUp: true });

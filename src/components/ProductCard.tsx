@@ -6,6 +6,7 @@ export interface Product {
   sku: string;
   description?: string;
   photo: string | null;
+  photoBlob?: Blob | null;
   quantity: number;
   removeTag: boolean;
   createdAt: Date;

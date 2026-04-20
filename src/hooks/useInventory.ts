@@ -1,6 +1,12 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Product, ListData, ListFlag } from "@/components/ProductCard";
 import { useToast } from "@/hooks/use-toast";
+import {
+  createRuntimePhoto,
+  revokeRuntimePhoto,
+  stripPhotoForPersistence,
+  shouldPersistPhoto,
+} from "@/lib/photoUtils";
 
 interface OpenListParams {
   title: string;
@@ -12,7 +18,7 @@ interface OpenListParams {
 interface AddProductParams {
   barcode: string;
   sku: string;
-  photo: string | null;
+  photoBlob?: Blob | null;
   quantity: number;
   removeTag?: boolean;
   description?: string;
@@ -27,23 +33,33 @@ type SaveListsResult = "ok" | "without-photos" | "failed";
 function stripPhotosFromLists(lists: ListData[]): ListData[] {
   return lists.map((list) => ({
     ...list,
-    products: list.products.map((product) => ({
-      ...product,
-      photo: null,
-    })),
+    products: list.products.map((product) => stripPhotoForPersistence(product)),
   }));
 }
 
+function hasNonPersistablePhotos(lists: ListData[]): boolean {
+  return lists.some((list) =>
+    list.products.some((product) => Boolean(product.photo) && !shouldPersistPhoto(product))
+  );
+}
+
 function saveLists(lists: ListData[]): SaveListsResult {
+  const serializableLists = stripPhotosFromLists(lists);
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(lists));
-    return "ok";
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableLists));
+    return hasNonPersistablePhotos(lists) ? "without-photos" : "ok";
   } catch (err) {
     console.error("Erro ao salvar listas:", err);
   }
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(stripPhotosFromLists(lists)));
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableLists.map((list) => ({
+      ...list,
+      products: list.products.map((product) => ({
+        ...product,
+        photo: null,
+      })),
+    }))));
     return "without-photos";
   } catch (fallbackErr) {
     console.error("Erro ao salvar listas sem fotos:", fallbackErr);
@@ -64,6 +80,7 @@ function loadLists(): ListData[] {
       closedAt: l.closedAt ? new Date(l.closedAt) : undefined,
       products: l.products.map((p) => ({
         ...p,
+        photoBlob: null,
         createdAt: new Date(p.createdAt),
       })),
     }));
@@ -76,6 +93,7 @@ export function useInventory() {
   const { toast } = useToast();
   const [lists, setLists] = useState<ListData[]>(() => loadLists());
   const lastSaveResultRef = useRef<SaveListsResult>("ok");
+  const listsRef = useRef<ListData[]>(lists);
   const [activeListId, setActiveListId] = useState<string | null>(() => {
     try {
       const savedId = localStorage.getItem("scan_newshop_active_list");
@@ -89,6 +107,10 @@ export function useInventory() {
   });
 
   const activeList = lists.find((l) => l.id === activeListId && l.status === "open") ?? null;
+
+  useEffect(() => {
+    listsRef.current = lists;
+  }, [lists]);
 
   useEffect(() => {
     const saveResult = saveLists(lists);
@@ -118,6 +140,14 @@ export function useInventory() {
       localStorage.removeItem("scan_newshop_active_list");
     }
   }, [lists, activeListId, toast]);
+
+  useEffect(() => {
+    return () => {
+      listsRef.current.forEach((list) => {
+        list.products.forEach((product) => revokeRuntimePhoto(product));
+      });
+    };
+  }, []);
 
   const openList = useCallback(
     ({ title, person, flag, empresa }: OpenListParams): boolean => {
@@ -175,12 +205,14 @@ export function useInventory() {
             };
             return { ...l, products: updatedProducts };
           }
+          const runtimePhoto = params.photoBlob ? createRuntimePhoto(params.photoBlob) : null;
            const newProduct: Product = {
              id: crypto.randomUUID(),
              barcode,
              sku: params.sku.trim(),
              description: params.description?.trim() || undefined,
-             photo: params.photo,
+             photo: runtimePhoto?.photo ?? null,
+             photoBlob: runtimePhoto?.photoBlob ?? null,
              quantity,
              removeTag: params.removeTag ?? false,
              createdAt: new Date(),
@@ -203,11 +235,16 @@ export function useInventory() {
   const deleteProduct = useCallback((productId: string) => {
     if (!activeListId) return;
     setLists((prev) =>
-      prev.map((l) =>
-        l.id === activeListId
-          ? { ...l, products: l.products.filter((p) => p.id !== productId) }
-          : l
-      )
+      prev.map((l) => {
+        if (l.id !== activeListId) return l;
+
+        const product = l.products.find((p) => p.id === productId);
+        if (product) {
+          revokeRuntimePhoto(product);
+        }
+
+        return { ...l, products: l.products.filter((p) => p.id !== productId) };
+      })
     );
   }, [activeListId]);
 
@@ -229,6 +266,7 @@ export function useInventory() {
             sku: item.sku?.trim() || "",
             description: item.description?.trim() || undefined,
             photo: null,
+            photoBlob: null,
             quantity: 0,
             removeTag: false,
             createdAt: new Date(),
@@ -250,6 +288,40 @@ export function useInventory() {
       prev.map((l) => {
         if (l.id !== activeListId) return l;
         return { ...l, products: l.products.map((p) => p.id === productId ? { ...p, ...updates } : p) };
+      })
+    );
+  }, [activeListId]);
+
+  const updateProductPhoto = useCallback((productId: string, photoBlob: Blob | null) => {
+    if (!activeListId) return;
+
+    setLists((prev) =>
+      prev.map((list) => {
+        if (list.id !== activeListId) return list;
+
+        return {
+          ...list,
+          products: list.products.map((product) => {
+            if (product.id !== productId) return product;
+
+            revokeRuntimePhoto(product);
+
+            if (!photoBlob) {
+              return {
+                ...product,
+                photo: null,
+                photoBlob: null,
+              };
+            }
+
+            const runtimePhoto = createRuntimePhoto(photoBlob);
+            return {
+              ...product,
+              photo: runtimePhoto.photo,
+              photoBlob: runtimePhoto.photoBlob,
+            };
+          }),
+        };
       })
     );
   }, [activeListId]);
@@ -286,5 +358,5 @@ export function useInventory() {
     });
   }, [activeListId]);
 
-  return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, deleteProduct, updateList, moveProductToTop, scrollToProduct };
+  return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, updateProductPhoto, deleteProduct, updateList, moveProductToTop, scrollToProduct };
 }

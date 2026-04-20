@@ -1,0 +1,95 @@
+export interface RuntimePhotoLike {
+  photo: string | null;
+  photoBlob?: Blob | null;
+}
+
+export function isObjectPhotoUrl(value: string | null | undefined): boolean {
+  return typeof value === "string" && value.startsWith("blob:");
+}
+
+export function isDataPhotoUrl(value: string | null | undefined): boolean {
+  return typeof value === "string" && /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(value);
+}
+
+export function isRemotePhotoUrl(value: string | null | undefined): boolean {
+  return typeof value === "string" && /^https?:\/\//i.test(value);
+}
+
+export function createRuntimePhoto(blob: Blob): { photo: string; photoBlob: Blob } {
+  return {
+    photo: URL.createObjectURL(blob),
+    photoBlob: blob,
+  };
+}
+
+export function revokePhotoUrl(value: string | null | undefined): void {
+  if (!isObjectPhotoUrl(value)) return;
+
+  try {
+    URL.revokeObjectURL(value);
+  } catch {
+    // ignore
+  }
+}
+
+export function revokeRuntimePhoto(photo: RuntimePhotoLike | null | undefined): void {
+  if (!photo?.photoBlob) return;
+  revokePhotoUrl(photo.photo);
+}
+
+export function shouldPersistPhoto(photo: RuntimePhotoLike | null | undefined): boolean {
+  if (!photo?.photo) return false;
+  if (photo.photoBlob) return false;
+  return isRemotePhotoUrl(photo.photo);
+}
+
+export function stripPhotoForPersistence<T extends RuntimePhotoLike>(photo: T): T {
+  return {
+    ...photo,
+    photo: shouldPersistPhoto(photo) ? photo.photo : null,
+    photoBlob: undefined,
+  };
+}
+
+export function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Falha ao ler foto"));
+    reader.readAsDataURL(blob);
+  });
+}
+
+async function fetchPhotoBlob(url: string): Promise<Blob> {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`Falha ao carregar foto (${response.status})`);
+  }
+
+  return await response.blob();
+}
+
+export async function resolvePhotoToDataUrl(photo: RuntimePhotoLike): Promise<string | null> {
+  if (photo.photoBlob instanceof Blob) {
+    return await blobToDataUrl(photo.photoBlob);
+  }
+
+  if (!photo.photo) {
+    return null;
+  }
+
+  if (isDataPhotoUrl(photo.photo)) {
+    return photo.photo;
+  }
+
+  if (isObjectPhotoUrl(photo.photo) || isRemotePhotoUrl(photo.photo)) {
+    try {
+      const blob = await fetchPhotoBlob(photo.photo);
+      return await blobToDataUrl(blob);
+    } catch {
+      return null;
+    }
+  }
+
+  return null;
+}

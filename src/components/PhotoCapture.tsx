@@ -4,7 +4,7 @@ type CompressionPreset = "default" | "light";
 
 interface PhotoCaptureProps {
   photo: string | null;
-  onCapture: (photo: string) => void;
+  onCapture: (photo: Blob) => void;
   onRemove: () => void;
   compressionPreset?: CompressionPreset;
 }
@@ -15,15 +15,6 @@ const PRESET_CONFIG: Record<CompressionPreset, { maxEdge: number; quality: numbe
 };
 
 const SAFE_RAW_FILE_SIZE_BYTES = 700 * 1024;
-
-function readAsDataUrl(file: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onloadend = () => resolve(reader.result as string);
-    reader.onerror = () => reject(new Error("Falha ao ler imagem"));
-    reader.readAsDataURL(file);
-  });
-}
 
 function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {
   return new Promise((resolve, reject) => {
@@ -45,7 +36,7 @@ function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob 
   });
 }
 
-async function compressPhoto(file: File, preset: CompressionPreset): Promise<string> {
+async function compressPhoto(file: File, preset: CompressionPreset): Promise<Blob> {
   const { image, objectUrl } = await loadImageFromFile(file);
   const { maxEdge, quality } = PRESET_CONFIG[preset];
   const canvas = document.createElement("canvas");
@@ -71,10 +62,10 @@ async function compressPhoto(file: File, preset: CompressionPreset): Promise<str
 
     const blob = await canvasToBlob(canvas, quality);
     if (blob) {
-      return await readAsDataUrl(blob);
+      return blob;
     }
 
-    return canvas.toDataURL("image/jpeg", quality);
+    throw new Error("Falha ao gerar blob da imagem");
   } finally {
     canvas.width = 0;
     canvas.height = 0;
@@ -98,8 +89,7 @@ const PhotoCapture = ({ photo, onCapture, onRemove, compressionPreset = "default
       console.error("[PhotoCapture] Falha ao processar foto:", error);
 
       if (file.size <= SAFE_RAW_FILE_SIZE_BYTES) {
-        const fallback = await readAsDataUrl(file);
-        onCapture(fallback);
+        onCapture(file);
       } else {
         window.alert("Nao foi possivel processar a foto neste aparelho. Tente novamente ou use uma foto menor.");
       }

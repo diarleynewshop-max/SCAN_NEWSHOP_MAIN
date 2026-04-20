@@ -8,6 +8,7 @@ import { useInventory } from "@/hooks/useInventory";
 import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
+import { createRuntimePhoto, revokePhotoUrl } from "@/lib/photoUtils";
 
 const LOGO = "/newshop-logo.jpg";
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
@@ -81,6 +82,7 @@ const Index = () => {
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
   const [sku, setSku] = useState(() => sessionStorage.getItem("scan_sku") ?? "");
   const [photo, setPhoto] = useState<string | null>(null);
+  const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
   const [view, setView] = useState<"scan" | "list" | "conference">(
     initialTab === "conference" ? "conference" : initialTab === "list" ? "list" : "scan"
@@ -94,7 +96,7 @@ const Index = () => {
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
   const consultaBloqueadaPorEmpresa = isEmpresaSemConsulta(currentLogin?.empresa);
 
-  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, moveProductToTop } = useInventory();
+  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
   const { productInfo, loading, error, lookupProduct } = useProductLookup({ enabled: !modoLeve && !consultaBloqueadaPorEmpresa });
 
   useEffect(() => {
@@ -112,6 +114,12 @@ const Index = () => {
   useEffect(() => {
     sessionStorage.removeItem("scan_photo");
   }, []);
+
+  useEffect(() => {
+    return () => {
+      revokePhotoUrl(photo);
+    };
+  }, [photo]);
 
   useEffect(() => {
     const handleStorageChange = () => {
@@ -184,13 +192,31 @@ const Index = () => {
     }
   };
 
+  const setDraftPhoto = useCallback((blob: Blob) => {
+    const runtimePhoto = createRuntimePhoto(blob);
+
+    setPhoto((prev) => {
+      revokePhotoUrl(prev);
+      return runtimePhoto.photo;
+    });
+    setPhotoBlob(blob);
+  }, []);
+
+  const clearDraftPhoto = useCallback(() => {
+    setPhoto((prev) => {
+      revokePhotoUrl(prev);
+      return null;
+    });
+    setPhotoBlob(null);
+  }, []);
+
   const handleAdd = () => {
-    const ok = addProduct({ barcode, sku, photo, quantity: Number(quantity) });
+    const ok = addProduct({ barcode, sku, photoBlob, quantity: Number(quantity) });
     if (!ok) return;
 
     setBarcode("");
     setSku("");
-    setPhoto(null);
+    clearDraftPhoto();
     setQuantity("");
     sessionStorage.removeItem("scan_barcode");
     sessionStorage.removeItem("scan_sku");
@@ -401,8 +427,8 @@ const Index = () => {
                 <div data-tut="scanner-foto">
                   <PhotoCapture
                     photo={photo}
-                    onCapture={setPhoto}
-                    onRemove={() => setPhoto(null)}
+                    onCapture={setDraftPhoto}
+                    onRemove={clearDraftPhoto}
                     compressionPreset={modoLeve ? "light" : "default"}
                   />
                 </div>
@@ -496,15 +522,15 @@ const Index = () => {
           <PhotoCapture
             photo={activeList?.products.find((p) => p.id === photoProductId)?.photo || null}
             compressionPreset={modoLeve ? "light" : "default"}
-            onCapture={(nextPhoto) => {
+            onCapture={(nextPhotoBlob) => {
               if (!photoProductId) return;
-              updateProduct(photoProductId, { photo: nextPhoto });
+              updateProductPhoto(photoProductId, nextPhotoBlob);
               setShowPhotoCapture(false);
               setPhotoProductId(null);
             }}
             onRemove={() => {
               if (!photoProductId) return;
-              updateProduct(photoProductId, { photo: null });
+              updateProductPhoto(photoProductId, null);
               setShowPhotoCapture(false);
               setPhotoProductId(null);
             }}
