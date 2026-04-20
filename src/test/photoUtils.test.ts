@@ -23,15 +23,19 @@ describe("photoUtils", () => {
     const persisted = stripPhotoForPersistence({
       photo: "https://cdn.exemplo.com/foto.jpg",
       photoBlob: null,
+      photoAssetId: "asset-remoto",
     });
 
     const stripped = stripPhotoForPersistence({
       photo: "blob:http://localhost/123",
       photoBlob: new Blob(["x"]),
+      photoAssetId: "asset-local",
     });
 
     expect(persisted.photo).toBe("https://cdn.exemplo.com/foto.jpg");
+    expect(persisted.photoAssetId).toBe("asset-remoto");
     expect(stripped.photo).toBeNull();
     expect(stripped.photoBlob).toBeUndefined();
+    expect(stripped.photoAssetId).toBe("asset-local");
   });
 });

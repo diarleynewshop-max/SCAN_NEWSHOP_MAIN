@@ -9,6 +9,7 @@ import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
 import { createRuntimePhoto, revokePhotoUrl } from "@/lib/photoUtils";
+import { deletePhotoBlob, getPhotoBlob, putPhotoBlob } from "@/lib/photoStore";
 
 const LOGO = "/newshop-logo.jpg";
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
@@ -21,6 +22,8 @@ const LAZY_FALLBACK = (
     Carregando...
   </div>
 );
+
+const DRAFT_PHOTO_STORAGE_KEY = "scan_newshop_draft_photo";
 
 const S = {
   inputBase: {
@@ -116,6 +119,32 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
+    let cancelled = false;
+
+    const restoreDraftPhoto = async () => {
+      try {
+        const savedPhoto = await getPhotoBlob(DRAFT_PHOTO_STORAGE_KEY);
+        if (!savedPhoto || cancelled) return;
+
+        const runtimePhoto = createRuntimePhoto(savedPhoto);
+        setPhoto((prev) => {
+          revokePhotoUrl(prev);
+          return runtimePhoto.photo;
+        });
+        setPhotoBlob(savedPhoto);
+      } catch (error) {
+        console.error("Erro ao restaurar foto temporaria:", error);
+      }
+    };
+
+    void restoreDraftPhoto();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     return () => {
       revokePhotoUrl(photo);
     };
@@ -192,7 +221,19 @@ const Index = () => {
     }
   };
 
-  const setDraftPhoto = useCallback((blob: Blob) => {
+  const setDraftPhoto = useCallback(async (blob: Blob) => {
+    try {
+      await putPhotoBlob(DRAFT_PHOTO_STORAGE_KEY, blob);
+    } catch (error) {
+      console.error("Erro ao salvar foto temporaria:", error);
+      toast({
+        title: "Falha ao proteger a foto",
+        description: "Nao foi possivel guardar a foto temporaria neste aparelho.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const runtimePhoto = createRuntimePhoto(blob);
 
     setPhoto((prev) => {
@@ -200,9 +241,15 @@ const Index = () => {
       return runtimePhoto.photo;
     });
     setPhotoBlob(blob);
-  }, []);
+  }, [toast]);
 
-  const clearDraftPhoto = useCallback(() => {
+  const clearDraftPhoto = useCallback(async () => {
+    try {
+      await deletePhotoBlob(DRAFT_PHOTO_STORAGE_KEY);
+    } catch (error) {
+      console.error("Erro ao limpar foto temporaria:", error);
+    }
+
     setPhoto((prev) => {
       revokePhotoUrl(prev);
       return null;
@@ -210,13 +257,13 @@ const Index = () => {
     setPhotoBlob(null);
   }, []);
 
-  const handleAdd = () => {
-    const ok = addProduct({ barcode, sku, photoBlob, quantity: Number(quantity) });
+  const handleAdd = async () => {
+    const ok = await addProduct({ barcode, sku, photoBlob, quantity: Number(quantity) });
     if (!ok) return;
 
     setBarcode("");
     setSku("");
-    clearDraftPhoto();
+    await clearDraftPhoto();
     setQuantity("");
     sessionStorage.removeItem("scan_barcode");
     sessionStorage.removeItem("scan_sku");
@@ -427,8 +474,12 @@ const Index = () => {
                 <div data-tut="scanner-foto">
                   <PhotoCapture
                     photo={photo}
-                    onCapture={setDraftPhoto}
-                    onRemove={clearDraftPhoto}
+                    onCapture={(nextPhotoBlob) => {
+                      void setDraftPhoto(nextPhotoBlob);
+                    }}
+                    onRemove={() => {
+                      void clearDraftPhoto();
+                    }}
                     compressionPreset={modoLeve ? "light" : "default"}
                   />
                 </div>
@@ -440,7 +491,9 @@ const Index = () => {
               </div>
 
               <button
-                onClick={handleAdd}
+                onClick={() => {
+                  void handleAdd();
+                }}
                 disabled={!activeList}
                 data-tut="scanner-add"
                 style={{ ...S.btnPrimary, height: modoDesktop ? 60 : 56, fontSize: modoDesktop ? 16 : 15, opacity: activeList ? 1 : 0.45, cursor: activeList ? "pointer" : "not-allowed" }}
@@ -524,15 +577,21 @@ const Index = () => {
             compressionPreset={modoLeve ? "light" : "default"}
             onCapture={(nextPhotoBlob) => {
               if (!photoProductId) return;
-              updateProductPhoto(photoProductId, nextPhotoBlob);
-              setShowPhotoCapture(false);
-              setPhotoProductId(null);
+              void (async () => {
+                const ok = await updateProductPhoto(photoProductId, nextPhotoBlob);
+                if (!ok) return;
+                setShowPhotoCapture(false);
+                setPhotoProductId(null);
+              })();
             }}
             onRemove={() => {
               if (!photoProductId) return;
-              updateProductPhoto(photoProductId, null);
-              setShowPhotoCapture(false);
-              setPhotoProductId(null);
+              void (async () => {
+                const ok = await updateProductPhoto(photoProductId, null);
+                if (!ok) return;
+                setShowPhotoCapture(false);
+                setPhotoProductId(null);
+              })();
             }}
           />
         </Suspense>

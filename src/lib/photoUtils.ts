@@ -1,6 +1,9 @@
+import { getPhotoBlob } from "@/lib/photoStore";
+
 export interface RuntimePhotoLike {
   photo: string | null;
   photoBlob?: Blob | null;
+  photoAssetId?: string | null;
 }
 
 export function isObjectPhotoUrl(value: string | null | undefined): boolean {
@@ -72,6 +75,17 @@ async function fetchPhotoBlob(url: string): Promise<Blob> {
 export async function resolvePhotoToDataUrl(photo: RuntimePhotoLike): Promise<string | null> {
   if (photo.photoBlob instanceof Blob) {
     return await blobToDataUrl(photo.photoBlob);
+  }
+
+  if (photo.photoAssetId) {
+    try {
+      const storedBlob = await getPhotoBlob(photo.photoAssetId);
+      if (storedBlob) {
+        return await blobToDataUrl(storedBlob);
+      }
+    } catch {
+      // ignore and keep fallback flow below
+    }
   }
 
   if (!photo.photo) {

@@ -7,6 +7,7 @@ export interface Product {
   description?: string;
   photo: string | null;
   photoBlob?: Blob | null;
+  photoAssetId?: string | null;
   quantity: number;
   removeTag: boolean;
   createdAt: Date;

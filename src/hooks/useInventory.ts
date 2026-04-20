@@ -7,6 +7,7 @@ import {
   stripPhotoForPersistence,
   shouldPersistPhoto,
 } from "@/lib/photoUtils";
+import { deletePhotoBlob, getPhotoBlob, putPhotoBlob } from "@/lib/photoStore";
 
 interface OpenListParams {
   title: string;
@@ -39,12 +40,18 @@ function stripPhotosFromLists(lists: ListData[]): ListData[] {
 
 function hasNonPersistablePhotos(lists: ListData[]): boolean {
   return lists.some((list) =>
-    list.products.some((product) => Boolean(product.photo) && !shouldPersistPhoto(product))
+    list.products.some(
+      (product) =>
+        Boolean(product.photo) &&
+        !shouldPersistPhoto(product) &&
+        !product.photoAssetId
+    )
   );
 }
 
 function saveLists(lists: ListData[]): SaveListsResult {
   const serializableLists = stripPhotosFromLists(lists);
+
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableLists));
     return hasNonPersistablePhotos(lists) ? "without-photos" : "ok";
@@ -53,13 +60,18 @@ function saveLists(lists: ListData[]): SaveListsResult {
   }
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableLists.map((list) => ({
-      ...list,
-      products: list.products.map((product) => ({
-        ...product,
-        photo: null,
-      })),
-    }))));
+    localStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify(
+        serializableLists.map((list) => ({
+          ...list,
+          products: list.products.map((product) => ({
+            ...product,
+            photo: null,
+          })),
+        }))
+      )
+    );
     return "without-photos";
   } catch (fallbackErr) {
     console.error("Erro ao salvar listas sem fotos:", fallbackErr);
@@ -71,17 +83,19 @@ function loadLists(): ListData[] {
   try {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return [];
+
     const parsed = JSON.parse(raw) as ListData[];
-    return parsed.map((l) => ({
-      ...l,
-      flag: l.flag ?? "loja",
-      empresa: l.empresa ?? "",
-      createdAt: new Date(l.createdAt),
-      closedAt: l.closedAt ? new Date(l.closedAt) : undefined,
-      products: l.products.map((p) => ({
-        ...p,
+    return parsed.map((list) => ({
+      ...list,
+      flag: list.flag ?? "loja",
+      empresa: list.empresa ?? "",
+      createdAt: new Date(list.createdAt),
+      closedAt: list.closedAt ? new Date(list.closedAt) : undefined,
+      products: list.products.map((product) => ({
+        ...product,
+        photoAssetId: product.photoAssetId ?? null,
         photoBlob: null,
-        createdAt: new Date(p.createdAt),
+        createdAt: new Date(product.createdAt),
       })),
     }));
   } catch {
@@ -98,15 +112,15 @@ export function useInventory() {
     try {
       const savedId = localStorage.getItem("scan_newshop_active_list");
       if (!savedId) return null;
-      const lists = loadLists();
-      const exists = lists.find((l) => l.id === savedId && l.status === "open");
+      const loadedLists = loadLists();
+      const exists = loadedLists.find((list) => list.id === savedId && list.status === "open");
       return exists ? savedId : null;
     } catch {
       return null;
     }
   });
 
-  const activeList = lists.find((l) => l.id === activeListId && l.status === "open") ?? null;
+  const activeList = lists.find((list) => list.id === activeListId && list.status === "open") ?? null;
 
   useEffect(() => {
     listsRef.current = lists;
@@ -119,7 +133,7 @@ export function useInventory() {
       if (saveResult === "without-photos") {
         toast({
           title: "Fotos removidas do armazenamento",
-          description: "O app limpou as fotos locais para evitar travamento e perda total da lista.",
+          description: "O app limpou fotos sem backup para evitar travamento e perda total da lista.",
         });
       }
 
@@ -149,10 +163,85 @@ export function useInventory() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydratePersistedPhotos = async () => {
+      const pendingProducts = lists.flatMap((list) =>
+        list.products
+          .filter((product) => product.photoAssetId && !product.photoBlob && !product.photo)
+          .map((product) => ({
+            productId: product.id,
+            photoAssetId: product.photoAssetId as string,
+          }))
+      );
+
+      if (pendingProducts.length === 0) return;
+
+      const hydratedPhotos = await Promise.all(
+        pendingProducts.map(async (product) => ({
+          productId: product.productId,
+          blob: await getPhotoBlob(product.photoAssetId).catch(() => null),
+        }))
+      );
+
+      if (cancelled) return;
+
+      const hydratedMap = new Map(
+        hydratedPhotos
+          .filter((item): item is { productId: string; blob: Blob } => item.blob instanceof Blob)
+          .map((item) => [item.productId, item.blob])
+      );
+
+      if (hydratedMap.size === 0) return;
+
+      setLists((prev) =>
+        prev.map((list) => {
+          let changed = false;
+
+          const products = list.products.map((product) => {
+            if (product.photo || product.photoBlob || !product.photoAssetId) {
+              return product;
+            }
+
+            const blob = hydratedMap.get(product.id);
+            if (!blob) {
+              return product;
+            }
+
+            changed = true;
+            const runtimePhoto = createRuntimePhoto(blob);
+            return {
+              ...product,
+              photo: runtimePhoto.photo,
+              photoBlob: runtimePhoto.photoBlob,
+            };
+          });
+
+          return changed ? { ...list, products } : list;
+        })
+      );
+    };
+
+    void hydratePersistedPhotos();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [lists]);
+
   const openList = useCallback(
     ({ title, person, flag, empresa }: OpenListParams): boolean => {
-      if (!title.trim()) { toast({ title: "Informe a descrição", variant: "destructive" }); return false; }
-      if (!person.trim()) { toast({ title: "Informe o nome", variant: "destructive" }); return false; }
+      if (!title.trim()) {
+        toast({ title: "Informe a descricao", variant: "destructive" });
+        return false;
+      }
+
+      if (!person.trim()) {
+        toast({ title: "Informe o nome", variant: "destructive" });
+        return false;
+      }
+
       const newList: ListData = {
         id: crypto.randomUUID(),
         title: title.trim(),
@@ -163,6 +252,7 @@ export function useInventory() {
         createdAt: new Date(),
         status: "open",
       };
+
       setLists((prev) => [...prev, newList]);
       setActiveListId(newList.id);
       toast({ title: "Lista aberta!", description: `${newList.title} • ${newList.person} • ${flag.toUpperCase()}` });
@@ -173,52 +263,97 @@ export function useInventory() {
 
   const closeList = useCallback(() => {
     if (!activeListId) return;
+
     setLists((prev) =>
-      prev.map((l) =>
-        l.id === activeListId ? { ...l, status: "yellow" as const, closedAt: new Date() } : l
+      prev.map((list) =>
+        list.id === activeListId ? { ...list, status: "yellow" as const, closedAt: new Date() } : list
       )
     );
+
     setActiveListId(null);
-    toast({ title: "Lista fechada!", description: "Disponível no histórico." });
+    toast({ title: "Lista fechada!", description: "Disponivel no historico." });
   }, [activeListId, toast]);
 
   const addProduct = useCallback(
-    (params: AddProductParams): boolean => {
-      if (!activeList) { toast({ title: "Abra uma lista primeiro", variant: "destructive" }); return false; }
-      if (!params.barcode.trim()) { toast({ title: "Preencha o código de barras", variant: "destructive" }); return false; }
-      if (!params.quantity || params.quantity <= 0) { toast({ title: "Informe a quantidade", variant: "destructive" }); return false; }
+    async (params: AddProductParams): Promise<boolean> => {
+      if (!activeList) {
+        toast({ title: "Abra uma lista primeiro", variant: "destructive" });
+        return false;
+      }
+
+      if (!params.barcode.trim()) {
+        toast({ title: "Preencha o codigo de barras", variant: "destructive" });
+        return false;
+      }
+
+      if (!params.quantity || params.quantity <= 0) {
+        toast({ title: "Informe a quantidade", variant: "destructive" });
+        return false;
+      }
+
       const barcode = params.barcode.trim();
       const quantity = params.quantity;
+      const existingProductId = activeList.products.find((product) => product.barcode === barcode)?.id ?? null;
+      const newProductId = crypto.randomUUID();
+      const photoAssetId = params.photoBlob ? (existingProductId ?? newProductId) : null;
+      const runtimePhoto = params.photoBlob ? createRuntimePhoto(params.photoBlob) : null;
       let merged = false;
 
+      if (params.photoBlob && photoAssetId) {
+        try {
+          await putPhotoBlob(photoAssetId, params.photoBlob);
+        } catch (error) {
+          revokeRuntimePhoto(runtimePhoto);
+          console.error("Erro ao salvar foto no IndexedDB:", error);
+          toast({
+            title: "Falha ao proteger a foto",
+            description: "Nao foi possivel salvar a foto no armazenamento seguro do aparelho.",
+            variant: "destructive",
+          });
+          return false;
+        }
+      }
+
       setLists((prev) =>
-        prev.map((l) => {
-          if (l.id !== activeListId) return l;
-          const existingIndex = l.products.findIndex((p) => p.barcode === barcode);
+        prev.map((list) => {
+          if (list.id !== activeListId) return list;
+
+          const existingIndex = list.products.findIndex((product) => product.barcode === barcode);
           if (existingIndex !== -1) {
             merged = true;
-            const updatedProducts = [...l.products];
+            const updatedProducts = [...list.products];
             const existing = updatedProducts[existingIndex];
+
             updatedProducts[existingIndex] = {
               ...existing,
               quantity: existing.quantity + quantity,
+              photo: runtimePhoto?.photo ?? existing.photo,
+              photoBlob: runtimePhoto?.photoBlob ?? existing.photoBlob ?? null,
+              photoAssetId: runtimePhoto ? photoAssetId : existing.photoAssetId ?? null,
             };
-            return { ...l, products: updatedProducts };
+
+            if (runtimePhoto) {
+              revokeRuntimePhoto(existing);
+            }
+
+            return { ...list, products: updatedProducts };
           }
-          const runtimePhoto = params.photoBlob ? createRuntimePhoto(params.photoBlob) : null;
-           const newProduct: Product = {
-             id: crypto.randomUUID(),
-             barcode,
-             sku: params.sku.trim(),
-             description: params.description?.trim() || undefined,
-             photo: runtimePhoto?.photo ?? null,
-             photoBlob: runtimePhoto?.photoBlob ?? null,
-             quantity,
-             removeTag: params.removeTag ?? false,
-             createdAt: new Date(),
-             importedFromSpreadsheet: params.importedFromSpreadsheet ?? false,
-           };
-          return { ...l, products: [...l.products, newProduct] };
+
+          const newProduct: Product = {
+            id: newProductId,
+            barcode,
+            sku: params.sku.trim(),
+            description: params.description?.trim() || undefined,
+            photo: runtimePhoto?.photo ?? null,
+            photoBlob: runtimePhoto?.photoBlob ?? null,
+            photoAssetId,
+            quantity,
+            removeTag: params.removeTag ?? false,
+            createdAt: new Date(),
+            importedFromSpreadsheet: params.importedFromSpreadsheet ?? false,
+          };
+
+          return { ...list, products: [...list.products, newProduct] };
         })
       );
 
@@ -227,6 +362,7 @@ export function useInventory() {
       } else {
         toast({ title: "Produto adicionado!", description: barcode });
       }
+
       return true;
     },
     [activeList, activeListId, toast]
@@ -234,32 +370,46 @@ export function useInventory() {
 
   const deleteProduct = useCallback((productId: string) => {
     if (!activeListId) return;
-    setLists((prev) =>
-      prev.map((l) => {
-        if (l.id !== activeListId) return l;
 
-        const product = l.products.find((p) => p.id === productId);
+    setLists((prev) =>
+      prev.map((list) => {
+        if (list.id !== activeListId) return list;
+
+        const product = list.products.find((item) => item.id === productId);
         if (product) {
           revokeRuntimePhoto(product);
+          if (product.photoAssetId) {
+            void deletePhotoBlob(product.photoAssetId).catch((error) => {
+              console.error("Erro ao remover foto persistida:", error);
+            });
+          }
         }
 
-        return { ...l, products: l.products.filter((p) => p.id !== productId) };
+        return { ...list, products: list.products.filter((product) => product.id !== productId) };
       })
     );
   }, [activeListId]);
 
   const updateList = useCallback((updated: ListData) => {
-    setLists((prev) => prev.map((l) => (l.id === updated.id ? updated : l)));
+    setLists((prev) => prev.map((list) => (list.id === updated.id ? updated : list)));
   }, []);
 
   const addProductsFromSpreadsheet = useCallback(
     (items: AddProductParams[]): boolean => {
-      if (!activeList) { toast({ title: "Abra uma lista primeiro", variant: "destructive" }); return false; }
-      if (items.length === 0) { toast({ title: "Nenhum item para importar", variant: "destructive" }); return false; }
+      if (!activeList) {
+        toast({ title: "Abra uma lista primeiro", variant: "destructive" });
+        return false;
+      }
+
+      if (items.length === 0) {
+        toast({ title: "Nenhum item para importar", variant: "destructive" });
+        return false;
+      }
 
       setLists((prev) =>
-        prev.map((l) => {
-          if (l.id !== activeListId) return l;
+        prev.map((list) => {
+          if (list.id !== activeListId) return list;
+
           const newProducts: Product[] = items.map((item) => ({
             id: crypto.randomUUID(),
             barcode: item.barcode.trim(),
@@ -267,15 +417,18 @@ export function useInventory() {
             description: item.description?.trim() || undefined,
             photo: null,
             photoBlob: null,
+            photoAssetId: null,
             quantity: 0,
             removeTag: false,
             createdAt: new Date(),
             importedFromSpreadsheet: true,
             qtdPlanilha: item.qtdPlanilha ?? 0,
           }));
-          return { ...l, products: [...l.products, ...newProducts] };
+
+          return { ...list, products: [...list.products, ...newProducts] };
         })
       );
+
       toast({ title: `${items.length} itens importados!`, description: "Preencha COD e QTD em cada item." });
       return true;
     },
@@ -284,79 +437,131 @@ export function useInventory() {
 
   const updateProduct = useCallback((productId: string, updates: Partial<Product>) => {
     if (!activeListId) return;
+
     setLists((prev) =>
-      prev.map((l) => {
-        if (l.id !== activeListId) return l;
-        return { ...l, products: l.products.map((p) => p.id === productId ? { ...p, ...updates } : p) };
+      prev.map((list) => {
+        if (list.id !== activeListId) return list;
+        return {
+          ...list,
+          products: list.products.map((product) =>
+            product.id === productId ? { ...product, ...updates } : product
+          ),
+        };
       })
     );
   }, [activeListId]);
 
-  const updateProductPhoto = useCallback((productId: string, photoBlob: Blob | null) => {
+  const updateProductPhoto = useCallback(
+    async (productId: string, photoBlob: Blob | null): Promise<boolean> => {
+      if (!activeListId) return false;
+
+      const existingProduct = activeList?.products.find((product) => product.id === productId) ?? null;
+      const photoAssetId = existingProduct?.photoAssetId ?? productId;
+
+      try {
+        if (photoBlob) {
+          await putPhotoBlob(photoAssetId, photoBlob);
+        } else {
+          await deletePhotoBlob(photoAssetId);
+        }
+      } catch (error) {
+        console.error("Erro ao atualizar foto persistida:", error);
+        toast({
+          title: "Falha ao salvar a foto",
+          description: "Nao foi possivel atualizar a foto no armazenamento seguro do aparelho.",
+          variant: "destructive",
+        });
+        return false;
+      }
+
+      setLists((prev) =>
+        prev.map((list) => {
+          if (list.id !== activeListId) return list;
+
+          return {
+            ...list,
+            products: list.products.map((product) => {
+              if (product.id !== productId) return product;
+
+              revokeRuntimePhoto(product);
+
+              if (!photoBlob) {
+                return {
+                  ...product,
+                  photo: null,
+                  photoBlob: null,
+                  photoAssetId: null,
+                };
+              }
+
+              const runtimePhoto = createRuntimePhoto(photoBlob);
+              return {
+                ...product,
+                photo: runtimePhoto.photo,
+                photoBlob: runtimePhoto.photoBlob,
+                photoAssetId,
+              };
+            }),
+          };
+        })
+      );
+
+      return true;
+    },
+    [activeList, activeListId, toast]
+  );
+
+  const moveProductToTop = useCallback((productId: string) => {
     if (!activeListId) return;
 
     setLists((prev) =>
       prev.map((list) => {
         if (list.id !== activeListId) return list;
 
-        return {
-          ...list,
-          products: list.products.map((product) => {
-            if (product.id !== productId) return product;
+        const productIndex = list.products.findIndex((product) => product.id === productId);
+        if (productIndex <= 0) return list;
 
-            revokeRuntimePhoto(product);
-
-            if (!photoBlob) {
-              return {
-                ...product,
-                photo: null,
-                photoBlob: null,
-              };
-            }
-
-            const runtimePhoto = createRuntimePhoto(photoBlob);
-            return {
-              ...product,
-              photo: runtimePhoto.photo,
-              photoBlob: runtimePhoto.photoBlob,
-            };
-          }),
-        };
-      })
-    );
-  }, [activeListId]);
-
-  const moveProductToTop = useCallback((productId: string) => {
-    if (!activeListId) return;
-    setLists((prev) =>
-      prev.map((l) => {
-        if (l.id !== activeListId) return l;
-        const productIndex = l.products.findIndex((p) => p.id === productId);
-        if (productIndex <= 0) return l;
-        const updatedProducts = [...l.products];
+        const updatedProducts = [...list.products];
         const [product] = updatedProducts.splice(productIndex, 1);
         updatedProducts.unshift(product);
-        return { ...l, products: updatedProducts };
+        return { ...list, products: updatedProducts };
       })
     );
   }, [activeListId]);
 
   const scrollToProduct = useCallback((productId: string) => {
     if (!activeListId) return;
+
     setLists((prev) => {
-      const newLists = prev.map((l) => {
-        if (l.id !== activeListId) return l;
-        const productIndex = l.products.findIndex((p) => p.id === productId);
-        if (productIndex <= 0) return l;
-        const updatedProducts = [...l.products];
+      const newLists = prev.map((list) => {
+        if (list.id !== activeListId) return list;
+
+        const productIndex = list.products.findIndex((product) => product.id === productId);
+        if (productIndex <= 0) return list;
+
+        const updatedProducts = [...list.products];
         const [product] = updatedProducts.splice(productIndex, 1);
         updatedProducts.unshift(product);
-        return { ...l, products: updatedProducts };
+        return { ...list, products: updatedProducts };
       });
+
       setTimeout(() => window.scrollTo({ top: 0, behavior: "instant" }), 50);
       return newLists;
     });
   }, [activeListId]);
 
-  return { lists, activeList, openList, closeList, addProduct, addProductsFromSpreadsheet, updateProduct, updateProductPhoto, deleteProduct, updateList, moveProductToTop, scrollToProduct };
+  return {
+    lists,
+    activeList,
+    openList,
+    closeList,
+    addProduct,
+    addProductsFromSpreadsheet,
+    updateProduct,
+    updateProductPhoto,
+    deleteProduct,
+    updateList,
+    moveProductToTop,
+    scrollToProduct,
+  };
 }
