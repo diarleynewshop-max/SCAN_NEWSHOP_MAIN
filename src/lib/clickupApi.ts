@@ -59,8 +59,12 @@ function getConfig(empresa: EmpresaKey, flag: FlagKey): EmpresaConfig & { resolv
 }
 
 // ── Validação de senha ────────────────────────────────────────────────────────
-export function validarSenha(empresa: EmpresaKey, senha: string): boolean {
-  return CONFIGS[empresa]?.senha === senha;
+export function obterSenhaPadrao(empresa: EmpresaKey, _flag: FlagKey = "loja"): string {
+  return CONFIGS[empresa]?.senha ?? "";
+}
+
+export function validarSenha(empresa: EmpresaKey, senha: string, flag: FlagKey = "loja"): boolean {
+  return obterSenhaPadrao(empresa, flag) === senha;
 }
 
 // ── Buscar tasks do status "Analisado" ────────────────────────────────────────

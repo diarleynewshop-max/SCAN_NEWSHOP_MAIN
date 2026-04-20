@@ -24,6 +24,7 @@ import JSZip from "jszip";
 import { enviarConferenciaParaClickUp } from "@/lib/webhookRouter";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import {
+  obterSenhaPadrao,
   validarSenha,
   buscarTasksAnalisado,
   baixarJsonDaTask,
@@ -97,7 +98,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [flag, setFlag] = useState(flagInicial);
   const [conferenceId] = useState(() => crypto.randomUUID());
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
-  const [senha, setSenha] = useState("");
+  const [senha, setSenha] = useState(() => obterSenhaPadrao(empresaInicial as EmpresaKey, flagInicial as FlagKey));
   const [senhaErro, setSenhaErro] = useState(false);
   const [tasks, setTasks] = useState<ClickUpTask[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
@@ -134,8 +135,13 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     };
   }, []);
 
+  useEffect(() => {
+    setSenha(obterSenhaPadrao(empresa as EmpresaKey, flag as FlagKey));
+    setSenhaErro(false);
+  }, [empresa, flag]);
+
   const confirmarSenha = async () => {
-    const ok = validarSenha(empresa as EmpresaKey, senha);
+    const ok = validarSenha(empresa as EmpresaKey, senha, flag as FlagKey);
     if (!ok) { setSenhaErro(true); return; }
     setSenhaErro(false);
     setLoadingTasks(true);
