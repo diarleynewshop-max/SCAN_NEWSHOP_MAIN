@@ -1,4 +1,4 @@
-import { useState, useCallback, useEffect } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { Product, ListData, ListFlag } from "@/components/ProductCard";
 import { useToast } from "@/hooks/use-toast";
 
@@ -22,11 +22,32 @@ interface AddProductParams {
 
 const STORAGE_KEY = "scan_newshop_lists";
 
-function saveLists(lists: ListData[]) {
+type SaveListsResult = "ok" | "without-photos" | "failed";
+
+function stripPhotosFromLists(lists: ListData[]): ListData[] {
+  return lists.map((list) => ({
+    ...list,
+    products: list.products.map((product) => ({
+      ...product,
+      photo: null,
+    })),
+  }));
+}
+
+function saveLists(lists: ListData[]): SaveListsResult {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(lists));
+    return "ok";
   } catch (err) {
-    console.error('Erro ao salvar listas:', err);
+    console.error("Erro ao salvar listas:", err);
+  }
+
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(stripPhotosFromLists(lists)));
+    return "without-photos";
+  } catch (fallbackErr) {
+    console.error("Erro ao salvar listas sem fotos:", fallbackErr);
+    return "failed";
   }
 }
 
@@ -54,6 +75,7 @@ function loadLists(): ListData[] {
 export function useInventory() {
   const { toast } = useToast();
   const [lists, setLists] = useState<ListData[]>(() => loadLists());
+  const lastSaveResultRef = useRef<SaveListsResult>("ok");
   const [activeListId, setActiveListId] = useState<string | null>(() => {
     try {
       const savedId = localStorage.getItem("scan_newshop_active_list");
@@ -69,13 +91,33 @@ export function useInventory() {
   const activeList = lists.find((l) => l.id === activeListId && l.status === "open") ?? null;
 
   useEffect(() => {
-    saveLists(lists);
+    const saveResult = saveLists(lists);
+
+    if (saveResult !== lastSaveResultRef.current) {
+      if (saveResult === "without-photos") {
+        toast({
+          title: "Fotos removidas do armazenamento",
+          description: "O app limpou as fotos locais para evitar travamento e perda total da lista.",
+        });
+      }
+
+      if (saveResult === "failed") {
+        toast({
+          title: "Falha ao salvar localmente",
+          description: "O app nao conseguiu persistir tudo no aparelho. Feche listas pesadas ou limpe fotos.",
+          variant: "destructive",
+        });
+      }
+    }
+
+    lastSaveResultRef.current = saveResult;
+
     if (activeListId) {
       localStorage.setItem("scan_newshop_active_list", activeListId);
     } else {
       localStorage.removeItem("scan_newshop_active_list");
     }
-  }, [lists, activeListId]);
+  }, [lists, activeListId, toast]);
 
   const openList = useCallback(
     ({ title, person, flag, empresa }: OpenListParams): boolean => {

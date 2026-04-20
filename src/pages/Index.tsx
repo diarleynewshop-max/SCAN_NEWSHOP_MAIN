@@ -80,7 +80,7 @@ const Index = () => {
 
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
   const [sku, setSku] = useState(() => sessionStorage.getItem("scan_sku") ?? "");
-  const [photo, setPhoto] = useState<string | null>(() => sessionStorage.getItem("scan_photo") ?? null);
+  const [photo, setPhoto] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
   const [view, setView] = useState<"scan" | "list" | "conference">(
     initialTab === "conference" ? "conference" : initialTab === "list" ? "list" : "scan"
@@ -106,12 +106,12 @@ const Index = () => {
   }, [sku]);
 
   useEffect(() => {
-    sessionStorage.setItem("scan_photo", photo ?? "");
-  }, [photo]);
-
-  useEffect(() => {
     sessionStorage.setItem("scan_quantity", quantity);
   }, [quantity]);
+
+  useEffect(() => {
+    sessionStorage.removeItem("scan_photo");
+  }, []);
 
   useEffect(() => {
     const handleStorageChange = () => {

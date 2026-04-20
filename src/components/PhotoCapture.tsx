@@ -9,7 +9,14 @@ interface PhotoCaptureProps {
   compressionPreset?: CompressionPreset;
 }
 
-function readAsDataUrl(file: File): Promise<string> {
+const PRESET_CONFIG: Record<CompressionPreset, { maxEdge: number; quality: number }> = {
+  default: { maxEdge: 1600, quality: 0.72 },
+  light: { maxEdge: 1024, quality: 0.5 },
+};
+
+const SAFE_RAW_FILE_SIZE_BYTES = 700 * 1024;
+
+function readAsDataUrl(file: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
     reader.onloadend = () => resolve(reader.result as string);
@@ -18,35 +25,62 @@ function readAsDataUrl(file: File): Promise<string> {
   });
 }
 
-function loadImage(dataUrl: string): Promise<HTMLImageElement> {
+function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {
   return new Promise((resolve, reject) => {
+    const objectUrl = URL.createObjectURL(file);
     const img = new Image();
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Falha ao carregar imagem"));
-    img.src = dataUrl;
+
+    img.onload = () => resolve({ image: img, objectUrl });
+    img.onerror = () => {
+      URL.revokeObjectURL(objectUrl);
+      reject(new Error("Falha ao carregar imagem"));
+    };
+    img.src = objectUrl;
   });
 }
 
-async function compressForLightMode(file: File): Promise<string> {
-  const original = await readAsDataUrl(file);
-  const image = await loadImage(original);
+function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality);
+  });
+}
 
-  const maxEdge = 1280;
-  const currentMaxEdge = Math.max(image.width, image.height);
-  const scale = currentMaxEdge > maxEdge ? maxEdge / currentMaxEdge : 1;
-
-  const targetWidth = Math.max(1, Math.round(image.width * scale));
-  const targetHeight = Math.max(1, Math.round(image.height * scale));
-
+async function compressPhoto(file: File, preset: CompressionPreset): Promise<string> {
+  const { image, objectUrl } = await loadImageFromFile(file);
+  const { maxEdge, quality } = PRESET_CONFIG[preset];
   const canvas = document.createElement("canvas");
-  canvas.width = targetWidth;
-  canvas.height = targetHeight;
 
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return original;
+  try {
+    const currentMaxEdge = Math.max(image.width, image.height);
+    const scale = currentMaxEdge > maxEdge ? maxEdge / currentMaxEdge : 1;
 
-  ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
-  return canvas.toDataURL("image/jpeg", 0.55);
+    const targetWidth = Math.max(1, Math.round(image.width * scale));
+    const targetHeight = Math.max(1, Math.round(image.height * scale));
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) {
+      throw new Error("Falha ao preparar canvas");
+    }
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+    const blob = await canvasToBlob(canvas, quality);
+    if (blob) {
+      return await readAsDataUrl(blob);
+    }
+
+    return canvas.toDataURL("image/jpeg", quality);
+  } finally {
+    canvas.width = 0;
+    canvas.height = 0;
+    image.src = "";
+    URL.revokeObjectURL(objectUrl);
+  }
 }
 
 const PhotoCapture = ({ photo, onCapture, onRemove, compressionPreset = "default" }: PhotoCaptureProps) => {
@@ -58,14 +92,17 @@ const PhotoCapture = ({ photo, onCapture, onRemove, compressionPreset = "default
     }
 
     try {
-      const nextPhoto = compressionPreset === "light"
-        ? await compressForLightMode(file)
-        : await readAsDataUrl(file);
+      const nextPhoto = await compressPhoto(file, compressionPreset);
       onCapture(nextPhoto);
-    } catch {
-      // Fallback para nao bloquear fluxo em aparelho antigo
-      const fallback = await readAsDataUrl(file);
-      onCapture(fallback);
+    } catch (error) {
+      console.error("[PhotoCapture] Falha ao processar foto:", error);
+
+      if (file.size <= SAFE_RAW_FILE_SIZE_BYTES) {
+        const fallback = await readAsDataUrl(file);
+        onCapture(fallback);
+      } else {
+        window.alert("Nao foi possivel processar a foto neste aparelho. Tente novamente ou use uma foto menor.");
+      }
     } finally {
       e.target.value = "";
     }

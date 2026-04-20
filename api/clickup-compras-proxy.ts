@@ -12,6 +12,11 @@ import {
   normalizeEmpresa,
   resolveCompraClickUpStatus,
 } from './_clickup.js';
+import {
+  fetchZimaComprasTasks,
+  isZimaComprasConfigured,
+  updateZimaCompraStatus,
+} from './_zima-compras.js';
 
 type CompraStatusApp = 'todo' | 'produto_bom' | 'produto_ruim' | 'fazer_pedido' | 'concluido';
 
@@ -81,6 +86,16 @@ async function buscarTasksCompras(
   listId: string
 ) {
   const statusFilter = normalizeStatusFilter(req.query.status);
+
+  if (isZimaComprasConfigured()) {
+    const data = await fetchZimaComprasTasks(empresa, statusFilter);
+    return res.json({
+      ...data,
+      empresa,
+      source: 'zima',
+    });
+  }
+
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 15000);
 
@@ -111,7 +126,7 @@ async function buscarTasksCompras(
     }
 
     try {
-      const t = task as Record<string, any>;
+      const t = task as Record<string, unknown>;
       const id = String(t.id ?? '');
       if (!id) {
         skippedTasks.push({ id: '', reason: 'sem-id' });
@@ -133,7 +148,7 @@ async function buscarTasksCompras(
       });
     } catch (taskError) {
       skippedTasks.push({
-        id: String((task as Record<string, any>).id ?? ''),
+        id: String((task as Record<string, unknown>).id ?? ''),
         reason: String(taskError),
       });
     }
@@ -194,7 +209,7 @@ async function moverStatusCompra(
       const listData = await listResponse.json();
       availableStatuses = Array.isArray(listData.statuses)
         ? listData.statuses
-            .map((status: any) => String(status?.status ?? '').trim())
+            .map((status: Record<string, unknown>) => String(status?.status ?? '').trim())
             .filter(Boolean)
         : [];
     }
@@ -244,6 +259,27 @@ async function moverStatusCompra(
     });
   }
 
+  let syncWarning: string | null = null;
+  if (isZimaComprasConfigured()) {
+    try {
+      await updateZimaCompraStatus({
+        taskId,
+        empresa,
+        status_novo: novoStatusApp,
+        status_clickup: statusAplicado,
+        acao: 'ALTERAR_STATUS',
+        origem: 'clickup-compras-proxy',
+        payload: {
+          currentStatus,
+          attemptedStatuses: candidateStatuses,
+        },
+      });
+    } catch (error) {
+      syncWarning = String(error);
+      console.error('[clickup-compras-proxy] Falha ao sincronizar ZimaOS:', error);
+    }
+  }
+
   return res.json({
     ok: true,
     taskId,
@@ -252,6 +288,7 @@ async function moverStatusCompra(
     status: statusAplicado,
     statusApp: novoStatusApp,
     empresa,
+    syncWarning,
   });
 }
 
@@ -262,22 +299,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method === 'OPTIONS') return res.status(200).end();
 
   const empresa = normalizeEmpresa(getSingle(req.query.empresa) || getSingle((req.body as Record<string, unknown> | undefined)?.empresa));
-  const token = getClickUpToken(empresa);
-  const listId = getClickUpListId(empresa, 'compras');
   const action = getAction(req);
-
-  if (!token) {
-    return res.status(500).json({
-      error: 'Token nao configurado',
-      empresa,
-      expectedEnv: empresa === 'NEWSHOP'
-        ? ['CLICKUP_TOKEN', 'CLICKUP_API_TOKEN', 'VITE_CLICKUP_API_TOKEN', 'VITE_CLICKUP_TOKEN_NEWSHOP']
-        : ['CLICKUP_TOKEN_SF', 'CLICKUP_API_TOKEN_SF', 'CLICKUP_API_TOKEN', 'VITE_CLICKUP_API_TOKEN', 'VITE_CLICKUP_TOKEN_SF'],
-    });
-  }
 
   try {
     if (action === 'buscar-tasks') {
+      const token = getClickUpToken(empresa);
+      const listId = getClickUpListId(empresa, 'compras');
+
+      if (!token && !isZimaComprasConfigured()) {
+        return res.status(500).json({
+          error: 'Token nao configurado',
+          empresa,
+          expectedEnv: empresa === 'NEWSHOP'
+            ? ['CLICKUP_TOKEN', 'CLICKUP_API_TOKEN', 'VITE_CLICKUP_API_TOKEN', 'VITE_CLICKUP_TOKEN_NEWSHOP', 'ZIMA_COMPRAS_BASE_URL', 'ZIMA_COMPRAS_API_TOKEN']
+            : ['CLICKUP_TOKEN_SF', 'CLICKUP_API_TOKEN_SF', 'CLICKUP_API_TOKEN', 'VITE_CLICKUP_API_TOKEN', 'VITE_CLICKUP_TOKEN_SF', 'ZIMA_COMPRAS_BASE_URL', 'ZIMA_COMPRAS_API_TOKEN'],
+        });
+      }
+
       return await buscarTasksCompras(req, res, empresa, token, listId);
     }
 
@@ -285,11 +323,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (req.method !== 'POST') {
         return res.status(405).json({ error: 'Metodo nao permitido para mover-status' });
       }
+
+      const token = getClickUpToken(empresa);
+      const listId = getClickUpListId(empresa, 'compras');
+
+      if (!token) {
+        return res.status(500).json({
+          error: 'Token nao configurado',
+          empresa,
+          expectedEnv: empresa === 'NEWSHOP'
+            ? ['CLICKUP_TOKEN', 'CLICKUP_API_TOKEN', 'VITE_CLICKUP_API_TOKEN', 'VITE_CLICKUP_TOKEN_NEWSHOP']
+            : ['CLICKUP_TOKEN_SF', 'CLICKUP_API_TOKEN_SF', 'CLICKUP_API_TOKEN', 'VITE_CLICKUP_API_TOKEN', 'VITE_CLICKUP_TOKEN_SF'],
+        });
+      }
+
       return await moverStatusCompra(req, res, empresa, token, listId);
     }
 
     return res.status(400).json({ error: 'Action invalida', action });
   } catch (error) {
+    const listId = getClickUpListId(empresa, 'compras');
     console.error('Erro no clickup-compras-proxy:', error);
     return res.status(500).json({
       error: String(error),

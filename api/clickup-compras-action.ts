@@ -8,6 +8,7 @@ import {
   normalizeEmpresa,
   resolveCompraClickUpStatus,
 } from './_clickup.js';
+import { isZimaComprasConfigured, updateZimaCompraStatus } from './_zima-compras.js';
 
 const supabaseUrl = process.env.SUPABASE_URL;
 const supabaseServiceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
@@ -77,7 +78,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const listData = await listResponse.json();
     const availableStatuses = Array.isArray(listData.statuses)
       ? listData.statuses
-          .map((status: any) => String(status?.status ?? '').trim())
+          .map((status: Record<string, unknown>) => String(status?.status ?? '').trim())
           .filter(Boolean)
       : [];
 
@@ -110,6 +111,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(400).json({ error: 'Erro ao mover', details: errorText });
     }
 
+    let syncWarning: string | null = null;
+    if (isZimaComprasConfigured()) {
+      try {
+        await updateZimaCompraStatus({
+          taskId,
+          empresa: empresaKey,
+          status_novo: novoStatusApp,
+          status_clickup: novoStatus,
+          acao: 'ALTERAR_STATUS',
+          origem: 'clickup-compras-action',
+          payload: {
+            previousStatus: statusAtual,
+          },
+        });
+      } catch (syncError) {
+        syncWarning = String(syncError);
+        console.error('Erro ao sincronizar status com ZimaOS:', syncError);
+      }
+    }
+
     if (supabase) {
       try {
         const channel = supabase.channel('compras-sync');
@@ -140,6 +161,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       status: novoStatus,
       statusApp: novoStatusApp,
       empresa: empresaKey,
+      syncWarning,
     });
   } catch (error) {
     console.error('Erro:', error);
