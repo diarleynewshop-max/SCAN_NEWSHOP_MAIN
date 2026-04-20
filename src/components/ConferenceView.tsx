@@ -22,6 +22,7 @@ import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { enviarConferenciaParaClickUp } from "@/lib/webhookRouter";
+import { obterLoginSalvo } from "@/hooks/useAuth";
 import {
   validarSenha,
   buscarTasksAnalisado,
@@ -81,15 +82,19 @@ const ConferenceFileSchema = z.object({
   ).min(1),
 });
 
-const ConferenceView = ({ onBack, empresa: empresaProp = "NEWSHOP", flag: flagProp = "loja", modoDesktop = false }: ConferenceViewProps) => {
+const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesktop = false }: ConferenceViewProps) => {
+  const loginSalvo = obterLoginSalvo();
+  const empresaInicial = empresaProp ?? loginSalvo?.empresa ?? "NEWSHOP";
+  const flagInicial = flagProp ?? loginSalvo?.flag ?? "loja";
+  const conferenteInicial = loginSalvo?.nomePessoa ?? "";
   const [items, setItems] = useState<ConferenceItem[]>([]);
   const [phase, setPhase] = useState<Phase>("import");
   const [importError, setImportError] = useState<string | null>(null);
-  const [conferente, setConferente] = useState("");
+  const [conferente, setConferente] = useState(conferenteInicial);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
-  const [empresa, setEmpresa] = useState(empresaProp);
-  const [flag, setFlag] = useState(flagProp);
+  const [empresa, setEmpresa] = useState(empresaInicial);
+  const [flag, setFlag] = useState(flagInicial);
   const [conferenceId] = useState(() => crypto.randomUUID());
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [senha, setSenha] = useState("");
