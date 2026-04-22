@@ -14,16 +14,22 @@ describe("photoUtils", () => {
     expect(isRemotePhotoUrl("https://cdn.exemplo.com/foto.jpg")).toBe(true);
   });
 
-  it("nao persiste foto local em blob ou data url", () => {
+  it("persiste data url e nao persiste blob local", () => {
     expect(shouldPersistPhoto({ photo: "blob:http://localhost/123", photoBlob: new Blob(["x"]) })).toBe(false);
-    expect(shouldPersistPhoto({ photo: "data:image/jpeg;base64,abc" })).toBe(false);
+    expect(shouldPersistPhoto({ photo: "data:image/jpeg;base64,abc" })).toBe(true);
   });
 
-  it("mantem apenas URL remota na serializacao", () => {
+  it("mantem URL remota e data url na serializacao", () => {
     const persisted = stripPhotoForPersistence({
       photo: "https://cdn.exemplo.com/foto.jpg",
       photoBlob: null,
       photoAssetId: "asset-remoto",
+    });
+
+    const dataUrl = stripPhotoForPersistence({
+      photo: "data:image/jpeg;base64,abc",
+      photoBlob: null,
+      photoAssetId: "asset-base64",
     });
 
     const stripped = stripPhotoForPersistence({
@@ -33,7 +39,9 @@ describe("photoUtils", () => {
     });
 
     expect(persisted.photo).toBe("https://cdn.exemplo.com/foto.jpg");
-    expect(persisted.photoAssetId).toBe("asset-remoto");
+    expect(persisted.photoAssetId).toBeUndefined();
+    expect(dataUrl.photo).toBe("data:image/jpeg;base64,abc");
+    expect(dataUrl.photoAssetId).toBeUndefined();
     expect(stripped.photo).toBeNull();
     expect(stripped.photoBlob).toBeUndefined();
     expect(stripped.photoAssetId).toBe("asset-local");

@@ -1,5 +1,3 @@
-import { getPhotoBlob } from "@/lib/photoStore";
-
 export interface RuntimePhotoLike {
   photo: string | null;
   photoBlob?: Blob | null;
@@ -42,15 +40,17 @@ export function revokeRuntimePhoto(photo: RuntimePhotoLike | null | undefined): 
 
 export function shouldPersistPhoto(photo: RuntimePhotoLike | null | undefined): boolean {
   if (!photo?.photo) return false;
-  if (photo.photoBlob) return false;
-  return isRemotePhotoUrl(photo.photo);
+  return isDataPhotoUrl(photo.photo) || isRemotePhotoUrl(photo.photo);
 }
 
 export function stripPhotoForPersistence<T extends RuntimePhotoLike>(photo: T): T {
+  const persistedPhoto = shouldPersistPhoto(photo) ? photo.photo : null;
+
   return {
     ...photo,
-    photo: shouldPersistPhoto(photo) ? photo.photo : null,
+    photo: persistedPhoto,
     photoBlob: undefined,
+    photoAssetId: persistedPhoto ? undefined : photo.photoAssetId,
   };
 }
 
@@ -75,17 +75,6 @@ async function fetchPhotoBlob(url: string): Promise<Blob> {
 export async function resolvePhotoToDataUrl(photo: RuntimePhotoLike): Promise<string | null> {
   if (photo.photoBlob instanceof Blob) {
     return await blobToDataUrl(photo.photoBlob);
-  }
-
-  if (photo.photoAssetId) {
-    try {
-      const storedBlob = await getPhotoBlob(photo.photoAssetId);
-      if (storedBlob) {
-        return await blobToDataUrl(storedBlob);
-      }
-    } catch {
-      // ignore and keep fallback flow below
-    }
   }
 
   if (!photo.photo) {

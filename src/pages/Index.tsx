@@ -8,8 +8,6 @@ import { useInventory } from "@/hooks/useInventory";
 import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
-import { createRuntimePhoto, revokePhotoUrl } from "@/lib/photoUtils";
-import { deletePhotoBlob, getPhotoBlob, putPhotoBlob } from "@/lib/photoStore";
 
 const LOGO = "/newshop-logo.jpg";
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
@@ -22,8 +20,6 @@ const LAZY_FALLBACK = (
     Carregando...
   </div>
 );
-
-const DRAFT_PHOTO_STORAGE_KEY = "scan_newshop_draft_photo";
 
 const S = {
   inputBase: {
@@ -84,8 +80,7 @@ const Index = () => {
 
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
   const [sku, setSku] = useState(() => sessionStorage.getItem("scan_sku") ?? "");
-  const [photo, setPhoto] = useState<string | null>(null);
-  const [photoBlob, setPhotoBlob] = useState<Blob | null>(null);
+  const [photo, setPhoto] = useState<string | null>(() => sessionStorage.getItem("scan_photo"));
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
   const [view, setView] = useState<"scan" | "list" | "conference">(
     initialTab === "conference" ? "conference" : initialTab === "list" ? "list" : "scan"
@@ -115,39 +110,16 @@ const Index = () => {
   }, [quantity]);
 
   useEffect(() => {
-    sessionStorage.removeItem("scan_photo");
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const restoreDraftPhoto = async () => {
-      try {
-        const savedPhoto = await getPhotoBlob(DRAFT_PHOTO_STORAGE_KEY);
-        if (!savedPhoto || cancelled) return;
-
-        const runtimePhoto = createRuntimePhoto(savedPhoto);
-        setPhoto((prev) => {
-          revokePhotoUrl(prev);
-          return runtimePhoto.photo;
-        });
-        setPhotoBlob(savedPhoto);
-      } catch (error) {
-        console.error("Erro ao restaurar foto temporaria:", error);
+    try {
+      if (photo) {
+        sessionStorage.setItem("scan_photo", photo);
+      } else {
+        sessionStorage.removeItem("scan_photo");
       }
-    };
-
-    void restoreDraftPhoto();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => {
-    return () => {
-      revokePhotoUrl(photo);
-    };
+    } catch (error) {
+      console.error("Erro ao salvar foto temporaria:", error);
+      sessionStorage.removeItem("scan_photo");
+    }
   }, [photo]);
 
   useEffect(() => {
@@ -224,49 +196,21 @@ const Index = () => {
     }
   };
 
-  const setDraftPhoto = useCallback(async (blob: Blob) => {
-    try {
-      await putPhotoBlob(DRAFT_PHOTO_STORAGE_KEY, blob);
-    } catch (error) {
-      console.error("Erro ao salvar foto temporaria:", error);
-      toast({
-        title: "Falha ao proteger a foto",
-        description: "Nao foi possivel guardar a foto temporaria neste aparelho.",
-        variant: "destructive",
-      });
-      return;
-    }
+  const setDraftPhoto = useCallback((nextPhoto: string) => {
+    setPhoto(nextPhoto);
+  }, []);
 
-    const runtimePhoto = createRuntimePhoto(blob);
-
-    setPhoto((prev) => {
-      revokePhotoUrl(prev);
-      return runtimePhoto.photo;
-    });
-    setPhotoBlob(blob);
-  }, [toast]);
-
-  const clearDraftPhoto = useCallback(async () => {
-    try {
-      await deletePhotoBlob(DRAFT_PHOTO_STORAGE_KEY);
-    } catch (error) {
-      console.error("Erro ao limpar foto temporaria:", error);
-    }
-
-    setPhoto((prev) => {
-      revokePhotoUrl(prev);
-      return null;
-    });
-    setPhotoBlob(null);
+  const clearDraftPhoto = useCallback(() => {
+    setPhoto(null);
   }, []);
 
   const handleAdd = async () => {
-    const ok = await addProduct({ barcode, sku, photoBlob, quantity: Number(quantity) });
+    const ok = await addProduct({ barcode, sku, photo, quantity: Number(quantity) });
     if (!ok) return;
 
     setBarcode("");
     setSku("");
-    await clearDraftPhoto();
+    clearDraftPhoto();
     setQuantity("");
     sessionStorage.removeItem("scan_barcode");
     sessionStorage.removeItem("scan_sku");
@@ -477,11 +421,11 @@ const Index = () => {
                 <div data-tut="scanner-foto">
                   <PhotoCapture
                     photo={photo}
-                    onCapture={(nextPhotoBlob) => {
-                      void setDraftPhoto(nextPhotoBlob);
+                    onCapture={(nextPhoto) => {
+                      setDraftPhoto(nextPhoto);
                     }}
                     onRemove={() => {
-                      void clearDraftPhoto();
+                      clearDraftPhoto();
                     }}
                     compressionPreset={modoLeve ? "light" : "default"}
                   />
@@ -578,10 +522,10 @@ const Index = () => {
           <PhotoCapture
             photo={activeList?.products.find((p) => p.id === photoProductId)?.photo || null}
             compressionPreset={modoLeve ? "light" : "default"}
-            onCapture={(nextPhotoBlob) => {
+            onCapture={(nextPhoto) => {
               if (!photoProductId) return;
               void (async () => {
-                const ok = await updateProductPhoto(photoProductId, nextPhotoBlob);
+                const ok = await updateProductPhoto(photoProductId, nextPhoto);
                 if (!ok) return;
                 setShowPhotoCapture(false);
                 setPhotoProductId(null);

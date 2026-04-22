@@ -1,13 +1,8 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Product, ListData, ListFlag } from "@/components/ProductCard";
 import { useToast } from "@/hooks/use-toast";
-import {
-  createRuntimePhoto,
-  revokeRuntimePhoto,
-  stripPhotoForPersistence,
-  shouldPersistPhoto,
-} from "@/lib/photoUtils";
-import { deletePhotoBlob, getPhotoBlob, putPhotoBlob } from "@/lib/photoStore";
+import { blobToDataUrl, stripPhotoForPersistence, shouldPersistPhoto } from "@/lib/photoUtils";
+import { deletePhotoBlob, getPhotoBlob } from "@/lib/photoStore";
 
 interface OpenListParams {
   title: string;
@@ -19,7 +14,7 @@ interface OpenListParams {
 interface AddProductParams {
   barcode: string;
   sku: string;
-  photoBlob?: Blob | null;
+  photo?: string | null;
   quantity: number;
   removeTag?: boolean;
   description?: string;
@@ -43,8 +38,7 @@ function hasNonPersistablePhotos(lists: ListData[]): boolean {
     list.products.some(
       (product) =>
         Boolean(product.photo) &&
-        !shouldPersistPhoto(product) &&
-        !product.photoAssetId
+        !shouldPersistPhoto(product)
     )
   );
 }
@@ -107,7 +101,6 @@ export function useInventory() {
   const { toast } = useToast();
   const [lists, setLists] = useState<ListData[]>(() => loadLists());
   const lastSaveResultRef = useRef<SaveListsResult>("ok");
-  const listsRef = useRef<ListData[]>(lists);
   const [activeListId, setActiveListId] = useState<string | null>(() => {
     try {
       const savedId = localStorage.getItem("scan_newshop_active_list");
@@ -121,10 +114,6 @@ export function useInventory() {
   });
 
   const activeList = lists.find((list) => list.id === activeListId && list.status === "open") ?? null;
-
-  useEffect(() => {
-    listsRef.current = lists;
-  }, [lists]);
 
   useEffect(() => {
     const saveResult = saveLists(lists);
@@ -156,20 +145,12 @@ export function useInventory() {
   }, [lists, activeListId, toast]);
 
   useEffect(() => {
-    return () => {
-      listsRef.current.forEach((list) => {
-        list.products.forEach((product) => revokeRuntimePhoto(product));
-      });
-    };
-  }, []);
-
-  useEffect(() => {
     let cancelled = false;
 
     const hydratePersistedPhotos = async () => {
       const pendingProducts = lists.flatMap((list) =>
         list.products
-          .filter((product) => product.photoAssetId && !product.photoBlob && !product.photo)
+          .filter((product) => product.photoAssetId && !product.photo)
           .map((product) => ({
             productId: product.id,
             photoAssetId: product.photoAssetId as string,
@@ -181,7 +162,9 @@ export function useInventory() {
       const hydratedPhotos = await Promise.all(
         pendingProducts.map(async (product) => ({
           productId: product.productId,
-          blob: await getPhotoBlob(product.photoAssetId).catch(() => null),
+          photo: await getPhotoBlob(product.photoAssetId)
+            .then((blob) => (blob ? blobToDataUrl(blob) : null))
+            .catch(() => null),
         }))
       );
 
@@ -189,8 +172,8 @@ export function useInventory() {
 
       const hydratedMap = new Map(
         hydratedPhotos
-          .filter((item): item is { productId: string; blob: Blob } => item.blob instanceof Blob)
-          .map((item) => [item.productId, item.blob])
+          .filter((item): item is { productId: string; photo: string } => Boolean(item.photo))
+          .map((item) => [item.productId, item.photo])
       );
 
       if (hydratedMap.size === 0) return;
@@ -200,21 +183,21 @@ export function useInventory() {
           let changed = false;
 
           const products = list.products.map((product) => {
-            if (product.photo || product.photoBlob || !product.photoAssetId) {
+            if (product.photo || !product.photoAssetId) {
               return product;
             }
 
-            const blob = hydratedMap.get(product.id);
-            if (!blob) {
+            const photo = hydratedMap.get(product.id);
+            if (!photo) {
               return product;
             }
 
             changed = true;
-            const runtimePhoto = createRuntimePhoto(blob);
             return {
               ...product,
-              photo: runtimePhoto.photo,
-              photoBlob: runtimePhoto.photoBlob,
+              photo,
+              photoBlob: null,
+              photoAssetId: null,
             };
           });
 
@@ -295,26 +278,8 @@ export function useInventory() {
 
       const barcode = params.barcode.trim();
       const quantity = params.quantity;
-      const existingProductId = activeList.products.find((product) => product.barcode === barcode)?.id ?? null;
       const newProductId = crypto.randomUUID();
-      const photoAssetId = params.photoBlob ? (existingProductId ?? newProductId) : null;
-      const runtimePhoto = params.photoBlob ? createRuntimePhoto(params.photoBlob) : null;
       let merged = false;
-
-      if (params.photoBlob && photoAssetId) {
-        try {
-          await putPhotoBlob(photoAssetId, params.photoBlob);
-        } catch (error) {
-          revokeRuntimePhoto(runtimePhoto);
-          console.error("Erro ao salvar foto no IndexedDB:", error);
-          toast({
-            title: "Falha ao proteger a foto",
-            description: "Nao foi possivel salvar a foto no armazenamento seguro do aparelho.",
-            variant: "destructive",
-          });
-          return false;
-        }
-      }
 
       setLists((prev) =>
         prev.map((list) => {
@@ -329,14 +294,10 @@ export function useInventory() {
             updatedProducts[existingIndex] = {
               ...existing,
               quantity: existing.quantity + quantity,
-              photo: runtimePhoto?.photo ?? existing.photo,
-              photoBlob: runtimePhoto?.photoBlob ?? existing.photoBlob ?? null,
-              photoAssetId: runtimePhoto ? photoAssetId : existing.photoAssetId ?? null,
+              photo: params.photo ?? existing.photo,
+              photoBlob: null,
+              photoAssetId: null,
             };
-
-            if (runtimePhoto) {
-              revokeRuntimePhoto(existing);
-            }
 
             return { ...list, products: updatedProducts };
           }
@@ -346,9 +307,9 @@ export function useInventory() {
             barcode,
             sku: params.sku.trim(),
             description: params.description?.trim() || undefined,
-            photo: runtimePhoto?.photo ?? null,
-            photoBlob: runtimePhoto?.photoBlob ?? null,
-            photoAssetId,
+            photo: params.photo ?? null,
+            photoBlob: null,
+            photoAssetId: null,
             quantity,
             removeTag: params.removeTag ?? false,
             createdAt: new Date(),
@@ -378,13 +339,10 @@ export function useInventory() {
         if (list.id !== activeListId) return list;
 
         const product = list.products.find((item) => item.id === productId);
-        if (product) {
-          revokeRuntimePhoto(product);
-          if (product.photoAssetId) {
-            void deletePhotoBlob(product.photoAssetId).catch((error) => {
-              console.error("Erro ao remover foto persistida:", error);
-            });
-          }
+        if (product?.photoAssetId) {
+          void deletePhotoBlob(product.photoAssetId).catch((error) => {
+            console.error("Erro ao remover foto persistida:", error);
+          });
         }
 
         return { ...list, products: list.products.filter((product) => product.id !== productId) };
@@ -454,27 +412,8 @@ export function useInventory() {
   }, [activeListId]);
 
   const updateProductPhoto = useCallback(
-    async (productId: string, photoBlob: Blob | null): Promise<boolean> => {
+    async (productId: string, photo: string | null): Promise<boolean> => {
       if (!activeListId) return false;
-
-      const existingProduct = activeList?.products.find((product) => product.id === productId) ?? null;
-      const photoAssetId = existingProduct?.photoAssetId ?? productId;
-
-      try {
-        if (photoBlob) {
-          await putPhotoBlob(photoAssetId, photoBlob);
-        } else {
-          await deletePhotoBlob(photoAssetId);
-        }
-      } catch (error) {
-        console.error("Erro ao atualizar foto persistida:", error);
-        toast({
-          title: "Falha ao salvar a foto",
-          description: "Nao foi possivel atualizar a foto no armazenamento seguro do aparelho.",
-          variant: "destructive",
-        });
-        return false;
-      }
 
       setLists((prev) =>
         prev.map((list) => {
@@ -485,9 +424,7 @@ export function useInventory() {
             products: list.products.map((product) => {
               if (product.id !== productId) return product;
 
-              revokeRuntimePhoto(product);
-
-              if (!photoBlob) {
+              if (!photo) {
                 return {
                   ...product,
                   photo: null,
@@ -496,12 +433,11 @@ export function useInventory() {
                 };
               }
 
-              const runtimePhoto = createRuntimePhoto(photoBlob);
               return {
                 ...product,
-                photo: runtimePhoto.photo,
-                photoBlob: runtimePhoto.photoBlob,
-                photoAssetId,
+                photo,
+                photoBlob: null,
+                photoAssetId: null,
               };
             }),
           };
@@ -510,7 +446,7 @@ export function useInventory() {
 
       return true;
     },
-    [activeList, activeListId, toast]
+    [activeListId]
   );
 
   const moveProductToTop = useCallback((productId: string) => {

@@ -4,7 +4,7 @@ type CompressionPreset = "default" | "light";
 
 interface PhotoCaptureProps {
   photo: string | null;
-  onCapture: (photo: Blob) => void;
+  onCapture: (photo: string) => void;
   onRemove: () => void;
   compressionPreset?: CompressionPreset;
 }
@@ -13,8 +13,6 @@ const PRESET_CONFIG: Record<CompressionPreset, { maxEdge: number; quality: numbe
   default: { maxEdge: 1600, quality: 0.72 },
   light: { maxEdge: 1024, quality: 0.5 },
 };
-
-const SAFE_RAW_FILE_SIZE_BYTES = 700 * 1024;
 
 function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {
   return new Promise((resolve, reject) => {
@@ -30,13 +28,16 @@ function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objec
   });
 }
 
-function canvasToBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
-  return new Promise((resolve) => {
-    canvas.toBlob((blob) => resolve(blob), "image/jpeg", quality);
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Falha ao ler imagem"));
+    reader.readAsDataURL(file);
   });
 }
 
-async function compressPhoto(file: File, preset: CompressionPreset): Promise<Blob> {
+async function compressPhoto(file: File, preset: CompressionPreset): Promise<string> {
   const { image, objectUrl } = await loadImageFromFile(file);
   const { maxEdge, quality } = PRESET_CONFIG[preset];
   const canvas = document.createElement("canvas");
@@ -60,12 +61,7 @@ async function compressPhoto(file: File, preset: CompressionPreset): Promise<Blo
     ctx.imageSmoothingQuality = "high";
     ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
 
-    const blob = await canvasToBlob(canvas, quality);
-    if (blob) {
-      return blob;
-    }
-
-    throw new Error("Falha ao gerar blob da imagem");
+    return canvas.toDataURL("image/jpeg", quality);
   } finally {
     canvas.width = 0;
     canvas.height = 0;
@@ -88,9 +84,9 @@ const PhotoCapture = ({ photo, onCapture, onRemove, compressionPreset = "default
     } catch (error) {
       console.error("[PhotoCapture] Falha ao processar foto:", error);
 
-      if (file.size <= SAFE_RAW_FILE_SIZE_BYTES) {
-        onCapture(file);
-      } else {
+      try {
+        onCapture(await readFileAsDataUrl(file));
+      } catch {
         window.alert("Nao foi possivel processar a foto neste aparelho. Tente novamente ou use uma foto menor.");
       }
     } finally {
