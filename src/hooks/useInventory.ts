@@ -1,8 +1,15 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Product, ListData, ListFlag } from "@/components/ProductCard";
 import { useToast } from "@/hooks/use-toast";
-import { blobToDataUrl, stripPhotoForPersistence, shouldPersistPhoto } from "@/lib/photoUtils";
-import { deletePhotoBlob, getPhotoBlob } from "@/lib/photoStore";
+import {
+  dataUrlToBlob,
+  isDataPhotoUrl,
+  isObjectPhotoUrl,
+  revokePhotoUrl,
+  shouldPersistPhoto,
+  stripPhotoForPersistence,
+} from "@/lib/photoUtils";
+import { deletePhotoBlob, getPhotoBlob, putPhotoBlob } from "@/lib/photoStore";
 
 interface OpenListParams {
   title: string;
@@ -25,6 +32,49 @@ interface AddProductParams {
 const STORAGE_KEY = "scan_newshop_lists";
 
 type SaveListsResult = "ok" | "without-photos" | "failed";
+
+type PreparedPhoto = Pick<Product, "photo" | "photoBlob" | "photoAssetId">;
+
+async function preparePhotoForRuntime(photo: string | null | undefined): Promise<PreparedPhoto> {
+  if (!photo) {
+    return { photo: null, photoBlob: null, photoAssetId: null };
+  }
+
+  if (!isDataPhotoUrl(photo)) {
+    return { photo, photoBlob: null, photoAssetId: null };
+  }
+
+  const blob = dataUrlToBlob(photo);
+  const assetId = crypto.randomUUID();
+  let photoAssetId: string | null = assetId;
+
+  try {
+    await putPhotoBlob(assetId, blob);
+  } catch (error) {
+    console.warn("Falha ao salvar foto no IndexedDB. Foto ficara apenas em memoria:", error);
+    photoAssetId = null;
+  }
+
+  return {
+    photo: URL.createObjectURL(blob),
+    photoBlob: blob,
+    photoAssetId,
+  };
+}
+
+function cleanupProductPhoto(product: Product | undefined): void {
+  if (!product) return;
+
+  if (product.photoAssetId) {
+    void deletePhotoBlob(product.photoAssetId).catch((error) => {
+      console.error("Erro ao remover foto persistida:", error);
+    });
+  }
+
+  if (isObjectPhotoUrl(product.photo)) {
+    revokePhotoUrl(product.photo);
+  }
+}
 
 function stripPhotosFromLists(lists: ListData[]): ListData[] {
   return lists.map((list) => ({
@@ -148,7 +198,7 @@ export function useInventory() {
     let cancelled = false;
 
     const hydratePersistedPhotos = async () => {
-      const pendingProducts = lists.flatMap((list) =>
+      const pendingAssetProducts = lists.flatMap((list) =>
         list.products
           .filter((product) => product.photoAssetId && !product.photo)
           .map((product) => ({
@@ -156,15 +206,27 @@ export function useInventory() {
             photoAssetId: product.photoAssetId as string,
           }))
       );
+      const pendingDataUrlProducts = lists.flatMap((list) =>
+        list.products
+          .filter((product) => isDataPhotoUrl(product.photo))
+          .map((product) => ({
+            productId: product.id,
+            photo: product.photo as string,
+          }))
+      );
 
-      if (pendingProducts.length === 0) return;
+      if (pendingAssetProducts.length === 0 && pendingDataUrlProducts.length === 0) return;
 
       const hydratedPhotos = await Promise.all(
-        pendingProducts.map(async (product) => ({
+        pendingAssetProducts.map(async (product) => ({
           productId: product.productId,
-          photo: await getPhotoBlob(product.photoAssetId)
-            .then((blob) => (blob ? blobToDataUrl(blob) : null))
-            .catch(() => null),
+          blob: await getPhotoBlob(product.photoAssetId).catch(() => null),
+        }))
+      );
+      const migratedPhotos = await Promise.all(
+        pendingDataUrlProducts.map(async (product) => ({
+          productId: product.productId,
+          photo: await preparePhotoForRuntime(product.photo).catch(() => null),
         }))
       );
 
@@ -172,32 +234,45 @@ export function useInventory() {
 
       const hydratedMap = new Map(
         hydratedPhotos
-          .filter((item): item is { productId: string; photo: string } => Boolean(item.photo))
+          .filter((item): item is { productId: string; blob: Blob } => item.blob instanceof Blob)
+          .map((item) => [item.productId, item.blob])
+      );
+      const migratedMap = new Map(
+        migratedPhotos
+          .filter((item): item is { productId: string; photo: PreparedPhoto } => Boolean(item.photo))
           .map((item) => [item.productId, item.photo])
       );
 
-      if (hydratedMap.size === 0) return;
+      if (hydratedMap.size === 0 && migratedMap.size === 0) return;
 
       setLists((prev) =>
         prev.map((list) => {
           let changed = false;
 
           const products = list.products.map((product) => {
+            const migratedPhoto = migratedMap.get(product.id);
+            if (migratedPhoto) {
+              changed = true;
+              return {
+                ...product,
+                ...migratedPhoto,
+              };
+            }
+
             if (product.photo || !product.photoAssetId) {
               return product;
             }
 
-            const photo = hydratedMap.get(product.id);
-            if (!photo) {
+            const blob = hydratedMap.get(product.id);
+            if (!blob) {
               return product;
             }
 
             changed = true;
             return {
               ...product,
-              photo,
-              photoBlob: null,
-              photoAssetId: null,
+              photo: URL.createObjectURL(blob),
+              photoBlob: blob,
             };
           });
 
@@ -279,7 +354,9 @@ export function useInventory() {
       const barcode = params.barcode.trim();
       const quantity = params.quantity;
       const newProductId = crypto.randomUUID();
+      const preparedPhoto = await preparePhotoForRuntime(params.photo);
       let merged = false;
+      let replacedProduct: Product | undefined;
 
       setLists((prev) =>
         prev.map((list) => {
@@ -290,13 +367,12 @@ export function useInventory() {
             merged = true;
             const updatedProducts = [...list.products];
             const existing = updatedProducts[existingIndex];
+            replacedProduct = params.photo ? existing : undefined;
 
             updatedProducts[existingIndex] = {
               ...existing,
               quantity: existing.quantity + quantity,
-              photo: params.photo ?? existing.photo,
-              photoBlob: null,
-              photoAssetId: null,
+              ...(params.photo ? preparedPhoto : {}),
             };
 
             return { ...list, products: updatedProducts };
@@ -307,9 +383,7 @@ export function useInventory() {
             barcode,
             sku: params.sku.trim(),
             description: params.description?.trim() || undefined,
-            photo: params.photo ?? null,
-            photoBlob: null,
-            photoAssetId: null,
+            ...preparedPhoto,
             quantity,
             removeTag: params.removeTag ?? false,
             createdAt: new Date(),
@@ -326,6 +400,8 @@ export function useInventory() {
         toast({ title: "Produto adicionado!", description: barcode });
       }
 
+      cleanupProductPhoto(replacedProduct);
+
       return true;
     },
     [activeList, activeListId, toast]
@@ -339,11 +415,7 @@ export function useInventory() {
         if (list.id !== activeListId) return list;
 
         const product = list.products.find((item) => item.id === productId);
-        if (product?.photoAssetId) {
-          void deletePhotoBlob(product.photoAssetId).catch((error) => {
-            console.error("Erro ao remover foto persistida:", error);
-          });
-        }
+        cleanupProductPhoto(product);
 
         return { ...list, products: list.products.filter((product) => product.id !== productId) };
       })
@@ -415,6 +487,9 @@ export function useInventory() {
     async (productId: string, photo: string | null): Promise<boolean> => {
       if (!activeListId) return false;
 
+      const preparedPhoto = await preparePhotoForRuntime(photo);
+      let replacedProduct: Product | undefined;
+
       setLists((prev) =>
         prev.map((list) => {
           if (list.id !== activeListId) return list;
@@ -423,6 +498,7 @@ export function useInventory() {
             ...list,
             products: list.products.map((product) => {
               if (product.id !== productId) return product;
+              replacedProduct = product;
 
               if (!photo) {
                 return {
@@ -435,15 +511,14 @@ export function useInventory() {
 
               return {
                 ...product,
-                photo,
-                photoBlob: null,
-                photoAssetId: null,
+                ...preparedPhoto,
               };
             }),
           };
         })
       );
 
+      cleanupProductPhoto(replacedProduct);
       return true;
     },
     [activeListId]

@@ -80,7 +80,7 @@ const Index = () => {
 
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
   const [sku, setSku] = useState(() => sessionStorage.getItem("scan_sku") ?? "");
-  const [photo, setPhoto] = useState<string | null>(() => sessionStorage.getItem("scan_photo"));
+  const [photo, setPhoto] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
   const [view, setView] = useState<"scan" | "list" | "conference">(
     initialTab === "conference" ? "conference" : initialTab === "list" ? "list" : "scan"
@@ -110,17 +110,8 @@ const Index = () => {
   }, [quantity]);
 
   useEffect(() => {
-    try {
-      if (photo) {
-        sessionStorage.setItem("scan_photo", photo);
-      } else {
-        sessionStorage.removeItem("scan_photo");
-      }
-    } catch (error) {
-      console.error("Erro ao salvar foto temporaria:", error);
-      sessionStorage.removeItem("scan_photo");
-    }
-  }, [photo]);
+    sessionStorage.removeItem("scan_photo");
+  }, []);
 
   useEffect(() => {
     const handleStorageChange = () => {

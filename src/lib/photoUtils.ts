@@ -1,3 +1,5 @@
+import { getPhotoBlob } from "@/lib/photoStore";
+
 export interface RuntimePhotoLike {
   photo: string | null;
   photoBlob?: Blob | null;
@@ -63,6 +65,19 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
   });
 }
 
+export function dataUrlToBlob(dataUrl: string): Blob {
+  const [header, base64] = dataUrl.split(",");
+  const mimeType = header.match(/^data:([^;]+);base64$/)?.[1] ?? "image/jpeg";
+  const binary = atob(base64 ?? "");
+  const bytes = new Uint8Array(binary.length);
+
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i);
+  }
+
+  return new Blob([bytes], { type: mimeType });
+}
+
 async function fetchPhotoBlob(url: string): Promise<Blob> {
   const response = await fetch(url);
   if (!response.ok) {
@@ -75,6 +90,13 @@ async function fetchPhotoBlob(url: string): Promise<Blob> {
 export async function resolvePhotoToDataUrl(photo: RuntimePhotoLike): Promise<string | null> {
   if (photo.photoBlob instanceof Blob) {
     return await blobToDataUrl(photo.photoBlob);
+  }
+
+  if (photo.photoAssetId) {
+    const blob = await getPhotoBlob(photo.photoAssetId).catch(() => null);
+    if (blob) {
+      return await blobToDataUrl(blob);
+    }
   }
 
   if (!photo.photo) {
