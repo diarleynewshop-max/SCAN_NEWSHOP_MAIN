@@ -155,8 +155,13 @@ const buildHeaders = async (contexto: VarejoFacilLookupContext = {}) => {
 };
 
 const fetchJson = async <T>(path: string, contexto: VarejoFacilLookupContext = {}) => {
-  const response = await fetch(`${resolveErpApiBase(contexto)}${path}`, {
-    headers: await buildHeaders(contexto),
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  const url = import.meta.env.DEV
+    ? `${resolveErpApiBase(contexto)}${path}`
+    : `/api/erp-proxy?empresa=${empresa.toLowerCase()}&path=${encodeURIComponent(path)}`;
+
+  const response = await fetch(url, {
+    headers: import.meta.env.DEV ? await buildHeaders(contexto) : { Accept: "application/json" },
   });
 
   if (response.status === 401) {
