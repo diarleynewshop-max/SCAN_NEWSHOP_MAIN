@@ -1,6 +1,5 @@
 import { useState, useCallback, useEffect } from "react";
-import { supabase } from "@/lib/supabase";
-import { buscarProdutoVarejoFacil, salvarProdutoSupabase } from "@/lib/varejoFacilIntegration";
+import { buscarProdutoVarejoFacil, type VarejoFacilLookupContext } from "@/lib/varejoFacilIntegration";
 
 interface ProductInfo {
   codigo: string;
@@ -19,9 +18,11 @@ interface UseProductLookupReturn {
 
 interface UseProductLookupOptions {
   enabled?: boolean;
+  empresa?: string | null;
+  flag?: string | null;
 }
 
-export const useProductLookup = ({ enabled = true }: UseProductLookupOptions = {}): UseProductLookupReturn => {
+export const useProductLookup = ({ enabled = true, empresa, flag }: UseProductLookupOptions = {}): UseProductLookupReturn => {
   const [productInfo, setProductInfo] = useState<ProductInfo | null>(null);
   const [loading, setLoading] = useState<boolean>(false);
   const [error, setError] = useState<string | null>(null);
@@ -46,44 +47,11 @@ export const useProductLookup = ({ enabled = true }: UseProductLookupOptions = {
     setError(null);
 
     try {
-      // Primeiro tentar buscar no Supabase
-      const { data, error } = await supabase
-        .from("estoque")
-        .select("*")
-        .eq("codigo", barcode)
-        .single();
-
-      console.log("Resposta do Supabase:", { data, error });
-
-      if (error && error.code !== "PGRST116") {
-        console.error("Erro na consulta ao Supabase:", error);
-        throw new Error(`Erro na consulta: ${error.message}`);
-      }
-
-      // Se encontrou no Supabase, usar esses dados
-      if (data) {
-        const productData: ProductInfo = {
-          codigo: String(data.codigo || data.barcode || barcode),
-          estoque: Number(data.estoque || data.quantidade_estoque || data.qtd || 0),
-          preco: data.preco !== undefined ? Number(data.preco) : data.valor !== undefined ? Number(data.valor) : undefined,
-          nome_produto: data.nome_produto || data.nome || data.descricao_produto || undefined,
-          descricao: data.descricao || data.descricao_completa || undefined,
-        };
-
-        setProductInfo(productData);
-        return;
-      }
-
-      // Se nao encontrou no Supabase, buscar na Varejo Facil
-      const produtoVarejoFacil = await buscarProdutoVarejoFacil(barcode);
+      // Produto vem direto da API Varejo Facil da empresa ativa.
+      const contexto: VarejoFacilLookupContext = { empresa, flag };
+      const produtoVarejoFacil = await buscarProdutoVarejoFacil(barcode, contexto);
 
       if (produtoVarejoFacil) {
-        try {
-          await salvarProdutoSupabase(produtoVarejoFacil);
-        } catch (saveError) {
-          console.error("Erro ao salvar produto no Supabase:", saveError);
-        }
-
         const productData: ProductInfo = {
           codigo: produtoVarejoFacil.codigo_barras,
           estoque: produtoVarejoFacil.estoque,
@@ -93,7 +61,7 @@ export const useProductLookup = ({ enabled = true }: UseProductLookupOptions = {
 
         setProductInfo(productData);
       } else {
-        setError("Produto nao encontrado no banco local nem na API externa");
+        setError("Produto nao encontrado na API Varejo Facil");
         setProductInfo(null);
       }
     } catch (err: any) {
@@ -103,7 +71,7 @@ export const useProductLookup = ({ enabled = true }: UseProductLookupOptions = {
     } finally {
       setLoading(false);
     }
-  }, [enabled]);
+  }, [enabled, empresa, flag]);
 
   return { productInfo, loading, error, lookupProduct };
 };

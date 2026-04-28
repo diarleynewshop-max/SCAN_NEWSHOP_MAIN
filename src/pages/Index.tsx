@@ -66,9 +66,8 @@ const S = {
   } as React.CSSProperties,
 };
 
-function isEmpresaSemConsulta(empresa?: string | null): boolean {
-  const normalizada = (empresa ?? "").toUpperCase();
-  return normalizada.includes("SOYE") || normalizada.includes("FACIL");
+function isConsultaBloqueada(flag?: string | null): boolean {
+  return (flag ?? "loja").toLowerCase() !== "loja";
 }
 
 const Index = () => {
@@ -92,10 +91,16 @@ const Index = () => {
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
-  const consultaBloqueadaPorEmpresa = isEmpresaSemConsulta(currentLogin?.empresa);
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
-  const { productInfo, loading, error, lookupProduct } = useProductLookup({ enabled: !modoLeve && !consultaBloqueadaPorEmpresa });
+  const lookupEmpresa = activeList?.empresa ?? currentLogin?.empresa;
+  const lookupFlag = activeList?.flag ?? currentLogin?.flag ?? "loja";
+  const consultaBloqueadaPorFlag = isConsultaBloqueada(lookupFlag);
+  const { productInfo, loading, error, lookupProduct } = useProductLookup({
+    enabled: !modoLeve && !consultaBloqueadaPorFlag,
+    empresa: lookupEmpresa,
+    flag: lookupFlag,
+  });
 
   useEffect(() => {
     sessionStorage.setItem("scan_barcode", barcode);
@@ -129,9 +134,9 @@ const Index = () => {
   }, [modoLeve]);
 
   useEffect(() => {
-    if (!consultaBloqueadaPorEmpresa) return;
+    if (!consultaBloqueadaPorFlag) return;
     setShowProductInfo(false);
-  }, [consultaBloqueadaPorEmpresa]);
+  }, [consultaBloqueadaPorFlag]);
 
   useEffect(() => {
     if (!productInfo) return;
@@ -143,15 +148,15 @@ const Index = () => {
     (code: string) => {
       setShowScanner(false);
       setBarcode(code);
-      if (consultaBloqueadaPorEmpresa) {
-        toast({ title: "Consulta bloqueada", description: "Empresa SOYE/FACIL nao consulta Supabase/API." });
+      if (consultaBloqueadaPorFlag) {
+        toast({ title: "Consulta bloqueada", description: "Consulta de produto ativa apenas para flag LOJA." });
         return;
       }
       if (modoLeve) return;
       setShowProductInfo(true);
       lookupProduct(code);
     },
-    [lookupProduct, modoLeve, consultaBloqueadaPorEmpresa, toast]
+    [lookupProduct, modoLeve, consultaBloqueadaPorFlag, toast]
   );
 
   const handleCloseList = () => {
@@ -338,18 +343,18 @@ const Index = () => {
                 </div>
               )}
 
-              {(modoLeve || consultaBloqueadaPorEmpresa) && (
+              {(modoLeve || consultaBloqueadaPorFlag) && (
                 <div style={{ background: "hsl(var(--warning) / 0.10)", border: "1px solid hsl(var(--warning) / 0.22)", borderRadius: 10, padding: modoDesktop ? "14px 18px" : "11px 14px", display: "flex", alignItems: "center", gap: 8 }}>
                   <AlertCircle style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15, color: "hsl(var(--warning))", flexShrink: 0 }} />
                   <p style={{ fontSize: modoDesktop ? 13 : 12, color: "hsl(var(--foreground))", fontWeight: 500 }}>
-                    {consultaBloqueadaPorEmpresa
-                      ? "Empresa SOYE/FACIL: consulta de produto desativada."
+                    {consultaBloqueadaPorFlag
+                      ? "Consulta de produto ativa apenas para flag LOJA."
                       : "Modo Leve ativo: sem consulta de produto e com foto comprimida."}
                   </p>
                 </div>
               )}
 
-              {showProductInfo && !modoLeve && !consultaBloqueadaPorEmpresa && (
+              {showProductInfo && !modoLeve && !consultaBloqueadaPorFlag && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <h3 style={{ fontWeight: 700, fontSize: 16 }}>Informacoes do Produto</h3>
@@ -390,9 +395,9 @@ const Index = () => {
                   onScanPress={() => setShowScanner(true)}
                   onEnterPress={() => {
                     if (!barcode.trim()) return;
-                    if (modoLeve || consultaBloqueadaPorEmpresa) {
-                      if (consultaBloqueadaPorEmpresa) {
-                        toast({ title: "Consulta bloqueada", description: "Empresa SOYE/FACIL nao consulta Supabase/API." });
+                    if (modoLeve || consultaBloqueadaPorFlag) {
+                      if (consultaBloqueadaPorFlag) {
+                        toast({ title: "Consulta bloqueada", description: "Consulta de produto ativa apenas para flag LOJA." });
                       }
                       return;
                     }

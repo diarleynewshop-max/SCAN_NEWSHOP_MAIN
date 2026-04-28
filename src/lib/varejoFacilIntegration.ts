@@ -19,18 +19,79 @@ interface SupabaseStock {
   descricao?: string;
 }
 
+export type VarejoFacilEmpresa = "NEWSHOP" | "FACIL" | "SOYE";
+export type VarejoFacilFlag = "loja" | "cd";
+
+export interface VarejoFacilLookupContext {
+  empresa?: string | null;
+  flag?: VarejoFacilFlag | string | null;
+}
+
+const VAREJO_FACIL_HOSTS: Record<VarejoFacilEmpresa, string> = {
+  NEWSHOP: "newshop.varejofacil.com",
+  FACIL: "facil.varejofacil.com",
+  SOYE: "soye.varejofacil.com",
+};
+
+const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpresa => {
+  const normalizada = (empresa ?? "").toUpperCase();
+
+  if (normalizada.includes("SOYE")) return "SOYE";
+  if (normalizada.includes("FACIL")) return "FACIL";
+  return "NEWSHOP";
+};
+
+const resolverBaseUrlVarejoFacil = (contexto: VarejoFacilLookupContext = {}) => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  return `https://${VAREJO_FACIL_HOSTS[empresa]}`;
+};
+
+const adaptarProdutoVarejoFacil = (data: any, codigoBarras: string): VarejoFacilProduct => ({
+  id: data.id || data.produto_id || '',
+  codigo_barras: data.codigo_barras || data.ean || data.gtin || codigoBarras,
+  descricao: data.descricao || data.nome || data.titulo || '',
+  preco: Number(data.preco || data.valor || data.price || 0),
+  estoque: Number(data.estoque || data.quantidade || data.qtd || 0),
+});
+
 /**
  * Busca informações de um produto na API do Varejo Fácil
  * @param codigoBarras Código de barras do produto
  * @returns Dados do produto ou null se não encontrado
  */
-export const buscarProdutoVarejoFacil = async (codigoBarras: string): Promise<VarejoFacilProduct | null> => {
+export const buscarProdutoVarejoFacil = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VarejoFacilProduct | null> => {
   try {
     console.log("Buscando produto na Varejo Fácil:", codigoBarras);
 
-    // Primeiro tentar acesso direto
+    // Primeiro tentar via Vercel Function para evitar CORS e expor credenciais no browser
     try {
-      const url = `https://newshop.varejofacil.com/api/v1/produtos/${codigoBarras}`;
+      const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+      const response = await fetch(`/api/varejo-facil-proxy?codigo=${encodeURIComponent(codigoBarras)}&empresa=${empresa.toLowerCase()}`, {
+        method: 'GET',
+        headers: {
+          'Accept': 'application/json',
+        }
+      });
+
+      if (response.ok) {
+        const result = await response.json();
+        const data = result.data || result;
+        const produto = adaptarProdutoVarejoFacil(data, codigoBarras);
+
+        if (produto.codigo_barras) {
+          return produto;
+        }
+      }
+    } catch (proxyError) {
+      console.log("Proxy Vercel da Varejo Facil falhou:", proxyError);
+    }
+
+    // Tentar acesso direto como fallback
+    try {
+      const url = `${resolverBaseUrlVarejoFacil(contexto)}/api/v1/produtos/${codigoBarras}`;
       const response = await fetch(url, {
         method: 'GET',
         headers: {
@@ -46,13 +107,7 @@ export const buscarProdutoVarejoFacil = async (codigoBarras: string): Promise<Va
         console.log("Dados recebidos diretamente da Varejo Fácil:", data);
 
         // Adaptar os dados conforme a estrutura real da resposta da API
-        const produto: VarejoFacilProduct = {
-          id: data.id || data.produto_id || '',
-          codigo_barras: data.codigo_barras || data.ean || data.gtin || codigoBarras,
-          descricao: data.descricao || data.nome || data.titulo || '',
-          preco: Number(data.preco || data.valor || data.price || 0),
-          estoque: Number(data.estoque || data.quantidade || data.qtd || 0),
-        };
+        const produto = adaptarProdutoVarejoFacil(data, codigoBarras);
 
         // Validar se os dados são válidos
         if (produto.codigo_barras) {
@@ -70,7 +125,8 @@ export const buscarProdutoVarejoFacil = async (codigoBarras: string): Promise<Va
     console.log("Tentando acesso via função serverless...");
 
     // URL da função serverless do Supabase (ajustar conforme sua configuração)
-    const serverlessUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-varejo-facil?codigo=${codigoBarras}`;
+    const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+    const serverlessUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-varejo-facil?codigo=${codigoBarras}&empresa=${empresa.toLowerCase()}`;
 
     const serverlessResponse = await fetch(serverlessUrl, {
       method: 'GET',
@@ -165,10 +221,13 @@ export const salvarProdutoSupabase = async (produto: VarejoFacilProduct): Promis
  * @param codigoBarras Código de barras do produto
  * @returns Dados do produto salvo ou null se não encontrado
  */
-export const sincronizarProduto = async (codigoBarras: string): Promise<VarejoFacilProduct | null> => {
+export const sincronizarProduto = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VarejoFacilProduct | null> => {
   try {
     // Buscar produto na Varejo Fácil
-    const produto = await buscarProdutoVarejoFacil(codigoBarras);
+    const produto = await buscarProdutoVarejoFacil(codigoBarras, contexto);
 
     if (!produto) {
       console.log("Produto não encontrado na Varejo Fácil");
