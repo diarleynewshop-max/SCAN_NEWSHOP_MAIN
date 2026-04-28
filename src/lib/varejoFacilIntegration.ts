@@ -1,13 +1,13 @@
-import { supabase } from "@/lib/supabase";
+﻿import { supabase } from "@/lib/supabase";
 
-// Interface para os dados do produto da Varejo Fácil
+// Interface para os dados do produto da Varejo FÃ¡cil
 interface VarejoFacilProduct {
   id: string;
   codigo_barras: string;
   descricao: string;
   preco: number;
   estoque: number;
-  // Adicione outros campos conforme necessário
+  // Adicione outros campos conforme necessÃ¡rio
 }
 
 // Interface para os dados no formato da tabela estoque do Supabase
@@ -55,113 +55,45 @@ const adaptarProdutoVarejoFacil = (data: any, codigoBarras: string): VarejoFacil
 });
 
 /**
- * Busca informações de um produto na API do Varejo Fácil
- * @param codigoBarras Código de barras do produto
- * @returns Dados do produto ou null se não encontrado
+ * Busca informaÃ§Ãµes de um produto na API do Varejo FÃ¡cil
+ * @param codigoBarras CÃ³digo de barras do produto
+ * @returns Dados do produto ou null se nÃ£o encontrado
  */
 export const buscarProdutoVarejoFacil = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilProduct | null> => {
   try {
-    console.log("Buscando produto na Varejo Fácil:", codigoBarras);
+    console.log("Buscando produto na Varejo FÃ¡cil:", codigoBarras);
 
-    // Primeiro tentar via Vercel Function para evitar CORS e expor credenciais no browser
-    try {
-      const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-      const response = await fetch(`/api/varejo-facil-proxy?codigo=${encodeURIComponent(codigoBarras)}&empresa=${empresa.toLowerCase()}`, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-        }
-      });
-
-      if (response.ok) {
-        const result = await response.json();
-        const data = result.data || result;
-        const produto = adaptarProdutoVarejoFacil(data, codigoBarras);
-
-        if (produto.codigo_barras) {
-          return produto;
-        }
-      }
-    } catch (proxyError) {
-      console.log("Proxy Vercel da Varejo Facil falhou:", proxyError);
-    }
-
-    // Tentar acesso direto como fallback
-    try {
-      const url = `${resolverBaseUrlVarejoFacil(contexto)}/api/v1/produtos/${codigoBarras}`;
-      const response = await fetch(url, {
-        method: 'GET',
-        headers: {
-          'Accept': 'application/json',
-          // Se a API exigir autenticação, adicione aqui:
-          // 'Authorization': 'Bearer SUA_CHAVE_DE_API',
-          // 'X-API-Key': 'SUA_CHAVE_DE_API'
-        }
-      });
-
-      if (response.ok) {
-        const data = await response.json();
-        console.log("Dados recebidos diretamente da Varejo Fácil:", data);
-
-        // Adaptar os dados conforme a estrutura real da resposta da API
-        const produto = adaptarProdutoVarejoFacil(data, codigoBarras);
-
-        // Validar se os dados são válidos
-        if (produto.codigo_barras) {
-          return produto;
-        }
-      } else if (response.status !== 404) {
-        console.log(`Erro HTTP ${response.status} ao acessar Varejo Fácil diretamente`);
-      }
-    } catch (directError) {
-      console.log("Acesso direto à Varejo Fácil falhou:", directError);
-      // Continuar para tentativa via função serverless
-    }
-
-    // Se acesso direto falhar (possivelmente por CORS), tentar via função serverless
-    console.log("Tentando acesso via função serverless...");
-
-    // URL da função serverless do Supabase (ajustar conforme sua configuração)
     const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-    const serverlessUrl = `${import.meta.env.VITE_SUPABASE_URL}/functions/v1/fetch-varejo-facil?codigo=${codigoBarras}&empresa=${empresa.toLowerCase()}`;
-
-    const serverlessResponse = await fetch(serverlessUrl, {
-      method: 'GET',
+    const response = await fetch(`/api/varejo-facil-proxy?codigo=${encodeURIComponent(codigoBarras)}&empresa=${empresa.toLowerCase()}`, {
+      method: "GET",
       headers: {
-        'Accept': 'application/json',
-      }
+        Accept: "application/json",
+      },
     });
 
-    if (serverlessResponse.ok) {
-      const result = await serverlessResponse.json();
+    const result = await response.json().catch(() => null);
 
-      if (result.success && result.data) {
-        console.log("Dados recebidos via função serverless:", result.data);
-        return result.data as VarejoFacilProduct;
-      } else if (result.error) {
-        console.log("Erro na função serverless:", result.error);
-      }
-    } else {
-      console.log(`Função serverless retornou status ${serverlessResponse.status}`);
+    if (!response.ok) {
+      throw new Error(result?.error || `Falha ao consultar Varejo Facil (${response.status}).`);
     }
 
-    // Se ambas as tentativas falharem
-    console.log("Produto não encontrado na Varejo Fácil (ambas as tentativas)");
-    return null;
-
+    const data = result?.data || result;
+    const produto = adaptarProdutoVarejoFacil(data, codigoBarras);
+    return produto.codigo_barras ? produto : null;
   } catch (error) {
-    console.error("Erro ao buscar produto na Varejo Fácil:", error);
-    return null;
+    console.error("Erro ao buscar produto na Varejo Facil:", error);
+    if (error instanceof Error) throw error;
+    throw new Error("Nao foi possivel consultar a API Varejo Facil.");
   }
 };
 
 /**
- * Salva ou atualiza informações de produto no Supabase
+ * Salva ou atualiza informaÃ§Ãµes de produto no Supabase
  * @param produto Dados do produto a ser salvo
- * @returns Resultado da operação
+ * @returns Resultado da operaÃ§Ã£o
  */
 export const salvarProdutoSupabase = async (produto: VarejoFacilProduct): Promise<boolean> => {
   try {
@@ -176,7 +108,7 @@ export const salvarProdutoSupabase = async (produto: VarejoFacilProduct): Promis
       // descricao: produto.descricao // Se quiser duplicar
     };
 
-    // Verificar se o produto já existe
+    // Verificar se o produto jÃ¡ existe
     const { data: existingData, error: fetchError } = await supabase
       .from('estoque')
       .select('codigo')
@@ -184,7 +116,7 @@ export const salvarProdutoSupabase = async (produto: VarejoFacilProduct): Promis
       .single();
 
     if (fetchError && fetchError.code !== 'PGRST116') {
-      // Erro diferente de "não encontrado"
+      // Erro diferente de "nÃ£o encontrado"
       throw new Error(`Erro ao verificar produto existente: ${fetchError.message}`);
     }
 
@@ -217,20 +149,20 @@ export const salvarProdutoSupabase = async (produto: VarejoFacilProduct): Promis
 };
 
 /**
- * Função completa que busca um produto na Varejo Fácil e salva no Supabase
- * @param codigoBarras Código de barras do produto
- * @returns Dados do produto salvo ou null se não encontrado
+ * FunÃ§Ã£o completa que busca um produto na Varejo FÃ¡cil e salva no Supabase
+ * @param codigoBarras CÃ³digo de barras do produto
+ * @returns Dados do produto salvo ou null se nÃ£o encontrado
  */
 export const sincronizarProduto = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilProduct | null> => {
   try {
-    // Buscar produto na Varejo Fácil
+    // Buscar produto na Varejo FÃ¡cil
     const produto = await buscarProdutoVarejoFacil(codigoBarras, contexto);
 
     if (!produto) {
-      console.log("Produto não encontrado na Varejo Fácil");
+      console.log("Produto nÃ£o encontrado na Varejo FÃ¡cil");
       return null;
     }
 
@@ -243,7 +175,7 @@ export const sincronizarProduto = async (
       throw new Error("Falha ao salvar produto no Supabase");
     }
   } catch (error) {
-    console.error("Erro na sincronização completa:", error);
+    console.error("Erro na sincronizaÃ§Ã£o completa:", error);
     throw error;
   }
 };

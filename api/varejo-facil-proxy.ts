@@ -49,7 +49,9 @@ async function getAuthHeader(empresa: EmpresaKey, baseUrl: string): Promise<stri
   const cachedToken = tokenCache.get(cacheKey);
 
   if (cachedToken) return cachedToken;
-  if (!username || !password) return "";
+  if (!username || !password) {
+    throw new Error(`Credenciais Varejo Facil nao configuradas para ${empresa}.`);
+  }
 
   const response = await fetch(`${baseUrl}/api/auth`, {
     method: "POST",
