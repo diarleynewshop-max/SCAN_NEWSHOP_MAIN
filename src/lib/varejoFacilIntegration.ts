@@ -12,6 +12,7 @@ interface VarejoFacilProduct {
   descricao: string;
   preco: number;
   estoque: number;
+  imagem?: string;
 }
 
 type ErpProduto = {
@@ -19,6 +20,12 @@ type ErpProduto = {
   descricao?: string;
   codigoInterno?: string;
   unidadeDeVenda?: string;
+  imagem?: string;
+  imagemUrl?: string;
+  urlImagem?: string;
+  foto?: string;
+  fotoUrl?: string;
+  imagens?: Array<string | { url?: string; imagem?: string; src?: string }>;
 };
 
 type ErpPreco = {
@@ -233,6 +240,31 @@ const selecionarPrecoDaLoja = (precos: ErpPreco[] | null, contexto: VarejoFacilL
   return precos.find((preco) => preco.lojaId === lojaId) || precos[0];
 };
 
+const extrairImagemProduto = (produto: ErpProduto): string | undefined => {
+  const imagemDaLista = produto.imagens?.find(Boolean);
+
+  if (typeof imagemDaLista === "string") return imagemDaLista;
+  if (imagemDaLista?.url) return imagemDaLista.url;
+  if (imagemDaLista?.imagem) return imagemDaLista.imagem;
+  if (imagemDaLista?.src) return imagemDaLista.src;
+
+  return produto.imagem || produto.imagemUrl || produto.urlImagem || produto.foto || produto.fotoUrl || undefined;
+};
+
+const resolverImagemProduto = (imagem: string | undefined, contexto: VarejoFacilLookupContext = {}) => {
+  if (!imagem) return undefined;
+  if (/^data:image\//i.test(imagem)) return imagem;
+
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+
+  if (import.meta.env.DEV) {
+    if (/^https?:\/\//i.test(imagem)) return imagem;
+    return `${resolveErpApiBase(contexto).replace(/\/api$/, "")}${imagem.startsWith("/") ? imagem : `/${imagem}`}`;
+  }
+
+  return `/api/erp-image-proxy?empresa=${empresa.toLowerCase()}&src=${encodeURIComponent(imagem)}`;
+};
+
 export const buscarProdutoVarejoFacil = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
@@ -267,6 +299,7 @@ export const buscarProdutoVarejoFacil = async (
     descricao: produto.descricao || produto.codigoInterno || "",
     preco: normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1),
     estoque,
+    imagem: resolverImagemProduto(extrairImagemProduto(produto), contexto),
   };
 };
 

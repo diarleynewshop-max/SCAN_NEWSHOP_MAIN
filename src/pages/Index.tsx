@@ -142,6 +142,7 @@ const Index = () => {
     if (!productInfo) return;
     const descricao = productInfo.descricao || productInfo.nome_produto;
     if (descricao) setSku(descricao);
+    if (productInfo.imagem) setPhoto((currentPhoto) => currentPhoto || productInfo.imagem || null);
   }, [productInfo]);
 
   const handleBarcodeDetected = useCallback(

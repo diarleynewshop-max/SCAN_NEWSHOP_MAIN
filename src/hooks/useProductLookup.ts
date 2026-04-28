@@ -7,6 +7,7 @@ interface ProductInfo {
   preco?: number;
   nome_produto?: string;
   descricao?: string;
+  imagem?: string;
 }
 
 interface UseProductLookupReturn {
@@ -57,6 +58,7 @@ export const useProductLookup = ({ enabled = true, empresa, flag }: UseProductLo
           estoque: produtoVarejoFacil.estoque,
           preco: produtoVarejoFacil.preco,
           nome_produto: produtoVarejoFacil.descricao,
+          imagem: produtoVarejoFacil.imagem,
         };
 
         setProductInfo(productData);
