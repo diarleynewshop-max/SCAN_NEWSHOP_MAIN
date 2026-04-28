@@ -9,6 +9,13 @@ export default defineConfig({
     hmr: {
       overlay: false,
     },
+    proxy: {
+      "/erp-api": {
+        target: "https://facil.varejofacil.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/erp-api/, ""),
+      },
+    },
   },
   plugins: [react()],
   resolve: {

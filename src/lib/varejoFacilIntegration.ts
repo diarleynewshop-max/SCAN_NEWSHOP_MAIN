@@ -1,24 +1,3 @@
-﻿import { supabase } from "@/lib/supabase";
-
-// Interface para os dados do produto da Varejo FÃ¡cil
-interface VarejoFacilProduct {
-  id: string;
-  codigo_barras: string;
-  descricao: string;
-  preco: number;
-  estoque: number;
-  // Adicione outros campos conforme necessÃ¡rio
-}
-
-// Interface para os dados no formato da tabela estoque do Supabase
-interface SupabaseStock {
-  codigo: string;
-  estoque: number;
-  preco?: number;
-  nome_produto?: string;
-  descricao?: string;
-}
-
 export type VarejoFacilEmpresa = "NEWSHOP" | "FACIL" | "SOYE";
 export type VarejoFacilFlag = "loja" | "cd";
 
@@ -27,11 +6,59 @@ export interface VarejoFacilLookupContext {
   flag?: VarejoFacilFlag | string | null;
 }
 
+interface VarejoFacilProduct {
+  id: string;
+  codigo_barras: string;
+  descricao: string;
+  preco: number;
+  estoque: number;
+}
+
+type ErpProduto = {
+  id: number;
+  descricao?: string;
+  codigoInterno?: string;
+  unidadeDeVenda?: string;
+};
+
+type ErpPreco = {
+  lojaId?: number;
+  precoVenda1?: number;
+  precoOferta1?: number;
+  precoVenda2?: number;
+  precoOferta2?: number;
+};
+
+type ErpCodigoAuxiliar = {
+  id?: string;
+  produtoId?: number;
+  tipo?: string;
+};
+
+type ErpResumoEstoque = {
+  lojaId?: number;
+  saldo?: number;
+};
+
+type ErpListResponse<T> = {
+  items?: T[];
+};
+
 const VAREJO_FACIL_HOSTS: Record<VarejoFacilEmpresa, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
   SOYE: "soye.varejofacil.com",
 };
+
+const ERP_LOJA_BY_EMPRESA: Record<VarejoFacilEmpresa, number> = {
+  FACIL: 1,
+  NEWSHOP: 2,
+  SOYE: 1,
+};
+
+let cachedAccessToken: string | null = null;
+let cachedAuthKey: string | null = null;
+let tokenPromise: Promise<string> | null = null;
 
 const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpresa => {
   const normalizada = (empresa ?? "").toUpperCase();
@@ -41,141 +68,204 @@ const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpre
   return "NEWSHOP";
 };
 
-const resolverBaseUrlVarejoFacil = (contexto: VarejoFacilLookupContext = {}) => {
+const resolveErpApiBase = (contexto: VarejoFacilLookupContext = {}) => {
+  if (import.meta.env.DEV) {
+    return "/erp-api/api";
+  }
+
   const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-  return `https://${VAREJO_FACIL_HOSTS[empresa]}`;
+  const configuredUrl = (
+    import.meta.env[`VITE_ERP_API_URL_${empresa}`] ||
+    import.meta.env.VITE_ERP_API_URL ||
+    `https://${VAREJO_FACIL_HOSTS[empresa]}`
+  ).replace(/\/$/, "");
+
+  return configuredUrl.endsWith("/api") ? configuredUrl : `${configuredUrl}/api`;
 };
 
-const adaptarProdutoVarejoFacil = (data: any, codigoBarras: string): VarejoFacilProduct => ({
-  id: data.id || data.produto_id || '',
-  codigo_barras: data.codigo_barras || data.ean || data.gtin || codigoBarras,
-  descricao: data.descricao || data.nome || data.titulo || '',
-  preco: Number(data.preco || data.valor || data.price || 0),
-  estoque: Number(data.estoque || data.quantidade || data.qtd || 0),
-});
+const getEnvByEmpresa = (empresa: VarejoFacilEmpresa, key: "USERNAME" | "PASSWORD" | "TOKEN") =>
+  import.meta.env[`VITE_ERP_API_${key}_${empresa}`] || import.meta.env[`VITE_ERP_API_${key}`] || "";
 
-/**
- * Busca informaÃ§Ãµes de um produto na API do Varejo FÃ¡cil
- * @param codigoBarras CÃ³digo de barras do produto
- * @returns Dados do produto ou null se nÃ£o encontrado
- */
+const resolveTokenFromAuth = (data: Record<string, unknown>) =>
+  (typeof data.accessToken === "string" && data.accessToken) ||
+  (typeof data.access_token === "string" && data.access_token) ||
+  (typeof data.token === "string" && data.token) ||
+  (typeof data.jwt === "string" && data.jwt) ||
+  "";
+
+const getErpAccessToken = async (contexto: VarejoFacilLookupContext = {}) => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  const baseUrl = resolveErpApiBase(contexto);
+  const username = getEnvByEmpresa(empresa, "USERNAME");
+  const password = getEnvByEmpresa(empresa, "PASSWORD");
+  const configuredToken = getEnvByEmpresa(empresa, "TOKEN");
+  const authKey = `${empresa}:${baseUrl}:${username}`;
+
+  if (cachedAccessToken && cachedAuthKey === authKey) return cachedAccessToken;
+
+  if (username && password) {
+    if (!tokenPromise) {
+      tokenPromise = (async () => {
+        const response = await fetch(`${baseUrl}/auth`, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            Accept: "application/json",
+          },
+          body: JSON.stringify({ username, password }),
+        });
+
+        if (!response.ok) {
+          throw new Error("Nao foi possivel autenticar no ERP. Verifique usuario e senha.");
+        }
+
+        const data = (await response.json()) as Record<string, unknown>;
+        const token = resolveTokenFromAuth(data);
+
+        if (!token) {
+          throw new Error("O ERP nao retornou um access token valido no login.");
+        }
+
+        cachedAccessToken = token;
+        cachedAuthKey = authKey;
+        return token;
+      })().finally(() => {
+        tokenPromise = null;
+      });
+    }
+
+    return tokenPromise;
+  }
+
+  if (configuredToken) {
+    cachedAccessToken = configuredToken;
+    cachedAuthKey = authKey;
+    return configuredToken;
+  }
+
+  throw new Error("Credenciais do ERP nao configuradas. Defina VITE_ERP_API_USERNAME e VITE_ERP_API_PASSWORD.");
+};
+
+const buildHeaders = async (contexto: VarejoFacilLookupContext = {}) => {
+  const token = await getErpAccessToken(contexto);
+  return {
+    Authorization: token,
+    Accept: "application/json",
+  };
+};
+
+const fetchJson = async <T>(path: string, contexto: VarejoFacilLookupContext = {}) => {
+  const response = await fetch(`${resolveErpApiBase(contexto)}${path}`, {
+    headers: await buildHeaders(contexto),
+  });
+
+  if (response.status === 401) {
+    cachedAccessToken = null;
+    cachedAuthKey = null;
+    throw new Error("ERP nao autorizado. Verifique as credenciais configuradas.");
+  }
+
+  if (response.status === 404) return null;
+
+  if (!response.ok) {
+    throw new Error(`Falha ao consultar ERP (${response.status}).`);
+  }
+
+  return (await response.json()) as T;
+};
+
+const normalizarPreco = (precoVenda?: number, precoOferta?: number) => {
+  if (typeof precoOferta === "number" && precoOferta > 0) return precoOferta;
+  return precoVenda || 0;
+};
+
+const normalizarEans = (codigo: string) => {
+  const limpo = codigo.replace(/\s+/g, "");
+  const candidatos = [limpo];
+
+  if (/^\d{13}$/.test(limpo)) candidatos.push(`0${limpo}`);
+  if (/^0\d{13}$/.test(limpo)) candidatos.push(limpo.slice(1));
+
+  return [...new Set(candidatos.filter(Boolean))];
+};
+
+const getErpLojaAtiva = (contexto: VarejoFacilLookupContext = {}) => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  return ERP_LOJA_BY_EMPRESA[empresa] || 1;
+};
+
+const buscarCodigoAuxiliarPorEan = async (ean: string, contexto: VarejoFacilLookupContext = {}) => {
+  for (const candidato of normalizarEans(ean)) {
+    const fiql = encodeURIComponent(`id==${candidato}`);
+    const data = await fetchJson<ErpListResponse<ErpCodigoAuxiliar>>(`/v1/produto/codigos-auxiliares?q=${fiql}&count=5`, contexto);
+    const codigoAuxiliar = (data?.items || []).find((item) => item?.produtoId && item?.tipo === "EAN") || (data?.items || [])[0];
+
+    if (codigoAuxiliar?.produtoId) {
+      return {
+        codigoAuxiliar,
+        eanEncontrado: codigoAuxiliar.id || candidato,
+      };
+    }
+  }
+
+  return null;
+};
+
+const buscarEstoquePorProduto = async (produtoId: number, contexto: VarejoFacilLookupContext = {}) => {
+  const fiql = encodeURIComponent(`produtoId==${produtoId}`);
+  const data = await fetchJson<ErpListResponse<ErpResumoEstoque>>(`/v1/estoque/saldos?q=${fiql}&count=100`, contexto);
+  const lojaId = getErpLojaAtiva(contexto);
+  const itens = data?.items || [];
+  const itensDaLoja = itens.filter((item) => item.lojaId === lojaId);
+  const base = itensDaLoja.length > 0 ? itensDaLoja : itens;
+  return base.reduce((total, item) => total + Number(item?.saldo || 0), 0);
+};
+
+const selecionarPrecoDaLoja = (precos: ErpPreco[] | null, contexto: VarejoFacilLookupContext = {}) => {
+  if (!precos || precos.length === 0) return null;
+
+  const lojaId = getErpLojaAtiva(contexto);
+  return precos.find((preco) => preco.lojaId === lojaId) || precos[0];
+};
+
 export const buscarProdutoVarejoFacil = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilProduct | null> => {
-  try {
-    console.log("Buscando produto na Varejo FÃ¡cil:", codigoBarras);
+  const codigo = codigoBarras.trim();
+  if (!codigo) return null;
 
-    const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-    const response = await fetch(`/api/varejo-facil-proxy?codigo=${encodeURIComponent(codigoBarras)}&empresa=${empresa.toLowerCase()}`, {
-      method: "GET",
-      headers: {
-        Accept: "application/json",
-      },
-    });
+  const codigoAuxiliarEncontrado = await buscarCodigoAuxiliarPorEan(codigo, contexto);
+  let produto: ErpProduto | null = null;
+  let eanResolvido = codigo;
 
-    const result = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(result?.error || `Falha ao consultar Varejo Facil (${response.status}).`);
-    }
-
-    const data = result?.data || result;
-    const produto = adaptarProdutoVarejoFacil(data, codigoBarras);
-    return produto.codigo_barras ? produto : null;
-  } catch (error) {
-    console.error("Erro ao buscar produto na Varejo Facil:", error);
-    if (error instanceof Error) throw error;
-    throw new Error("Nao foi possivel consultar a API Varejo Facil.");
+  if (codigoAuxiliarEncontrado?.codigoAuxiliar.produtoId) {
+    produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${codigoAuxiliarEncontrado.codigoAuxiliar.produtoId}`, contexto);
+    eanResolvido = codigoAuxiliarEncontrado.eanEncontrado;
   }
+
+  if (!produto) {
+    produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/consulta/${encodeURIComponent(codigo)}`, contexto);
+  }
+
+  if (!produto?.id) return null;
+
+  const [precos, estoque] = await Promise.all([
+    fetchJson<ErpPreco[]>(`/v1/produto/produtos/${produto.id}/precos`, contexto),
+    buscarEstoquePorProduto(produto.id, contexto),
+  ]);
+  const precoSelecionado = selecionarPrecoDaLoja(precos, contexto);
+
+  return {
+    id: String(produto.id),
+    codigo_barras: eanResolvido,
+    descricao: produto.descricao || produto.codigoInterno || "",
+    preco: normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1),
+    estoque,
+  };
 };
 
-/**
- * Salva ou atualiza informaÃ§Ãµes de produto no Supabase
- * @param produto Dados do produto a ser salvo
- * @returns Resultado da operaÃ§Ã£o
- */
-export const salvarProdutoSupabase = async (produto: VarejoFacilProduct): Promise<boolean> => {
-  try {
-    console.log("Salvando produto no Supabase:", produto);
-
-    // Converter dados para o formato da tabela estoque
-    const dadosEstoque: SupabaseStock = {
-      codigo: produto.codigo_barras,
-      estoque: produto.estoque,
-      preco: produto.preco,
-      nome_produto: produto.descricao,
-      // descricao: produto.descricao // Se quiser duplicar
-    };
-
-    // Verificar se o produto jÃ¡ existe
-    const { data: existingData, error: fetchError } = await supabase
-      .from('estoque')
-      .select('codigo')
-      .eq('codigo', produto.codigo_barras)
-      .single();
-
-    if (fetchError && fetchError.code !== 'PGRST116') {
-      // Erro diferente de "nÃ£o encontrado"
-      throw new Error(`Erro ao verificar produto existente: ${fetchError.message}`);
-    }
-
-    let result;
-    if (existingData) {
-      // Atualizar produto existente
-      console.log("Atualizando produto existente");
-      result = await supabase
-        .from('estoque')
-        .update(dadosEstoque)
-        .eq('codigo', produto.codigo_barras);
-    } else {
-      // Inserir novo produto
-      console.log("Inserindo novo produto");
-      result = await supabase
-        .from('estoque')
-        .insert(dadosEstoque);
-    }
-
-    if (result.error) {
-      throw new Error(`Erro ao salvar no Supabase: ${result.error.message}`);
-    }
-
-    console.log("Produto salvo com sucesso no Supabase");
-    return true;
-  } catch (error) {
-    console.error("Erro ao salvar produto no Supabase:", error);
-    throw new Error(`Falha ao salvar produto: ${(error as Error).message}`);
-  }
-};
-
-/**
- * FunÃ§Ã£o completa que busca um produto na Varejo FÃ¡cil e salva no Supabase
- * @param codigoBarras CÃ³digo de barras do produto
- * @returns Dados do produto salvo ou null se nÃ£o encontrado
- */
 export const sincronizarProduto = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
-): Promise<VarejoFacilProduct | null> => {
-  try {
-    // Buscar produto na Varejo FÃ¡cil
-    const produto = await buscarProdutoVarejoFacil(codigoBarras, contexto);
-
-    if (!produto) {
-      console.log("Produto nÃ£o encontrado na Varejo FÃ¡cil");
-      return null;
-    }
-
-    // Salvar no Supabase
-    const sucesso = await salvarProdutoSupabase(produto);
-
-    if (sucesso) {
-      return produto;
-    } else {
-      throw new Error("Falha ao salvar produto no Supabase");
-    }
-  } catch (error) {
-    console.error("Erro na sincronizaÃ§Ã£o completa:", error);
-    throw error;
-  }
-};
+): Promise<VarejoFacilProduct | null> => buscarProdutoVarejoFacil(codigoBarras, contexto);
