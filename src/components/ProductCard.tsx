@@ -5,6 +5,7 @@ export interface Product {
   barcode: string;
   sku: string;
   description?: string;
+  secao?: string;
   photo: string | null;
   photoBlob?: Blob | null;
   photoAssetId?: string | null;

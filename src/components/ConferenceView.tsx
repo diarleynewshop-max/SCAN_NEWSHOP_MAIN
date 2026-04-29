@@ -46,6 +46,7 @@ export interface ConferenceItem {
   id: string;
   codigo: string;
   sku: string;
+  secao?: string | null;
   quantidadePedida: number;
   quantidadeReal: number | null;
   status: ConferenceStatus;
@@ -77,6 +78,7 @@ const ConferenceFileSchema = z.object({
     z.object({
       codigo: z.string().min(1),
       sku: z.string().optional().default(""),
+      secao: z.string().nullable().optional(),
       quantidade: z.number().int().positive(),
       photo: z.string().nullable().optional(),
     })
@@ -204,6 +206,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         id: crypto.randomUUID(),
         codigo: item.codigo,
         sku: item.sku ?? "",
+        secao: item.secao ?? null,
         quantidadePedida: item.quantidade,
         quantidadeReal: null,
         status: "pendente" as ConferenceStatus,
@@ -241,6 +244,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         id: crypto.randomUUID(),
         codigo: item.codigo,
         sku: item.sku ?? "",
+        secao: item.secao ?? null,
         quantidadePedida: item.quantidade,
         quantidadeReal: null,
         status: "pendente" as ConferenceStatus,
@@ -411,6 +415,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             id: crypto.randomUUID(),
             codigo: item.codigo,
             sku: item.sku ?? "",
+            secao: item.secao ?? null,
             quantidadePedida: item.quantidade,
             quantidadeReal: null,
             status: "pendente" as ConferenceStatus,
@@ -527,6 +532,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     itens: items.map((i) => ({
       codigo: i.codigo,
       sku: i.sku,
+      secao: i.secao ?? null,
       quantidadePedida: i.quantidadePedida,
       quantidadeReal: i.quantidadeReal,
       status: i.status,
@@ -758,6 +764,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       items: items.map((i) => ({
         codigo: i.codigo,
         sku: i.sku,
+        secao: i.secao ?? null,
         quantidade: i.quantidadePedida,
         quantidadeReal: i.quantidadeReal,
         status: statusMap[i.status],

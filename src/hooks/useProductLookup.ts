@@ -7,6 +7,7 @@ interface ProductInfo {
   preco?: number;
   nome_produto?: string;
   descricao?: string;
+  secao?: string;
   imagem?: string;
 }
 
@@ -58,6 +59,7 @@ export const useProductLookup = ({ enabled = true, empresa, flag }: UseProductLo
           estoque: produtoVarejoFacil.estoque,
           preco: produtoVarejoFacil.preco,
           nome_produto: produtoVarejoFacil.descricao,
+          secao: produtoVarejoFacil.secao,
           imagem: produtoVarejoFacil.imagem,
         };
 

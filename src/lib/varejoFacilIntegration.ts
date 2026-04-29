@@ -14,6 +14,7 @@ export interface VarejoFacilProduct {
   precoVarejo: number;
   precoAtacado: number;
   estoque: number;
+  secao?: string;
   imagem?: string;
 }
 
@@ -363,9 +364,10 @@ export const buscarProdutoVarejoFacil = async (
 
   if (!produto?.id) return null;
 
-  const [precos, estoque] = await Promise.all([
+  const [precos, estoque, secao] = await Promise.all([
     fetchJson<ErpPreco[]>(`/v1/produto/produtos/${produto.id}/precos`, contexto),
     buscarEstoquePorProduto(produto.id, contexto),
+    buscarSecao(produto.secaoId, contexto),
   ]);
   const precoSelecionado = selecionarPrecoDaLoja(precos, contexto);
   const precoVarejo = normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1);
@@ -379,6 +381,7 @@ export const buscarProdutoVarejoFacil = async (
     precoVarejo,
     precoAtacado,
     estoque,
+    secao: secao || undefined,
     imagem: resolverImagemProduto(extrairImagemProduto(produto), produto.id, contexto),
   };
 };

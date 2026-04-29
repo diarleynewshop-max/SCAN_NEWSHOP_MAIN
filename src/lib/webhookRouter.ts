@@ -22,6 +22,7 @@ export interface WebhookPayload {
     sku: string;
     quantidade: number;
     removeTag: boolean;
+    secao?: string | null;
     photo: string | null;
   }>;
 }

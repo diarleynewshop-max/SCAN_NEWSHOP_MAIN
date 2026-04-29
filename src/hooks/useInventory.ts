@@ -24,6 +24,7 @@ interface AddProductParams {
   quantity: number;
   removeTag?: boolean;
   description?: string;
+  secao?: string;
   importedFromSpreadsheet?: boolean;
   qtdPlanilha?: number;
 }
@@ -360,6 +361,7 @@ export function useInventory() {
               ...existing,
               quantity: existing.quantity + quantity,
               ...(params.photo ? preparedPhoto : {}),
+              ...(params.secao?.trim() ? { secao: params.secao.trim() } : {}),
             };
 
             return { ...list, products: updatedProducts };
@@ -370,6 +372,7 @@ export function useInventory() {
             barcode,
             sku: params.sku.trim(),
             description: params.description?.trim() || undefined,
+            secao: params.secao?.trim() || undefined,
             ...preparedPhoto,
             quantity,
             removeTag: params.removeTag ?? false,

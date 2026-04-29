@@ -89,9 +89,17 @@ async function criarTarefaClickUp(
   listId: string,
   nome: string,
   descricao: string,
-  status: string
+  status: string,
+  tags: string[] = []
 ): Promise<string> {
-  const response = await fetch(
+  const buildBody = (withTags: boolean) => JSON.stringify({
+    name: nome,
+    description: descricao,
+    status,
+    ...(withTags && tags.length > 0 ? { tags } : {}),
+  });
+
+  let response = await fetch(
     `https://api.clickup.com/api/v2/list/${listId}/task`,
     {
       method: "POST",
@@ -99,14 +107,39 @@ async function criarTarefaClickUp(
         Authorization: CLICKUP_TOKEN_SF,
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ name: nome, description: descricao, status }),
+      body: buildBody(true),
     }
   );
+
+  if (!response.ok && tags.length > 0) {
+    console.warn("ClickUp recusou tags. Criando tarefa sem tags:", await response.text());
+    response = await fetch(
+      `https://api.clickup.com/api/v2/list/${listId}/task`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: CLICKUP_TOKEN_SF,
+          "Content-Type": "application/json",
+        },
+        body: buildBody(false),
+      }
+    );
+  }
+
+  if (!response.ok) {
+    throw new Error(`Erro ao criar tarefa ClickUp (${response.status}): ${await response.text()}`);
+  }
 
   const data = await response.json();
   console.log("Resposta ClickUp completa:", JSON.stringify(data));
   console.log("Tarefa criada, ID:", data.id);
   return data.id;
+}
+
+function normalizarTagSecao(secao: unknown): string | null {
+  const value = String(secao ?? "").trim().replace(/\s+/g, " ");
+  if (!value) return null;
+  return `SECAO - ${value}`.slice(0, 80);
 }
 
 async function anexarJsonNaTarefa(
@@ -290,6 +323,7 @@ async function criarTarefasComprasIndividuaisSF(
   const empresa = normalizarEmpresa(payload.empresa);
 
   for (const item of itens) {
+    const tagSecao = normalizarTagSecao(item.secao);
     const taskId = await criarTarefaClickUp(
       CLICKUP_TODO_LIST_ID_SF,
       `Compras ${empresa}: ${item.codigo} - ${payload.conferente} - ${dataFormatada}`,
@@ -305,11 +339,13 @@ ITEM FALTANTE
 Status: ${statusMap[item.status] ?? item.status}
 Codigo: ${item.codigo}
 SKU: ${item.sku || "-"}
+Secao: ${item.secao || "Nao informada"}
 Pedido: ${item.quantidadePedida}
 Real: ${item.quantidadeReal ?? 0}
 
 Foto anexada abaixo (se houver)`,
-      "to do"
+      "to do",
+      tagSecao ? [tagSecao] : []
     );
 
     if (!primeiraTaskId) {
@@ -370,6 +406,7 @@ Data: ${dataFormatada}`,
           items: payload.produtos.map((p: any) => ({
             codigo: p.barcode,
             sku: p.sku || "",
+            secao: p.secao || null,
             quantidade: p.quantity ?? p.quantidade,
             photo: p.photo || null,
           })),

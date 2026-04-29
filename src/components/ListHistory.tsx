@@ -325,6 +325,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           sku:        product.sku || "",
           quantidade: product.quantity,
           removeTag:  product.removeTag ?? false,
+          secao:      product.secao || null,
           photo:      photoDataUrl,
         })),
       };

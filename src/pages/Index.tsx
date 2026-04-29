@@ -288,7 +288,13 @@ const Index = () => {
   }, []);
 
   const handleAdd = async () => {
-    const ok = await addProduct({ barcode, sku, photo: modoLeve ? null : photo, quantity: Number(quantity) });
+    const ok = await addProduct({
+      barcode,
+      sku,
+      photo: modoLeve ? null : photo,
+      quantity: Number(quantity),
+      secao: productInfo?.secao,
+    });
     if (!ok) return;
 
     setBarcode("");
