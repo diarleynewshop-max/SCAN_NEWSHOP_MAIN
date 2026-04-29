@@ -1,4 +1,5 @@
 import { useState, useEffect } from "react";
+import { applyCompanyTheme } from "@/lib/companyTheme";
 
 type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
 export type LoginFlag = "loja" | "cd";
@@ -60,6 +61,7 @@ export function salvarLogin(data: LoginData): void {
     // Não armazenar a senha correta, apenas marcar que a senha foi validada
     const { senha, ...dadosParaSalvar } = data;
     localStorage.setItem(STORAGE_KEY, JSON.stringify(dadosParaSalvar));
+    applyCompanyTheme(data.empresa);
   } catch (err) {
     console.error('Erro ao salvar login:', err);
   }
@@ -94,6 +96,7 @@ export function obterLoginSalvo(): Omit<LoginData, 'senha'> | null {
 // Remover login (logout)
 export function removerLogin(): void {
   localStorage.removeItem(STORAGE_KEY);
+  applyCompanyTheme("NEWSHOP");
 }
 
 // Hook para gerenciar autenticação

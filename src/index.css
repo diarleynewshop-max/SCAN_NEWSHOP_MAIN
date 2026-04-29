@@ -103,6 +103,26 @@
     --shadow-xl:  0 16px 40px hsl(0 0% 0% / 0.8);
     --shadow-2xl: 0 24px 60px hsl(0 0% 0% / 0.9);
   }
+
+  :root.empresa-facil,
+  .dark.empresa-facil {
+    --primary: 24 100% 50%; /* #FF6600 */
+    --primary-foreground: 0 0% 100%;
+    --ring: 24 100% 50%;
+    --warning: 24 100% 50%;
+  }
+
+  :root.empresa-soye {
+    --primary: 220 9% 46%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 220 9% 46%;
+  }
+
+  .dark.empresa-soye {
+    --primary: 220 9% 72%;
+    --primary-foreground: 30 12% 12%;
+    --ring: 220 9% 72%;
+  }
 }
 
 * { box-sizing: border-box; }
