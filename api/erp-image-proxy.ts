@@ -89,6 +89,29 @@ function resolveImageUrl(baseUrl: string, src: string): string {
   return `${baseUrl}${src.startsWith("/") ? src : `/${src}`}`;
 }
 
+function buildImageCandidates(baseUrl: string, src: string): string[] {
+  const trimmed = src.trim();
+
+  if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")) {
+    return [resolveImageUrl(baseUrl, trimmed)];
+  }
+
+  const encoded = encodeURIComponent(trimmed);
+  const candidates = [
+    `/api/v1/produto/produtos/imagens/${encoded}`,
+    `/api/v1/produto/imagens/${encoded}`,
+    `/api/v1/produto/produtos/imagem/${encoded}`,
+    `/api/v1/produto/imagem/${encoded}`,
+    `/api/v1/imagens/${encoded}`,
+    `/api/v1/arquivos/${encoded}`,
+    `/api/v1/files/${encoded}`,
+    `/api/v1/anexos/${encoded}`,
+    `/${encoded}`,
+  ];
+
+  return candidates.map((candidate) => `${baseUrl}${candidate}`);
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET") {
     return res.status(405).send("Metodo nao permitido");
@@ -104,12 +127,49 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const baseUrl = resolveBaseUrl(empresa);
     const token = await getAccessToken(empresa, baseUrl);
-    const response = await fetch(resolveImageUrl(baseUrl, src), {
-      headers: {
-        Authorization: token,
-        Accept: "image/*,*/*",
-      },
-    });
+    let response: Response | null = null;
+    let lastNonImage: { contentType: string; preview: string } | null = null;
+
+    const tried: Array<{ url: string; status: number; contentType: string }> = [];
+
+    for (const url of buildImageCandidates(baseUrl, src)) {
+      const candidateResponse = await fetch(url, {
+        headers: {
+          Authorization: token,
+          Accept: "image/*,*/*",
+        },
+      });
+      const contentType = candidateResponse.headers.get("content-type") || "";
+      tried.push({ url, status: candidateResponse.status, contentType });
+
+      if (candidateResponse.status === 401) {
+        tokenCache.clear();
+      }
+
+      if (!candidateResponse.ok) {
+        continue;
+      }
+
+      if (contentType.startsWith("image/")) {
+        response = candidateResponse;
+        break;
+      }
+
+      const previewBuffer = Buffer.from(await candidateResponse.arrayBuffer());
+      lastNonImage = {
+        contentType,
+        preview: previewBuffer.toString("utf8", 0, Math.min(previewBuffer.length, 300)),
+      };
+    }
+
+    if (!response) {
+      return res.status(422).json({
+        error: "Imagem do ERP nao encontrada por URL/ID",
+        src,
+        tried,
+        lastNonImage,
+      });
+    }
 
     if (response.status === 401) {
       tokenCache.clear();
