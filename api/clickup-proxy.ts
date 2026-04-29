@@ -165,6 +165,142 @@ function mapClickUpTask(task: any, listId: string) {
   };
 }
 
+function isJsonAttachment(attachment: any): boolean {
+  const title = String(attachment?.title ?? attachment?.file_name ?? '').toLowerCase();
+  const mimetype = String(attachment?.mimetype ?? '').toLowerCase();
+  return title.endsWith('.json') || mimetype === 'application/json';
+}
+
+async function baixarJsonDaTask(taskId: string, token: string): Promise<any | null> {
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+    headers: { Authorization: token },
+  });
+
+  if (!response.ok) {
+    throw new Error(`ClickUp ${response.status} ao buscar task ${taskId}: ${await response.text()}`);
+  }
+
+  const taskData = await response.json();
+  const attachment = (taskData.attachments ?? []).find(isJsonAttachment);
+  if (!attachment?.url) return null;
+
+  const fileResponse = await fetch(attachment.url, { headers: { Authorization: token } });
+  if (!fileResponse.ok) {
+    throw new Error(`ClickUp ${fileResponse.status} ao baixar JSON da task ${taskId}`);
+  }
+
+  return await fileResponse.json();
+}
+
+function normalizeCodigo(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function normalizeQuantidade(value: unknown): number {
+  const numberValue = Number(value ?? 0);
+  if (!Number.isFinite(numberValue) || numberValue <= 0) return 0;
+  return Math.round(numberValue);
+}
+
+function normalizeTaskName(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .replace(/\s+/g, ' ')
+    .toLowerCase();
+}
+
+async function consolidarJsonsAnalisados(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  token: string,
+  nomeFiltro = ''
+) {
+  const tasks = await buscarTasksAnalisado(empresa, flag, token);
+  const nomeNormalizado = normalizeTaskName(nomeFiltro);
+  const tasksFiltradas = nomeNormalizado
+    ? tasks.filter((task) => normalizeTaskName(task.name) === nomeNormalizado)
+    : tasks;
+  const itemsMap = new Map<string, any>();
+  const pedidos: Array<{ taskId: string; name: string; itens: number }> = [];
+  const ignorados: Array<{ taskId: string; name: string; motivo: string }> = [];
+  let linhasOriginais = 0;
+
+  for (const task of tasksFiltradas) {
+    try {
+      const json = await baixarJsonDaTask(task.id, token);
+      const items = Array.isArray(json?.items) ? json.items : [];
+
+      if (items.length === 0) {
+        ignorados.push({ taskId: task.id, name: task.name, motivo: 'JSON sem items' });
+        continue;
+      }
+
+      pedidos.push({ taskId: task.id, name: task.name, itens: items.length });
+
+      for (const item of items) {
+        const codigo = normalizeCodigo(item.codigo ?? item.barcode);
+        const quantidade = normalizeQuantidade(item.quantidade ?? item.quantity);
+        if (!codigo || quantidade <= 0) continue;
+
+        const sku = String(item.sku ?? '').trim();
+        const secao = String(item.secao ?? '').trim();
+        const key = `${codigo}::${sku}::${secao}`;
+        const existing = itemsMap.get(key);
+
+        linhasOriginais += 1;
+
+        if (existing) {
+          existing.quantidade += quantidade;
+          existing._origens.push(task.id);
+          if (!existing.photo && item.photo) existing.photo = item.photo;
+          continue;
+        }
+
+        itemsMap.set(key, {
+          codigo,
+          sku,
+          secao: secao || null,
+          quantidade,
+          photo: item.photo || null,
+          _origens: [task.id],
+        });
+      }
+    } catch (error: any) {
+      ignorados.push({ taskId: task.id, name: task.name, motivo: error?.message ?? 'Erro ao baixar JSON' });
+    }
+  }
+
+  const items = Array.from(itemsMap.values()).map((item) => ({
+    codigo: item.codigo,
+    sku: item.sku,
+    secao: item.secao,
+    quantidade: item.quantidade,
+    photo: item.photo,
+  }));
+
+  return {
+    type: 'conference-file',
+    empresa,
+    flag,
+    geradoEm: new Date().toISOString(),
+    items,
+    _meta: {
+      origem: 'clickup-consolidado',
+      statusOrigem: 'ANALISADO',
+      totalPedidos: pedidos.length,
+      totalTasksAnalisadas: tasks.length,
+      totalTasksFiltradas: tasksFiltradas.length,
+      nomeFiltro: nomeFiltro || null,
+      totalLinhasOriginais: linhasOriginais,
+      totalItensConsolidados: items.length,
+      pedidos,
+      ignorados,
+    },
+  };
+}
+
 async function buscarTasksAnalisado(
   empresa: EmpresaKey,
   flag: FlagKey,
@@ -225,6 +361,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const empresa = normalizeEmpresa(req.query.empresa);
   const flag = normalizeFlag(req.query.flag);
   const taskId = getSingle(req.query.taskId).trim();
+  const nome = getSingle(req.query.nome).trim();
   const token = getToken(empresa);
 
   if (!token) {
@@ -245,20 +382,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'baixar-json') {
-      const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
-        headers: { Authorization: token },
-      });
-      const taskData = await response.json();
-      const attachment = (taskData.attachments ?? []).find(
-        (item: any) =>
-          (item.title ?? item.file_name ?? '').endsWith('.json') ||
-          item.mimetype === 'application/json'
-      );
+      const json = await baixarJsonDaTask(taskId, token);
+      if (!json) return res.status(404).json({ error: 'JSON nao encontrado na task' });
+      return res.status(200).json(json);
+    }
 
-      if (!attachment) return res.status(404).json({ error: 'JSON nao encontrado na task' });
-
-      const fileResponse = await fetch(attachment.url, { headers: { Authorization: token } });
-      const json = await fileResponse.json();
+    if (action === 'consolidar-jsons') {
+      const json = await consolidarJsonsAnalisados(empresa, flag, token, nome);
       return res.status(200).json(json);
     }
 

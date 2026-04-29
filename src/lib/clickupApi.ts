@@ -101,6 +101,23 @@ export async function baixarJsonDaTask(
 }
 
 // ── Buscar attachments de uma task ───────────────────────────────────────────
+export async function consolidarJsonsAnalisados(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  nome?: string
+): Promise<object> {
+  const params = new URLSearchParams({
+    action: "consolidar-jsons",
+    empresa,
+    flag,
+  });
+  if (nome) params.set("nome", nome);
+
+  const response = await fetch(`/api/clickup-proxy?${params.toString()}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao consolidar JSONs`);
+  return await response.json();
+}
+
 export async function buscarAttachmentsDaTask(
   empresa: EmpresaKey,
   taskId: string,

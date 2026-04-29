@@ -29,6 +29,7 @@ import {
   buscarTasksAnalisado,
   baixarJsonDaTask,
   buscarAttachmentsDaTask,
+  consolidarJsonsAnalisados,
   deletarTask,
   type ClickUpTask,
   type EmpresaKey,
@@ -107,12 +108,24 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [tasksErro, setTasksErro] = useState<string | null>(null);
   const [taskSelecionada, setTaskSelecionada] = useState<ClickUpTask | null>(null);
   const [loadingJson, setLoadingJson] = useState(false);
+  const [consolidandoJson, setConsolidandoJson] = useState(false);
   const [taskOrigemId, setTaskOrigemId] = useState<string | null>(null);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
 
   const STORAGE_KEY = "clickup_sent_ids";
+
+  const gruposMesmoNome = Array.from(
+    tasks.reduce((map, task) => {
+      const nome = task.name.trim();
+      if (!nome) return map;
+      const grupo = map.get(nome) ?? [];
+      grupo.push(task);
+      map.set(nome, grupo);
+      return map;
+    }, new Map<string, ClickUpTask[]>())
+  ).filter(([, grupo]) => grupo.length > 1);
 
   const jaFoiEnviado = (): boolean => {
     try {
@@ -223,6 +236,60 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       setTaskSelecionada(null);
     } finally {
       setLoadingJson(false);
+    }
+  };
+
+  const juntarTasksPorNome = async (nome: string) => {
+    const grupo = tasks.filter((task) => task.name.trim() === nome.trim());
+    if (grupo.length < 2) {
+      toast({ title: "Precisa ter 2 ou mais tasks com o mesmo nome", variant: "destructive" });
+      return;
+    }
+
+    setConsolidandoJson(true);
+    try {
+      const json = await consolidarJsonsAnalisados(empresa as EmpresaKey, flag as FlagKey, nome);
+      const result = ConferenceFileSchema.safeParse(json);
+
+      if (!result.success) {
+        toast({ title: "JSON consolidado invalido", description: result.error.issues[0]?.message, variant: "destructive" });
+        return;
+      }
+
+      if (result.data.empresa) setEmpresa(result.data.empresa);
+      if (result.data.flag) setFlag(result.data.flag);
+
+      const digitoMap: Record<string, "S" | "M"> = (json as any)._meta?.digitoMap ?? {};
+      const parsed: ConferenceItem[] = result.data.items.map((item) => ({
+        id: crypto.randomUUID(),
+        codigo: item.codigo,
+        sku: item.sku ?? "",
+        secao: item.secao ?? null,
+        quantidadePedida: item.quantidade,
+        quantidadeReal: null,
+        status: "pendente" as ConferenceStatus,
+        photo: item.photo ?? null,
+        digito: digitoMap[item.codigo] ?? null,
+      }));
+
+      if (parsed.length === 0) {
+        toast({ title: "JSON consolidado vazio", variant: "destructive" });
+        return;
+      }
+
+      setItems(parsed);
+      setTaskOrigemId(null);
+      setPhase("ready");
+      setCurrentIndex(0);
+      const meta = (json as any)._meta;
+      toast({
+        title: `${parsed.length} itens no JSON unico`,
+        description: `${meta?.totalPedidos ?? grupo.length} pedido(s) com o mesmo nome juntado(s).`,
+      });
+    } catch (e: any) {
+      toast({ title: "Erro ao juntar pedidos", description: e.message ?? "Falha ao consolidar JSONs", variant: "destructive" });
+    } finally {
+      setConsolidandoJson(false);
     }
   };
 
@@ -948,6 +1015,32 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           <EmpresaBadge />
         </div>
 
+        {!loadingTasks && gruposMesmoNome.length > 0 && (
+          <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
+            <p className="text-xs font-bold text-primary">Juntar somente pedidos com o mesmo nome</p>
+            {gruposMesmoNome.map(([nome, grupo]) => (
+              <button
+                key={nome}
+                onClick={() => juntarTasksPorNome(nome)}
+                disabled={loadingJson || consolidandoJson}
+                className="w-full min-h-12 bg-primary text-primary-foreground rounded-xl font-bold text-sm flex items-center justify-between gap-2 px-3 py-2 active:scale-[0.98] transition-transform shadow-sm disabled:opacity-60"
+              >
+                <span className="flex items-center gap-2 min-w-0">
+                  {consolidandoJson ? (
+                    <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
+                  ) : (
+                    <FileJson className="w-4 h-4 flex-shrink-0" />
+                  )}
+                  <span className="truncate">{nome}</span>
+                </span>
+                <span className="text-xs font-black bg-primary-foreground/20 rounded-full px-2 py-0.5 flex-shrink-0">
+                  {grupo.length}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+
         {tasksErro && (
           <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{tasksErro}</div>
         )}
@@ -977,7 +1070,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               <button
                 key={task.id}
                 onClick={() => abrirTask(task)}
-                disabled={loadingJson}
+                disabled={loadingJson || consolidandoJson}
                 className="w-full text-left rounded-xl border border-border bg-card p-4 flex items-center justify-between gap-3 active:scale-[0.99] transition-all hover:border-primary/40 hover:bg-primary/5 disabled:opacity-60"
               >
                 <div className="flex-1 min-w-0">
