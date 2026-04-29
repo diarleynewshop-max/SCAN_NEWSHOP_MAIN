@@ -6,6 +6,7 @@ import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Load
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
+import { isDataPhotoUrl } from "@/lib/photoUtils";
 
 const PAGE_SIZE = 10;
 
@@ -20,7 +21,7 @@ const STATUS_PRIORITY: Record<string, number> = {
 function isValidImageSrc(foto: string | null): boolean {
   if (!foto) return false;
   if (foto.startsWith("http://") || foto.startsWith("https://")) return true;
-  return /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(foto);
+  return isDataPhotoUrl(foto);
 }
 
 const Compras = () => {

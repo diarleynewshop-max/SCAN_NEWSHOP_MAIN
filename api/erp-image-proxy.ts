@@ -205,8 +205,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (req.query.format === "data-url") {
+      const mimeType = contentType.split(";")[0]?.trim() || "image/jpeg";
       return res.status(200).json({
-        dataUrl: `data:${contentType};base64,${buffer.toString("base64")}`,
+        dataUrl: `data:${mimeType};base64,${buffer.toString("base64")}`,
       });
     }
 

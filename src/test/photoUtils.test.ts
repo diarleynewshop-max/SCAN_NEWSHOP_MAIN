@@ -11,6 +11,7 @@ describe("photoUtils", () => {
   it("detecta tipos de URL de foto", () => {
     expect(isObjectPhotoUrl("blob:http://localhost/123")).toBe(true);
     expect(isDataPhotoUrl("data:image/jpeg;base64,abc")).toBe(true);
+    expect(isDataPhotoUrl("data:image/png;charset=UTF-8;base64,abc")).toBe(true);
     expect(isRemotePhotoUrl("https://cdn.exemplo.com/foto.jpg")).toBe(true);
   });
 

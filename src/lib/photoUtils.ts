@@ -11,7 +11,7 @@ export function isObjectPhotoUrl(value: string | null | undefined): boolean {
 }
 
 export function isDataPhotoUrl(value: string | null | undefined): boolean {
-  return typeof value === "string" && /^data:image\/[a-zA-Z0-9.+-]+;base64,/.test(value);
+  return typeof value === "string" && /^data:image\/[a-zA-Z0-9.+-]+(?:;[^;,]+)*;base64,/i.test(value);
 }
 
 export function isRemotePhotoUrl(value: string | null | undefined): boolean {
@@ -67,7 +67,7 @@ export function blobToDataUrl(blob: Blob): Promise<string> {
 
 export function dataUrlToBlob(dataUrl: string): Blob {
   const [header, base64] = dataUrl.split(",");
-  const mimeType = header.match(/^data:([^;]+);base64$/)?.[1] ?? "image/jpeg";
+  const mimeType = header.match(/^data:([^;]+)(?:;[^;]+)*;base64$/i)?.[1] ?? "image/jpeg";
   const binary = atob(base64 ?? "");
   const bytes = new Uint8Array(binary.length);
 
