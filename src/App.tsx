@@ -16,6 +16,7 @@ const Index = lazy(() => import("./pages/Index"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Analytics = lazy(() => import("./pages/Analytics"));
 const Compras = lazy(() => import("./pages/Compras"));
+const ConsultaPreco = lazy(() => import("./pages/ConsultaPreco"));
 
 const queryClient = new QueryClient();
 
@@ -43,6 +44,7 @@ const App = () => (
           <Routes>
             <Route path="/" element={<Home />} />
             <Route path="/scanner" element={<Index />} />
+            <Route path="/consulta-preco" element={<ConsultaPreco />} />
             
             {/* Rotas protegidas por role */}
             <Route path="/analytics" element={

@@ -1,5 +1,5 @@
 ﻿import { useNavigate } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -30,6 +30,7 @@ function getStorageSize(): { kb: number; hasData: boolean; listCount: number; ha
 // Menu base (sempre visível)
 const baseMenuItems = [
   { Icon: ScanBarcode,  label: "Escanear",    description: "Leia códigos e registre produtos",    path: "/scanner",                  accent: "hsl(var(--primary))"     },
+  { Icon: BadgeDollarSign, label: "Consulta Preço", description: "Consulte varejo, atacado e grupo", path: "/consulta-preco", accent: "hsl(var(--warning))" },
   { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))"     },
   { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },

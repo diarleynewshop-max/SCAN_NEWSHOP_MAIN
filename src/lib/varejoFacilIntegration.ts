@@ -6,13 +6,25 @@ export interface VarejoFacilLookupContext {
   flag?: VarejoFacilFlag | string | null;
 }
 
-interface VarejoFacilProduct {
+export interface VarejoFacilProduct {
   id: string;
   codigo_barras: string;
   descricao: string;
   preco: number;
+  precoVarejo: number;
+  precoAtacado: number;
   estoque: number;
   imagem?: string;
+}
+
+export interface ConsultaPrecoVarejoFacilProduto {
+  id: string;
+  codigo_barras: string;
+  descricao: string;
+  precoVarejo: number;
+  precoAtacado: number;
+  secao?: string;
+  grupo?: string;
 }
 
 type ErpProduto = {
@@ -50,6 +62,16 @@ type ErpResumoEstoque = {
   saldo?: number;
 };
 
+type ErpSecao = {
+  id?: number;
+  descricao?: string;
+};
+
+type ErpGrupo = {
+  id?: number;
+  descricao?: string;
+};
+
 type ErpListResponse<T> = {
   items?: T[];
 };
@@ -69,6 +91,9 @@ const ERP_LOJA_BY_EMPRESA: Record<VarejoFacilEmpresa, number> = {
 let cachedAccessToken: string | null = null;
 let cachedAuthKey: string | null = null;
 let tokenPromise: Promise<string> | null = null;
+
+const secaoCache = new Map<number, string>();
+const grupoCache = new Map<string, string>();
 
 const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpresa => {
   const normalizada = (empresa ?? "").toUpperCase();
@@ -243,6 +268,40 @@ const selecionarPrecoDaLoja = (precos: ErpPreco[] | null, contexto: VarejoFacilL
   return precos.find((preco) => preco.lojaId === lojaId) || precos[0];
 };
 
+const buscarSecao = async (secaoId?: number, contexto: VarejoFacilLookupContext = {}) => {
+  if (!secaoId) return "";
+  if (secaoCache.has(secaoId)) return secaoCache.get(secaoId)!;
+
+  let descricao = `Secao ${secaoId}`;
+  try {
+    const data = await fetchJson<ErpSecao>(`/v1/produto/secoes/${secaoId}`, contexto);
+    descricao = data?.descricao || descricao;
+  } catch {
+    // Mantem a consulta de preco funcionando mesmo se o mercadologico falhar.
+  }
+
+  secaoCache.set(secaoId, descricao);
+  return descricao;
+};
+
+const buscarGrupo = async (secaoId?: number, grupoId?: number, contexto: VarejoFacilLookupContext = {}) => {
+  if (!secaoId || !grupoId) return "";
+
+  const key = `${secaoId}:${grupoId}`;
+  if (grupoCache.has(key)) return grupoCache.get(key)!;
+
+  let descricao = `Grupo ${grupoId}`;
+  try {
+    const data = await fetchJson<ErpGrupo>(`/v1/produto/secoes/${secaoId}/grupos/${grupoId}`, contexto);
+    descricao = data?.descricao || descricao;
+  } catch {
+    // Mantem a consulta de preco funcionando mesmo se o mercadologico falhar.
+  }
+
+  grupoCache.set(key, descricao);
+  return descricao;
+};
+
 const extrairImagemProduto = (produto: ErpProduto): string | undefined => {
   const imagemDaLista = produto.imagens?.find(Boolean);
 
@@ -309,14 +368,59 @@ export const buscarProdutoVarejoFacil = async (
     buscarEstoquePorProduto(produto.id, contexto),
   ]);
   const precoSelecionado = selecionarPrecoDaLoja(precos, contexto);
+  const precoVarejo = normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1);
+  const precoAtacado = normalizarPreco(precoSelecionado?.precoVenda2, precoSelecionado?.precoOferta2);
 
   return {
     id: String(produto.id),
     codigo_barras: eanResolvido,
     descricao: produto.descricao || produto.codigoInterno || "",
-    preco: normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1),
+    preco: precoVarejo,
+    precoVarejo,
+    precoAtacado,
     estoque,
     imagem: resolverImagemProduto(extrairImagemProduto(produto), produto.id, contexto),
+  };
+};
+
+export const consultarPrecoProdutoVarejoFacil = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {},
+  incluirMercadologico = false
+): Promise<ConsultaPrecoVarejoFacilProduto | null> => {
+  const codigo = codigoBarras.trim();
+  if (!codigo) return null;
+
+  const codigoAuxiliarEncontrado = await buscarCodigoAuxiliarPorEan(codigo, contexto);
+  let produto: ErpProduto | null = null;
+  let eanResolvido = codigo;
+
+  if (codigoAuxiliarEncontrado?.codigoAuxiliar.produtoId) {
+    produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${codigoAuxiliarEncontrado.codigoAuxiliar.produtoId}`, contexto);
+    eanResolvido = codigoAuxiliarEncontrado.eanEncontrado;
+  }
+
+  if (!produto) {
+    produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/consulta/${encodeURIComponent(codigo)}`, contexto);
+  }
+
+  if (!produto?.id) return null;
+
+  const [precos, secao, grupo] = await Promise.all([
+    fetchJson<ErpPreco[]>(`/v1/produto/produtos/${produto.id}/precos`, contexto),
+    incluirMercadologico ? buscarSecao(produto.secaoId, contexto) : Promise.resolve(""),
+    incluirMercadologico ? buscarGrupo(produto.secaoId, produto.grupoId, contexto) : Promise.resolve(""),
+  ]);
+  const precoSelecionado = selecionarPrecoDaLoja(precos, contexto);
+
+  return {
+    id: String(produto.id),
+    codigo_barras: eanResolvido,
+    descricao: produto.descricao || produto.codigoInterno || "Produto sem descricao",
+    precoVarejo: normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1),
+    precoAtacado: normalizarPreco(precoSelecionado?.precoVenda2, precoSelecionado?.precoOferta2),
+    secao: secao || undefined,
+    grupo: grupo || undefined,
   };
 };
 
