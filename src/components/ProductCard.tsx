@@ -64,7 +64,7 @@ const ProductCard = ({ product, onDelete, onUpdate, onCapturePhoto, onMoveToTop,
           )}
         </div>
       ) : (
-        <button onClick={() => onCapturePhoto?.(product.id)} disabled={!isImported} style={{ 
+        <button onClick={() => onCapturePhoto?.(product.id)} disabled={!isImported || !onCapturePhoto} style={{ 
           width: modoDesktop ? 60 : 52, 
           height: modoDesktop ? 60 : 52, 
           borderRadius: modoDesktop ? 10 : 8, 
@@ -74,7 +74,7 @@ const ProductCard = ({ product, onDelete, onUpdate, onCapturePhoto, onMoveToTop,
           alignItems: "center", 
           justifyContent: "center", 
           flexShrink: 0,
-          cursor: isImported ? "pointer" : "default"
+          cursor: isImported && onCapturePhoto ? "pointer" : "default"
         }}>
           {isImported ? (
             <Camera style={{ width: modoDesktop ? 22 : 20, height: modoDesktop ? 22 : 20, color: "hsl(var(--primary))" }} />

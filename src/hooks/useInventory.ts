@@ -2,14 +2,13 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Product, ListData, ListFlag } from "@/components/ProductCard";
 import { useToast } from "@/hooks/use-toast";
 import {
-  dataUrlToBlob,
   isDataPhotoUrl,
   isObjectPhotoUrl,
   revokePhotoUrl,
   shouldPersistPhoto,
   stripPhotoForPersistence,
 } from "@/lib/photoUtils";
-import { deletePhotoBlob, getPhotoBlob, putPhotoBlob } from "@/lib/photoStore";
+import { deletePhotoBlob, getPhotoBlob } from "@/lib/photoStore";
 
 interface OpenListParams {
   title: string;
@@ -44,21 +43,10 @@ async function preparePhotoForRuntime(photo: string | null | undefined): Promise
     return { photo, photoBlob: null, photoAssetId: null };
   }
 
-  const blob = dataUrlToBlob(photo);
-  const assetId = crypto.randomUUID();
-  let photoAssetId: string | null = assetId;
-
-  try {
-    await putPhotoBlob(assetId, blob);
-  } catch (error) {
-    console.warn("Falha ao salvar foto no IndexedDB. Foto ficara apenas em memoria:", error);
-    photoAssetId = null;
-  }
-
   return {
-    photo: URL.createObjectURL(blob),
-    photoBlob: blob,
-    photoAssetId,
+    photo,
+    photoBlob: null,
+    photoAssetId: null,
   };
 }
 

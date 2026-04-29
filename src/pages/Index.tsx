@@ -8,6 +8,7 @@ import { useInventory } from "@/hooks/useInventory";
 import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
+import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 
 const LOGO = "/newshop-logo.jpg";
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
@@ -70,6 +71,40 @@ function isConsultaBloqueada(flag?: string | null): boolean {
   return (flag ?? "loja").toLowerCase() !== "loja";
 }
 
+async function compactImageBlobToDataUrl(blob: Blob): Promise<string> {
+  if (!blob.type.startsWith("image/")) return blobToDataUrl(blob);
+
+  const objectUrl = URL.createObjectURL(blob);
+  const image = new Image();
+  image.crossOrigin = "anonymous";
+
+  try {
+    await new Promise<void>((resolve, reject) => {
+      image.onload = () => resolve();
+      image.onerror = () => reject(new Error("Falha ao carregar foto do ERP"));
+      image.src = objectUrl;
+    });
+
+    const maxEdge = 900;
+    const currentMaxEdge = Math.max(image.width, image.height);
+    const scale = currentMaxEdge > maxEdge ? maxEdge / currentMaxEdge : 1;
+    const canvas = document.createElement("canvas");
+    canvas.width = Math.max(1, Math.round(image.width * scale));
+    canvas.height = Math.max(1, Math.round(image.height * scale));
+
+    const ctx = canvas.getContext("2d", { alpha: false });
+    if (!ctx) return blobToDataUrl(blob);
+
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = "high";
+    ctx.drawImage(image, 0, 0, canvas.width, canvas.height);
+    return canvas.toDataURL("image/jpeg", 0.65);
+  } finally {
+    image.src = "";
+    URL.revokeObjectURL(objectUrl);
+  }
+}
+
 const Index = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -97,7 +132,7 @@ const Index = () => {
   const lookupFlag = activeList?.flag ?? currentLogin?.flag ?? "loja";
   const consultaBloqueadaPorFlag = isConsultaBloqueada(lookupFlag);
   const { productInfo, loading, error, lookupProduct } = useProductLookup({
-    enabled: !modoLeve && !consultaBloqueadaPorFlag,
+    enabled: !consultaBloqueadaPorFlag,
     empresa: lookupEmpresa,
     flag: lookupFlag,
   });
@@ -129,11 +164,6 @@ const Index = () => {
   }, []);
 
   useEffect(() => {
-    if (!modoLeve) return;
-    setShowProductInfo(false);
-  }, [modoLeve]);
-
-  useEffect(() => {
     if (!consultaBloqueadaPorFlag) return;
     setShowProductInfo(false);
   }, [consultaBloqueadaPorFlag]);
@@ -142,8 +172,35 @@ const Index = () => {
     if (!productInfo) return;
     const descricao = productInfo.descricao || productInfo.nome_produto;
     if (descricao) setSku(descricao);
-    if (productInfo.imagem) setPhoto((currentPhoto) => currentPhoto || productInfo.imagem || null);
   }, [productInfo]);
+
+  useEffect(() => {
+    if (!productInfo?.imagem || modoLeve) return;
+
+    let cancelled = false;
+
+    const baixarFotoProduto = async () => {
+      try {
+        const dataUrl = isDataPhotoUrl(productInfo.imagem)
+          ? productInfo.imagem
+          : await fetch(productInfo.imagem).then(async (response) => {
+              if (!response.ok) throw new Error(`Falha ao baixar foto (${response.status})`);
+              return compactImageBlobToDataUrl(await response.blob());
+            });
+
+        if (cancelled) return;
+        setPhoto((currentPhoto) => currentPhoto || dataUrl);
+      } catch (error) {
+        console.warn("Foto do ERP nao foi baixada:", error);
+      }
+    };
+
+    void baixarFotoProduto();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [productInfo?.imagem, modoLeve]);
 
   const handleBarcodeDetected = useCallback(
     (code: string) => {
@@ -153,11 +210,10 @@ const Index = () => {
         toast({ title: "Consulta bloqueada", description: "Consulta de produto ativa apenas para flag LOJA." });
         return;
       }
-      if (modoLeve) return;
       setShowProductInfo(true);
       lookupProduct(code);
     },
-    [lookupProduct, modoLeve, consultaBloqueadaPorFlag, toast]
+    [lookupProduct, consultaBloqueadaPorFlag, toast]
   );
 
   const handleCloseList = () => {
@@ -202,7 +258,7 @@ const Index = () => {
   }, []);
 
   const handleAdd = async () => {
-    const ok = await addProduct({ barcode, sku, photo, quantity: Number(quantity) });
+    const ok = await addProduct({ barcode, sku, photo: modoLeve ? null : photo, quantity: Number(quantity) });
     if (!ok) return;
 
     setBarcode("");
@@ -350,12 +406,12 @@ const Index = () => {
                   <p style={{ fontSize: modoDesktop ? 13 : 12, color: "hsl(var(--foreground))", fontWeight: 500 }}>
                     {consultaBloqueadaPorFlag
                       ? "Consulta de produto ativa apenas para flag LOJA."
-                      : "Modo Leve ativo: sem consulta de produto e com foto comprimida."}
+                      : "Modo Leve ativo: fotos desativadas, consulta de preco liberada."}
                   </p>
                 </div>
               )}
 
-              {showProductInfo && !modoLeve && !consultaBloqueadaPorFlag && (
+              {showProductInfo && !consultaBloqueadaPorFlag && (
                 <div style={{ marginBottom: 16 }}>
                   <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 8 }}>
                     <h3 style={{ fontWeight: 700, fontSize: 16 }}>Informacoes do Produto</h3>
@@ -396,7 +452,7 @@ const Index = () => {
                   onScanPress={() => setShowScanner(true)}
                   onEnterPress={() => {
                     if (!barcode.trim()) return;
-                    if (modoLeve || consultaBloqueadaPorFlag) {
+                    if (consultaBloqueadaPorFlag) {
                       if (consultaBloqueadaPorFlag) {
                         toast({ title: "Consulta bloqueada", description: "Consulta de produto ativa apenas para flag LOJA." });
                       }
@@ -413,21 +469,23 @@ const Index = () => {
                 <input type="text" placeholder="Ex: BM-5050" value={sku} onChange={(e) => setSku(e.target.value)} style={S.inputBase} />
               </div>
 
-              <div>
-                <label style={S.label}>Foto do Produto</label>
-                <div data-tut="scanner-foto">
-                  <PhotoCapture
-                    photo={photo}
-                    onCapture={(nextPhoto) => {
-                      setDraftPhoto(nextPhoto);
-                    }}
-                    onRemove={() => {
-                      clearDraftPhoto();
-                    }}
-                    compressionPreset={modoLeve ? "light" : "default"}
-                  />
+              {!modoLeve && (
+                <div>
+                  <label style={S.label}>Foto do Produto</label>
+                  <div data-tut="scanner-foto">
+                    <PhotoCapture
+                      photo={photo}
+                      onCapture={(nextPhoto) => {
+                        setDraftPhoto(nextPhoto);
+                      }}
+                      onRemove={() => {
+                        clearDraftPhoto();
+                      }}
+                      compressionPreset="default"
+                    />
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div>
                 <label style={S.label}>Quantidade</label>
@@ -460,7 +518,7 @@ const Index = () => {
                       onDelete={deleteProduct}
                       onUpdate={updateProduct}
                       onMoveToTop={moveProductToTop}
-                      onCapturePhoto={(id) => {
+                      onCapturePhoto={modoLeve ? undefined : (id) => {
                         setPhotoProductId(id);
                         setShowPhotoCapture(true);
                       }}
@@ -481,7 +539,7 @@ const Index = () => {
                     onDelete={deleteProduct}
                     onUpdate={updateProduct}
                     onMoveToTop={moveProductToTop}
-                    onCapturePhoto={(id) => {
+                    onCapturePhoto={modoLeve ? undefined : (id) => {
                       setPhotoProductId(id);
                       setShowPhotoCapture(true);
                     }}
@@ -514,7 +572,7 @@ const Index = () => {
         </Suspense>
       )}
 
-      {showPhotoCapture && photoProductId && (
+      {!modoLeve && showPhotoCapture && photoProductId && (
         <Suspense fallback={LAZY_FALLBACK}>
           <PhotoCapture
             photo={activeList?.products.find((p) => p.id === photoProductId)?.photo || null}
