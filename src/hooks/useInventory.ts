@@ -157,13 +157,6 @@ export function useInventory() {
     const saveResult = saveLists(lists);
 
     if (saveResult !== lastSaveResultRef.current) {
-      if (saveResult === "without-photos") {
-        toast({
-          title: "Fotos removidas do armazenamento",
-          description: "O app limpou fotos sem backup para evitar travamento e perda total da lista.",
-        });
-      }
-
       if (saveResult === "failed") {
         toast({
           title: "Falha ao salvar localmente",
@@ -269,7 +262,13 @@ export function useInventory() {
       );
     };
 
-    void hydratePersistedPhotos();
+    const hasPhotosToHydrate = lists.some((list) =>
+      list.products.some((product) => product.photoAssetId && !product.photo)
+    );
+
+    if (hasPhotosToHydrate) {
+      void hydratePersistedPhotos();
+    }
 
     return () => {
       cancelled = true;

@@ -185,13 +185,23 @@ const Index = () => {
           ? productInfo.imagem
           : await fetch(productInfo.imagem).then(async (response) => {
               if (!response.ok) throw new Error(`Falha ao baixar foto (${response.status})`);
+              const contentType = response.headers.get("content-type") || "";
+              if (contentType.includes("application/json")) {
+                const data = await response.json();
+                if (typeof data?.dataUrl === "string") {
+                  return data.dataUrl;
+                }
+              }
               return compactImageBlobToDataUrl(await response.blob());
             });
 
         if (cancelled) return;
-        setPhoto((currentPhoto) => currentPhoto || dataUrl);
+        const compactedDataUrl = isDataPhotoUrl(dataUrl)
+          ? await compactImageBlobToDataUrl(await fetch(dataUrl).then((response) => response.blob()))
+          : dataUrl;
+        setPhoto((currentPhoto) => currentPhoto || compactedDataUrl);
       } catch (error) {
-        console.warn("Foto do ERP nao foi baixada:", error);
+        console.error("Foto do ERP nao foi baixada:", error);
       }
     };
 

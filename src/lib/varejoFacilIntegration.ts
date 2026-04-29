@@ -262,7 +262,7 @@ const resolverImagemProduto = (imagem: string | undefined, contexto: VarejoFacil
     return `${resolveErpApiBase(contexto).replace(/\/api$/, "")}${imagem.startsWith("/") ? imagem : `/${imagem}`}`;
   }
 
-  return `/api/erp-image-proxy?empresa=${empresa.toLowerCase()}&src=${encodeURIComponent(imagem)}`;
+  return `/api/erp-image-proxy?empresa=${empresa.toLowerCase()}&format=data-url&src=${encodeURIComponent(imagem)}`;
 };
 
 export const buscarProdutoVarejoFacil = async (

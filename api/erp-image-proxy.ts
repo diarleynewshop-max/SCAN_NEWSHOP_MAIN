@@ -122,6 +122,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const contentType = response.headers.get("content-type") || "image/jpeg";
     const buffer = Buffer.from(await response.arrayBuffer());
 
+    if (req.query.format === "data-url") {
+      return res.status(200).json({
+        dataUrl: `data:${contentType};base64,${buffer.toString("base64")}`,
+      });
+    }
+
     res.setHeader("Content-Type", contentType);
     res.setHeader("Cache-Control", "public, max-age=3600");
     return res.status(200).send(buffer);
