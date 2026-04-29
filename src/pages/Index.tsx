@@ -323,8 +323,8 @@ const Index = () => {
 
   const extraTab = currentLogin?.role === "compras" ? [{ key: "compras" as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
   const tabs = [
-    { key: "scan" as const, label: "Escanear", Icon: ScanBarcode },
     { key: "consultaPreco" as const, label: "Consulta", Icon: BadgeDollarSign },
+    { key: "scan" as const, label: "Escanear", Icon: ScanBarcode },
     { key: "list" as const, label: "Lista", Icon: ClipboardList },
     { key: "conference" as const, label: "Conferencia", Icon: GitCompare },
     ...extraTab,
