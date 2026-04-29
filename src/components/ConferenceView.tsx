@@ -30,10 +30,12 @@ import {
   baixarJsonDaTask,
   buscarAttachmentsDaTask,
   consolidarJsonsAnalisados,
+  gerarRelatorioDiario,
   deletarTask,
   type ClickUpTask,
   type EmpresaKey,
   type FlagKey,
+  type RelatorioDiario,
 } from "@/lib/clickupApi";
 import { z } from "zod";
 
@@ -109,6 +111,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [taskSelecionada, setTaskSelecionada] = useState<ClickUpTask | null>(null);
   const [loadingJson, setLoadingJson] = useState(false);
   const [consolidandoJson, setConsolidandoJson] = useState(false);
+  const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
   const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -867,6 +870,148 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
   };
 
+  const formatarDataRelatorio = (data: string) => {
+    const [ano, mes, dia] = data.split("-");
+    return `${dia}/${mes}/${ano}`;
+  };
+
+  const addRelatorioSection = (doc: jsPDF, title: string, y: number) => {
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(10);
+    doc.setTextColor(20, 20, 20);
+    doc.text(title, 14, y);
+    return y + 6;
+  };
+
+  const exportRelatorioDiarioPDF = (relatorio: RelatorioDiario) => {
+    const doc = new jsPDF();
+    const pageW = doc.internal.pageSize.getWidth();
+    const pageH = doc.internal.pageSize.getHeight();
+    const margem = 14;
+    let y = 36;
+
+    const ensureSpace = (height: number) => {
+      if (y + height <= pageH - 14) return;
+      doc.addPage();
+      y = 16;
+    };
+
+    const addTextLine = (text: string, size = 8, bold = false) => {
+      ensureSpace(6);
+      doc.setFont("helvetica", bold ? "bold" : "normal");
+      doc.setFontSize(size);
+      doc.setTextColor(55, 55, 55);
+      const lines = doc.splitTextToSize(text, pageW - margem * 2);
+      doc.text(lines, margem, y);
+      y += lines.length * 5;
+    };
+
+    doc.setFillColor(20, 20, 20);
+    doc.rect(0, 0, pageW, 28, "F");
+    doc.setTextColor(255, 255, 255);
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(16);
+    doc.text("Relatorio Diario", margem, 12);
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(8);
+    doc.text(`${relatorio.empresa} - ${relatorio.flag.toUpperCase()} - ${formatarDataRelatorio(relatorio.data)}`, margem, 20);
+    doc.text(`Conferencias: ${relatorio.totalConferencias} | Itens: ${relatorio.resumo.totalItens}`, pageW - margem, 20, { align: "right" });
+
+    const cards = [
+      { label: "Separado", val: relatorio.resumo.separado, color: [34, 197, 94] },
+      { label: "Parcial", val: relatorio.resumo.parcial, color: [234, 179, 8] },
+      { label: "Nao tem", val: relatorio.resumo.naoTem, color: [239, 68, 68] },
+      { label: "Pendente", val: relatorio.resumo.pendente, color: [156, 163, 175] },
+    ] as const;
+    const colW = (pageW - margem * 2) / cards.length;
+    cards.forEach((card, index) => {
+      const x = margem + index * colW;
+      doc.setFillColor(card.color[0], card.color[1], card.color[2]);
+      doc.roundedRect(x, y, colW - 4, 15, 2, 2, "F");
+      doc.setTextColor(255, 255, 255);
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(12);
+      doc.text(String(card.val), x + (colW - 4) / 2, y + 7, { align: "center" });
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(7);
+      doc.text(card.label, x + (colW - 4) / 2, y + 12, { align: "center" });
+    });
+    y += 24;
+
+    y = addRelatorioSection(doc, "Por conferente", y);
+    relatorio.porConferente.forEach((item) => {
+      addTextLine(`${item.nome}: ${item.conferencias} conferencia(s), ${item.totalItens} itens | Separado ${item.separado} | Parcial ${item.parcial} | Nao tem ${item.naoTem}`);
+    });
+
+    y += 3;
+    y = addRelatorioSection(doc, "Por secao - faltantes/parciais", y);
+    if (relatorio.porSecao.length === 0) {
+      addTextLine("Nenhum item faltante ou parcial.");
+    } else {
+      relatorio.porSecao.forEach((item) => {
+        addTextLine(`${item.nome}: ${item.total} item(ns) | Nao tem ${item.naoTem} | Parcial ${item.parcial}`);
+      });
+    }
+
+    y += 3;
+    y = addRelatorioSection(doc, "Itens faltantes/parciais", y);
+    if (relatorio.itensCriticos.length === 0) {
+      addTextLine("Nenhum item faltante ou parcial.");
+    } else {
+      relatorio.itensCriticos.forEach((item, index) => {
+        const status = item.status === "nao_tem" ? "Nao tem" : "Parcial";
+        addTextLine(`${index + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | ${item.secao} | Pedido: ${item.pedido} | Real: ${item.real ?? "-"} | ${status} | ${item.conferente}`);
+      });
+    }
+
+    if (relatorio.ignoradas.length > 0) {
+      y += 3;
+      y = addRelatorioSection(doc, "Tasks ignoradas", y);
+      relatorio.ignoradas.forEach((item) => addTextLine(`${item.name}: ${item.motivo}`));
+    }
+
+    const totalPages = (doc as any).internal.getNumberOfPages();
+    for (let i = 1; i <= totalPages; i++) {
+      doc.setPage(i);
+      doc.setFillColor(240, 240, 240);
+      doc.rect(0, pageH - 10, pageW, 10, "F");
+      doc.setFontSize(7);
+      doc.setFont("helvetica", "normal");
+      doc.setTextColor(120, 120, 120);
+      doc.text(`Gerado em ${new Date(relatorio.geradoEm).toLocaleString("pt-BR")}`, margem, pageH - 3);
+      doc.text(`Pagina ${i} de ${totalPages}`, pageW - margem, pageH - 3, { align: "right" });
+    }
+
+    doc.save(`relatorio_diario_${relatorio.empresa}_${relatorio.data}.pdf`);
+  };
+
+  const gerarRelatorioDoDia = async () => {
+    if (gerandoRelatorio) return;
+
+    setGerandoRelatorio(true);
+    try {
+      const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
+      const relatorio = await gerarRelatorioDiario(empresa as EmpresaKey, flag as FlagKey, hoje);
+
+      if (relatorio.totalConferencias === 0) {
+        toast({ title: "Nenhuma conferencia concluida hoje", variant: "destructive" });
+        return;
+      }
+
+      exportRelatorioDiarioPDF(relatorio);
+      toast({
+        title: "Relatorio diario gerado",
+        description: relatorio.clickupTaskId
+          ? `PDF baixado e task ${relatorio.clickupTaskId} criada no ClickUp.`
+          : "PDF baixado.",
+      });
+    } catch (e: any) {
+      toast({ title: "Erro ao gerar relatorio", description: e.message ?? "Falha no relatorio diario", variant: "destructive" });
+    } finally {
+      setGerandoRelatorio(false);
+    }
+  };
+
   const EmpresaBadge = () => {
     const empresaColors: Record<string, { bg: string; border: string; text: string }> = {
       NEWSHOP: { bg: "hsl(var(--primary)/0.12)", border: "hsl(var(--primary)/0.4)", text: "hsl(var(--primary))" },
@@ -1008,10 +1153,21 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           <button onClick={() => setPhase("import")} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
             <ArrowLeft className="w-4 h-4" /> Voltar
           </button>
-          <button onClick={recarregarTasks} disabled={loadingTasks}
-            className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
-            <RefreshCw className={`w-3.5 h-3.5 ${loadingTasks ? "animate-spin" : ""}`} /> Atualizar
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={gerarRelatorioDoDia} disabled={gerandoRelatorio}
+              className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
+              {gerandoRelatorio ? (
+                <span className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+              ) : (
+                <FileText className="w-3.5 h-3.5" />
+              )}
+              Relatorio
+            </button>
+            <button onClick={recarregarTasks} disabled={loadingTasks}
+              className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
+              <RefreshCw className={`w-3.5 h-3.5 ${loadingTasks ? "animate-spin" : ""}`} /> Atualizar
+            </button>
+          </div>
         </div>
 
         <div className="flex items-center justify-between">

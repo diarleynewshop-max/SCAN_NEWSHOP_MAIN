@@ -23,6 +23,56 @@ export interface ClickUpAttachment {
   mimetype: string;
 }
 
+export interface RelatorioDiarioItem {
+  codigo: string;
+  sku: string;
+  secao: string;
+  pedido: number;
+  real: number | null;
+  status: "nao_tem" | "parcial" | string;
+  conferente: string;
+  taskId: string;
+}
+
+export interface RelatorioDiarioConferente {
+  nome: string;
+  conferencias: number;
+  totalItens: number;
+  separado: number;
+  naoTem: number;
+  parcial: number;
+  pendente: number;
+}
+
+export interface RelatorioDiarioSecao {
+  nome: string;
+  total: number;
+  naoTem: number;
+  parcial: number;
+}
+
+export interface RelatorioDiario {
+  type: "daily-conference-report";
+  empresa: EmpresaKey;
+  flag: FlagKey;
+  data: string;
+  geradoEm: string;
+  totalConferencias: number;
+  resumo: {
+    totalItens: number;
+    separado: number;
+    naoTem: number;
+    parcial: number;
+    pendente: number;
+  };
+  porConferente: RelatorioDiarioConferente[];
+  porSecao: RelatorioDiarioSecao[];
+  itensCriticos: RelatorioDiarioItem[];
+  conferencias: Array<{ taskId: string; name: string; conferente: string; totalItens: number }>;
+  ignoradas: Array<{ taskId: string; name: string; motivo: string }>;
+  clickupTaskId: string | null;
+}
+
 // ── Configuração por empresa/flag ─────────────────────────────────────────────
 interface EmpresaConfig {
   token:    string; // VITE_CLICKUP_TOKEN_xxx
@@ -115,6 +165,25 @@ export async function consolidarJsonsAnalisados(
 
   const response = await fetch(`/api/clickup-proxy?${params.toString()}`);
   if (!response.ok) throw new Error(`Erro ${response.status} ao consolidar JSONs`);
+  return await response.json();
+}
+
+export async function gerarRelatorioDiario(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  data?: string
+): Promise<RelatorioDiario> {
+  const params = new URLSearchParams({
+    action: "gerar-relatorio-diario",
+    empresa,
+    flag,
+  });
+  if (data) params.set("data", data);
+
+  const response = await fetch(`/api/clickup-proxy?${params.toString()}`, {
+    method: "POST",
+  });
+  if (!response.ok) throw new Error(`Erro ${response.status} ao gerar relatorio diario`);
   return await response.json();
 }
 

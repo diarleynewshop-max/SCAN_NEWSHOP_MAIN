@@ -4,6 +4,17 @@ type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
 type FlagKey = 'loja' | 'cd';
 type ListaKey = FlagKey | 'compras';
 
+type RelatorioItem = {
+  codigo: string;
+  sku: string;
+  secao: string;
+  pedido: number;
+  real: number | null;
+  status: string;
+  conferente: string;
+  taskId: string;
+};
+
 const DEFAULT_LIST_IDS: Record<EmpresaKey, Record<ListaKey, string>> = {
   NEWSHOP: { loja: '901325900510', cd: '901325900510', compras: '901326684020' },
   SOYE: { loja: '901326607319', cd: '901326461924', compras: '901326684020' },
@@ -155,6 +166,8 @@ function mapClickUpTask(task: any, listId: string) {
     name: task.name,
     status: task.status?.status ?? '',
     date_created: task.date_created ?? '',
+    date_updated: task.date_updated ?? '',
+    description: task.description ?? task.text_content ?? '',
     listId,
     attachments: (task.attachments ?? []).map((attachment: any) => ({
       id: attachment.id,
@@ -163,6 +176,301 @@ function mapClickUpTask(task: any, listId: string) {
       mimetype: attachment.mimetype ?? '',
     })),
   };
+}
+
+async function fetchTaskDetail(taskId: string, token: string): Promise<any> {
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+    headers: { Authorization: token },
+  });
+
+  if (!response.ok) {
+    throw new Error(`ClickUp ${response.status} ao buscar task ${taskId}: ${await response.text()}`);
+  }
+
+  return await response.json();
+}
+
+function formatDateKey(date = new Date()): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(date);
+
+  const value = (type: string) => parts.find((part) => part.type === type)?.value ?? '';
+  return `${value('year')}-${value('month')}-${value('day')}`;
+}
+
+function formatDatePtBr(dateKey: string): string {
+  const [year, month, day] = dateKey.split('-');
+  return `${day}/${month}/${year}`;
+}
+
+function taskMatchesDate(task: any, dateKey: string): boolean {
+  const datePtBr = formatDatePtBr(dateKey);
+  const name = String(task?.name ?? '');
+  const description = String(task?.description ?? task?.text_content ?? '');
+
+  if (name.includes(datePtBr) || description.includes(`Data: ${datePtBr}`)) {
+    return true;
+  }
+
+  const timestamp = Number(task?.date_updated || task?.date_created || 0);
+  if (!timestamp) return false;
+  return formatDateKey(new Date(timestamp)) === dateKey;
+}
+
+function normalizeText(value: unknown): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+function extractConferente(task: any, description: string): string {
+  const fromDescription = description.match(/^Conferente:\s*(.+)$/im)?.[1]?.trim();
+  if (fromDescription) return fromDescription;
+
+  return String(task?.name ?? '')
+    .replace(/^[^\wÀ-ÿ]+/u, '')
+    .split(/[—-]/)[0]
+    .trim() || 'Sem conferente';
+}
+
+function extractResumoValue(description: string, label: string): number {
+  const labelNorm = normalizeText(label);
+  const line = description
+    .split(/\r?\n/)
+    .find((item) => normalizeText(item).includes(labelNorm));
+
+  const value = line?.match(/:\s*(\d+)/)?.[1];
+  return value ? Number(value) : 0;
+}
+
+function normalizeReportStatus(value: string): string {
+  const text = normalizeText(value);
+  if (text.includes('parcial')) return 'parcial';
+  if (text.includes('nao tem') || text.includes('não tem')) return 'nao_tem';
+  if (text.includes('pendente')) return 'pendente';
+  return 'separado';
+}
+
+function parseConferenceItems(description: string, conferente: string, taskId: string): RelatorioItem[] {
+  const items: RelatorioItem[] = [];
+  let secaoAtual = 'Sem categoria';
+
+  for (const rawLine of description.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (line === '{S}' || line === '{M}' || normalizeText(line) === 'sem categoria') {
+      secaoAtual = normalizeText(line) === 'sem categoria' ? 'Sem categoria' : line;
+      continue;
+    }
+
+    const secaoMatch = line.match(/^Se[cç][aã]o:\s*(.+)$/i);
+    if (secaoMatch?.[1]) {
+      secaoAtual = secaoMatch[1].trim();
+      continue;
+    }
+
+    const itemMatch = line.match(/Codigo:\s*([^|]+)\|\s*SKU:\s*([^|]+)\|\s*Pedido:\s*(\d+)\s*\|\s*Real:\s*([^|]+)\|\s*(.+)$/i);
+    if (!itemMatch) continue;
+
+    const status = normalizeReportStatus(itemMatch[5]);
+    if (status !== 'nao_tem' && status !== 'parcial') continue;
+
+    const realText = itemMatch[4].trim();
+    items.push({
+      codigo: itemMatch[1].trim(),
+      sku: itemMatch[2].trim(),
+      secao: secaoAtual,
+      pedido: Number(itemMatch[3]),
+      real: /^\d+$/.test(realText) ? Number(realText) : null,
+      status,
+      conferente,
+      taskId,
+    });
+  }
+
+  return items;
+}
+
+function buildRelatorioDescription(report: any): string {
+  const porConferente = report.porConferente
+    .map((item: any) => `- ${item.nome}: ${item.totalItens} itens | Separado ${item.separado} | Parcial ${item.parcial} | Nao tem ${item.naoTem}`)
+    .join('\n') || '- Sem dados';
+
+  const porSecao = report.porSecao
+    .map((item: any) => `- ${item.nome}: ${item.total} faltante/parcial`)
+    .join('\n') || '- Sem faltas/parciais';
+
+  const faltas = report.itensCriticos
+    .slice(0, 80)
+    .map((item: RelatorioItem, index: number) =>
+      `${index + 1}. ${item.codigo} | SKU: ${item.sku || '-'} | ${item.secao} | Pedido: ${item.pedido} | Real: ${item.real ?? '-'} | ${item.status} | ${item.conferente}`
+    )
+    .join('\n') || 'Nenhum item faltante/parcial.';
+
+  return `Relatorio diario de conferencia
+Empresa: ${report.empresa}
+Tipo: ${String(report.flag).toUpperCase()}
+Data: ${formatDatePtBr(report.data)}
+Conferencias: ${report.totalConferencias}
+Tasks ignoradas: ${report.ignoradas.length}
+
+RESUMO GERAL
+Total de itens: ${report.resumo.totalItens}
+Separado: ${report.resumo.separado}
+Nao tem: ${report.resumo.naoTem}
+Parcial: ${report.resumo.parcial}
+Pendente: ${report.resumo.pendente}
+
+POR CONFERENTE
+${porConferente}
+
+POR SECAO
+${porSecao}
+
+ITENS FALTANTES/PARCIAIS
+${faltas}`;
+}
+
+async function criarTarefaClickUp(listId: string, token: string, name: string, description: string, status = 'complete') {
+  const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
+    method: 'POST',
+    headers: {
+      Authorization: token,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({ name, description, status }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`ClickUp ${response.status} ao criar relatorio: ${await response.text()}`);
+  }
+
+  return await response.json();
+}
+
+function sortByTotalDesc<T extends { total?: number; totalItens?: number }>(items: T[]): T[] {
+  return items.sort((a, b) => Number(b.total ?? b.totalItens ?? 0) - Number(a.total ?? a.totalItens ?? 0));
+}
+
+async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: string, dateKey: string) {
+  const listId = getListId(empresa, flag);
+  const rawTasks = await fetchTasksFromList(listId, token);
+  const concluidas = rawTasks.filter((task) => {
+    const status = normalizeStatus(task.status?.status);
+    const name = normalizeText(task.name);
+    return (status === 'concluido' || status === 'complete') && !name.includes('relatorio diario');
+  });
+
+  const tasksDoDia = concluidas.filter((task) => taskMatchesDate(task, dateKey));
+  const conferencias: any[] = [];
+  const ignoradas: Array<{ taskId: string; name: string; motivo: string }> = [];
+  const itensCriticos: RelatorioItem[] = [];
+
+  for (const task of tasksDoDia) {
+    try {
+      const detail = await fetchTaskDetail(task.id, token);
+      const description = String(detail.description ?? detail.text_content ?? task.description ?? '');
+      if (!description || !normalizeText(description).includes('resumo')) {
+        ignoradas.push({ taskId: task.id, name: task.name, motivo: 'Descricao fora do padrao da conferencia' });
+        continue;
+      }
+
+      const conferente = extractConferente(task, description);
+      const resumo = {
+        separado: extractResumoValue(description, 'Separado'),
+        naoTem: extractResumoValue(description, 'Nao tem'),
+        parcial: extractResumoValue(description, 'Parcial'),
+        pendente: extractResumoValue(description, 'Pendente'),
+      };
+      const totalItens = Number(description.match(/^Total:\s*(\d+)/im)?.[1] ?? 0);
+
+      conferencias.push({
+        taskId: task.id,
+        name: task.name,
+        conferente,
+        totalItens,
+        resumo,
+      });
+      itensCriticos.push(...parseConferenceItems(description, conferente, task.id));
+    } catch (error: any) {
+      ignoradas.push({ taskId: task.id, name: task.name, motivo: error?.message ?? 'Erro ao ler task' });
+    }
+  }
+
+  const resumo = conferencias.reduce(
+    (acc, item) => {
+      acc.totalItens += item.totalItens;
+      acc.separado += item.resumo.separado;
+      acc.naoTem += item.resumo.naoTem;
+      acc.parcial += item.resumo.parcial;
+      acc.pendente += item.resumo.pendente;
+      return acc;
+    },
+    { totalItens: 0, separado: 0, naoTem: 0, parcial: 0, pendente: 0 }
+  );
+
+  const conferenteMap = new Map<string, any>();
+  for (const item of conferencias) {
+    const current = conferenteMap.get(item.conferente) ?? {
+      nome: item.conferente,
+      conferencias: 0,
+      totalItens: 0,
+      separado: 0,
+      naoTem: 0,
+      parcial: 0,
+      pendente: 0,
+    };
+    current.conferencias += 1;
+    current.totalItens += item.totalItens;
+    current.separado += item.resumo.separado;
+    current.naoTem += item.resumo.naoTem;
+    current.parcial += item.resumo.parcial;
+    current.pendente += item.resumo.pendente;
+    conferenteMap.set(item.conferente, current);
+  }
+
+  const secaoMap = new Map<string, any>();
+  for (const item of itensCriticos) {
+    const current = secaoMap.get(item.secao) ?? { nome: item.secao, total: 0, naoTem: 0, parcial: 0 };
+    current.total += 1;
+    if (item.status === 'nao_tem') current.naoTem += 1;
+    if (item.status === 'parcial') current.parcial += 1;
+    secaoMap.set(item.secao, current);
+  }
+
+  const report = {
+    type: 'daily-conference-report',
+    empresa,
+    flag,
+    data: dateKey,
+    geradoEm: new Date().toISOString(),
+    totalConferencias: conferencias.length,
+    resumo,
+    porConferente: sortByTotalDesc(Array.from(conferenteMap.values())),
+    porSecao: sortByTotalDesc(Array.from(secaoMap.values())),
+    itensCriticos,
+    conferencias,
+    ignoradas,
+    clickupTaskId: null as string | null,
+  };
+
+  if (conferencias.length > 0) {
+    const task = await criarTarefaClickUp(
+      listId,
+      `Relatorio Diario - ${empresa} - ${formatDatePtBr(dateKey)}`,
+      buildRelatorioDescription(report),
+      'complete'
+    );
+    report.clickupTaskId = task.id ?? null;
+  }
+
+  return report;
 }
 
 function isJsonAttachment(attachment: any): boolean {
@@ -362,6 +670,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const flag = normalizeFlag(req.query.flag);
   const taskId = getSingle(req.query.taskId).trim();
   const nome = getSingle(req.query.nome).trim();
+  const dataRelatorio = getSingle(req.query.data || req.body?.data).trim() || formatDateKey();
   const token = getToken(empresa);
 
   if (!token) {
@@ -390,6 +699,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'consolidar-jsons') {
       const json = await consolidarJsonsAnalisados(empresa, flag, token, nome);
       return res.status(200).json(json);
+    }
+
+    if (action === 'gerar-relatorio-diario') {
+      const relatorio = await gerarRelatorioDiario(empresa, flag, token, dataRelatorio);
+      return res.status(200).json(relatorio);
     }
 
     if (action === 'deletar-task') {
