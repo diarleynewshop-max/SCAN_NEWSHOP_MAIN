@@ -268,7 +268,7 @@ const extrairImagemProduto = (produto: ErpProduto): string | undefined => {
   return produto.imagem || produto.imagemUrl || produto.urlImagem || produto.foto || produto.fotoUrl || imagemMeta || undefined;
 };
 
-const resolverImagemProduto = (imagem: string | undefined, contexto: VarejoFacilLookupContext = {}) => {
+const resolverImagemProduto = (imagem: string | undefined, produtoId: number, contexto: VarejoFacilLookupContext = {}) => {
   if (!imagem) return undefined;
   if (/^data:image\//i.test(imagem)) return imagem;
 
@@ -279,7 +279,7 @@ const resolverImagemProduto = (imagem: string | undefined, contexto: VarejoFacil
     return `${resolveErpApiBase(contexto).replace(/\/api$/, "")}${imagem.startsWith("/") ? imagem : `/${imagem}`}`;
   }
 
-  return `/api/erp-image-proxy?empresa=${empresa.toLowerCase()}&format=data-url&src=${encodeURIComponent(imagem)}`;
+  return `/api/erp-image-proxy?empresa=${empresa.toLowerCase()}&format=data-url&produtoId=${produtoId}&src=${encodeURIComponent(imagem)}`;
 };
 
 export const buscarProdutoVarejoFacil = async (
@@ -316,7 +316,7 @@ export const buscarProdutoVarejoFacil = async (
     descricao: produto.descricao || produto.codigoInterno || "",
     preco: normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1),
     estoque,
-    imagem: resolverImagemProduto(extrairImagemProduto(produto), contexto),
+    imagem: resolverImagemProduto(extrairImagemProduto(produto), produto.id, contexto),
   };
 };
 

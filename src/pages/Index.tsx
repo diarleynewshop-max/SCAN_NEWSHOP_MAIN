@@ -184,8 +184,14 @@ const Index = () => {
         const dataUrl = isDataPhotoUrl(productInfo.imagem)
           ? productInfo.imagem
           : await fetch(productInfo.imagem).then(async (response) => {
-              if (!response.ok) throw new Error(`Falha ao baixar foto (${response.status})`);
               const contentType = response.headers.get("content-type") || "";
+              if (!response.ok) {
+                const detail = contentType.includes("application/json")
+                  ? await response.json().catch(() => null)
+                  : await response.text().catch(() => "");
+                console.error("Erro detalhado da foto ERP:", detail);
+                throw new Error(`Falha ao baixar foto (${response.status})`);
+              }
               if (contentType.includes("application/json")) {
                 const data = await response.json();
                 if (typeof data?.dataUrl === "string" && isDataPhotoUrl(data.dataUrl)) {

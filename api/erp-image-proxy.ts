@@ -89,7 +89,7 @@ function resolveImageUrl(baseUrl: string, src: string): string {
   return `${baseUrl}${src.startsWith("/") ? src : `/${src}`}`;
 }
 
-function buildImageCandidates(baseUrl: string, src: string): string[] {
+function buildImageCandidates(baseUrl: string, src: string, produtoId?: string): string[] {
   const trimmed = src.trim();
 
   if (/^https?:\/\//i.test(trimmed) || trimmed.startsWith("/")) {
@@ -97,7 +97,18 @@ function buildImageCandidates(baseUrl: string, src: string): string[] {
   }
 
   const encoded = encodeURIComponent(trimmed);
+  const produtoCandidates = produtoId
+    ? [
+        `/api/v1/produto/produtos/${encodeURIComponent(produtoId)}/imagens/${encoded}`,
+        `/api/v1/produto/produtos/${encodeURIComponent(produtoId)}/imagem/${encoded}`,
+        `/api/v1/produto/produtos/${encodeURIComponent(produtoId)}/imagens/${encoded}/download`,
+        `/api/v1/produto/produtos/${encodeURIComponent(produtoId)}/imagem/${encoded}/download`,
+        `/api/v1/produto/produtos/${encodeURIComponent(produtoId)}/imagens`,
+        `/api/v1/produto/produtos/${encodeURIComponent(produtoId)}/imagem`,
+      ]
+    : [];
   const candidates = [
+    ...produtoCandidates,
     `/api/v1/produto/produtos/imagens/${encoded}`,
     `/api/v1/produto/imagens/${encoded}`,
     `/api/v1/produto/produtos/imagem/${encoded}`,
@@ -119,6 +130,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   const empresa = normalizeEmpresa(req.query.empresa);
   const src = getSingle(req.query.src);
+  const produtoId = getSingle(req.query.produtoId).trim();
 
   if (!src) {
     return res.status(400).send("src obrigatorio");
@@ -132,7 +144,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const tried: Array<{ url: string; status: number; contentType: string }> = [];
 
-    for (const url of buildImageCandidates(baseUrl, src)) {
+    for (const url of buildImageCandidates(baseUrl, src, produtoId)) {
       const candidateResponse = await fetch(url, {
         headers: {
           Authorization: token,
