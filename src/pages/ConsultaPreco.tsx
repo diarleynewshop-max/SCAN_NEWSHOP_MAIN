@@ -4,6 +4,7 @@ import { useNavigate } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
+import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 import {
   consultarPrecoProdutoVarejoFacil,
   type ConsultaPrecoVarejoFacilProduto,
@@ -12,8 +13,6 @@ import {
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
 
 type ModoConsulta = "simples" | "completa";
-
-const LOGO = "/newshop-logo.jpg";
 
 const currency = new Intl.NumberFormat("pt-BR", {
   style: "currency",
@@ -26,6 +25,8 @@ const ConsultaPreco = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const login = obterLoginSalvo();
+  const logoEmpresa = getCompanyLogo(login?.empresa);
+  const nomeEmpresaLogo = getCompanyName(login?.empresa);
   const [modo, setModo] = useState<ModoConsulta>("simples");
   const [codigo, setCodigo] = useState("");
   const [produto, setProduto] = useState<ConsultaPrecoVarejoFacilProduto | null>(null);
@@ -87,7 +88,7 @@ const ConsultaPreco = () => {
           >
             <ArrowLeft className="w-5 h-5 text-primary-foreground" />
           </button>
-          <img src={LOGO} alt="Newshop" className="h-6 object-contain brightness-0 invert" />
+          <img src={logoEmpresa} alt={nomeEmpresaLogo} className="h-9 object-contain" />
         </div>
         <div className="text-right">
           <p className="text-[10px] font-mono uppercase tracking-[0.15em] text-primary-foreground/55">

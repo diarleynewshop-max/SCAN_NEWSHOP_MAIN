@@ -9,8 +9,8 @@ import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
+import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 
-const LOGO = "/newshop-logo.jpg";
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
 const PhotoCapture = lazy(() => import("@/components/PhotoCapture"));
 const ListHistory = lazy(() => import("@/components/ListHistory"));
@@ -130,6 +130,8 @@ const Index = () => {
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
   const lookupEmpresa = activeList?.empresa ?? currentLogin?.empresa;
   const lookupFlag = activeList?.flag ?? currentLogin?.flag ?? "loja";
+  const logoEmpresa = getCompanyLogo(lookupEmpresa);
+  const nomeEmpresaLogo = getCompanyName(lookupEmpresa);
   const consultaBloqueadaPorFlag = isConsultaBloqueada(lookupFlag);
   const { productInfo, loading, error, lookupProduct } = useProductLookup({
     enabled: !consultaBloqueadaPorFlag,
@@ -350,7 +352,7 @@ const Index = () => {
           <button onClick={() => navigate("/")} style={{ color: "rgba(255,255,255,0.5)", background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex" }}>
             <ArrowLeft style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} />
           </button>
-          <img src={LOGO} alt="Newshop" style={{ height: modoDesktop ? 26 : 22, filter: "brightness(0) invert(1)", objectFit: "contain" }} />
+          <img src={logoEmpresa} alt={nomeEmpresaLogo} style={{ height: modoDesktop ? 38 : 34, objectFit: "contain" }} />
         </div>
         <div style={{ textAlign: "right" }}>
           <p style={{ fontFamily: "var(--font-mono)", fontSize: modoDesktop ? 10 : 9, color: "rgba(255,255,255,0.45)", letterSpacing: "0.15em", textTransform: "uppercase" }}>

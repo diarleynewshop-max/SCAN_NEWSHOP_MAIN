@@ -29,3 +29,13 @@ export const applySavedCompanyTheme = () => {
     applyCompanyTheme("NEWSHOP");
   }
 };
+
+export const getCompanyLogo = (empresa?: unknown): string => {
+  const empresaTema = normalizarEmpresaTema(empresa);
+
+  if (empresaTema === "FACIL") return "/logo-facil.png";
+  if (empresaTema === "SOYE") return "/logo-soye.png";
+  return "/logo-newshop.jpg";
+};
+
+export const getCompanyName = (empresa?: unknown): string => normalizarEmpresaTema(empresa);

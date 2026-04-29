@@ -5,8 +5,7 @@ import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
 import { useToast } from "@/hooks/use-toast";
-
-const LOGO = "/newshop-logo.jpg";
+import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 
 const STORAGE_KEY = "scan_newshop_lists";
 const ACTIVE_KEY  = "scan_newshop_active_list";
@@ -184,6 +183,8 @@ const Home = () => {
   });
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
   const [mostrarConfiguracoes, setMostrarConfiguracoes] = useState(false);
+  const logoEmpresa = getCompanyLogo(loginSalvo?.empresa ?? empresa);
+  const nomeEmpresaLogo = getCompanyName(loginSalvo?.empresa ?? empresa);
 
   useEffect(() => { setStorage(getStorageSize()); }, []);
 
@@ -313,11 +314,10 @@ const Home = () => {
         <div style={{ position: "absolute", top: -40, right: -40, width: 160, height: 160, borderRadius: "50%", background: "currentColor", opacity: 0.05, pointerEvents: "none" }} />
         <div className={`${modoDesktop ? 'flex items-center justify-between' : ''}`}>
           <div>
-            {/* AQUI ESTÁ A MÁGICA DA LOGO. Ela inverte a cor dependendo do tema! */}
             <img 
-              src={LOGO} 
-              alt="Newshop" 
-              className={`${modoDesktop ? 'h-9' : 'h-7'} object-contain brightness-0 invert dark:invert-0`} 
+              src={logoEmpresa} 
+              alt={nomeEmpresaLogo} 
+              className={`${modoDesktop ? 'h-12' : 'h-10'} object-contain`}
             />
             <p className="font-mono text-[10px] uppercase tracking-[0.18em] opacity-60 mt-2">
               Sistema de Pedido
