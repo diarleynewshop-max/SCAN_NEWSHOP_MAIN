@@ -472,9 +472,32 @@ const Index = () => {
                     </div>
                   ) : productInfo ? (
                     <div style={{ background: "hsl(var(--secondary))", borderRadius: 10, padding: 16, border: "1px solid hsl(var(--border))" }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", marginBottom: 12 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", gap: 12, marginBottom: 12 }}>
                         <h4 style={{ fontWeight: 700, fontSize: 15 }}>{productInfo.nome_produto || productInfo.descricao || "Produto sem nome"}</h4>
-                        {typeof productInfo.preco === "number" && <span style={{ fontWeight: 800, fontSize: 16, color: "hsl(var(--primary))" }}>R$ {productInfo.preco.toFixed(2)}</span>}
+                        {typeof productInfo.precoVarejo === "number" && (
+                          <div style={{ textAlign: "right", flexShrink: 0 }}>
+                            <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", fontWeight: 700, textTransform: "uppercase" }}>Varejo</p>
+                            <span style={{ fontWeight: 800, fontSize: 16, color: "hsl(var(--primary))" }}>R$ {productInfo.precoVarejo.toFixed(2)}</span>
+                          </div>
+                        )}
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10, marginBottom: 10 }}>
+                        <div style={{ background: "hsl(var(--background))", border: "1px solid hsl(var(--border))", borderRadius: 8, padding: "8px 10px" }}>
+                          <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", fontWeight: 700, textTransform: "uppercase" }}>Atacado</p>
+                          <p style={{ fontWeight: 900, fontSize: 18, color: "hsl(var(--success))" }}>
+                            {typeof productInfo.precoAtacado === "number" && productInfo.precoAtacado > 0
+                              ? `R$ ${productInfo.precoAtacado.toFixed(2)}`
+                              : "Nao informado"}
+                          </p>
+                        </div>
+                        <div style={{ background: "hsl(var(--background))", border: "1px solid hsl(var(--border))", borderRadius: 8, padding: "8px 10px" }}>
+                          <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", fontWeight: 700, textTransform: "uppercase" }}>Varejo</p>
+                          <p style={{ fontWeight: 900, fontSize: 18, color: "hsl(var(--primary))" }}>
+                            {typeof productInfo.precoVarejo === "number" && productInfo.precoVarejo > 0
+                              ? `R$ ${productInfo.precoVarejo.toFixed(2)}`
+                              : "Nao informado"}
+                          </p>
+                        </div>
                       </div>
                       <div style={{ display: "flex", justifyContent: "space-between" }}>
                         <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Estoque disponivel:</span>
