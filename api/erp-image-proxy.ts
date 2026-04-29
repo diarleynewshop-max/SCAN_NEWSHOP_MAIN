@@ -108,6 +108,8 @@ function buildImageCandidates(baseUrl: string, src: string, produtoId?: string):
       ]
     : [];
   const candidates = [
+    `/arquivo/view?uuid=${encoded}`,
+    `/arquivo/download?uuid=${encoded}`,
     ...produtoCandidates,
     `/api/v1/produto/produtos/imagens/${encoded}`,
     `/api/v1/produto/imagens/${encoded}`,

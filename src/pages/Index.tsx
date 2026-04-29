@@ -190,6 +190,12 @@ const Index = () => {
                   ? await response.json().catch(() => null)
                   : await response.text().catch(() => "");
                 console.error("Erro detalhado da foto ERP:", detail);
+                if (detail) {
+                  console.error(
+                    "Erro detalhado da foto ERP JSON:",
+                    typeof detail === "string" ? detail : JSON.stringify(detail, null, 2)
+                  );
+                }
                 throw new Error(`Falha ao baixar foto (${response.status})`);
               }
               if (contentType.includes("application/json")) {
