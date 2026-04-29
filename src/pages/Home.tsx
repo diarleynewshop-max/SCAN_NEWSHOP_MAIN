@@ -1,5 +1,5 @@
 ﻿import { useNavigate } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -245,6 +245,32 @@ const Home = () => {
     const novoModo = !modoLeve;
     setModoLeve(novoModo);
     setLightModeEnabled(novoModo);
+  };
+
+  const baixarAtalhoApp = () => {
+    const appUrl = `${window.location.origin}/`;
+    const nomeEmpresa = loginSalvo?.empresa || "NEWSHOP";
+    const shortcut = [
+      "[InternetShortcut]",
+      `URL=${appUrl}`,
+      "IconIndex=0",
+      "",
+    ].join("\r\n");
+
+    const blob = new Blob([shortcut], { type: "application/octet-stream" });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = `SCAN ${nomeEmpresa}.url`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+
+    toast({
+      title: "Atalho baixado",
+      description: "Mova o arquivo para a Area de Trabalho para abrir o app direto.",
+    });
   };
 
   const handleClear = () => {
@@ -1078,6 +1104,44 @@ const Home = () => {
                   {modoLeve
                     ? "Supabase no scanner e analise de estoque ficam desligados; foto salva comprimida e animacoes reduzidas."
                     : "Quando ativado, corta consultas pesadas e reduz efeitos visuais para melhorar desempenho."}
+                </p>
+              </div>
+
+              {/* Baixar App */}
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                    <Download style={{ width: 18, height: 18, color: "hsl(var(--primary))" }} />
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))" }}>Baixar App</p>
+                    <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Gera um atalho para abrir o sistema direto</p>
+                  </div>
+                </div>
+                <button
+                  onClick={baixarAtalhoApp}
+                  style={{
+                    width: "100%",
+                    height: 44,
+                    background: "hsl(var(--primary))",
+                    color: "hsl(var(--primary-foreground))",
+                    border: "none",
+                    borderRadius: 10,
+                    fontFamily: "var(--font-sans)",
+                    fontSize: 13,
+                    fontWeight: 800,
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: 8,
+                    textTransform: "uppercase",
+                  }}
+                >
+                  <Download style={{ width: 17, height: 17 }} /> Baixar App
+                </button>
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, marginTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
+                  O navegador baixa o atalho; depois é só mover para a Área de Trabalho.
                 </p>
               </div>
 
