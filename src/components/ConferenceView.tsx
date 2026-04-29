@@ -109,7 +109,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [taskSelecionada, setTaskSelecionada] = useState<ClickUpTask | null>(null);
   const [loadingJson, setLoadingJson] = useState(false);
   const [consolidandoJson, setConsolidandoJson] = useState(false);
-  const [taskOrigemId, setTaskOrigemId] = useState<string | null>(null);
+  const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -228,7 +228,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       }));
 
       setItems(parsed);
-      setTaskOrigemId(task.id);
+      setTaskOrigemIds([task.id]);
       setPhase("ready");
       toast({ title: `${parsed.length} itens carregados da task!` });
     } catch (e: any) {
@@ -277,11 +277,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         return;
       }
 
+      const meta = (json as any)._meta;
+      const origemIds = Array.isArray(meta?.pedidos)
+        ? meta.pedidos.map((pedido: any) => String(pedido?.taskId ?? "")).filter(Boolean)
+        : grupo.map((task) => task.id);
+
       setItems(parsed);
-      setTaskOrigemId(null);
+      setTaskOrigemIds(Array.from(new Set(origemIds)));
       setPhase("ready");
       setCurrentIndex(0);
-      const meta = (json as any)._meta;
       toast({
         title: `${parsed.length} itens no JSON unico`,
         description: `${meta?.totalPedidos ?? grupo.length} pedido(s) com o mesmo nome juntado(s).`,
@@ -320,6 +324,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       }));
 
       setItems(parsed);
+      setTaskOrigemIds([]);
       setPhase("ready");
       setCurrentIndex(0);
       toast({ title: `${parsed.length} itens importados!` });
@@ -395,6 +400,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       }
 
       setItems(parsed);
+      setTaskOrigemIds([]);
       setPhase("ready");
       setCurrentIndex(0);
       toast({ title: `${parsed.length} itens prontos após cruzamento com ERP!` });
@@ -422,6 +428,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
 
     setItems(parsed);
+    setTaskOrigemIds([]);
     setPhase("ready");
     setCurrentIndex(0);
     toast({ title: `${parsed.length} itens importados!` });
@@ -637,10 +644,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       setSendStatus("sent");
       toast({ title: "✅ Chegou no ClickUp!", description: `Pedido de ${conferente} enviado com sucesso.` });
 
-      if (taskOrigemId) {
+      if (taskOrigemIds.length > 0) {
         try {
-          await deletarTask(empresa as EmpresaKey, taskOrigemId);
-          setTaskOrigemId(null);
+          await Promise.all(taskOrigemIds.map((taskId) => deletarTask(empresa as EmpresaKey, taskId)));
+          setTaskOrigemIds([]);
           toast({ title: "🗑️ Task de origem removida do Analisado." });
         } catch {
           toast({ title: "⚠️ Não foi possível deletar a task de origem", variant: "destructive" });

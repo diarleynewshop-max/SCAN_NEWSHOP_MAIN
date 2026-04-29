@@ -399,6 +399,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         method: 'DELETE',
         headers: { Authorization: token },
       });
+
+      if (!response.ok) {
+        return res.status(response.status).json({
+          error: `ClickUp ${response.status} ao deletar task ${taskId}`,
+          details: await response.text(),
+        });
+      }
+
       return res.status(200).json({ deleted: response.ok });
     }
 
