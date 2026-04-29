@@ -122,6 +122,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const contentType = response.headers.get("content-type") || "image/jpeg";
     const buffer = Buffer.from(await response.arrayBuffer());
 
+    if (!contentType.startsWith("image/")) {
+      return res.status(422).json({
+        error: "URL do ERP nao retornou imagem",
+        contentType,
+        preview: buffer.toString("utf8", 0, Math.min(buffer.length, 300)),
+      });
+    }
+
     if (req.query.format === "data-url") {
       return res.status(200).json({
         dataUrl: `data:${contentType};base64,${buffer.toString("base64")}`,

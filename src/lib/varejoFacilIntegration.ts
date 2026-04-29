@@ -25,6 +25,9 @@ type ErpProduto = {
   urlImagem?: string;
   foto?: string;
   fotoUrl?: string;
+  meta?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+  metadados?: Record<string, unknown>;
   imagens?: Array<string | { url?: string; imagem?: string; src?: string }>;
 };
 
@@ -248,7 +251,21 @@ const extrairImagemProduto = (produto: ErpProduto): string | undefined => {
   if (imagemDaLista?.imagem) return imagemDaLista.imagem;
   if (imagemDaLista?.src) return imagemDaLista.src;
 
-  return produto.imagem || produto.imagemUrl || produto.urlImagem || produto.foto || produto.fotoUrl || undefined;
+  const metas = [produto.meta, produto.metadata, produto.metadados].filter(Boolean) as Record<string, unknown>[];
+  const imagemMeta = metas
+    .flatMap((meta) => [
+      meta.imagem,
+      meta.imagemUrl,
+      meta.urlImagem,
+      meta.foto,
+      meta.fotoUrl,
+      meta.image,
+      meta.imageUrl,
+      meta.url,
+    ])
+    .find((value): value is string => typeof value === "string" && value.trim().length > 0);
+
+  return produto.imagem || produto.imagemUrl || produto.urlImagem || produto.foto || produto.fotoUrl || imagemMeta || undefined;
 };
 
 const resolverImagemProduto = (imagem: string | undefined, contexto: VarejoFacilLookupContext = {}) => {

@@ -188,17 +188,25 @@ const Index = () => {
               const contentType = response.headers.get("content-type") || "";
               if (contentType.includes("application/json")) {
                 const data = await response.json();
-                if (typeof data?.dataUrl === "string") {
+                if (typeof data?.dataUrl === "string" && isDataPhotoUrl(data.dataUrl)) {
                   return data.dataUrl;
                 }
+                throw new Error(data?.error || "Proxy nao retornou dataUrl de imagem.");
               }
-              return compactImageBlobToDataUrl(await response.blob());
+              const blob = await response.blob();
+              if (!blob.type.startsWith("image/")) {
+                throw new Error(`Resposta nao e imagem (${blob.type || "sem content-type"})`);
+              }
+              return compactImageBlobToDataUrl(blob);
             });
 
         if (cancelled) return;
         const compactedDataUrl = isDataPhotoUrl(dataUrl)
           ? await compactImageBlobToDataUrl(await fetch(dataUrl).then((response) => response.blob()))
           : dataUrl;
+        if (!isDataPhotoUrl(compactedDataUrl)) {
+          throw new Error("Foto baixada nao gerou data:image valido.");
+        }
         setPhoto((currentPhoto) => currentPhoto || compactedDataUrl);
       } catch (error) {
         console.error("Foto do ERP nao foi baixada:", error);
