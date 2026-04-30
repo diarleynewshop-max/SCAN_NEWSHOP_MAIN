@@ -1,1 +1,1 @@
-export { default } from "./clickup/clickup-webhook";
+export { default } from "./clickup/clickup-webhook.js";

@@ -1,1 +1,1 @@
-export { default } from "./clickup/clickup-compras";
+export { default } from "./clickup/clickup-compras.js";

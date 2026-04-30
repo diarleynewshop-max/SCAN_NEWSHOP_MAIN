@@ -73,6 +73,11 @@ function getAction(req: VercelRequest): string {
   return (actionQuery || actionBody || 'buscar-tasks').toLowerCase();
 }
 
+function getClickUpStatusName(status: unknown): string {
+  if (!status || typeof status !== 'object') return '';
+  return String((status as Record<string, unknown>).status ?? '');
+}
+
 async function buscarTasksCompras(
   req: VercelRequest,
   res: VercelResponse,
@@ -128,8 +133,8 @@ async function buscarTasksCompras(
         sku: extractSku(t.name),
         descricao,
         foto: extractFirstImageUrl(t.attachments),
-        status: mapTaskStatus(t.status?.status),
-        status_clickup: String(t.status?.status ?? ''),
+        status: mapTaskStatus(getClickUpStatusName(t.status)),
+        status_clickup: getClickUpStatusName(t.status),
         date_created: String(t.date_created ?? ''),
       });
     } catch (taskError) {

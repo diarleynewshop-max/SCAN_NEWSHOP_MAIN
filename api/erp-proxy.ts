@@ -1,1 +1,1 @@
-export { default } from "./varejo-facil/erp-proxy";
+export { default } from "./varejo-facil/erp-proxy.js";

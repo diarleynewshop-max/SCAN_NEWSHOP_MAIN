@@ -1,1 +1,1 @@
-export { default } from "./clickup/clickup-handler";
+export { default } from "./clickup/clickup-handler.js";

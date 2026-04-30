@@ -1,1 +1,1 @@
-export { default } from "./clickup/clickup-debug";
+export { default } from "./clickup/clickup-debug.js";
