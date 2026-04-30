@@ -6,7 +6,7 @@ import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Load
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
-import { isDataPhotoUrl } from "@/lib/photoUtils";
+import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { useToast } from "@/hooks/use-toast";
 import { buscarProdutoVarejoFacil, type VarejoFacilProduct } from "@/lib/varejoFacilIntegration";
 
@@ -33,6 +33,33 @@ function isValidImageSrc(foto: string | null): boolean {
   if (!foto) return false;
   if (foto.startsWith("http://") || foto.startsWith("https://")) return true;
   return isDataPhotoUrl(foto);
+}
+
+async function baixarImagemParaDataUrl(src: string): Promise<string> {
+  if (isDataPhotoUrl(src)) return src;
+
+  const response = await fetch(src);
+  const contentType = response.headers.get("content-type") || "";
+
+  if (!response.ok) {
+    const detail = contentType.includes("application/json")
+      ? await response.json().catch(() => null)
+      : await response.text().catch(() => "");
+    throw new Error(`Falha ao baixar imagem (${response.status}): ${typeof detail === "string" ? detail : JSON.stringify(detail)}`);
+  }
+
+  if (contentType.includes("application/json")) {
+    const data = await response.json();
+    if (typeof data?.dataUrl === "string" && isDataPhotoUrl(data.dataUrl)) return data.dataUrl;
+    throw new Error(data?.error || "Proxy retornou JSON sem dataUrl");
+  }
+
+  const blob = await response.blob();
+  if (!blob.type.startsWith("image/")) {
+    throw new Error(`Resposta nao e imagem (${blob.type || "sem content-type"})`);
+  }
+
+  return await blobToDataUrl(blob);
 }
 
 function getCodigoConsulta(codigo: string): string {
@@ -205,7 +232,7 @@ const Compras = () => {
         pendentes.map(async (produto) => {
           const codigo = getCodigoConsulta(produto.codigo);
           try {
-            const dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
+            let dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
             if (dados?.imagem) {
               console.info("[Compras][Foto] ERP candidato", {
                 produtoId: produto.id,
@@ -213,6 +240,24 @@ const Compras = () => {
                 erpId: dados.id,
                 imagem: dados.imagem,
               });
+              try {
+                const imagemDataUrl = await baixarImagemParaDataUrl(dados.imagem);
+                dados = { ...dados, imagem: imagemDataUrl };
+                console.info("[Compras][Foto] ERP imagem baixada", {
+                  produtoId: produto.id,
+                  codigo,
+                  erpId: dados.id,
+                  formato: "data-url",
+                });
+              } catch (imageError) {
+                console.warn("[Compras][Foto] ERP imagem nao baixou", {
+                  produtoId: produto.id,
+                  codigo,
+                  erpId: dados.id,
+                  imagem: dados.imagem,
+                  erro: imageError instanceof Error ? imageError.message : String(imageError),
+                });
+              }
             } else {
               console.warn("[Compras][Foto] ERP sem imagem", {
                 produtoId: produto.id,
