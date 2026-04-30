@@ -5,12 +5,19 @@ import { Badge } from "@/components/ui/badge";
 import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
-import { useProdutosComprar } from "@/hooks/useProdutosComprar";
+import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
 import { isDataPhotoUrl } from "@/lib/photoUtils";
 import { useToast } from "@/hooks/use-toast";
 import { buscarProdutoVarejoFacil, type VarejoFacilProduct } from "@/lib/varejoFacilIntegration";
 
 const PAGE_SIZE = 10;
+
+type FotoFonte = "ERP" | "CLICKUP_TASK" | "CLICKUP_LIST";
+
+type FotoOpcao = {
+  src: string;
+  fonte: FotoFonte;
+};
 
 const STATUS_PRIORITY: Record<string, number> = {
   todo: 0,
@@ -36,8 +43,31 @@ function getCodigoConsulta(codigo: string): string {
   return qualquerCodigo?.[0] ?? codigo;
 }
 
-function getImagemErroKey(produtoId: string, foto: string | null): string {
-  return `${produtoId}:${foto || "sem-foto"}`;
+function getImagemErroKey(produtoId: string, fonte: FotoFonte, foto: string | null): string {
+  return `${produtoId}:${fonte}:${foto || "sem-foto"}`;
+}
+
+function montarOpcoesFoto(
+  produto: ProdutoComprar,
+  produtoErp: VarejoFacilProduct | null | undefined,
+  fotosClickUp: Record<string, string | null>
+): FotoOpcao[] {
+  return [
+    produtoErp?.imagem ? { src: produtoErp.imagem, fonte: "ERP" as const } : null,
+    fotosClickUp[produto.id] ? { src: fotosClickUp[produto.id] as string, fonte: "CLICKUP_TASK" as const } : null,
+    produto.foto ? { src: produto.foto, fonte: "CLICKUP_LIST" as const } : null,
+  ].filter((opcao): opcao is FotoOpcao => Boolean(opcao?.src && isValidImageSrc(opcao.src)));
+}
+
+function selecionarFotoProduto(
+  produto: ProdutoComprar,
+  produtoErp: VarejoFacilProduct | null | undefined,
+  fotosClickUp: Record<string, string | null>,
+  imagemComErro: Record<string, boolean>
+): FotoOpcao | null {
+  return montarOpcoesFoto(produto, produtoErp, fotosClickUp).find((opcao) => (
+    !imagemComErro[getImagemErroKey(produto.id, opcao.fonte, opcao.src)]
+  )) ?? null;
 }
 
 const Compras = () => {
@@ -54,6 +84,7 @@ const Compras = () => {
   const [escolhaDireita, setEscolhaDireita] = useState(false);
   const [dragX, setDragX] = useState(0);
   const dragStartRef = useRef<number | null>(null);
+  const semFotoLogRef = useRef<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     produtos,
@@ -175,9 +206,28 @@ const Compras = () => {
           const codigo = getCodigoConsulta(produto.codigo);
           try {
             const dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
+            if (dados?.imagem) {
+              console.info("[Compras][Foto] ERP candidato", {
+                produtoId: produto.id,
+                codigo,
+                erpId: dados.id,
+                imagem: dados.imagem,
+              });
+            } else {
+              console.warn("[Compras][Foto] ERP sem imagem", {
+                produtoId: produto.id,
+                codigo,
+                motivo: dados ? "produto encontrado sem imagem" : "produto nao encontrado",
+              });
+            }
             return [produto.id, dados] as const;
           } catch (err) {
             console.warn("[Compras] Produto nao enriquecido pelo ERP:", produto.codigo, err);
+            console.warn("[Compras][Foto] ERP falhou", {
+              produtoId: produto.id,
+              codigo,
+              erro: err instanceof Error ? err.message : String(err),
+            });
             return [produto.id, null] as const;
           }
         })
@@ -205,8 +255,7 @@ const Compras = () => {
 
     const carregarFotosClickUp = async () => {
       const pendentes = produtosPaginados.filter((produto) => {
-        if (produto.foto || produto.id in fotosClickUp) return false;
-        return true;
+        return !(produto.id in fotosClickUp);
       });
 
       if (pendentes.length === 0) return;
@@ -217,11 +266,40 @@ const Compras = () => {
             const response = await fetch(
               `/api/clickup-compras-proxy?action=buscar-foto&empresa=${empresa}&taskId=${produto.id}`
             );
-            if (!response.ok) return [produto.id, null] as const;
+            if (!response.ok) {
+              const data = await response.json().catch(() => ({}));
+              console.warn("[Compras][Foto] ClickUp falhou", {
+                produtoId: produto.id,
+                codigo: produto.codigo,
+                status: response.status,
+                erro: data.error || data.message || "erro desconhecido",
+              });
+              return [produto.id, null] as const;
+            }
             const data = await response.json();
-            return [produto.id, typeof data.foto === "string" ? data.foto : null] as const;
+            const foto = typeof data.foto === "string" ? data.foto : null;
+            if (foto) {
+              console.info("[Compras][Foto] ClickUp candidato", {
+                produtoId: produto.id,
+                codigo: produto.codigo,
+                sourceUrl: data.imageUrl,
+                mensagem: data.message,
+              });
+            } else {
+              console.warn("[Compras][Foto] ClickUp sem imagem", {
+                produtoId: produto.id,
+                codigo: produto.codigo,
+                mensagem: data.message || "task sem anexo de imagem",
+              });
+            }
+            return [produto.id, foto] as const;
           } catch (err) {
             console.warn("[Compras] Foto da task nao carregada:", produto.id, err);
+            console.warn("[Compras][Foto] ClickUp falhou", {
+              produtoId: produto.id,
+              codigo: produto.codigo,
+              erro: err instanceof Error ? err.message : String(err),
+            });
             return [produto.id, null] as const;
           }
         })
@@ -243,6 +321,33 @@ const Compras = () => {
       cancelado = true;
     };
   }, [empresa, fotosClickUp, produtosErp, produtosPaginados]);
+
+  useEffect(() => {
+    for (const produto of produtosPaginados) {
+      const erpCarregado = produto.id in produtosErp;
+      const clickUpCarregado = produto.id in fotosClickUp;
+      if (!erpCarregado || !clickUpCarregado) continue;
+
+      const fotoSelecionada = selecionarFotoProduto(produto, produtosErp[produto.id], fotosClickUp, imagemComErro);
+      if (fotoSelecionada) continue;
+
+      const opcoes = montarOpcoesFoto(produto, produtosErp[produto.id], fotosClickUp);
+      const erros = opcoes
+        .filter((opcao) => imagemComErro[getImagemErroKey(produto.id, opcao.fonte, opcao.src)])
+        .map((opcao) => opcao.fonte);
+      const logKey = `${produto.id}:${opcoes.map((opcao) => opcao.fonte).join(",")}:${erros.join(",")}`;
+      if (semFotoLogRef.current.has(logKey)) continue;
+
+      semFotoLogRef.current.add(logKey);
+      console.warn("[Compras][Foto] Produto sem foto exibivel", {
+        produtoId: produto.id,
+        codigo: produto.codigo,
+        fontesTestadas: opcoes.map((opcao) => opcao.fonte),
+        fontesComErro: erros,
+        motivo: opcoes.length === 0 ? "ERP e ClickUp nao retornaram imagem" : "todas as fontes de imagem falharam no navegador",
+      });
+    }
+  }, [fotosClickUp, imagemComErro, produtosErp, produtosPaginados]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -271,15 +376,12 @@ const Compras = () => {
   );
   const produtoAnalise = produtosAnalise[0] ?? null;
   const produtoAnaliseErp = produtoAnalise ? produtosErp[produtoAnalise.id] : null;
-  const fotoAnalise = produtoAnalise ? (fotosClickUp[produtoAnalise.id] || produtoAnalise.foto || produtoAnaliseErp?.imagem) : null;
-  const fotoAnaliseErroKey = produtoAnalise ? getImagemErroKey(produtoAnalise.id, fotoAnalise) : "";
+  const fotoAnaliseSelecionada = produtoAnalise
+    ? selecionarFotoProduto(produtoAnalise, produtoAnaliseErp, fotosClickUp, imagemComErro)
+    : null;
+  const fotoAnalise = fotoAnaliseSelecionada?.src ?? null;
   const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
-  const podeMostrarFotoAnalise = Boolean(
-    produtoAnalise &&
-    fotoAnalise &&
-    isValidImageSrc(fotoAnalise) &&
-    !imagemComErro[fotoAnaliseErroKey]
-  );
+  const podeMostrarFotoAnalise = Boolean(produtoAnalise && fotoAnaliseSelecionada);
 
   const executarAnalise = async (
     acao: "DISLIKE" | "LIKE" | "FAZER_PEDIDO",
@@ -492,13 +594,9 @@ const Compras = () => {
                   const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
                   const produtoErp = produtosErp[produto.id];
                   const descricao = produtoErp?.descricao || produto.descricao;
-                  const foto = fotosClickUp[produto.id] || produto.foto || produtoErp?.imagem;
-                  const fotoErroKey = getImagemErroKey(produto.id, foto);
-                  const podeMostrarImagem = Boolean(
-                    foto &&
-                    isValidImageSrc(foto) &&
-                    !imagemComErro[fotoErroKey]
-                  );
+                  const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
+                  const foto = fotoSelecionada?.src ?? null;
+                  const podeMostrarImagem = Boolean(fotoSelecionada);
 
                   return (
                     <div key={produto.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg gap-4">
@@ -508,7 +606,19 @@ const Compras = () => {
                             src={foto as string}
                             alt={produto.codigo}
                             className="w-16 h-16 object-cover rounded shrink-0"
-                            onError={() => setImagemComErro((prev) => ({ ...prev, [fotoErroKey]: true }))}
+                            onError={() => {
+                              if (!fotoSelecionada) return;
+                              console.warn("[Compras][Foto] Fonte falhou no navegador", {
+                                produtoId: produto.id,
+                                codigo: produto.codigo,
+                                fonte: fotoSelecionada.fonte,
+                                src: fotoSelecionada.src,
+                              });
+                              setImagemComErro((prev) => ({
+                                ...prev,
+                                [getImagemErroKey(produto.id, fotoSelecionada.fonte, fotoSelecionada.src)]: true,
+                              }));
+                            }}
                           />
                         ) : (
                           <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center shrink-0">
@@ -687,7 +797,19 @@ const Compras = () => {
                         src={fotoAnalise as string}
                         alt={produtoAnalise.codigo}
                         className="h-64 w-full object-cover bg-gray-100"
-                        onError={() => setImagemComErro((prev) => ({ ...prev, [fotoAnaliseErroKey]: true }))}
+                        onError={() => {
+                          if (!fotoAnaliseSelecionada) return;
+                          console.warn("[Compras][Foto] Fonte falhou no navegador", {
+                            produtoId: produtoAnalise.id,
+                            codigo: produtoAnalise.codigo,
+                            fonte: fotoAnaliseSelecionada.fonte,
+                            src: fotoAnaliseSelecionada.src,
+                          });
+                          setImagemComErro((prev) => ({
+                            ...prev,
+                            [getImagemErroKey(produtoAnalise.id, fotoAnaliseSelecionada.fonte, fotoAnaliseSelecionada.src)]: true,
+                          }));
+                        }}
                       />
                     ) : (
                       <div className="h-64 w-full bg-gray-100 flex items-center justify-center text-gray-400">

@@ -177,6 +177,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (!response) {
+      console.warn("[erp-image-proxy] Imagem do ERP nao encontrada", {
+        empresa,
+        produtoId,
+        src,
+        tried: tried.map((item) => ({
+          status: item.status,
+          contentType: item.contentType,
+          url: item.url,
+        })),
+      });
       return res.status(422).json({
         error: "Imagem do ERP nao encontrada por URL/ID",
         src,
@@ -197,12 +207,26 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const buffer = Buffer.from(await response.arrayBuffer());
 
     if (!contentType.startsWith("image/")) {
+      console.warn("[erp-image-proxy] URL do ERP nao retornou imagem", {
+        empresa,
+        produtoId,
+        src,
+        contentType,
+      });
       return res.status(422).json({
         error: "URL do ERP nao retornou imagem",
         contentType,
         preview: buffer.toString("utf8", 0, Math.min(buffer.length, 300)),
       });
     }
+
+    console.info("[erp-image-proxy] Imagem encontrada", {
+      empresa,
+      produtoId,
+      src,
+      contentType,
+      bytes: buffer.length,
+    });
 
     if (req.query.format === "data-url") {
       const mimeType = contentType.split(";")[0]?.trim() || "image/jpeg";

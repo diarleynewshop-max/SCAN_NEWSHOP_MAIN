@@ -421,11 +421,33 @@ async function buscarFotoTask(
   const task = (await response.json()) as Record<string, unknown>;
   const imageUrl = extractImageFromTask(task);
   const dataUrl = imageUrl ? await fetchImageAsDataUrl(imageUrl, token) : null;
+  const foto = dataUrl || imageUrl;
+  const message = foto
+    ? 'Foto encontrada no ClickUp'
+    : 'Nenhuma foto encontrada nos anexos/campos da task do ClickUp';
+
+  if (foto) {
+    console.info('[clickup-compras][foto] Foto encontrada', {
+      empresa,
+      taskId,
+      imageUrl,
+      returnedAs: dataUrl ? 'data-url' : 'url',
+    });
+  } else {
+    console.warn('[clickup-compras][foto] Sem foto na task', {
+      empresa,
+      taskId,
+      taskName: typeof task.name === 'string' ? task.name : '',
+    });
+  }
 
   return res.json({
     taskId,
-    foto: dataUrl || imageUrl,
-    hasImage: Boolean(dataUrl || imageUrl),
+    foto,
+    hasImage: Boolean(foto),
+    source: 'clickup',
+    imageUrl,
+    message,
   });
 }
 
