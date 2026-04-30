@@ -1,6 +1,6 @@
 ﻿import { useState, useCallback, useEffect, lazy, Suspense } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Loader2, AlertCircle, ShoppingCart, BadgeDollarSign } from "lucide-react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Loader2, AlertCircle, BadgeDollarSign } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import ProductCard from "@/components/ProductCard";
@@ -311,11 +311,7 @@ const Index = () => {
 
   const productCount = activeList?.products.length ?? 0;
 
-  const handleTabChange = (key: "scan" | "list" | "conference" | "compras" | "consultaPreco") => {
-    if (key === "compras") {
-      navigate("/compras");
-      return;
-    }
+  const handleTabChange = (key: "scan" | "list" | "conference" | "consultaPreco") => {
     if (key === "consultaPreco") {
       navigate("/consulta-preco");
       return;
@@ -323,13 +319,11 @@ const Index = () => {
     setView(key);
   };
 
-  const extraTab = currentLogin?.role === "compras" ? [{ key: "compras" as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
   const tabs = [
     { key: "consultaPreco" as const, label: "Consulta", Icon: BadgeDollarSign },
     { key: "scan" as const, label: "Escanear", Icon: ScanBarcode },
     { key: "list" as const, label: "Lista", Icon: ClipboardList },
     { key: "conference" as const, label: "Conferencia", Icon: GitCompare },
-    ...extraTab,
   ];
 
   const flagBadge = { bg: "hsl(var(--primary)/0.10)", border: "hsl(var(--primary)/0.20)", text: "hsl(var(--primary))" };
