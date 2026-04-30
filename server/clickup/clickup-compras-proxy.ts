@@ -76,6 +76,46 @@ function extractFirstImageUrl(attachments: unknown): string | null {
   return null;
 }
 
+function extractImageFromTask(task: Record<string, unknown>): string | null {
+  const fromAttachments = extractFirstImageUrl(task.attachments);
+  if (fromAttachments) return fromAttachments;
+
+  const directFields = [
+    task.coverimage,
+    task.cover_image,
+    task.image,
+    task.image_url,
+    task.thumbnail,
+    task.thumbnail_url,
+  ];
+
+  for (const value of directFields) {
+    if (typeof value === 'string' && value.startsWith('http')) return value;
+  }
+
+  return null;
+}
+
+async function fetchImageAsDataUrl(url: string, token: string): Promise<string | null> {
+  try {
+    const response = await fetch(url, {
+      headers: {
+        Authorization: token,
+        Accept: 'image/*,*/*',
+      },
+    });
+
+    const contentType = response.headers.get('content-type') || '';
+    if (!response.ok || !contentType.startsWith('image/')) return null;
+
+    const buffer = Buffer.from(await response.arrayBuffer());
+    const mimeType = contentType.split(';')[0]?.trim() || 'image/jpeg';
+    return `data:${mimeType};base64,${buffer.toString('base64')}`;
+  } catch {
+    return null;
+  }
+}
+
 function getAction(req: VercelRequest): string {
   const actionQuery = getSingle(req.query.action).trim();
   const actionBody = getSingle((req.body as Record<string, unknown> | undefined)?.action).trim();
@@ -270,6 +310,40 @@ async function moverStatusCompra(
   });
 }
 
+async function buscarFotoTask(
+  req: VercelRequest,
+  res: VercelResponse,
+  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL',
+  token: string
+) {
+  const taskId = getSingle(req.query.taskId).trim();
+  if (!taskId) {
+    return res.status(400).json({ error: 'taskId obrigatorio' });
+  }
+
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+    headers: { Authorization: token },
+  });
+
+  if (!response.ok) {
+    return res.status(response.status).json({
+      error: await response.text(),
+      empresa,
+      taskId,
+    });
+  }
+
+  const task = (await response.json()) as Record<string, unknown>;
+  const imageUrl = extractImageFromTask(task);
+  const dataUrl = imageUrl ? await fetchImageAsDataUrl(imageUrl, token) : null;
+
+  return res.json({
+    taskId,
+    foto: dataUrl || imageUrl,
+    hasImage: Boolean(dataUrl || imageUrl),
+  });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -316,6 +390,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       return await moverStatusCompra(req, res, empresa, token, listId);
+    }
+
+    if (action === 'buscar-foto') {
+      const token = getClickUpToken(empresa);
+
+      if (!token) {
+        return res.status(500).json({
+          error: 'Token nao configurado',
+          empresa,
+        });
+      }
+
+      return await buscarFotoTask(req, res, empresa, token);
     }
 
     return res.status(400).json({ error: 'Action invalida', action });

@@ -127,8 +127,8 @@ export function extractCodigo(name: unknown): string {
   const pipeMatch = normalizedName.match(/COD:([^|]+)/i);
   if (pipeMatch) return pipeMatch[1].trim();
 
-  const leadingBarcodeMatch = normalizedName.match(/^\s*(\d{6,14})(?=\D|$)/);
-  if (leadingBarcodeMatch) return leadingBarcodeMatch[1].trim();
+  const firstBarcodeMatch = normalizedName.match(/\d{6,14}/);
+  if (firstBarcodeMatch) return firstBarcodeMatch[0].trim();
 
   const match = normalizedName.match(/nao_tem(?:_tudo)?_(\d+)/i);
   return match ? match[1] : normalizedName;

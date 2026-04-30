@@ -45,6 +45,7 @@ const Compras = () => {
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
   const [acaoEmAndamento, setAcaoEmAndamento] = useState<string | null>(null);
   const [produtosErp, setProdutosErp] = useState<Record<string, VarejoFacilProduct | null>>({});
+  const [fotosClickUp, setFotosClickUp] = useState<Record<string, string | null>>({});
   const [analiseAberta, setAnaliseAberta] = useState(false);
   const [escolhaDireita, setEscolhaDireita] = useState(false);
   const [dragX, setDragX] = useState(0);
@@ -195,6 +196,51 @@ const Compras = () => {
     };
   }, [empresa, produtosErp, produtosPaginados]);
 
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregarFotosClickUp = async () => {
+      const pendentes = produtosPaginados.filter((produto) => {
+        if (produto.foto || produto.id in fotosClickUp) return false;
+        const produtoErp = produtosErp[produto.id];
+        return !produtoErp?.imagem;
+      });
+
+      if (pendentes.length === 0) return;
+
+      const resultados = await Promise.all(
+        pendentes.map(async (produto) => {
+          try {
+            const response = await fetch(
+              `/api/clickup-compras-proxy?action=buscar-foto&empresa=${empresa}&taskId=${produto.id}`
+            );
+            if (!response.ok) return [produto.id, null] as const;
+            const data = await response.json();
+            return [produto.id, typeof data.foto === "string" ? data.foto : null] as const;
+          } catch (err) {
+            console.warn("[Compras] Foto da task nao carregada:", produto.id, err);
+            return [produto.id, null] as const;
+          }
+        })
+      );
+
+      if (cancelado) return;
+      setFotosClickUp((prev) => {
+        const next = { ...prev };
+        for (const [id, foto] of resultados) {
+          next[id] = foto;
+        }
+        return next;
+      });
+    };
+
+    void carregarFotosClickUp();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [empresa, fotosClickUp, produtosErp, produtosPaginados]);
+
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "todo":
@@ -222,7 +268,7 @@ const Compras = () => {
   );
   const produtoAnalise = produtosAnalise[0] ?? null;
   const produtoAnaliseErp = produtoAnalise ? produtosErp[produtoAnalise.id] : null;
-  const fotoAnalise = produtoAnalise ? (produtoAnaliseErp?.imagem || produtoAnalise.foto) : null;
+  const fotoAnalise = produtoAnalise ? (produtoAnaliseErp?.imagem || fotosClickUp[produtoAnalise.id] || produtoAnalise.foto) : null;
   const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
   const podeMostrarFotoAnalise = Boolean(
     produtoAnalise &&
@@ -442,7 +488,7 @@ const Compras = () => {
                   const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
                   const produtoErp = produtosErp[produto.id];
                   const descricao = produtoErp?.descricao || produto.descricao;
-                  const foto = produtoErp?.imagem || produto.foto;
+                  const foto = produtoErp?.imagem || fotosClickUp[produto.id] || produto.foto;
                   const podeMostrarImagem = Boolean(
                     foto &&
                     isValidImageSrc(foto) &&
