@@ -9,10 +9,10 @@ Exemplo:
 - `/api/clickup-proxy`
 - `/api/clickup-compras-proxy`
 
-Esses arquivos da raiz sao apenas pontes. A logica real fica organizada em:
+Esses arquivos da raiz sao apenas pontes. A logica real fica fora de `api/` para nao virar Serverless Function extra na Vercel Hobby:
 
 ```text
-api/
+server/
   varejo-facil/
     erp-proxy.ts
     erp-image-proxy.ts
@@ -32,5 +32,6 @@ api/
 ## Regra
 
 - Frontend deve continuar chamando as rotas antigas na raiz.
-- Codigo novo deve ser implementado dentro da subpasta correta.
+- Codigo novo deve ser implementado dentro de `server/clickup` ou `server/varejo-facil`.
 - Se criar uma nova rota publica, crie tambem uma ponte na raiz quando precisar manter compatibilidade.
+- Manter no maximo 12 arquivos `.ts` em `api/` no plano Hobby da Vercel.

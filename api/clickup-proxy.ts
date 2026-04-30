@@ -1,1 +1,1 @@
-export { default } from "./clickup/clickup-proxy.js";
+export { default } from "../server/clickup/clickup-proxy.js";
