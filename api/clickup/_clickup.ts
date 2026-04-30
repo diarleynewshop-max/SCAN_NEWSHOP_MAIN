@@ -1,0 +1,289 @@
+type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
+
+type ListaKey = "compras" | "conferencia";
+
+type CompraStatusApp = "todo" | "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido";
+
+const DEFAULT_LISTS: Record<EmpresaKey, { compras: string; conferencia: string }> = {
+  NEWSHOP: {
+    compras: "901326684020",
+    conferencia: "901325900510",
+  },
+  SOYE: {
+    compras: "901326684020",
+    conferencia: "901326607319",
+  },
+  FACIL: {
+    compras: "901326684020",
+    conferencia: "901326607320",
+  },
+};
+
+export function normalizeEmpresa(value: unknown): EmpresaKey {
+  const empresa = String(value ?? "NEWSHOP").toUpperCase();
+  if (empresa === "SOYE" || empresa === "FACIL") {
+    return empresa;
+  }
+  return "NEWSHOP";
+}
+
+export function getClickUpToken(empresa: EmpresaKey): string {
+  if (empresa === "NEWSHOP") {
+    return (
+      process.env.CLICKUP_TOKEN ||
+      process.env.CLICKUP_API_TOKEN ||
+      process.env.VITE_CLICKUP_API_TOKEN ||
+      process.env.VITE_CLICKUP_TOKEN_NEWSHOP ||
+      ""
+    );
+  }
+
+  return (
+    process.env.CLICKUP_TOKEN_SF ||
+    process.env.CLICKUP_API_TOKEN_SF ||
+    process.env.CLICKUP_API_TOKEN ||
+    process.env.VITE_CLICKUP_API_TOKEN ||
+    process.env.VITE_CLICKUP_TOKEN_SF ||
+    ""
+  );
+}
+
+export function getClickUpListId(empresa: EmpresaKey, lista: ListaKey): string {
+  const defaults = DEFAULT_LISTS[empresa];
+
+  if (lista === "compras") {
+    if (empresa === "NEWSHOP") {
+      return (
+        process.env.CLICKUP_TODO_LIST_ID_NEWSHOP ||
+        process.env.CLICKUP_TODO_LIST_ID ||
+        process.env.CLICKUP_LIST_ID_COMPRAS_NEWSHOP ||
+        process.env.CLICKUP_LIST_ID_COMPRAS ||
+        process.env.VITE_CLICKUP_LIST_ID_COMPRAS ||
+        defaults.compras
+      );
+    }
+
+    if (empresa === "SOYE") {
+      return (
+        process.env.CLICKUP_TODO_LIST_ID_SOYE ||
+        process.env.CLICKUP_TODO_LIST_ID_SF ||
+        process.env.CLICKUP_TODO_LIST_ID ||
+        process.env.CLICKUP_LIST_ID_COMPRAS_SOYE ||
+        process.env.CLICKUP_LIST_ID_COMPRAS_SF ||
+        process.env.CLICKUP_LIST_ID_COMPRAS ||
+        process.env.VITE_CLICKUP_LIST_ID_COMPRAS ||
+        defaults.compras
+      );
+    }
+
+    return (
+      process.env.CLICKUP_TODO_LIST_ID_FACIL ||
+      process.env.CLICKUP_TODO_LIST_ID_SF ||
+      process.env.CLICKUP_TODO_LIST_ID ||
+      process.env.CLICKUP_LIST_ID_COMPRAS_FACIL ||
+      process.env.CLICKUP_LIST_ID_COMPRAS_SF ||
+      process.env.CLICKUP_LIST_ID_COMPRAS ||
+      process.env.VITE_CLICKUP_LIST_ID_COMPRAS ||
+      defaults.compras
+    );
+  }
+
+  if (empresa === "NEWSHOP") {
+    return (
+      process.env.CLICKUP_LIST_ID_NEWSHOP ||
+      process.env.VITE_CLICKUP_LIST_ID_NEWSHOP ||
+      defaults.conferencia
+    );
+  }
+
+  if (empresa === "SOYE") {
+    return (
+      process.env.CLICKUP_LIST_ID_SOYE ||
+      process.env.VITE_CLICKUP_LIST_ID_SOYE ||
+      defaults.conferencia
+    );
+  }
+
+  return (
+    process.env.CLICKUP_LIST_ID_FACIL ||
+    process.env.VITE_CLICKUP_LIST_ID_FACIL ||
+    defaults.conferencia
+  );
+}
+
+function normalizeTaskName(name: unknown): string {
+  return String(name ?? "").trim();
+}
+
+export function extractCodigo(name: unknown): string {
+  const normalizedName = normalizeTaskName(name);
+  const pipeMatch = normalizedName.match(/COD:([^|]+)/i);
+  if (pipeMatch) return pipeMatch[1].trim();
+
+  const match = normalizedName.match(/nao_tem(?:_tudo)?_(\d+)/i);
+  return match ? match[1] : normalizedName;
+}
+
+export function extractSku(name: unknown): string | null {
+  const normalizedName = normalizeTaskName(name);
+  const pipeMatch = normalizedName.match(/SKU:([^|]+)/i);
+  if (pipeMatch) return pipeMatch[1].trim();
+
+  const match = normalizedName.match(/nao_tem(?:_tudo)?_\d+_([^_\s]+)/i);
+  return match ? match[1] : null;
+}
+
+export function extractDescricao(name: unknown): string {
+  const normalizedName = normalizeTaskName(name);
+  const pipeMatch = normalizedName.match(/DESC:([^|]+)/i);
+  if (pipeMatch) return pipeMatch[1].trim();
+
+  return normalizedName
+    .replace(/^nao_tem_tudo_/i, "")
+    .replace(/^nao_tem_/i, "")
+    .trim();
+}
+
+export function normalizeClickUpStatus(status: string): string {
+  return String(status ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+export function mapTaskStatus(
+  status: string
+): "todo" | "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido" {
+  const value = normalizeClickUpStatus(status);
+
+  if (
+    value === "produto bom" ||
+    value === "like" ||
+    value === "bom" ||
+    value === "aprovado" ||
+    value === "analisado"
+  ) {
+    return "produto_bom";
+  }
+
+  if (
+    value === "produto ruim" ||
+    value === "dislike" ||
+    value === "deslike" ||
+    value === "ruim" ||
+    value === "reprovado"
+  ) {
+    return "produto_ruim";
+  }
+
+  if (
+    value === "fazer pedido" ||
+    value === "pedido" ||
+    value === "comprar"
+  ) {
+    return "fazer_pedido";
+  }
+
+  if (value === "concluido" || value === "done" || value === "completed") return "concluido";
+
+  return "todo";
+}
+
+export function mapActionToStatus(
+  action: string
+): "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido" | null {
+  const value = String(action ?? "").trim().toUpperCase();
+
+  if (value === "LIKE") return "produto_bom";
+  if (value === "DISLIKE") return "produto_ruim";
+  if (value === "FAZER_PEDIDO") return "fazer_pedido";
+  if (value === "CONCLUIR") return "concluido";
+
+  return null;
+}
+
+export function mapAppStatusToClickUp(
+  status: string
+): "produto bom" | "produto ruim" | "fazer pedido" | "concluido" | "to do" {
+  const value = String(status ?? "").trim().toLowerCase();
+
+  if (value === "produto_bom") return "produto bom";
+  if (value === "produto_ruim") return "produto ruim";
+  if (value === "fazer_pedido") return "fazer pedido";
+  if (value === "concluido") return "concluido";
+
+  return "to do";
+}
+
+function getCompraStatusAliases(status: CompraStatusApp): string[] {
+  if (status === "produto_bom") {
+    return ["produto bom", "like", "bom", "aprovado", "analisado"];
+  }
+
+  if (status === "produto_ruim") {
+    return ["produto ruim", "dislike", "deslike", "ruim", "reprovado"];
+  }
+
+  if (status === "fazer_pedido") {
+    return ["fazer pedido", "pedido", "comprar"];
+  }
+
+  if (status === "concluido") {
+    return ["concluido", "done", "completed", "comprado"];
+  }
+
+  return ["to do", "todo", "open", "aberto"];
+}
+
+export function getCompraStatusCandidates(status: CompraStatusApp): string[] {
+  const aliases = getCompraStatusAliases(status);
+  const unique = new Set<string>();
+  const candidates: string[] = [];
+
+  for (const alias of aliases) {
+    const normalized = normalizeClickUpStatus(alias);
+    if (!normalized || unique.has(normalized)) continue;
+    unique.add(normalized);
+    candidates.push(alias);
+  }
+
+  return candidates;
+}
+
+export function resolveCompraClickUpStatus(
+  status: CompraStatusApp,
+  availableStatuses: string[]
+): string | null {
+  const aliases = getCompraStatusCandidates(status);
+
+  for (const alias of aliases) {
+    const matched = availableStatuses.find(
+      (candidate) => normalizeClickUpStatus(candidate) === normalizeClickUpStatus(alias)
+    );
+
+    if (matched) {
+      return matched;
+    }
+  }
+
+  return null;
+}
+
+export function isCompraTransitionAllowed(
+  fromStatus: string,
+  toStatus: string
+): boolean {
+  const from = String(fromStatus ?? "todo").trim().toLowerCase();
+  const to = String(toStatus ?? "").trim().toLowerCase();
+
+  const allowed: Record<string, string[]> = {
+    todo: ["produto_bom", "produto_ruim"],
+    produto_bom: ["produto_ruim", "fazer_pedido"],
+    produto_ruim: ["produto_bom"],
+    fazer_pedido: ["produto_bom", "concluido"],
+    concluido: ["fazer_pedido"],
+  };
+
+  return allowed[from]?.includes(to) ?? false;
+}

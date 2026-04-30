@@ -43,6 +43,11 @@ supabase/functions/    # Funcoes Supabase (quando aplicavel)
 migrations/            # Estrutura de analytics/DB
 ```
 
+Documentacao de manutencao:
+
+- `docs/PROJECT_STRUCTURE.md`: mapa dos fluxos, arquivos principais e estrutura alvo.
+- `docs/MAINTENANCE.md`: checklist rapido para manutencao segura.
+
 ## Requisitos
 
 - Node.js `18+` (arquivo `.nvmrc` = `18`)
