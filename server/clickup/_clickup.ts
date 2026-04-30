@@ -127,6 +127,9 @@ export function extractCodigo(name: unknown): string {
   const pipeMatch = normalizedName.match(/COD:([^|]+)/i);
   if (pipeMatch) return pipeMatch[1].trim();
 
+  const leadingBarcodeMatch = normalizedName.match(/^\s*(\d{6,14})(?=\D|$)/);
+  if (leadingBarcodeMatch) return leadingBarcodeMatch[1].trim();
+
   const match = normalizedName.match(/nao_tem(?:_tudo)?_(\d+)/i);
   return match ? match[1] : normalizedName;
 }
@@ -301,7 +304,7 @@ export function isCompraTransitionAllowed(
   const to = String(toStatus ?? "").trim().toLowerCase();
 
   const allowed: Record<string, string[]> = {
-    todo: ["produto_bom", "produto_ruim"],
+    todo: ["produto_bom", "produto_ruim", "fazer_pedido"],
     produto_bom: ["produto_ruim", "fazer_pedido"],
     produto_ruim: ["produto_bom"],
     fazer_pedido: ["produto_bom", "pedido_andamento"],

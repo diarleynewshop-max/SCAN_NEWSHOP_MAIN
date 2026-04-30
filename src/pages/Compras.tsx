@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
@@ -28,6 +28,14 @@ function isValidImageSrc(foto: string | null): boolean {
   return isDataPhotoUrl(foto);
 }
 
+function getCodigoConsulta(codigo: string): string {
+  const inicio = codigo.match(/^\s*(\d{6,14})(?=\D|$)/);
+  if (inicio) return inicio[1];
+
+  const qualquerCodigo = codigo.match(/\d{6,14}/);
+  return qualquerCodigo?.[0] ?? codigo;
+}
+
 const Compras = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -37,6 +45,10 @@ const Compras = () => {
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
   const [acaoEmAndamento, setAcaoEmAndamento] = useState<string | null>(null);
   const [produtosErp, setProdutosErp] = useState<Record<string, VarejoFacilProduct | null>>({});
+  const [analiseAberta, setAnaliseAberta] = useState(false);
+  const [escolhaDireita, setEscolhaDireita] = useState(false);
+  const [dragX, setDragX] = useState(0);
+  const dragStartRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     produtos,
@@ -155,7 +167,7 @@ const Compras = () => {
 
       const resultados = await Promise.all(
         pendentes.map(async (produto) => {
-          const codigo = produto.codigo.replace(/\D/g, "") || produto.codigo;
+          const codigo = getCodigoConsulta(produto.codigo);
           try {
             const dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
             return [produto.id, dados] as const;
@@ -204,6 +216,62 @@ const Compras = () => {
     }
   };
 
+  const produtosAnalise = useMemo(
+    () => produtosOrdenados.filter((produto) => produto.status === "todo"),
+    [produtosOrdenados]
+  );
+  const produtoAnalise = produtosAnalise[0] ?? null;
+  const produtoAnaliseErp = produtoAnalise ? produtosErp[produtoAnalise.id] : null;
+  const fotoAnalise = produtoAnalise ? (produtoAnaliseErp?.imagem || produtoAnalise.foto) : null;
+  const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
+  const podeMostrarFotoAnalise = Boolean(
+    produtoAnalise &&
+    fotoAnalise &&
+    isValidImageSrc(fotoAnalise) &&
+    !imagemComErro[produtoAnalise.id]
+  );
+
+  const executarAnalise = async (
+    acao: "DISLIKE" | "LIKE" | "FAZER_PEDIDO",
+    action: () => Promise<void>,
+    sucesso: string
+  ) => {
+    if (!produtoAnalise) return;
+    setEscolhaDireita(false);
+    setDragX(0);
+    await executarAcao(`${produtoAnalise.id}:${acao}`, action, sucesso);
+  };
+
+  const iniciarDrag = (clientX: number) => {
+    if (!produtoAnalise || !!acaoEmAndamento) return;
+    dragStartRef.current = clientX;
+    setEscolhaDireita(false);
+  };
+
+  const moverDrag = (clientX: number) => {
+    if (dragStartRef.current === null) return;
+    const delta = Math.max(-150, Math.min(150, clientX - dragStartRef.current));
+    setDragX(delta);
+  };
+
+  const finalizarDrag = () => {
+    if (!produtoAnalise || dragStartRef.current === null) return;
+    dragStartRef.current = null;
+
+    if (dragX <= -90) {
+      void executarAnalise("DISLIKE", () => dislike(produtoAnalise.id), "Produto marcado como ruim");
+      return;
+    }
+
+    if (dragX >= 90) {
+      setEscolhaDireita(true);
+      setDragX(96);
+      return;
+    }
+
+    setDragX(0);
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
@@ -229,6 +297,10 @@ const Compras = () => {
               onChange={handleImportarPlanilha}
               className="hidden"
             />
+            <Button onClick={() => setAnaliseAberta(true)} disabled={loading || produtosAnalise.length === 0}>
+              <ShoppingCart className="h-4 w-4 mr-2" />
+              Iniciar Analise
+            </Button>
             <Button variant="outline" onClick={() => fileInputRef.current?.click()} disabled={importando}>
               {importando ? (
                 <Loader2 className="h-4 w-4 mr-2 animate-spin" />
@@ -512,6 +584,123 @@ const Compras = () => {
           <p>{"Fluxo ClickUp Compras: PENDENTE -> PRODUTOS RUIM | PODE SER QUE TEM NO GALPAO -> FAZER PEDIDO -> PEDIDO EM ANDAMENTO -> COMPRA REALIZADA -> CONCLUIDO"}</p>
         </div>
       </div>
+
+      {analiseAberta && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-4 relative overflow-hidden">
+            <button
+              type="button"
+              className="absolute right-3 top-3 h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center"
+              onClick={() => {
+                setAnaliseAberta(false);
+                setEscolhaDireita(false);
+                setDragX(0);
+              }}
+            >
+              <X className="h-4 w-4" />
+            </button>
+
+            <div className="pr-10 mb-4">
+              <h2 className="text-xl font-bold text-gray-900">Analise de Compras</h2>
+              <p className="text-sm text-gray-500">{produtosAnalise.length} item(ns) pendente(s)</p>
+            </div>
+
+            {!produtoAnalise ? (
+              <div className="py-16 text-center text-gray-500">Nenhum item pendente</div>
+            ) : (
+              <>
+                <div className="relative h-[430px]">
+                  <div className="absolute inset-y-10 left-0 w-1/2 rounded-xl bg-red-50 flex items-center justify-start pl-5 text-red-600 font-bold opacity-80">
+                    Produto Ruim
+                  </div>
+                  <div className="absolute inset-y-10 right-0 w-1/2 rounded-xl bg-emerald-50 flex items-center justify-end pr-5 text-emerald-700 font-bold opacity-80">
+                    Galpao / Pedido
+                  </div>
+
+                  <div
+                    className="absolute inset-x-0 top-0 mx-auto w-full rounded-xl bg-white border border-gray-200 shadow-xl overflow-hidden select-none"
+                    style={{
+                      transform: `translateX(${dragX}px) rotate(${dragX / 18}deg)`,
+                      transition: dragStartRef.current === null ? "transform 0.18s ease" : "none",
+                    }}
+                    onMouseDown={(event) => iniciarDrag(event.clientX)}
+                    onMouseMove={(event) => moverDrag(event.clientX)}
+                    onMouseUp={finalizarDrag}
+                    onMouseLeave={finalizarDrag}
+                    onTouchStart={(event) => iniciarDrag(event.touches[0]?.clientX ?? 0)}
+                    onTouchMove={(event) => moverDrag(event.touches[0]?.clientX ?? 0)}
+                    onTouchEnd={finalizarDrag}
+                  >
+                    {podeMostrarFotoAnalise ? (
+                      <img
+                        src={fotoAnalise as string}
+                        alt={produtoAnalise.codigo}
+                        className="h-64 w-full object-cover bg-gray-100"
+                        onError={() => setImagemComErro((prev) => ({ ...prev, [produtoAnalise.id]: true }))}
+                      />
+                    ) : (
+                      <div className="h-64 w-full bg-gray-100 flex items-center justify-center text-gray-400">
+                        sem foto
+                      </div>
+                    )}
+
+                    <div className="p-4">
+                      <div className="text-lg font-bold text-gray-900">{produtoAnalise.codigo}</div>
+                      <div className="text-sm text-gray-700 mt-1">{descricaoAnalise}</div>
+                      {produtoAnaliseErp?.secao && (
+                        <div className="text-xs text-indigo-600 mt-2">Secao: {produtoAnaliseErp.secao}</div>
+                      )}
+                      <div className="mt-3">{getStatusBadge(produtoAnalise.status)}</div>
+                    </div>
+                  </div>
+                </div>
+
+                {escolhaDireita ? (
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <Button
+                      variant="outline"
+                      disabled={!!acaoEmAndamento}
+                      onClick={() => executarAnalise("LIKE", () => like(produtoAnalise.id), "Produto enviado para Galpao")}
+                    >
+                      <ThumbsUp className="h-4 w-4 mr-2" />
+                      Galpao
+                    </Button>
+                    <Button
+                      disabled={!!acaoEmAndamento}
+                      onClick={() => executarAnalise("FAZER_PEDIDO", () => fazerPedido(produtoAnalise.id), "Produto enviado para Fazer Pedido")}
+                    >
+                      <ShoppingCart className="h-4 w-4 mr-2" />
+                      Fazer Pedido
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-2 gap-3 mt-4">
+                    <Button
+                      variant="outline"
+                      className="text-red-600 border-red-200"
+                      disabled={!!acaoEmAndamento}
+                      onClick={() => executarAnalise("DISLIKE", () => dislike(produtoAnalise.id), "Produto marcado como ruim")}
+                    >
+                      <ThumbsDown className="h-4 w-4 mr-2" />
+                      Ruim
+                    </Button>
+                    <Button
+                      disabled={!!acaoEmAndamento}
+                      onClick={() => {
+                        setEscolhaDireita(true);
+                        setDragX(96);
+                      }}
+                    >
+                      <ThumbsUp className="h-4 w-4 mr-2" />
+                      Direita
+                    </Button>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };
