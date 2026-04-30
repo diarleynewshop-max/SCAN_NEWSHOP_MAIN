@@ -8,6 +8,7 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
 import { isDataPhotoUrl } from "@/lib/photoUtils";
 import { useToast } from "@/hooks/use-toast";
+import { buscarProdutoVarejoFacil, type VarejoFacilProduct } from "@/lib/varejoFacilIntegration";
 
 const PAGE_SIZE = 10;
 
@@ -35,6 +36,7 @@ const Compras = () => {
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
   const [acaoEmAndamento, setAcaoEmAndamento] = useState<string | null>(null);
+  const [produtosErp, setProdutosErp] = useState<Record<string, VarejoFacilProduct | null>>({});
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     produtos,
@@ -143,6 +145,43 @@ const Compras = () => {
   const inicio = (paginaAtual - 1) * PAGE_SIZE;
   const fim = inicio + PAGE_SIZE;
   const produtosPaginados = produtosOrdenados.slice(inicio, fim);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregarProdutosErp = async () => {
+      const pendentes = produtosPaginados.filter((produto) => !(produto.id in produtosErp));
+      if (pendentes.length === 0) return;
+
+      const resultados = await Promise.all(
+        pendentes.map(async (produto) => {
+          const codigo = produto.codigo.replace(/\D/g, "") || produto.codigo;
+          try {
+            const dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
+            return [produto.id, dados] as const;
+          } catch (err) {
+            console.warn("[Compras] Produto nao enriquecido pelo ERP:", produto.codigo, err);
+            return [produto.id, null] as const;
+          }
+        })
+      );
+
+      if (cancelado) return;
+      setProdutosErp((prev) => {
+        const next = { ...prev };
+        for (const [id, dados] of resultados) {
+          next[id] = dados;
+        }
+        return next;
+      });
+    };
+
+    void carregarProdutosErp();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [empresa, produtosErp, produtosPaginados]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -329,9 +368,12 @@ const Compras = () => {
 
                 {produtosPaginados.map((produto) => {
                   const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
+                  const produtoErp = produtosErp[produto.id];
+                  const descricao = produtoErp?.descricao || produto.descricao;
+                  const foto = produtoErp?.imagem || produto.foto;
                   const podeMostrarImagem = Boolean(
-                    produto.foto &&
-                    isValidImageSrc(produto.foto) &&
+                    foto &&
+                    isValidImageSrc(foto) &&
                     !imagemComErro[produto.id]
                   );
 
@@ -340,7 +382,7 @@ const Compras = () => {
                       <div className="flex items-center gap-4 min-w-0">
                         {podeMostrarImagem ? (
                           <img
-                            src={produto.foto as string}
+                            src={foto as string}
                             alt={produto.codigo}
                             className="w-16 h-16 object-cover rounded shrink-0"
                             onError={() => setImagemComErro((prev) => ({ ...prev, [produto.id]: true }))}
@@ -352,7 +394,8 @@ const Compras = () => {
                         )}
                         <div className="min-w-0">
                           <div className="font-bold">{produto.codigo}</div>
-                          <div className="text-sm text-gray-600 break-words">{produto.descricao}</div>
+                          <div className="text-sm text-gray-600 break-words">{descricao}</div>
+                          {produtoErp?.secao && <div className="text-xs text-indigo-600">Secao: {produtoErp.secao}</div>}
                           {produto.sku && <div className="text-xs text-gray-400">SKU: {produto.sku}</div>}
                         </div>
                       </div>
