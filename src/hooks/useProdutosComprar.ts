@@ -109,6 +109,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const executarAcao = useCallback(async (taskId: string, acao: string) => {
     const empresaAtual = getEmpresaAtual();
     const produtoAtual = produtos.find((p) => p.id === taskId);
+    const statusAnterior = produtoAtual?.status;
     const previsao: Record<string, ProdutoComprar['status']> = {
       LIKE: 'produto_bom',
       DISLIKE: 'produto_ruim',
@@ -147,7 +148,14 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
           : '';
         throw new Error((data.error ?? 'Erro ao executar acao') + detalhe + statusDisponiveis + statusTentados);
       }
+
+      await fetchProdutos();
     } catch (err: any) {
+      if (statusAnterior) {
+        setProdutos((prev) =>
+          prev.map((p) => (p.id === taskId ? { ...p, status: statusAnterior } : p))
+        );
+      }
       console.error('[useProdutosComprar] Erro na acao:', err);
       throw err;
     }

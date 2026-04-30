@@ -7,6 +7,7 @@ import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar } from "@/hooks/useProdutosComprar";
 import { isDataPhotoUrl } from "@/lib/photoUtils";
+import { useToast } from "@/hooks/use-toast";
 
 const PAGE_SIZE = 10;
 
@@ -26,10 +27,12 @@ function isValidImageSrc(foto: string | null): boolean {
 
 const Compras = () => {
   const navigate = useNavigate();
+  const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
   const [importando, setImportando] = useState(false);
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
+  const [acaoEmAndamento, setAcaoEmAndamento] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     produtos,
@@ -80,6 +83,26 @@ const Compras = () => {
     } finally {
       setImportando(false);
       if (fileInputRef.current) fileInputRef.current.value = "";
+    }
+  };
+
+  const executarAcao = async (
+    actionKey: string,
+    action: () => Promise<void>,
+    sucesso: string
+  ) => {
+    setAcaoEmAndamento(actionKey);
+    try {
+      await action();
+      toast({ title: sucesso });
+    } catch (err) {
+      toast({
+        title: "Erro em Compras",
+        description: err instanceof Error ? err.message : String(err),
+        variant: "destructive",
+      });
+    } finally {
+      setAcaoEmAndamento(null);
     }
   };
 
@@ -267,6 +290,7 @@ const Compras = () => {
                 </div>
 
                 {produtosPaginados.map((produto) => {
+                  const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
                   const podeMostrarImagem = Boolean(
                     produto.foto &&
                     isValidImageSrc(produto.foto) &&
@@ -299,12 +323,12 @@ const Compras = () => {
 
                         {produto.status === "todo" && (
                           <>
-                            <Button size="sm" onClick={() => like(produto.id)}>
-                              <ThumbsUp className="h-4 w-4 mr-1" />
+                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto marcado como bom")}>
+                              {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
                               Like
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
-                              <ThumbsDown className="h-4 w-4 mr-1" />
+                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto marcado como ruim")} className="text-red-600">
+                              {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-1" />}
                               Deslike
                             </Button>
                           </>
@@ -312,40 +336,40 @@ const Compras = () => {
 
                         {produto.status === "produto_bom" && (
                           <>
-                            <Button size="sm" onClick={() => fazerPedido(produto.id)}>
-                              <ShoppingCart className="h-4 w-4 mr-1" />
+                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto movido para fazer pedido")}>
+                              {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-1" />}
                               Fazer Pedido
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => dislike(produto.id)} className="text-red-600">
-                              <ThumbsDown className="h-4 w-4 mr-1" />
+                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto marcado como ruim")} className="text-red-600">
+                              {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-1" />}
                               Deslike
                             </Button>
                           </>
                         )}
 
                         {produto.status === "produto_ruim" && (
-                          <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
-                            <ThumbsUp className="h-4 w-4 mr-1" />
+                          <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto marcado como bom")} className="text-emerald-700">
+                            {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
                             Like
                           </Button>
                         )}
 
                         {produto.status === "fazer_pedido" && (
                           <>
-                            <Button size="sm" onClick={() => concluir(produto.id)}>
-                              <Check className="h-4 w-4 mr-1" />
+                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:CONCLUIR`, () => concluir(produto.id), "Produto concluido")}>
+                              {isActionLoading("CONCLUIR") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
                               Concluir
                             </Button>
-                            <Button size="sm" variant="outline" onClick={() => like(produto.id)} className="text-emerald-700">
-                              <ThumbsUp className="h-4 w-4 mr-1" />
+                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto voltou para bom")} className="text-emerald-700">
+                              {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
                               Voltar Bom
                             </Button>
                           </>
                         )}
 
                         {produto.status === "concluido" && (
-                          <Button size="sm" variant="outline" onClick={() => fazerPedido(produto.id)}>
-                            <RefreshCw className="h-4 w-4 mr-1" />
+                          <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto reaberto")}>
+                            {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
                             Reabrir
                           </Button>
                         )}
