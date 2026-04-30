@@ -237,15 +237,28 @@ const getErpLojaAtiva = (contexto: VarejoFacilLookupContext = {}) => {
 
 const buscarCodigoAuxiliarPorEan = async (ean: string, contexto: VarejoFacilLookupContext = {}) => {
   for (const candidato of normalizarEans(ean)) {
-    const fiql = encodeURIComponent(`id==${candidato}`);
-    const data = await fetchJson<ErpListResponse<ErpCodigoAuxiliar>>(`/v1/produto/codigos-auxiliares?q=${fiql}&count=5`, contexto);
-    const codigoAuxiliar = (data?.items || []).find((item) => item?.produtoId && item?.tipo === "EAN") || (data?.items || [])[0];
+    try {
+      const fiql = encodeURIComponent(`id==${candidato}`);
+      const data = await fetchJson<ErpListResponse<ErpCodigoAuxiliar>>(`/v1/produto/codigos-auxiliares?q=${fiql}&count=5`, contexto);
+      const codigoAuxiliar = (data?.items || []).find((item) => item?.produtoId && item?.tipo === "EAN") || (data?.items || [])[0];
 
-    if (codigoAuxiliar?.produtoId) {
-      return {
-        codigoAuxiliar,
-        eanEncontrado: codigoAuxiliar.id || candidato,
-      };
+      if (codigoAuxiliar?.produtoId) {
+        console.info("[VarejoFacil][EAN] Codigo auxiliar encontrado", {
+          eanOriginal: ean,
+          eanConsultado: candidato,
+          produtoId: codigoAuxiliar.produtoId,
+        });
+        return {
+          codigoAuxiliar,
+          eanEncontrado: codigoAuxiliar.id || candidato,
+        };
+      }
+    } catch (err) {
+      console.warn("[VarejoFacil][EAN] Falha ao consultar candidato", {
+        eanOriginal: ean,
+        eanConsultado: candidato,
+        erro: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -364,14 +377,49 @@ export const buscarProdutoVarejoFacil = async (
 
   if (!produto?.id) return null;
 
-  const [precos, estoque, secao] = await Promise.all([
+  const [precosResult, estoqueResult, secaoResult] = await Promise.allSettled([
     fetchJson<ErpPreco[]>(`/v1/produto/produtos/${produto.id}/precos`, contexto),
     buscarEstoquePorProduto(produto.id, contexto),
     buscarSecao(produto.secaoId, contexto),
   ]);
+  const precos = precosResult.status === "fulfilled" ? precosResult.value : null;
+  const estoque = estoqueResult.status === "fulfilled" ? estoqueResult.value : 0;
+  const secao = secaoResult.status === "fulfilled" ? secaoResult.value : "";
+
+  if (precosResult.status === "rejected") {
+    console.warn("[VarejoFacil][Produto] Preco nao carregado", {
+      codigo,
+      produtoId: produto.id,
+      erro: precosResult.reason instanceof Error ? precosResult.reason.message : String(precosResult.reason),
+    });
+  }
+  if (estoqueResult.status === "rejected") {
+    console.warn("[VarejoFacil][Produto] Estoque nao carregado", {
+      codigo,
+      produtoId: produto.id,
+      erro: estoqueResult.reason instanceof Error ? estoqueResult.reason.message : String(estoqueResult.reason),
+    });
+  }
+  if (secaoResult.status === "rejected") {
+    console.warn("[VarejoFacil][Produto] Secao nao carregada", {
+      codigo,
+      produtoId: produto.id,
+      erro: secaoResult.reason instanceof Error ? secaoResult.reason.message : String(secaoResult.reason),
+    });
+  }
+
   const precoSelecionado = selecionarPrecoDaLoja(precos, contexto);
   const precoVarejo = normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1);
   const precoAtacado = normalizarPreco(precoSelecionado?.precoVenda2, precoSelecionado?.precoOferta2);
+  const imagem = resolverImagemProduto(extrairImagemProduto(produto), produto.id, contexto);
+
+  console.info("[VarejoFacil][Produto] Produto resolvido", {
+    codigo,
+    eanResolvido,
+    produtoId: produto.id,
+    descricao: produto.descricao || produto.codigoInterno || "",
+    imagem,
+  });
 
   return {
     id: String(produto.id),
@@ -382,7 +430,7 @@ export const buscarProdutoVarejoFacil = async (
     precoAtacado,
     estoque,
     secao: secao || undefined,
-    imagem: resolverImagemProduto(extrairImagemProduto(produto), produto.id, contexto),
+    imagem,
   };
 };
 

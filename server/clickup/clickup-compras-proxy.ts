@@ -83,17 +83,30 @@ function looksLikeImageUrl(value: string): boolean {
   return (
     normalized.includes('image') ||
     normalized.includes('attachment') ||
+    normalized.includes('clickup-attachments.com') ||
     normalized.includes('thumbnail') ||
     normalized.includes('preview') ||
     /\.(jpg|jpeg|png|gif|webp)(\?|#|$)/.test(normalized)
   );
 }
 
+function extractImageUrlFromText(value: string): string | null {
+  const urls = value.match(/https?:\/\/[^\s"'<>)]*/g) || [];
+
+  for (const rawUrl of urls) {
+    const url = rawUrl.replace(/[.,;]+$/, '');
+    if (looksLikeImageUrl(url)) return url;
+  }
+
+  return null;
+}
+
 function findImageUrlDeep(value: unknown, depth = 0): string | null {
   if (depth > 5 || value == null) return null;
 
   if (typeof value === 'string') {
-    return value.startsWith('http') && looksLikeImageUrl(value) ? value : null;
+    if (value.startsWith('http') && looksLikeImageUrl(value)) return value;
+    return extractImageUrlFromText(value);
   }
 
   if (Array.isArray(value)) {
