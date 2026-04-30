@@ -43,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const acaoUp = String(acao).toUpperCase();
   const novoStatusApp = mapActionToStatus(acaoUp);
   if (!novoStatusApp) {
-    return res.status(400).json({ error: 'Use: LIKE, DISLIKE, FAZER_PEDIDO ou CONCLUIR' });
+    return res.status(400).json({ error: 'Use: LIKE, DISLIKE, FAZER_PEDIDO, PEDIDO_ANDAMENTO, COMPRA_REALIZADA ou CONCLUIR' });
   }
 
   const statusAtual = String(currentStatus ?? 'todo').trim().toLowerCase();

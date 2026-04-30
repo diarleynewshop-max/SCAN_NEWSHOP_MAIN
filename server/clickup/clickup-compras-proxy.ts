@@ -13,7 +13,14 @@ import {
   resolveCompraClickUpStatus,
 } from './_clickup.js';
 
-type CompraStatusApp = 'todo' | 'produto_bom' | 'produto_ruim' | 'fazer_pedido' | 'concluido';
+type CompraStatusApp =
+  | 'todo'
+  | 'produto_bom'
+  | 'produto_ruim'
+  | 'fazer_pedido'
+  | 'pedido_andamento'
+  | 'compra_realizada'
+  | 'concluido';
 
 function getSingle(value: unknown): string {
   if (Array.isArray(value)) {
@@ -30,6 +37,8 @@ function normalizeStatusFilter(value: unknown): CompraStatusApp | null {
     status === 'produto_bom' ||
     status === 'produto_ruim' ||
     status === 'fazer_pedido' ||
+    status === 'pedido_andamento' ||
+    status === 'compra_realizada' ||
     status === 'concluido'
   ) {
     return status;
@@ -179,7 +188,7 @@ async function moverStatusCompra(
   const novoStatusApp = mapActionToStatus(acaoUp);
 
   if (!novoStatusApp) {
-    return res.status(400).json({ error: 'Use: LIKE, DISLIKE, FAZER_PEDIDO ou CONCLUIR' });
+    return res.status(400).json({ error: 'Use: LIKE, DISLIKE, FAZER_PEDIDO, PEDIDO_ANDAMENTO, COMPRA_REALIZADA ou CONCLUIR' });
   }
 
   if (!isCompraTransitionAllowed(currentStatus, novoStatusApp)) {

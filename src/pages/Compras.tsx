@@ -16,7 +16,9 @@ const STATUS_PRIORITY: Record<string, number> = {
   produto_bom: 1,
   produto_ruim: 2,
   fazer_pedido: 3,
-  concluido: 4,
+  pedido_andamento: 4,
+  compra_realizada: 5,
+  concluido: 6,
 };
 
 function isValidImageSrc(foto: string | null): boolean {
@@ -42,6 +44,8 @@ const Compras = () => {
     like,
     dislike,
     fazerPedido,
+    pedidoAndamento,
+    compraRealizada,
     concluir,
     ultimaAtualizacao,
     empresa,
@@ -143,13 +147,17 @@ const Compras = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case "todo":
-        return <Badge className="bg-blue-100 text-blue-800">TO DO</Badge>;
+        return <Badge className="bg-zinc-100 text-zinc-800">Pendente</Badge>;
       case "produto_bom":
-        return <Badge className="bg-emerald-100 text-emerald-800">Produto Bom</Badge>;
+        return <Badge className="bg-slate-100 text-slate-800">Pode ter no Galpao</Badge>;
       case "produto_ruim":
-        return <Badge className="bg-rose-100 text-rose-800">Produto Ruim</Badge>;
+        return <Badge className="bg-rose-100 text-rose-800">Produtos Ruim</Badge>;
       case "fazer_pedido":
         return <Badge className="bg-amber-100 text-amber-800">Fazer Pedido</Badge>;
+      case "pedido_andamento":
+        return <Badge className="bg-orange-100 text-orange-800">Pedido em Andamento</Badge>;
+      case "compra_realizada":
+        return <Badge className="bg-red-100 text-red-800">Compra Realizada</Badge>;
       case "concluido":
         return <Badge className="bg-green-100 text-green-800">Concluido</Badge>;
       default:
@@ -197,7 +205,7 @@ const Compras = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-5 gap-4 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-7 gap-4 mb-6">
           <Card>
             <CardHeader className="pb-2">
               <CardTitle className="text-lg">Total</CardTitle>
@@ -208,7 +216,7 @@ const Compras = () => {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">TO DO</CardTitle>
+              <CardTitle className="text-lg">Pendente</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-blue-600">
@@ -218,11 +226,21 @@ const Compras = () => {
           </Card>
           <Card>
             <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Produto Bom</CardTitle>
+              <CardTitle className="text-lg">Galpao</CardTitle>
             </CardHeader>
             <CardContent>
               <div className="text-3xl font-bold text-emerald-600">
                 {produtos.filter((p) => p.status === "produto_bom").length}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Ruim</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-rose-600">
+                {produtos.filter((p) => p.status === "produto_ruim").length}
               </div>
             </CardContent>
           </Card>
@@ -233,6 +251,26 @@ const Compras = () => {
             <CardContent>
               <div className="text-3xl font-bold text-amber-600">
                 {produtos.filter((p) => p.status === "fazer_pedido").length}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Andamento</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-orange-600">
+                {produtos.filter((p) => p.status === "pedido_andamento").length}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardHeader className="pb-2">
+              <CardTitle className="text-lg">Realizada</CardTitle>
+            </CardHeader>
+            <CardContent>
+              <div className="text-3xl font-bold text-red-600">
+                {produtos.filter((p) => p.status === "compra_realizada").length}
               </div>
             </CardContent>
           </Card>
@@ -325,11 +363,11 @@ const Compras = () => {
                           <>
                             <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto marcado como bom")}>
                               {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
-                              Like
+                              Galpao
                             </Button>
                             <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto marcado como ruim")} className="text-red-600">
                               {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-1" />}
-                              Deslike
+                              Ruim
                             </Button>
                           </>
                         )}
@@ -342,7 +380,7 @@ const Compras = () => {
                             </Button>
                             <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto marcado como ruim")} className="text-red-600">
                               {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-1" />}
-                              Deslike
+                              Ruim
                             </Button>
                           </>
                         )}
@@ -350,26 +388,52 @@ const Compras = () => {
                         {produto.status === "produto_ruim" && (
                           <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto marcado como bom")} className="text-emerald-700">
                             {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
-                            Like
+                            Galpao
                           </Button>
                         )}
 
                         {produto.status === "fazer_pedido" && (
                           <>
+                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:PEDIDO_ANDAMENTO`, () => pedidoAndamento(produto.id), "Pedido em andamento")}>
+                              {isActionLoading("PEDIDO_ANDAMENTO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                              Em Andamento
+                            </Button>
+                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto voltou para bom")} className="text-emerald-700">
+                              {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
+                              Voltar Galpao
+                            </Button>
+                          </>
+                        )}
+
+                        {produto.status === "pedido_andamento" && (
+                          <>
+                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Compra realizada")}>
+                              {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
+                              Compra Realizada
+                            </Button>
+                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto voltou para fazer pedido")}>
+                              {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-1" />}
+                              Voltar Pedido
+                            </Button>
+                          </>
+                        )}
+
+                        {produto.status === "compra_realizada" && (
+                          <>
                             <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:CONCLUIR`, () => concluir(produto.id), "Produto concluido")}>
                               {isActionLoading("CONCLUIR") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
                               Concluir
                             </Button>
-                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto voltou para bom")} className="text-emerald-700">
-                              {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
-                              Voltar Bom
+                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:PEDIDO_ANDAMENTO`, () => pedidoAndamento(produto.id), "Produto voltou para pedido em andamento")}>
+                              {isActionLoading("PEDIDO_ANDAMENTO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                              Voltar Andamento
                             </Button>
                           </>
                         )}
 
                         {produto.status === "concluido" && (
-                          <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto reaberto")}>
-                            {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
+                          <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Produto reaberto")}>
+                            {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
                             Reabrir
                           </Button>
                         )}
@@ -402,7 +466,7 @@ const Compras = () => {
         </Card>
 
         <div className="text-center text-gray-500 text-sm mt-8">
-          <p>{"Fluxo ClickUp Compras: TO DO -> PRODUTO RUIM | PRODUTO BOM -> FAZER PEDIDO -> CONCLUIDO"}</p>
+          <p>{"Fluxo ClickUp Compras: PENDENTE -> PRODUTOS RUIM | PODE SER QUE TEM NO GALPAO -> FAZER PEDIDO -> PEDIDO EM ANDAMENTO -> COMPRA REALIZADA -> CONCLUIDO"}</p>
         </div>
       </div>
     </div>

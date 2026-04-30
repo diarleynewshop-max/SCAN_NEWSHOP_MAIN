@@ -2,7 +2,14 @@ type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
 
 type ListaKey = "compras" | "conferencia";
 
-type CompraStatusApp = "todo" | "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido";
+type CompraStatusApp =
+  | "todo"
+  | "produto_bom"
+  | "produto_ruim"
+  | "fazer_pedido"
+  | "pedido_andamento"
+  | "compra_realizada"
+  | "concluido";
 
 const DEFAULT_LISTS: Record<EmpresaKey, { compras: string; conferencia: string }> = {
   NEWSHOP: {
@@ -154,10 +161,11 @@ export function normalizeClickUpStatus(status: string): string {
 
 export function mapTaskStatus(
   status: string
-): "todo" | "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido" {
+): CompraStatusApp {
   const value = normalizeClickUpStatus(status);
 
   if (
+    value === "pode ser que tem no galpao" ||
     value === "produto bom" ||
     value === "like" ||
     value === "bom" ||
@@ -168,6 +176,7 @@ export function mapTaskStatus(
   }
 
   if (
+    value === "produtos ruim" ||
     value === "produto ruim" ||
     value === "dislike" ||
     value === "deslike" ||
@@ -185,6 +194,8 @@ export function mapTaskStatus(
     return "fazer_pedido";
   }
 
+  if (value === "pedido em andamento" || value === "em andamento") return "pedido_andamento";
+  if (value === "compra realizada" || value === "comprado") return "compra_realizada";
   if (value === "concluido" || value === "done" || value === "completed") return "concluido";
 
   return "todo";
@@ -192,12 +203,14 @@ export function mapTaskStatus(
 
 export function mapActionToStatus(
   action: string
-): "produto_bom" | "produto_ruim" | "fazer_pedido" | "concluido" | null {
+): Exclude<CompraStatusApp, "todo"> | null {
   const value = String(action ?? "").trim().toUpperCase();
 
   if (value === "LIKE") return "produto_bom";
   if (value === "DISLIKE") return "produto_ruim";
   if (value === "FAZER_PEDIDO") return "fazer_pedido";
+  if (value === "PEDIDO_ANDAMENTO") return "pedido_andamento";
+  if (value === "COMPRA_REALIZADA") return "compra_realizada";
   if (value === "CONCLUIR") return "concluido";
 
   return null;
@@ -205,35 +218,45 @@ export function mapActionToStatus(
 
 export function mapAppStatusToClickUp(
   status: string
-): "produto bom" | "produto ruim" | "fazer pedido" | "concluido" | "to do" {
+): string {
   const value = String(status ?? "").trim().toLowerCase();
 
-  if (value === "produto_bom") return "produto bom";
-  if (value === "produto_ruim") return "produto ruim";
-  if (value === "fazer_pedido") return "fazer pedido";
-  if (value === "concluido") return "concluido";
+  if (value === "produto_bom") return "PODE SER QUE TEM NO GALPAO";
+  if (value === "produto_ruim") return "PRODUTOS RUIM";
+  if (value === "fazer_pedido") return "FAZER PEDIDO";
+  if (value === "pedido_andamento") return "PEDIDO EM ANDAMENTO";
+  if (value === "compra_realizada") return "COMPRA REALIZADA";
+  if (value === "concluido") return "CONCLUIDO";
 
-  return "to do";
+  return "PENDENTE";
 }
 
 function getCompraStatusAliases(status: CompraStatusApp): string[] {
   if (status === "produto_bom") {
-    return ["produto bom", "like", "bom", "aprovado", "analisado"];
+    return ["PODE SER QUE TEM NO GALPAO", "produto bom", "like", "bom", "aprovado", "analisado"];
   }
 
   if (status === "produto_ruim") {
-    return ["produto ruim", "dislike", "deslike", "ruim", "reprovado"];
+    return ["PRODUTOS RUIM", "produto ruim", "dislike", "deslike", "ruim", "reprovado"];
   }
 
   if (status === "fazer_pedido") {
-    return ["fazer pedido", "pedido", "comprar"];
+    return ["FAZER PEDIDO", "fazer pedido", "pedido", "comprar"];
+  }
+
+  if (status === "pedido_andamento") {
+    return ["PEDIDO EM ANDAMENTO", "pedido em andamento", "em andamento"];
+  }
+
+  if (status === "compra_realizada") {
+    return ["COMPRA REALIZADA", "compra realizada", "comprado"];
   }
 
   if (status === "concluido") {
-    return ["concluido", "done", "completed", "comprado"];
+    return ["CONCLUIDO", "concluido", "done", "completed"];
   }
 
-  return ["to do", "todo", "open", "aberto"];
+  return ["PENDENTE", "to do", "todo", "open", "aberto"];
 }
 
 export function getCompraStatusCandidates(status: CompraStatusApp): string[] {
@@ -281,8 +304,10 @@ export function isCompraTransitionAllowed(
     todo: ["produto_bom", "produto_ruim"],
     produto_bom: ["produto_ruim", "fazer_pedido"],
     produto_ruim: ["produto_bom"],
-    fazer_pedido: ["produto_bom", "concluido"],
-    concluido: ["fazer_pedido"],
+    fazer_pedido: ["produto_bom", "pedido_andamento"],
+    pedido_andamento: ["fazer_pedido", "compra_realizada"],
+    compra_realizada: ["pedido_andamento", "concluido"],
+    concluido: ["fazer_pedido", "compra_realizada"],
   };
 
   return allowed[from]?.includes(to) ?? false;

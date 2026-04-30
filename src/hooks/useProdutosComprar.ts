@@ -7,9 +7,18 @@ export interface ProdutoComprar {
   sku: string | null;
   descricao: string;
   foto: string | null;
-  status: 'todo' | 'produto_bom' | 'produto_ruim' | 'fazer_pedido' | 'concluido';
+  status: CompraStatusApp;
   date_created: string;
 }
+
+export type CompraStatusApp =
+  | 'todo'
+  | 'produto_bom'
+  | 'produto_ruim'
+  | 'fazer_pedido'
+  | 'pedido_andamento'
+  | 'compra_realizada'
+  | 'concluido';
 
 interface UseProdutosComprarReturn {
   produtos: ProdutoComprar[];
@@ -21,6 +30,8 @@ interface UseProdutosComprarReturn {
   like: (taskId: string) => Promise<void>;
   dislike: (taskId: string) => Promise<void>;
   fazerPedido: (taskId: string) => Promise<void>;
+  pedidoAndamento: (taskId: string) => Promise<void>;
+  compraRealizada: (taskId: string) => Promise<void>;
   concluir: (taskId: string) => Promise<void>;
 }
 
@@ -110,10 +121,12 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     const empresaAtual = getEmpresaAtual();
     const produtoAtual = produtos.find((p) => p.id === taskId);
     const statusAnterior = produtoAtual?.status;
-    const previsao: Record<string, ProdutoComprar['status']> = {
+    const previsao: Record<string, CompraStatusApp> = {
       LIKE: 'produto_bom',
       DISLIKE: 'produto_ruim',
       FAZER_PEDIDO: 'fazer_pedido',
+      PEDIDO_ANDAMENTO: 'pedido_andamento',
+      COMPRA_REALIZADA: 'compra_realizada',
       CONCLUIR: 'concluido',
     };
 
@@ -164,6 +177,8 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
   const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
   const fazerPedido = useCallback((id: string) => executarAcao(id, 'FAZER_PEDIDO'), [executarAcao]);
+  const pedidoAndamento = useCallback((id: string) => executarAcao(id, 'PEDIDO_ANDAMENTO'), [executarAcao]);
+  const compraRealizada = useCallback((id: string) => executarAcao(id, 'COMPRA_REALIZADA'), [executarAcao]);
   const concluir = useCallback((id: string) => executarAcao(id, 'CONCLUIR'), [executarAcao]);
 
   return {
@@ -176,6 +191,8 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     like,
     dislike,
     fazerPedido,
+    pedidoAndamento,
+    compraRealizada,
     concluir,
   };
 };

@@ -9,7 +9,14 @@ import {
   normalizeEmpresa,
 } from './_clickup.js';
 
-type CompraStatusApp = 'todo' | 'produto_bom' | 'produto_ruim' | 'fazer_pedido' | 'concluido';
+type CompraStatusApp =
+  | 'todo'
+  | 'produto_bom'
+  | 'produto_ruim'
+  | 'fazer_pedido'
+  | 'pedido_andamento'
+  | 'compra_realizada'
+  | 'concluido';
 
 function extractFirstImageUrl(attachments: unknown): string | null {
   const safeAttachments = Array.isArray(attachments) ? attachments : [];
@@ -50,6 +57,8 @@ function normalizeStatusFilter(value: unknown): CompraStatusApp | null {
     status === 'produto_bom' ||
     status === 'produto_ruim' ||
     status === 'fazer_pedido' ||
+    status === 'pedido_andamento' ||
+    status === 'compra_realizada' ||
     status === 'concluido'
   ) {
     return status;
