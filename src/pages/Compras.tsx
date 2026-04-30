@@ -36,6 +36,10 @@ function getCodigoConsulta(codigo: string): string {
   return qualquerCodigo?.[0] ?? codigo;
 }
 
+function getImagemErroKey(produtoId: string, foto: string | null): string {
+  return `${produtoId}:${foto || "sem-foto"}`;
+}
+
 const Compras = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -202,8 +206,7 @@ const Compras = () => {
     const carregarFotosClickUp = async () => {
       const pendentes = produtosPaginados.filter((produto) => {
         if (produto.foto || produto.id in fotosClickUp) return false;
-        const produtoErp = produtosErp[produto.id];
-        return !produtoErp?.imagem;
+        return true;
       });
 
       if (pendentes.length === 0) return;
@@ -268,13 +271,14 @@ const Compras = () => {
   );
   const produtoAnalise = produtosAnalise[0] ?? null;
   const produtoAnaliseErp = produtoAnalise ? produtosErp[produtoAnalise.id] : null;
-  const fotoAnalise = produtoAnalise ? (produtoAnaliseErp?.imagem || fotosClickUp[produtoAnalise.id] || produtoAnalise.foto) : null;
+  const fotoAnalise = produtoAnalise ? (fotosClickUp[produtoAnalise.id] || produtoAnalise.foto || produtoAnaliseErp?.imagem) : null;
+  const fotoAnaliseErroKey = produtoAnalise ? getImagemErroKey(produtoAnalise.id, fotoAnalise) : "";
   const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
   const podeMostrarFotoAnalise = Boolean(
     produtoAnalise &&
     fotoAnalise &&
     isValidImageSrc(fotoAnalise) &&
-    !imagemComErro[produtoAnalise.id]
+    !imagemComErro[fotoAnaliseErroKey]
   );
 
   const executarAnalise = async (
@@ -488,11 +492,12 @@ const Compras = () => {
                   const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
                   const produtoErp = produtosErp[produto.id];
                   const descricao = produtoErp?.descricao || produto.descricao;
-                  const foto = produtoErp?.imagem || fotosClickUp[produto.id] || produto.foto;
+                  const foto = fotosClickUp[produto.id] || produto.foto || produtoErp?.imagem;
+                  const fotoErroKey = getImagemErroKey(produto.id, foto);
                   const podeMostrarImagem = Boolean(
                     foto &&
                     isValidImageSrc(foto) &&
-                    !imagemComErro[produto.id]
+                    !imagemComErro[fotoErroKey]
                   );
 
                   return (
@@ -503,7 +508,7 @@ const Compras = () => {
                             src={foto as string}
                             alt={produto.codigo}
                             className="w-16 h-16 object-cover rounded shrink-0"
-                            onError={() => setImagemComErro((prev) => ({ ...prev, [produto.id]: true }))}
+                            onError={() => setImagemComErro((prev) => ({ ...prev, [fotoErroKey]: true }))}
                           />
                         ) : (
                           <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center shrink-0">
@@ -682,7 +687,7 @@ const Compras = () => {
                         src={fotoAnalise as string}
                         alt={produtoAnalise.codigo}
                         className="h-64 w-full object-cover bg-gray-100"
-                        onError={() => setImagemComErro((prev) => ({ ...prev, [produtoAnalise.id]: true }))}
+                        onError={() => setImagemComErro((prev) => ({ ...prev, [fotoAnaliseErroKey]: true }))}
                       />
                     ) : (
                       <div className="h-64 w-full bg-gray-100 flex items-center justify-center text-gray-400">
