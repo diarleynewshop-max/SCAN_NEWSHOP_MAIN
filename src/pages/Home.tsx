@@ -1,5 +1,5 @@
 ﻿import { useNavigate } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -34,6 +34,11 @@ const baseMenuItems = [
   { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },
   { Icon: Settings,     label: "Configuração", description: "Tema, layout e Modo Leve", path: null, accent: "hsl(var(--indigo))" },
+];
+
+// Menu para compras (compras, admin, super)
+const comprasMenuItems = [
+  { Icon: ShoppingCart, label: "Compras",     description: "Gestão de reposição e itens faltantes", path: "/compras", accent: "hsl(var(--indigo))" },
 ];
 
 // Menu para analytics (admin, super)
@@ -379,7 +384,7 @@ const Home = () => {
             </h2>
             {modoDesktop && (
               <p style={{ fontSize: 14, color: "hsl(var(--muted-foreground))", marginTop: 8, maxWidth: "600px" }}>
-                Acesse as funcionalidades do sistema de pedidos e conferência em uma interface otimizada para desktop.
+                Acesse todas as funcionalidades do sistema de pedidos, conferência e gestão de compras em uma interface otimizada para desktop.
               </p>
             )}
           </div>
@@ -421,6 +426,24 @@ const Home = () => {
               />
             </div>
           ))}
+          
+          {/* Cards para compras (se tiver acesso) */}
+          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
+            comprasMenuItems.map(({ Icon, label, description, path, accent }) => (
+              <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
+                <MenuCard 
+                  Icon={Icon}
+                  label={label}
+                  description={description}
+                  path={path}
+                  accent={accent}
+                  navigate={navigate}
+                  setMostrarPerfil={setMostrarPerfil}
+                  setMostrarConfiguracoes={setMostrarConfiguracoes}
+                />
+              </div>
+            ))
+          )}
           
           {/* Cards para analytics (se tiver acesso) */}
           {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
