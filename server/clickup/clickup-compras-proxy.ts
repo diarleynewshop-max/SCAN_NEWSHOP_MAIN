@@ -49,28 +49,97 @@ function normalizeStatusFilter(value: unknown): CompraStatusApp | null {
 
 function extractFirstImageUrl(attachments: unknown): string | null {
   const safeAttachments = Array.isArray(attachments) ? attachments : [];
+  const urlFields = ['thumbnail_url', 'thumbnailUrl', 'preview_url', 'previewUrl', 'download_url', 'downloadUrl', 'url'];
 
   for (const attachment of safeAttachments) {
     if (!attachment || typeof attachment !== 'object') continue;
 
     const candidate = attachment as Record<string, unknown>;
-    const url = String(candidate.url || '');
     const title = String(candidate.title || candidate.file_name || '').toLowerCase();
     const mimetype = String(candidate.mimetype || '');
+    const isImageAttachment =
+      mimetype.startsWith('image/') ||
+      title.endsWith('.jpg') ||
+      title.endsWith('.jpeg') ||
+      title.endsWith('.png') ||
+      title.endsWith('.gif') ||
+      title.endsWith('.webp');
 
-    if (
-      url.startsWith('http') &&
-      (
-        mimetype.startsWith('image/') ||
-        title.endsWith('.jpg') ||
-        title.endsWith('.jpeg') ||
-        title.endsWith('.png') ||
-        title.endsWith('.gif') ||
-        title.endsWith('.webp')
-      )
-    ) {
-      return url;
+    for (const field of urlFields) {
+      const url = String(candidate[field] || '');
+      if (!url.startsWith('http')) continue;
+
+      if (isImageAttachment || field.includes('thumbnail') || field.includes('preview') || (!mimetype && !title)) {
+        return url;
+      }
     }
+  }
+
+  return null;
+}
+
+function looksLikeImageUrl(value: string): boolean {
+  const normalized = value.toLowerCase();
+  return (
+    normalized.includes('image') ||
+    normalized.includes('attachment') ||
+    normalized.includes('thumbnail') ||
+    normalized.includes('preview') ||
+    /\.(jpg|jpeg|png|gif|webp)(\?|#|$)/.test(normalized)
+  );
+}
+
+function findImageUrlDeep(value: unknown, depth = 0): string | null {
+  if (depth > 5 || value == null) return null;
+
+  if (typeof value === 'string') {
+    return value.startsWith('http') && looksLikeImageUrl(value) ? value : null;
+  }
+
+  if (Array.isArray(value)) {
+    for (const item of value) {
+      const found = findImageUrlDeep(item, depth + 1);
+      if (found) return found;
+    }
+    return null;
+  }
+
+  if (typeof value !== 'object') return null;
+
+  const record = value as Record<string, unknown>;
+  const preferredKeys = [
+    'thumbnail_url',
+    'thumbnailUrl',
+    'preview_url',
+    'previewUrl',
+    'download_url',
+    'downloadUrl',
+    'coverimage',
+    'cover_image',
+    'image_url',
+    'imageUrl',
+    'thumbnail',
+    'preview',
+    'url',
+  ];
+
+  for (const key of preferredKeys) {
+    const candidate = record[key];
+    if (typeof candidate === 'string' && candidate.startsWith('http') && looksLikeImageUrl(candidate)) {
+      return candidate;
+    }
+  }
+
+  for (const [key, candidate] of Object.entries(record)) {
+    if (typeof candidate === 'string' && candidate.startsWith('http')) {
+      const context = key.toLowerCase();
+      if (context.includes('image') || context.includes('thumb') || context.includes('preview') || looksLikeImageUrl(candidate)) {
+        return candidate;
+      }
+    }
+
+    const found = findImageUrlDeep(candidate, depth + 1);
+    if (found) return found;
   }
 
   return null;
@@ -93,6 +162,20 @@ function extractImageFromTask(task: Record<string, unknown>): string | null {
     if (typeof value === 'string' && value.startsWith('http')) return value;
   }
 
+  return findImageUrlDeep(task);
+}
+
+function detectImageMime(buffer: Buffer, contentType: string): string | null {
+  const mimeType = contentType.split(';')[0]?.trim();
+  if (mimeType?.startsWith('image/')) return mimeType;
+
+  if (buffer.length >= 4 && buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) return 'image/jpeg';
+  if (buffer.length >= 8 && buffer[0] === 0x89 && buffer[1] === 0x50 && buffer[2] === 0x4e && buffer[3] === 0x47) return 'image/png';
+  if (buffer.length >= 6 && buffer.subarray(0, 3).toString('ascii') === 'GIF') return 'image/gif';
+  if (buffer.length >= 12 && buffer.subarray(0, 4).toString('ascii') === 'RIFF' && buffer.subarray(8, 12).toString('ascii') === 'WEBP') {
+    return 'image/webp';
+  }
+
   return null;
 }
 
@@ -106,10 +189,12 @@ async function fetchImageAsDataUrl(url: string, token: string): Promise<string |
     });
 
     const contentType = response.headers.get('content-type') || '';
-    if (!response.ok || !contentType.startsWith('image/')) return null;
+    if (!response.ok) return null;
 
     const buffer = Buffer.from(await response.arrayBuffer());
-    const mimeType = contentType.split(';')[0]?.trim() || 'image/jpeg';
+    const mimeType = detectImageMime(buffer, contentType);
+    if (!mimeType) return null;
+
     return `data:${mimeType};base64,${buffer.toString('base64')}`;
   } catch {
     return null;
