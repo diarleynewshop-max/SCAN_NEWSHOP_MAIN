@@ -22,6 +22,9 @@ type CompraStatusApp =
   | 'compra_realizada'
   | 'concluido';
 
+const CLICKUP_PAGE_SIZE = 100;
+const MAX_CLICKUP_PAGES = 20;
+
 function getSingle(value: unknown): string {
   if (Array.isArray(value)) {
     return String(value[0] ?? '');
@@ -225,6 +228,41 @@ function getClickUpStatusName(status: unknown): string {
   return String((status as Record<string, unknown>).status ?? '');
 }
 
+async function fetchAllCompraTasks(token: string, listId: string) {
+  const allTasks: unknown[] = [];
+
+  for (let page = 0; page < MAX_CLICKUP_PAGES; page++) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 15000);
+
+    try {
+      const response = await fetch(
+        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=${page}`,
+        {
+          headers: { Authorization: token },
+          signal: controller.signal,
+        }
+      );
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        throw new Error(`ClickUp ${response.status} na lista ${listId}: ${errorText}`);
+      }
+
+      const rawText = await response.text();
+      const data = rawText ? JSON.parse(rawText) : {};
+      const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+      allTasks.push(...tasks);
+
+      if (tasks.length < CLICKUP_PAGE_SIZE) break;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
+  return allTasks;
+}
+
 async function buscarTasksCompras(
   req: VercelRequest,
   res: VercelResponse,
@@ -233,27 +271,7 @@ async function buscarTasksCompras(
   listId: string
 ) {
   const statusFilter = normalizeStatusFilter(req.query.status);
-
-  const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 15000);
-
-  const response = await fetch(
-    `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true`,
-    {
-      headers: { Authorization: token },
-      signal: controller.signal,
-    }
-  );
-  clearTimeout(timeout);
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    return res.status(response.status).json({ error: errorText, empresa, listId });
-  }
-
-  const rawText = await response.text();
-  const data = rawText ? JSON.parse(rawText) : {};
-  const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+  const tasks = await fetchAllCompraTasks(token, listId);
   const produtos: Array<Record<string, unknown>> = [];
   const skippedTasks: Array<{ id: string; reason: string }> = [];
 
@@ -300,6 +318,7 @@ async function buscarTasksCompras(
     produtos: produtosFiltrados,
     empresa,
     total: produtosFiltrados.length,
+    totalRaw: tasks.length,
     listId,
     statusFilter,
     skippedCount: skippedTasks.length,
