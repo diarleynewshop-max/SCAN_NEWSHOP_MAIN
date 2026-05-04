@@ -4,6 +4,7 @@
  */
 
 import { createClient } from '@supabase/supabase-js';
+import WebSocket from 'ws';
 
 // Configuração do Supabase para ambiente do Trigger
 const supabaseUrl = process.env.SUPABASE_URL;
@@ -23,6 +24,9 @@ export const supabase = createClient(
    {
     auth: {
       persistSession: false
+    },
+    realtime: {
+      transport: WebSocket as never,
     },
     db: { 
       schema: 'public',
