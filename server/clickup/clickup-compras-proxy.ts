@@ -9,6 +9,7 @@ import {
   isCompraTransitionAllowed,
   mapActionToStatus,
   mapTaskStatus,
+  normalizeClickUpStatus,
   normalizeEmpresa,
   resolveCompraClickUpStatus,
 } from './_clickup.js';
@@ -24,6 +25,30 @@ type CompraStatusApp =
 
 const CLICKUP_PAGE_SIZE = 100;
 const MAX_CLICKUP_PAGES = 20;
+const REPEATED_ITEM_TAG = '( ITEM REPETIDO )';
+const MAX_REPEATED_TAGS_PER_REQUEST = 25;
+
+const DUPLICATE_STATUS_PRIORITY: Record<CompraStatusApp, number> = {
+  fazer_pedido: 400,
+  produto_bom: 300,
+  produto_ruim: 200,
+  todo: 100,
+  pedido_andamento: 90,
+  compra_realizada: 80,
+  concluido: 10,
+};
+
+type CompraProdutoInterno = {
+  id: string;
+  codigo: string;
+  sku: string | null;
+  descricao: string;
+  foto: string | null;
+  status: CompraStatusApp;
+  status_clickup: string;
+  date_created: string;
+  tags: unknown;
+};
 
 function getSingle(value: unknown): string {
   if (Array.isArray(value)) {
@@ -228,6 +253,148 @@ function getClickUpStatusName(status: unknown): string {
   return String((status as Record<string, unknown>).status ?? '');
 }
 
+function normalizeProdutoKey(value: string | null | undefined): string {
+  const normalized = String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase();
+
+  return normalized.replace(/\s+/g, ' ');
+}
+
+function getProdutoDuplicateKey(produto: CompraProdutoInterno): string {
+  const codigo = normalizeProdutoKey(produto.codigo);
+  const codigoNumerico = codigo.match(/\d{6,14}/)?.[0];
+  if (codigoNumerico) return `COD:${codigoNumerico}`;
+
+  const sku = normalizeProdutoKey(produto.sku);
+  if (sku) return `SKU:${sku}`;
+
+  return codigo ? `COD:${codigo}` : '';
+}
+
+function shouldReplaceDuplicate(kept: CompraProdutoInterno, candidate: CompraProdutoInterno): boolean {
+  const keptPriority = DUPLICATE_STATUS_PRIORITY[kept.status] ?? 0;
+  const candidatePriority = DUPLICATE_STATUS_PRIORITY[candidate.status] ?? 0;
+
+  if (candidatePriority !== keptPriority) {
+    return candidatePriority > keptPriority;
+  }
+
+  return Number(candidate.date_created || 0) > Number(kept.date_created || 0);
+}
+
+function deduplicateProdutosCompras(produtos: CompraProdutoInterno[]) {
+  const byProduct = new Map<string, CompraProdutoInterno>();
+  const semChave: CompraProdutoInterno[] = [];
+  const repetidos: CompraProdutoInterno[] = [];
+
+  for (const produto of produtos) {
+    const key = getProdutoDuplicateKey(produto);
+    if (!key) {
+      semChave.push(produto);
+      continue;
+    }
+
+    const kept = byProduct.get(key);
+    if (!kept) {
+      byProduct.set(key, produto);
+      continue;
+    }
+
+    if (shouldReplaceDuplicate(kept, produto)) {
+      repetidos.push(kept);
+      byProduct.set(key, produto);
+    } else {
+      repetidos.push(produto);
+    }
+  }
+
+  return {
+    produtos: [...semChave, ...byProduct.values()],
+    repetidos,
+  };
+}
+
+function stripInternalFields(produto: CompraProdutoInterno) {
+  const { tags: _tags, ...publicProduto } = produto;
+  return publicProduto;
+}
+
+function taskHasRepeatedItemTag(tags: unknown): boolean {
+  if (!Array.isArray(tags)) return false;
+  const repeatedTag = normalizeClickUpStatus(REPEATED_ITEM_TAG);
+
+  return tags.some((tag) => {
+    const tagName = typeof tag === 'string'
+      ? tag
+      : String((tag as Record<string, unknown> | null)?.name ?? '');
+    return normalizeClickUpStatus(tagName) === repeatedTag;
+  });
+}
+
+async function addRepeatedItemTag(token: string, taskId: string) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+
+  try {
+    const response = await fetch(
+      `https://api.clickup.com/api/v2/task/${taskId}/tag/${encodeURIComponent(REPEATED_ITEM_TAG)}`,
+      {
+        method: 'POST',
+        headers: { Authorization: token },
+        signal: controller.signal,
+      }
+    );
+
+    if (!response.ok) {
+      throw new Error(`ClickUp ${response.status}: ${await response.text()}`);
+    }
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function markRepeatedTasksInClickUp(
+  token: string,
+  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL',
+  listId: string,
+  repetidos: CompraProdutoInterno[]
+) {
+  const candidates = repetidos
+    .filter((produto) => produto.id && !taskHasRepeatedItemTag(produto.tags))
+    .slice(0, MAX_REPEATED_TAGS_PER_REQUEST);
+
+  if (candidates.length === 0) return;
+
+  const results = await Promise.allSettled(
+    candidates.map((produto) => addRepeatedItemTag(token, produto.id))
+  );
+  const failed = results.filter((result) => result.status === 'rejected');
+
+  if (failed.length > 0) {
+    console.warn('[clickup-compras] falha ao marcar itens repetidos:', {
+      empresa,
+      listId,
+      failedCount: failed.length,
+      attemptedCount: candidates.length,
+      totalRepeated: repetidos.length,
+      firstError: failed[0]?.status === 'rejected' ? String(failed[0].reason) : '',
+    });
+  }
+
+  if (repetidos.length > MAX_REPEATED_TAGS_PER_REQUEST) {
+    console.warn('[clickup-compras] itens repetidos acima do limite por request:', {
+      empresa,
+      listId,
+      taggedThisRequest: candidates.length - failed.length,
+      totalRepeated: repetidos.length,
+      limit: MAX_REPEATED_TAGS_PER_REQUEST,
+    });
+  }
+}
+
 async function fetchAllCompraTasks(token: string, listId: string) {
   const allTasks: unknown[] = [];
 
@@ -272,7 +439,7 @@ async function buscarTasksCompras(
 ) {
   const statusFilter = normalizeStatusFilter(req.query.status);
   const tasks = await fetchAllCompraTasks(token, listId);
-  const produtos: Array<Record<string, unknown>> = [];
+  const produtos: CompraProdutoInterno[] = [];
   const skippedTasks: Array<{ id: string; reason: string }> = [];
 
   for (const task of tasks) {
@@ -301,6 +468,7 @@ async function buscarTasksCompras(
         status: mapTaskStatus(getClickUpStatusName(t.status)),
         status_clickup: getClickUpStatusName(t.status),
         date_created: String(t.date_created ?? ''),
+        tags: t.tags,
       });
     } catch (taskError) {
       skippedTasks.push({
@@ -310,15 +478,21 @@ async function buscarTasksCompras(
     }
   }
 
-  const produtosFiltrados = statusFilter
-    ? produtos.filter((produto) => produto.status === statusFilter)
-    : produtos;
+  const { produtos: produtosUnicos, repetidos } = deduplicateProdutosCompras(produtos);
+  await markRepeatedTasksInClickUp(token, empresa, listId, repetidos);
+
+  const produtosFiltrados = (statusFilter
+    ? produtosUnicos.filter((produto) => produto.status === statusFilter)
+    : produtosUnicos
+  ).map(stripInternalFields);
 
   return res.json({
     produtos: produtosFiltrados,
     empresa,
     total: produtosFiltrados.length,
     totalRaw: tasks.length,
+    totalUnique: produtosUnicos.length,
+    repeatedHiddenCount: repetidos.length,
     listId,
     statusFilter,
     skippedCount: skippedTasks.length,

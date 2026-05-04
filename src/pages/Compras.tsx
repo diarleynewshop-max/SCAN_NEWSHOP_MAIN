@@ -23,19 +23,19 @@ type StatusFiltro = "todos" | "todo" | "produto_ruim" | "produto_bom" | "fazer_p
 
 const STATUS_FILTROS: Array<{ value: StatusFiltro; label: string }> = [
   { value: "todos", label: "Todos" },
-  { value: "todo", label: "Pendente" },
-  { value: "produto_ruim", label: "Ruim" },
+  { value: "fazer_pedido", label: "Fazer Pedido" },
   { value: "produto_bom", label: "Galpao" },
-  { value: "fazer_pedido", label: "Fazer compra" },
+  { value: "produto_ruim", label: "Ruim" },
+  { value: "todo", label: "Pendente" },
 ];
 
 const SECOES_FIXAS = ["Eletronico", "Papelaria", "Bijuteria"];
 
 const STATUS_PRIORITY: Record<string, number> = {
-  todo: 0,
+  fazer_pedido: 0,
   produto_bom: 1,
   produto_ruim: 2,
-  fazer_pedido: 3,
+  todo: 3,
   pedido_andamento: 4,
   compra_realizada: 5,
   concluido: 6,
