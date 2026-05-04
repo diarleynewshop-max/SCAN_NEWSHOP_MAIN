@@ -307,7 +307,7 @@ export function isCompraTransitionAllowed(
     todo: ["produto_bom", "produto_ruim", "fazer_pedido"],
     produto_bom: ["produto_ruim", "fazer_pedido"],
     produto_ruim: ["produto_bom"],
-    fazer_pedido: ["produto_bom", "pedido_andamento"],
+    fazer_pedido: ["produto_bom", "produto_ruim", "pedido_andamento", "compra_realizada"],
     pedido_andamento: ["fazer_pedido", "compra_realizada"],
     compra_realizada: ["pedido_andamento", "concluido"],
     concluido: ["fazer_pedido", "compra_realizada"],
