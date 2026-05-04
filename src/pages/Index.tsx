@@ -123,6 +123,7 @@ const Index = () => {
   const [showProductInfo, setShowProductInfo] = useState(false);
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
   const [photoProductId, setPhotoProductId] = useState<string | null>(null);
+  const [lastLookupBarcode, setLastLookupBarcode] = useState<string | null>(null);
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
@@ -138,6 +139,16 @@ const Index = () => {
     empresa: lookupEmpresa,
     flag: lookupFlag,
   });
+
+  const startProductLookup = useCallback(
+    (code: string) => {
+      const normalizedCode = code.trim();
+      if (!normalizedCode) return;
+      setLastLookupBarcode(normalizedCode);
+      lookupProduct(normalizedCode);
+    },
+    [lookupProduct]
+  );
 
   useEffect(() => {
     sessionStorage.setItem("scan_barcode", barcode);
@@ -243,9 +254,9 @@ const Index = () => {
         return;
       }
       setShowProductInfo(true);
-      lookupProduct(code);
+      startProductLookup(code);
     },
-    [lookupProduct, consultaBloqueadaPorFlag, toast]
+    [startProductLookup, consultaBloqueadaPorFlag, toast]
   );
 
   const handleCloseList = () => {
@@ -291,7 +302,12 @@ const Index = () => {
 
   const handleAdd = async () => {
     const codigoAtual = barcode.trim();
-    const erpPhotoMissing = Boolean(productInfo && productInfo.codigo === codigoAtual && !productInfo.imagem);
+    const lookupFoiDoProdutoAtual = lastLookupBarcode === codigoAtual;
+    const erpPhotoMissing = Boolean(
+      lookupFoiDoProdutoAtual &&
+      (!productInfo || productInfo.codigo === codigoAtual) &&
+      !productInfo?.imagem
+    );
     const ok = await addProduct({
       barcode,
       sku,
@@ -311,6 +327,7 @@ const Index = () => {
     sessionStorage.removeItem("scan_sku");
     sessionStorage.removeItem("scan_photo");
     sessionStorage.removeItem("scan_quantity");
+    setLastLookupBarcode(null);
   };
 
   const productCount = activeList?.products.length ?? 0;
@@ -529,7 +546,7 @@ const Index = () => {
                       return;
                     }
                     setShowProductInfo(true);
-                    lookupProduct(barcode.trim());
+                    startProductLookup(barcode);
                   }}
                 />
               </div>
