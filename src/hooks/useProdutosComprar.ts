@@ -43,6 +43,77 @@ function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
   return 'NEWSHOP';
 }
 
+const STATUS_DUPLICADO_PRIORITY: Record<CompraStatusApp, number> = {
+  fazer_pedido: 400,
+  produto_bom: 300,
+  produto_ruim: 200,
+  todo: 100,
+  pedido_andamento: 90,
+  compra_realizada: 80,
+  concluido: 10,
+};
+
+function normalizarProdutoKey(value: string | null | undefined): string {
+  return String(value ?? '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .trim()
+    .toUpperCase()
+    .replace(/\s+/g, ' ');
+}
+
+function getProdutoKey(produto: ProdutoComprar): string {
+  const codigo = normalizarProdutoKey(produto.codigo);
+  const codigoNumerico = codigo.match(/\d{6,14}/)?.[0];
+  if (codigoNumerico) return `COD:${codigoNumerico}`;
+
+  const sku = normalizarProdutoKey(produto.sku);
+  if (sku) return `SKU:${sku}`;
+
+  return codigo ? `COD:${codigo}` : '';
+}
+
+function deveSubstituirProduto(mantido: ProdutoComprar, candidato: ProdutoComprar): boolean {
+  const prioridadeMantido = STATUS_DUPLICADO_PRIORITY[mantido.status] ?? 0;
+  const prioridadeCandidato = STATUS_DUPLICADO_PRIORITY[candidato.status] ?? 0;
+
+  if (prioridadeCandidato !== prioridadeMantido) {
+    return prioridadeCandidato > prioridadeMantido;
+  }
+
+  return Number(candidato.date_created || 0) > Number(mantido.date_created || 0);
+}
+
+function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
+  const porProduto = new Map<string, ProdutoComprar>();
+  const semChave: ProdutoComprar[] = [];
+
+  for (const produto of produtos) {
+    const key = getProdutoKey(produto);
+    if (!key) {
+      semChave.push(produto);
+      continue;
+    }
+
+    const mantido = porProduto.get(key);
+    if (!mantido || deveSubstituirProduto(mantido, produto)) {
+      porProduto.set(key, produto);
+    }
+  }
+
+  return [...semChave, ...porProduto.values()];
+}
+
+function isAbortError(err: unknown): boolean {
+  return typeof err === 'object' && err !== null && 'name' in err && err.name === 'AbortError';
+}
+
+function getErrorMessage(err: unknown, fallback: string): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === 'string') return err;
+  return fallback;
+}
+
 export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [produtos, setProdutos] = useState<ProdutoComprar[]>([]);
   const [loading, setLoading] = useState(true);
@@ -73,14 +144,14 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       }
 
       const data = await response.json();
-      setProdutos(data.produtos ?? []);
+      setProdutos(deduplicarProdutos(data.produtos ?? []));
       setUltimaAtualizacao(new Date());
-    } catch (err: any) {
-      if (err?.name === 'AbortError') {
+    } catch (err: unknown) {
+      if (isAbortError(err)) {
         return;
       }
       console.error('[useProdutosComprar] Erro ao buscar:', err);
-      setError(err.message ?? 'Falha ao carregar produtos');
+      setError(getErrorMessage(err, 'Falha ao carregar produtos'));
     } finally {
       if (requestControllerRef.current === controller) {
         setLoading(false);
@@ -163,7 +234,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       }
 
       await fetchProdutos();
-    } catch (err: any) {
+    } catch (err: unknown) {
       if (statusAnterior) {
         setProdutos((prev) =>
           prev.map((p) => (p.id === taskId ? { ...p, status: statusAnterior } : p))
