@@ -137,6 +137,7 @@ const Compras = () => {
   const [searchTerm, setSearchTerm] = useState("");
   const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("todos");
   const [filtroSecao, setFiltroSecao] = useState("todos");
+  const [filtroSecaoAnalise, setFiltroSecaoAnalise] = useState("todos");
   const [importando, setImportando] = useState(false);
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
@@ -281,13 +282,41 @@ const Compras = () => {
   const inicio = (paginaAtual - 1) * PAGE_SIZE;
   const fim = inicio + PAGE_SIZE;
   const produtosPaginados = produtosOrdenados.slice(inicio, fim);
+  const produtosPendentesAnalise = useMemo(() => {
+    return [...produtos.filter((produto) => produto.status === "todo")].sort((a, b) => (
+      Number(b.date_created || 0) - Number(a.date_created || 0)
+    ));
+  }, [produtos]);
+  const produtosAnalise = useMemo(
+    () => produtosPendentesAnalise.filter((produto) => (
+      secaoCombinaFiltro(produtosErp[produto.id]?.secao, filtroSecaoAnalise)
+    )),
+    [filtroSecaoAnalise, produtosErp, produtosPendentesAnalise]
+  );
+  const produtoAnalise = produtosAnalise[0] ?? null;
+  const produtoAnaliseErp = produtoAnalise ? produtosErp[produtoAnalise.id] : null;
+  const fotoAnaliseSelecionada = produtoAnalise
+    ? selecionarFotoProduto(produtoAnalise, produtoAnaliseErp, fotosClickUp, imagemComErro)
+    : null;
+  const fotoAnalise = fotoAnaliseSelecionada?.src ?? null;
+  const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
+  const podeMostrarFotoAnalise = Boolean(produtoAnalise && fotoAnaliseSelecionada);
 
   useEffect(() => {
     let cancelado = false;
 
     const carregarProdutosErp = async () => {
-      const origem = filtroSecao === "todos" ? produtosPaginados : produtosPorBuscaStatus;
-      const limite = filtroSecao === "todos" ? PAGE_SIZE : 25;
+      const origemTela = filtroSecao === "todos" ? produtosPaginados : produtosPorBuscaStatus;
+      const origemAnalise = analiseAberta
+        ? [
+            produtoAnalise,
+            ...(filtroSecaoAnalise === "todos" ? [] : produtosPendentesAnalise),
+          ].filter((produto): produto is ProdutoComprar => Boolean(produto))
+        : [];
+      const origem = Array.from(
+        new Map([...origemTela, ...origemAnalise].map((produto) => [produto.id, produto])).values()
+      );
+      const limite = filtroSecao !== "todos" || (analiseAberta && filtroSecaoAnalise !== "todos") ? 25 : PAGE_SIZE;
       const pendentes = origem.filter((produto) => !(produto.id in produtosErp)).slice(0, limite);
       if (pendentes.length === 0) return;
 
@@ -356,13 +385,29 @@ const Compras = () => {
     return () => {
       cancelado = true;
     };
-  }, [empresa, filtroSecao, produtosErp, produtosPaginados, produtosPorBuscaStatus]);
+  }, [
+    analiseAberta,
+    empresa,
+    filtroSecao,
+    filtroSecaoAnalise,
+    produtoAnalise,
+    produtosErp,
+    produtosPaginados,
+    produtosPendentesAnalise,
+    produtosPorBuscaStatus,
+  ]);
 
   useEffect(() => {
     let cancelado = false;
 
     const carregarFotosClickUp = async () => {
-      const pendentes = produtosPaginados.filter((produto) => {
+      const origem = Array.from(
+        new Map([
+          ...produtosPaginados,
+          ...(produtoAnalise ? [produtoAnalise] : []),
+        ].map((produto) => [produto.id, produto])).values()
+      );
+      const pendentes = origem.filter((produto) => {
         return !(produto.id in fotosClickUp);
       });
 
@@ -428,7 +473,7 @@ const Compras = () => {
     return () => {
       cancelado = true;
     };
-  }, [empresa, fotosClickUp, produtosErp, produtosPaginados]);
+  }, [empresa, fotosClickUp, produtoAnalise, produtosErp, produtosPaginados]);
 
   useEffect(() => {
     for (const produto of produtosPaginados) {
@@ -478,20 +523,9 @@ const Compras = () => {
     }
   };
 
-  const produtosAnalise = useMemo(
-    () => produtosOrdenados.filter((produto) => produto.status === "todo"),
-    [produtosOrdenados]
-  );
-  const produtoAnalise = produtosAnalise[0] ?? null;
-  const produtoAnaliseErp = produtoAnalise ? produtosErp[produtoAnalise.id] : null;
-  const fotoAnaliseSelecionada = produtoAnalise
-    ? selecionarFotoProduto(produtoAnalise, produtoAnaliseErp, fotosClickUp, imagemComErro)
-    : null;
-  const fotoAnalise = fotoAnaliseSelecionada?.src ?? null;
-  const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
-  const podeMostrarFotoAnalise = Boolean(produtoAnalise && fotoAnaliseSelecionada);
   const filtrosAtivos = Boolean(searchTerm || filtroStatus !== "todos" || filtroSecao !== "todos");
   const carregandoFiltroSecao = filtroSecao !== "todos" && produtosPorBuscaStatus.some((produto) => !(produto.id in produtosErp));
+  const carregandoFiltroSecaoAnalise = analiseAberta && filtroSecaoAnalise !== "todos" && produtosPendentesAnalise.some((produto) => !(produto.id in produtosErp));
 
   const executarAnalise = async (
     acao: "DISLIKE" | "LIKE" | "FAZER_PEDIDO",
@@ -559,7 +593,13 @@ const Compras = () => {
               onChange={handleImportarPlanilha}
               className="hidden"
             />
-            <Button onClick={() => setAnaliseAberta(true)} disabled={loading || produtosAnalise.length === 0}>
+            <Button
+              onClick={() => {
+                setFiltroSecaoAnalise(filtroSecao);
+                setAnaliseAberta(true);
+              }}
+              disabled={loading || produtosPendentesAnalise.length === 0}
+            >
               <ShoppingCart className="h-4 w-4 mr-2" />
               Iniciar Analise
             </Button>
@@ -931,10 +971,41 @@ const Compras = () => {
 
             <div className="pr-10 mb-4">
               <h2 className="text-xl font-bold text-gray-900">Analise de Compras</h2>
-              <p className="text-sm text-gray-500">{produtosAnalise.length} item(ns) pendente(s)</p>
+              <p className="text-sm text-gray-500">{produtosAnalise.length} de {produtosPendentesAnalise.length} item(ns) pendente(s)</p>
             </div>
 
-            {!produtoAnalise ? (
+            <div className="mb-4">
+              <label className="text-xs font-semibold text-gray-600 mb-1 block">Secao</label>
+              <select
+                value={filtroSecaoAnalise}
+                onChange={(e) => {
+                  setFiltroSecaoAnalise(e.target.value);
+                  setEscolhaDireita(false);
+                  setDragX(0);
+                }}
+                className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
+              >
+                <option value="todos">Todas as secoes</option>
+                {secoesDisponiveis.map((secao) => (
+                  <option key={secao} value={secao}>
+                    {secao}
+                  </option>
+                ))}
+              </select>
+              {carregandoFiltroSecaoAnalise && (
+                <div className="mt-2 inline-flex items-center gap-2 text-xs text-gray-500">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Carregando secoes dos pendentes
+                </div>
+              )}
+            </div>
+
+            {!produtoAnalise && carregandoFiltroSecaoAnalise ? (
+              <div className="py-16 flex items-center justify-center gap-2 text-gray-500">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Carregando itens
+              </div>
+            ) : !produtoAnalise ? (
               <div className="py-16 text-center text-gray-500">Nenhum item pendente</div>
             ) : (
               <>
