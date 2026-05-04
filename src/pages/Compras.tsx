@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
@@ -18,6 +18,18 @@ type FotoOpcao = {
   src: string;
   fonte: FotoFonte;
 };
+
+type StatusFiltro = "todos" | "todo" | "produto_ruim" | "produto_bom" | "fazer_pedido";
+
+const STATUS_FILTROS: Array<{ value: StatusFiltro; label: string }> = [
+  { value: "todos", label: "Todos" },
+  { value: "todo", label: "Pendente" },
+  { value: "produto_ruim", label: "Ruim" },
+  { value: "produto_bom", label: "Galpao" },
+  { value: "fazer_pedido", label: "Fazer compra" },
+];
+
+const SECOES_FIXAS = ["Eletronico", "Papelaria", "Bijuteria"];
 
 const STATUS_PRIORITY: Record<string, number> = {
   todo: 0,
@@ -70,6 +82,28 @@ function getCodigoConsulta(codigo: string): string {
   return qualquerCodigo?.[0] ?? codigo;
 }
 
+function normalizarFiltro(value: string | null | undefined): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function secaoCombinaFiltro(secao: string | null | undefined, filtro: string): boolean {
+  if (filtro === "todos") return true;
+
+  const secaoNormalizada = normalizarFiltro(secao);
+  const filtroNormalizado = normalizarFiltro(filtro);
+  if (!secaoNormalizada || !filtroNormalizado) return false;
+
+  return (
+    secaoNormalizada === filtroNormalizado ||
+    secaoNormalizada.includes(filtroNormalizado) ||
+    filtroNormalizado.includes(secaoNormalizada)
+  );
+}
+
 function getImagemErroKey(produtoId: string, fonte: FotoFonte, foto: string | null): string {
   return `${produtoId}:${fonte}:${foto || "sem-foto"}`;
 }
@@ -101,6 +135,8 @@ const Compras = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [searchTerm, setSearchTerm] = useState("");
+  const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("todos");
+  const [filtroSecao, setFiltroSecao] = useState("todos");
   const [importando, setImportando] = useState(false);
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
@@ -187,14 +223,39 @@ const Compras = () => {
     }
   };
 
-  const filteredProdutos = useMemo(() => {
+  const produtosPorBuscaStatus = useMemo(() => {
     const termo = searchTerm.toLowerCase();
     return produtos.filter((p) => (
-      p.codigo.toLowerCase().includes(termo) ||
-      p.descricao.toLowerCase().includes(termo) ||
-      (p.sku || "").toLowerCase().includes(termo)
+      (filtroStatus === "todos" || p.status === filtroStatus) &&
+      (
+        p.codigo.toLowerCase().includes(termo) ||
+        p.descricao.toLowerCase().includes(termo) ||
+        (p.sku || "").toLowerCase().includes(termo)
+      )
     ));
-  }, [produtos, searchTerm]);
+  }, [filtroStatus, produtos, searchTerm]);
+
+  const secoesDisponiveis = useMemo(() => {
+    const secoes = new Map<string, string>();
+
+    for (const secao of SECOES_FIXAS) {
+      secoes.set(normalizarFiltro(secao), secao);
+    }
+
+    for (const produtoErp of Object.values(produtosErp)) {
+      const secao = produtoErp?.secao?.trim();
+      if (!secao) continue;
+      secoes.set(normalizarFiltro(secao), secao);
+    }
+
+    return Array.from(secoes.values()).sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [produtosErp]);
+
+  const filteredProdutos = useMemo(() => {
+    return produtosPorBuscaStatus.filter((p) => (
+      secaoCombinaFiltro(produtosErp[p.id]?.secao, filtroSecao)
+    ));
+  }, [filtroSecao, produtosErp, produtosPorBuscaStatus]);
 
   const produtosOrdenados = useMemo(() => {
     return [...filteredProdutos].sort((a, b) => {
@@ -209,7 +270,7 @@ const Compras = () => {
 
   useEffect(() => {
     setPaginaAtual(1);
-  }, [searchTerm, produtos.length]);
+  }, [filtroSecao, filtroStatus, searchTerm, produtos.length]);
 
   useEffect(() => {
     if (paginaAtual > totalPaginas) {
@@ -225,7 +286,9 @@ const Compras = () => {
     let cancelado = false;
 
     const carregarProdutosErp = async () => {
-      const pendentes = produtosPaginados.filter((produto) => !(produto.id in produtosErp));
+      const origem = filtroSecao === "todos" ? produtosPaginados : produtosPorBuscaStatus;
+      const limite = filtroSecao === "todos" ? PAGE_SIZE : 25;
+      const pendentes = origem.filter((produto) => !(produto.id in produtosErp)).slice(0, limite);
       if (pendentes.length === 0) return;
 
       const resultados = await Promise.all(
@@ -293,7 +356,7 @@ const Compras = () => {
     return () => {
       cancelado = true;
     };
-  }, [empresa, produtosErp, produtosPaginados]);
+  }, [empresa, filtroSecao, produtosErp, produtosPaginados, produtosPorBuscaStatus]);
 
   useEffect(() => {
     let cancelado = false;
@@ -427,6 +490,8 @@ const Compras = () => {
   const fotoAnalise = fotoAnaliseSelecionada?.src ?? null;
   const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
   const podeMostrarFotoAnalise = Boolean(produtoAnalise && fotoAnaliseSelecionada);
+  const filtrosAtivos = Boolean(searchTerm || filtroStatus !== "todos" || filtroSecao !== "todos");
+  const carregandoFiltroSecao = filtroSecao !== "todos" && produtosPorBuscaStatus.some((produto) => !(produto.id in produtosErp));
 
   const executarAnalise = async (
     acao: "DISLIKE" | "LIKE" | "FAZER_PEDIDO",
@@ -596,14 +661,66 @@ const Compras = () => {
 
         <Card className="mb-6">
           <CardContent className="pt-6">
-            <div className="flex-1 relative">
-              <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
-              <Input
-                placeholder="Buscar por codigo, descricao ou SKU..."
-                className="pl-10"
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-              />
+            <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr_1fr_auto] gap-3">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
+                <Input
+                  placeholder="Buscar por codigo, descricao ou SKU..."
+                  className="pl-10"
+                  value={searchTerm}
+                  onChange={(e) => setSearchTerm(e.target.value)}
+                />
+              </div>
+
+              <select
+                value={filtroSecao}
+                onChange={(e) => setFiltroSecao(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="todos">Todas as secoes</option>
+                {secoesDisponiveis.map((secao) => (
+                  <option key={secao} value={secao}>
+                    {secao}
+                  </option>
+                ))}
+              </select>
+
+              <select
+                value={filtroStatus}
+                onChange={(e) => setFiltroStatus(e.target.value as StatusFiltro)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                {STATUS_FILTROS.map((status) => (
+                  <option key={status.value} value={status.value}>
+                    {status.label}
+                  </option>
+                ))}
+              </select>
+
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setSearchTerm("");
+                  setFiltroSecao("todos");
+                  setFiltroStatus("todos");
+                }}
+                disabled={!filtrosAtivos}
+              >
+                <Filter className="h-4 w-4 mr-2" />
+                Limpar
+              </Button>
+            </div>
+
+            <div className="mt-3 flex items-center justify-between gap-3 text-xs text-gray-500">
+              <span>
+                Filtro: {filteredProdutos.length} de {produtos.length} produto(s)
+              </span>
+              {carregandoFiltroSecao && (
+                <span className="inline-flex items-center gap-1">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Carregando secoes
+                </span>
+              )}
             </div>
           </CardContent>
         </Card>
@@ -623,7 +740,13 @@ const Compras = () => {
                 <p>Erro: {error}</p>
               </div>
             )}
-            {!loading && !error && filteredProdutos.length === 0 && (
+            {!loading && !error && filteredProdutos.length === 0 && carregandoFiltroSecao && (
+              <div className="flex items-center justify-center gap-2 py-12 text-gray-500">
+                <Loader2 className="h-5 w-5 animate-spin" />
+                Carregando secoes do ERP
+              </div>
+            )}
+            {!loading && !error && filteredProdutos.length === 0 && !carregandoFiltroSecao && (
               <div className="text-center py-12 text-gray-500">Nenhum produto encontrado</div>
             )}
             {!loading && !error && filteredProdutos.length > 0 && (
@@ -793,7 +916,7 @@ const Compras = () => {
 
       {analiseAberta && (
         <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="w-full max-w-md bg-white rounded-xl shadow-2xl p-4 relative overflow-hidden">
+          <div className="w-full max-w-xl max-h-[calc(100vh-2rem)] bg-white rounded-xl shadow-2xl p-4 relative overflow-y-auto">
             <button
               type="button"
               className="absolute right-3 top-3 h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center"
@@ -815,7 +938,7 @@ const Compras = () => {
               <div className="py-16 text-center text-gray-500">Nenhum item pendente</div>
             ) : (
               <>
-                <div className="relative h-[430px]">
+                <div className="relative h-[560px] sm:h-[620px]">
                   <div className="absolute inset-y-10 left-0 w-1/2 rounded-xl bg-red-50 flex items-center justify-start pl-5 text-red-600 font-bold opacity-80">
                     Produto Ruim
                   </div>
@@ -841,7 +964,7 @@ const Compras = () => {
                       <img
                         src={fotoAnalise as string}
                         alt={produtoAnalise.codigo}
-                        className="h-64 w-full object-cover bg-gray-100"
+                        className="h-[390px] sm:h-[460px] w-full object-contain bg-gray-100"
                         onError={() => {
                           if (!fotoAnaliseSelecionada) return;
                           console.warn("[Compras][Foto] Fonte falhou no navegador", {
@@ -857,7 +980,7 @@ const Compras = () => {
                         }}
                       />
                     ) : (
-                      <div className="h-64 w-full bg-gray-100 flex items-center justify-center text-gray-400">
+                      <div className="h-[390px] sm:h-[460px] w-full bg-gray-100 flex items-center justify-center text-gray-400">
                         sem foto
                       </div>
                     )}
