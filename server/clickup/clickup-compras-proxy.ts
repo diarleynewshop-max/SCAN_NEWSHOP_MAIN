@@ -374,23 +374,13 @@ async function markRepeatedTasksInClickUp(
   const failed = results.filter((result) => result.status === 'rejected');
 
   if (failed.length > 0) {
-    console.warn('[clickup-compras] falha ao marcar itens repetidos:', {
+    console.error('[clickup-compras] falha ao marcar itens repetidos:', {
       empresa,
       listId,
       failedCount: failed.length,
       attemptedCount: candidates.length,
       totalRepeated: repetidos.length,
       firstError: failed[0]?.status === 'rejected' ? String(failed[0].reason) : '',
-    });
-  }
-
-  if (repetidos.length > MAX_REPEATED_TAGS_PER_REQUEST) {
-    console.warn('[clickup-compras] itens repetidos acima do limite por request:', {
-      empresa,
-      listId,
-      taggedThisRequest: candidates.length - failed.length,
-      totalRepeated: repetidos.length,
-      limit: MAX_REPEATED_TAGS_PER_REQUEST,
     });
   }
 }
@@ -631,21 +621,6 @@ async function buscarFotoTask(
   const message = foto
     ? 'Foto encontrada no ClickUp'
     : 'Nenhuma foto encontrada nos anexos/campos da task do ClickUp';
-
-  if (foto) {
-    console.info('[clickup-compras][foto] Foto encontrada', {
-      empresa,
-      taskId,
-      imageUrl,
-      returnedAs: dataUrl ? 'data-url' : 'url',
-    });
-  } else {
-    console.warn('[clickup-compras][foto] Sem foto na task', {
-      empresa,
-      taskId,
-      taskName: typeof task.name === 'string' ? task.name : '',
-    });
-  }
 
   return res.json({
     taskId,

@@ -11,6 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { buscarProdutoVarejoFacil, type VarejoFacilProduct } from "@/lib/varejoFacilIntegration";
 
 const PAGE_SIZE = 10;
+const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
 type FotoFonte = "ERP" | "CLICKUP_TASK" | "CLICKUP_LIST";
 
@@ -40,6 +41,33 @@ const STATUS_PRIORITY: Record<string, number> = {
   compra_realizada: 5,
   concluido: 6,
 };
+
+function getComprasCacheKey(empresa: string, tipo: "erp" | "fotos"): string {
+  return `compras:${tipo}:${empresa}`;
+}
+
+function lerCacheLocal<T>(key: string): T | null {
+  try {
+    const raw = window.localStorage.getItem(key);
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as { data?: T; updatedAt?: number };
+    if (!parsed.data || typeof parsed.updatedAt !== "number") return null;
+    if (Date.now() - parsed.updatedAt > CACHE_TTL_MS) return null;
+
+    return parsed.data;
+  } catch {
+    return null;
+  }
+}
+
+function salvarCacheLocal<T>(key: string, data: T) {
+  try {
+    window.localStorage.setItem(key, JSON.stringify({ data, updatedAt: Date.now() }));
+  } catch {
+    // Cache local e opcional.
+  }
+}
 
 function isValidImageSrc(foto: string | null): boolean {
   if (!foto) return false;
@@ -148,7 +176,6 @@ const Compras = () => {
   const [escolhaDireita, setEscolhaDireita] = useState(false);
   const [dragX, setDragX] = useState(0);
   const dragStartRef = useRef<number | null>(null);
-  const semFotoLogRef = useRef<Set<string>>(new Set());
   const fileInputRef = useRef<HTMLInputElement>(null);
   const {
     produtos,
@@ -164,6 +191,12 @@ const Compras = () => {
     ultimaAtualizacao,
     empresa,
   } = useProdutosComprar();
+
+  useEffect(() => {
+    setProdutosErp(lerCacheLocal<Record<string, VarejoFacilProduct | null>>(getComprasCacheKey(empresa, "erp")) ?? {});
+    setFotosClickUp(lerCacheLocal<Record<string, string | null>>(getComprasCacheKey(empresa, "fotos")) ?? {});
+    setImagemComErro({});
+  }, [empresa]);
 
   const handleImportarPlanilha = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -326,23 +359,11 @@ const Compras = () => {
           try {
             let dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
             if (dados?.imagem) {
-              console.info("[Compras][Foto] ERP candidato", {
-                produtoId: produto.id,
-                codigo,
-                erpId: dados.id,
-                imagem: dados.imagem,
-              });
               try {
                 const imagemDataUrl = await baixarImagemParaDataUrl(dados.imagem);
                 dados = { ...dados, imagem: imagemDataUrl };
-                console.info("[Compras][Foto] ERP imagem baixada", {
-                  produtoId: produto.id,
-                  codigo,
-                  erpId: dados.id,
-                  formato: "data-url",
-                });
               } catch (imageError) {
-                console.warn("[Compras][Foto] ERP imagem nao baixou", {
+                console.error("[Compras][Foto] ERP imagem nao baixou", {
                   produtoId: produto.id,
                   codigo,
                   erpId: dados.id,
@@ -350,17 +371,10 @@ const Compras = () => {
                   erro: imageError instanceof Error ? imageError.message : String(imageError),
                 });
               }
-            } else {
-              console.warn("[Compras][Foto] ERP sem imagem", {
-                produtoId: produto.id,
-                codigo,
-                motivo: dados ? "produto encontrado sem imagem" : "produto nao encontrado",
-              });
             }
             return [produto.id, dados] as const;
           } catch (err) {
-            console.warn("[Compras] Produto nao enriquecido pelo ERP:", produto.codigo, err);
-            console.warn("[Compras][Foto] ERP falhou", {
+            console.error("[Compras][Foto] ERP falhou", {
               produtoId: produto.id,
               codigo,
               erro: err instanceof Error ? err.message : String(err),
@@ -376,6 +390,7 @@ const Compras = () => {
         for (const [id, dados] of resultados) {
           next[id] = dados;
         }
+        salvarCacheLocal(getComprasCacheKey(empresa, "erp"), next);
         return next;
       });
     };
@@ -421,7 +436,7 @@ const Compras = () => {
             );
             if (!response.ok) {
               const data = await response.json().catch(() => ({}));
-              console.warn("[Compras][Foto] ClickUp falhou", {
+              console.error("[Compras][Foto] ClickUp falhou", {
                 produtoId: produto.id,
                 codigo: produto.codigo,
                 status: response.status,
@@ -431,24 +446,9 @@ const Compras = () => {
             }
             const data = await response.json();
             const foto = typeof data.foto === "string" ? data.foto : null;
-            if (foto) {
-              console.info("[Compras][Foto] ClickUp candidato", {
-                produtoId: produto.id,
-                codigo: produto.codigo,
-                sourceUrl: data.imageUrl,
-                mensagem: data.message,
-              });
-            } else {
-              console.warn("[Compras][Foto] ClickUp sem imagem", {
-                produtoId: produto.id,
-                codigo: produto.codigo,
-                mensagem: data.message || "task sem anexo de imagem",
-              });
-            }
             return [produto.id, foto] as const;
           } catch (err) {
-            console.warn("[Compras] Foto da task nao carregada:", produto.id, err);
-            console.warn("[Compras][Foto] ClickUp falhou", {
+            console.error("[Compras][Foto] ClickUp falhou", {
               produtoId: produto.id,
               codigo: produto.codigo,
               erro: err instanceof Error ? err.message : String(err),
@@ -464,6 +464,7 @@ const Compras = () => {
         for (const [id, foto] of resultados) {
           next[id] = foto;
         }
+        salvarCacheLocal(getComprasCacheKey(empresa, "fotos"), next);
         return next;
       });
     };
@@ -474,33 +475,6 @@ const Compras = () => {
       cancelado = true;
     };
   }, [empresa, fotosClickUp, produtoAnalise, produtosErp, produtosPaginados]);
-
-  useEffect(() => {
-    for (const produto of produtosPaginados) {
-      const erpCarregado = produto.id in produtosErp;
-      const clickUpCarregado = produto.id in fotosClickUp;
-      if (!erpCarregado || !clickUpCarregado) continue;
-
-      const fotoSelecionada = selecionarFotoProduto(produto, produtosErp[produto.id], fotosClickUp, imagemComErro);
-      if (fotoSelecionada) continue;
-
-      const opcoes = montarOpcoesFoto(produto, produtosErp[produto.id], fotosClickUp);
-      const erros = opcoes
-        .filter((opcao) => imagemComErro[getImagemErroKey(produto.id, opcao.fonte, opcao.src)])
-        .map((opcao) => opcao.fonte);
-      const logKey = `${produto.id}:${opcoes.map((opcao) => opcao.fonte).join(",")}:${erros.join(",")}`;
-      if (semFotoLogRef.current.has(logKey)) continue;
-
-      semFotoLogRef.current.add(logKey);
-      console.warn("[Compras][Foto] Produto sem foto exibivel", {
-        produtoId: produto.id,
-        codigo: produto.codigo,
-        fontesTestadas: opcoes.map((opcao) => opcao.fonte),
-        fontesComErro: erros,
-        motivo: opcoes.length === 0 ? "ERP e ClickUp nao retornaram imagem" : "todas as fontes de imagem falharam no navegador",
-      });
-    }
-  }, [fotosClickUp, imagemComErro, produtosErp, produtosPaginados]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -816,12 +790,6 @@ const Compras = () => {
                             className="w-16 h-16 object-cover rounded shrink-0"
                             onError={() => {
                               if (!fotoSelecionada) return;
-                              console.warn("[Compras][Foto] Fonte falhou no navegador", {
-                                produtoId: produto.id,
-                                codigo: produto.codigo,
-                                fonte: fotoSelecionada.fonte,
-                                src: fotoSelecionada.src,
-                              });
                               setImagemComErro((prev) => ({
                                 ...prev,
                                 [getImagemErroKey(produto.id, fotoSelecionada.fonte, fotoSelecionada.src)]: true,
@@ -1038,12 +1006,6 @@ const Compras = () => {
                         className="h-[390px] sm:h-[460px] w-full object-contain bg-gray-100"
                         onError={() => {
                           if (!fotoAnaliseSelecionada) return;
-                          console.warn("[Compras][Foto] Fonte falhou no navegador", {
-                            produtoId: produtoAnalise.id,
-                            codigo: produtoAnalise.codigo,
-                            fonte: fotoAnaliseSelecionada.fonte,
-                            src: fotoAnaliseSelecionada.src,
-                          });
                           setImagemComErro((prev) => ({
                             ...prev,
                             [getImagemErroKey(produtoAnalise.id, fotoAnaliseSelecionada.fonte, fotoAnaliseSelecionada.src)]: true,

@@ -35,6 +35,8 @@ interface UseProdutosComprarReturn {
   concluir: (taskId: string) => Promise<void>;
 }
 
+const CACHE_TTL_MS = 5 * 60 * 1000;
+
 function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
   const login = obterLoginSalvo();
   if (login?.empresa === 'SOYE' || login?.empresa === 'FACIL') {
@@ -114,6 +116,38 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
+function getProdutosCacheKey(empresa: 'NEWSHOP' | 'SOYE' | 'FACIL'): string {
+  return `compras:produtos:${empresa}`;
+}
+
+function readProdutosCache(empresa: 'NEWSHOP' | 'SOYE' | 'FACIL'): { produtos: ProdutoComprar[]; updatedAt: number } | null {
+  try {
+    const raw = window.localStorage.getItem(getProdutosCacheKey(empresa));
+    if (!raw) return null;
+
+    const parsed = JSON.parse(raw) as { produtos?: ProdutoComprar[]; updatedAt?: number };
+    if (!Array.isArray(parsed.produtos) || typeof parsed.updatedAt !== 'number') return null;
+
+    return {
+      produtos: deduplicarProdutos(parsed.produtos),
+      updatedAt: parsed.updatedAt,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function writeProdutosCache(empresa: 'NEWSHOP' | 'SOYE' | 'FACIL', produtos: ProdutoComprar[]) {
+  try {
+    window.localStorage.setItem(
+      getProdutosCacheKey(empresa),
+      JSON.stringify({ produtos, updatedAt: Date.now() })
+    );
+  } catch {
+    // Cache local nao e obrigatorio para o fluxo funcionar.
+  }
+}
+
 export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [produtos, setProdutos] = useState<ProdutoComprar[]>([]);
   const [loading, setLoading] = useState(true);
@@ -122,10 +156,24 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [empresa, setEmpresa] = useState<'NEWSHOP' | 'SOYE' | 'FACIL'>(() => getEmpresaAtual());
   const requestControllerRef = useRef<AbortController | null>(null);
 
-  const fetchProdutos = useCallback(async () => {
+  const fetchProdutos = useCallback(async (force = false) => {
     const empresaAtual = getEmpresaAtual();
     setEmpresa(empresaAtual);
-    setLoading(true);
+    const cache = readProdutosCache(empresaAtual);
+
+    if (cache) {
+      setProdutos(cache.produtos);
+      setUltimaAtualizacao(new Date(cache.updatedAt));
+      setLoading(false);
+
+      if (!force && Date.now() - cache.updatedAt < CACHE_TTL_MS) {
+        setError(null);
+        return;
+      }
+    } else {
+      setLoading(true);
+    }
+
     setError(null);
     requestControllerRef.current?.abort();
     const controller = new AbortController();
@@ -144,8 +192,11 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       }
 
       const data = await response.json();
-      setProdutos(deduplicarProdutos(data.produtos ?? []));
-      setUltimaAtualizacao(new Date());
+      const produtosAtualizados = deduplicarProdutos(data.produtos ?? []);
+      setProdutos(produtosAtualizados);
+      const updatedAt = new Date();
+      setUltimaAtualizacao(updatedAt);
+      writeProdutosCache(empresaAtual, produtosAtualizados);
     } catch (err: unknown) {
       if (isAbortError(err)) {
         return;
@@ -162,28 +213,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   useEffect(() => {
     fetchProdutos();
 
-    const intervalId = window.setInterval(() => {
-      if (document.visibilityState === 'visible') {
-        fetchProdutos();
-      }
-    }, 60000);
-
-    const onFocus = () => {
-      fetchProdutos();
-    };
-    const onVisibilityChange = () => {
-      if (document.visibilityState === 'visible') {
-        fetchProdutos();
-      }
-    };
-
-    window.addEventListener('focus', onFocus);
-    document.addEventListener('visibilitychange', onVisibilityChange);
-
     return () => {
-      window.clearInterval(intervalId);
-      window.removeEventListener('focus', onFocus);
-      document.removeEventListener('visibilitychange', onVisibilityChange);
       requestControllerRef.current?.abort();
     };
   }, [fetchProdutos]);
@@ -222,7 +252,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       const data = await response.json();
 
       if (!response.ok) {
-        await fetchProdutos();
+        await fetchProdutos(true);
         const detalhe = data.details ? `: ${data.details}` : '';
         const statusDisponiveis = Array.isArray(data.availableStatuses) && data.availableStatuses.length > 0
           ? ` | Status disponiveis: ${data.availableStatuses.join(', ')}`
@@ -233,7 +263,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
         throw new Error((data.error ?? 'Erro ao executar acao') + detalhe + statusDisponiveis + statusTentados);
       }
 
-      await fetchProdutos();
+      await fetchProdutos(true);
     } catch (err: unknown) {
       if (statusAnterior) {
         setProdutos((prev) =>
@@ -258,7 +288,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     error,
     ultimaAtualizacao,
     empresa,
-    refetch: fetchProdutos,
+    refetch: () => fetchProdutos(true),
     like,
     dislike,
     fazerPedido,
