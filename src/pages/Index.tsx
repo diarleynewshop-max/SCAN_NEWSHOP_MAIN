@@ -290,12 +290,16 @@ const Index = () => {
   }, []);
 
   const handleAdd = async () => {
+    const codigoAtual = barcode.trim();
+    const erpPhotoMissing = Boolean(productInfo && productInfo.codigo === codigoAtual && !productInfo.imagem);
     const ok = await addProduct({
       barcode,
       sku,
       photo: modoLeve ? null : photo,
       quantity: Number(quantity),
       secao: productInfo?.secao,
+      erpPhotoMissing,
+      appPhotoWithoutErp: Boolean(!modoLeve && photo && erpPhotoMissing),
     });
     if (!ok) return;
 
