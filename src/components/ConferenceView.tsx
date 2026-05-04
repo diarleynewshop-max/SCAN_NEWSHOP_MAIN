@@ -656,9 +656,13 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           toast({ title: "⚠️ Não foi possível deletar a task de origem", variant: "destructive" });
         }
       }
-    } catch {
+    } catch (err) {
       setSendStatus("error");
-      toast({ title: "❌ Falha no envio", description: "Verifique sua conexão e tente novamente.", variant: "destructive" });
+      toast({
+        title: "❌ Falha no envio",
+        description: err instanceof Error ? err.message : "Verifique sua conexão e tente novamente.",
+        variant: "destructive",
+      });
     }
   };
 

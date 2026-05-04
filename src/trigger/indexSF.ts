@@ -19,6 +19,8 @@ const CLICKUP_TODO_LIST_ID_SF =
   process.env.CLICKUP_TODO_LIST_ID_SF ??
   process.env.CLICKUP_TODO_LIST_ID ??
   "901326684020";
+const MAX_CLICKUP_DESCRIPTION_CHARS = 18000;
+const MAX_CLICKUP_DESCRIPTION_PREVIEW_CHARS = 8000;
 
 function getPrimeiraEnv(...names: string[]): string | undefined {
   for (const name of names) {
@@ -140,6 +142,66 @@ function normalizarTagSecao(secao: unknown): string | null {
   const value = String(secao ?? "").trim().replace(/\s+/g, " ");
   if (!value) return null;
   return `SECAO - ${value}`.slice(0, 80);
+}
+
+function sanitizarNomeArquivo(value: unknown): string {
+  return String(value ?? "arquivo")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9._-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .slice(0, 80) || "arquivo";
+}
+
+function truncarTexto(value: string, maxChars: number): string {
+  if (value.length <= maxChars) return value;
+  return `${value.slice(0, maxChars)}\n\n... restante anexado no TXT/JSON da task ...`;
+}
+
+async function criarTarefaComDescricaoFallback(
+  listId: string,
+  nome: string,
+  descricaoCompleta: string,
+  descricaoCompacta: string,
+  status: string
+): Promise<string> {
+  const descricaoInicial = descricaoCompleta.length > MAX_CLICKUP_DESCRIPTION_CHARS
+    ? descricaoCompacta
+    : descricaoCompleta;
+
+  try {
+    return await criarTarefaClickUp(listId, nome, descricaoInicial, status);
+  } catch (err) {
+    if (descricaoInicial === descricaoCompacta) throw err;
+
+    console.warn(
+      "ClickUp recusou descricao completa. Tentando descricao compacta:",
+      err
+    );
+    return await criarTarefaClickUp(listId, nome, descricaoCompacta, status);
+  }
+}
+
+function montarJsonConferencia(payload: any, empresa: EmpresaSF, flag: FlagLista) {
+  return {
+    type: "conferencia-baixada",
+    empresa,
+    flag,
+    conferente: payload.conferente,
+    tempo: payload.tempo,
+    totalItens: payload.totalItens,
+    resumo: payload.resumo,
+    itens: (Array.isArray(payload.itens) ? payload.itens : []).map((item: any) => ({
+      codigo: item.codigo,
+      sku: item.sku || "",
+      secao: item.secao ?? null,
+      quantidadePedida: item.quantidadePedida,
+      quantidadeReal: item.quantidadeReal ?? null,
+      status: item.status,
+      digito: item.digito ?? null,
+      temFoto: Boolean(item.photo),
+    })),
+  };
 }
 
 async function anexarJsonNaTarefa(
@@ -507,9 +569,16 @@ export const conferenciaBaixadaSF = task({
         pendente: "Pendente",
       };
 
-      const itensS = payload.itens.filter((i: any) => i.digito === "S");
-      const itensM = payload.itens.filter((i: any) => i.digito === "M");
-      const itensSemDigito = payload.itens.filter((i: any) => !i.digito);
+      const itensPayload = Array.isArray(payload.itens) ? payload.itens : [];
+      const resumo = payload.resumo ?? {
+        separado: itensPayload.filter((i: any) => i.status === "separado").length,
+        naoTem: itensPayload.filter((i: any) => i.status === "nao_tem").length,
+        parcial: itensPayload.filter((i: any) => i.status === "nao_tem_tudo").length,
+        pendente: itensPayload.filter((i: any) => i.status === "pendente").length,
+      };
+      const itensS = itensPayload.filter((i: any) => i.digito === "S");
+      const itensM = itensPayload.filter((i: any) => i.digito === "M");
+      const itensSemDigito = itensPayload.filter((i: any) => !i.digito);
 
       const formatarItem = (item: any, idx: number) =>
         `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || "-"} | Pedido: ${item.quantidadePedida} | Real: ${item.quantidadeReal ?? "-"} | ${statusMap[item.status] ?? item.status}`;
@@ -527,32 +596,59 @@ export const conferenciaBaixadaSF = task({
         itensTexto += `Sem categoria\n${itensSemDigito.map(formatarItem).join("\n")}`;
       }
 
-      const itensNaoTem = (payload.itens || []).filter(
+      const itensNaoTem = itensPayload.filter(
         (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
       );
 
-      tarefaOriginalId = await criarTarefaClickUp(
-        listId,
-        `${empresa} ${isCD ? "CD" : "LOJA"}: ${payload.conferente} - ${dataFormatada}`,
-        `Conferente: ${payload.conferente}
+      const descricaoCompleta = `Conferente: ${payload.conferente}
 Empresa: ${empresa}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Data: ${dataFormatada}
 Tempo: ${payload.tempo}
-Total: ${payload.totalItens} item(ns)
+Total: ${payload.totalItens ?? itensPayload.length} item(ns)
 
 RESUMO
-Separado: ${payload.resumo.separado}
-Nao tem: ${payload.resumo.naoTem}
-Parcial: ${payload.resumo.parcial}
-Pendente: ${payload.resumo.pendente}
+Separado: ${resumo.separado}
+Nao tem: ${resumo.naoTem}
+Parcial: ${resumo.parcial}
+Pendente: ${resumo.pendente}
 
 ITENS
-${itensTexto}`,
+${itensTexto}`;
+
+      const descricaoCompacta = `Conferente: ${payload.conferente}
+Empresa: ${empresa}
+Tipo: ${isCD ? "CD" : "LOJA"}
+Data: ${dataFormatada}
+Tempo: ${payload.tempo}
+Total: ${payload.totalItens ?? itensPayload.length} item(ns)
+
+RESUMO
+Separado: ${resumo.separado}
+Nao tem: ${resumo.naoTem}
+Parcial: ${resumo.parcial}
+Pendente: ${resumo.pendente}
+
+ITENS
+${truncarTexto(itensTexto, MAX_CLICKUP_DESCRIPTION_PREVIEW_CHARS)}
+
+Lista completa anexada em TXT/JSON.`;
+
+      tarefaOriginalId = await criarTarefaComDescricaoFallback(
+        listId,
+        `${empresa} ${isCD ? "CD" : "LOJA"}: ${payload.conferente} - ${dataFormatada}`,
+        descricaoCompleta,
+        descricaoCompacta,
         "complete"
       );
 
       console.log(`Tarefa de conferencia criada: ${tarefaOriginalId}`);
+
+      const nomeAnexo = sanitizarNomeArquivo(`conferencia_${empresa}_${payload.conferente}_${dataFormatada}`);
+      await Promise.all([
+        anexarJsonNaTarefa(tarefaOriginalId, nomeAnexo, montarJsonConferencia(payload, empresa, flag)),
+        anexarTxtNaTarefa(tarefaOriginalId, `${nomeAnexo}_itens`, itensTexto || "Sem itens"),
+      ]);
 
       if (itensNaoTem.length > 0) {
         todoTaskId = await criarTarefasComprasIndividuaisSF(
