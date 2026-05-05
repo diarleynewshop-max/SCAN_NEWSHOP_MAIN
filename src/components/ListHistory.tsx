@@ -227,15 +227,17 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     );
   };
 
-  const enviarFotosAppParaErp = async (list: ListData) => {
+  const enviarFotosAppParaErp = async (list: ListData, perguntarAntes = true): Promise<ListData> => {
     const candidatos = list.products.filter((product) => product.appPhotoWithoutErp && product.photo);
 
     if (candidatos.length === 0) {
-      toast({ title: "Nenhuma foto pendente", description: "Esta lista nao tem item vermelho com foto do app." });
-      return;
+      if (perguntarAntes) {
+        toast({ title: "Nenhuma foto pendente", description: "Esta lista nao tem item vermelho com foto do app." });
+      }
+      return list;
     }
 
-    if (!window.confirm(`Enviar ${candidatos.length} foto(s) para o cadastro do ERP?`)) return;
+    if (perguntarAntes && !window.confirm(`Enviar ${candidatos.length} foto(s) para o cadastro do ERP?`)) return list;
 
     setUploadingPhotoListId(list.id);
     let enviados = 0;
@@ -278,14 +280,16 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       }
 
       if (produtosAtualizados.size > 0) {
-        onUpdateList({
+        const updatedList = {
           ...list,
           products: list.products.map((product) =>
             produtosAtualizados.has(product.id)
               ? { ...product, appPhotoWithoutErp: false, erpPhotoMissing: false }
               : product
           ),
-        });
+        };
+        onUpdateList(updatedList);
+        return updatedList;
       }
 
       toast({
@@ -296,6 +300,8 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     } finally {
       setUploadingPhotoListId(null);
     }
+
+    return list;
   };
 
   const exportJSON = async (list: ListData) => {
@@ -398,14 +404,24 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     setSendingId(list.id);
 
     try {
-      const hydratedProducts = await hydrateProductsForExport(list);
+      let listaParaEnviar = list;
+      const totalFotosErp = list.products.filter((product) => product.appPhotoWithoutErp && product.photo).length;
+
+      if (
+        totalFotosErp > 0 &&
+        window.confirm(`Tem ${totalFotosErp} foto(s) tirada(s) pelo app sem foto no ERP. Enviar para o cadastro antes do ClickUp?`)
+      ) {
+        listaParaEnviar = await enviarFotosAppParaErp(list, false);
+      }
+
+      const hydratedProducts = await hydrateProductsForExport(listaParaEnviar);
       const payload: WebhookPayload = {
-        flag:        list.flag ?? "loja",
-        empresa:     list.empresa ?? "",
-        pessoa:      list.person,
-        titulo:      list.title,
-        totalItens:  list.products.length,
-        dataCriacao: list.createdAt.toISOString(),
+        flag:        listaParaEnviar.flag ?? "loja",
+        empresa:     listaParaEnviar.empresa ?? "",
+        pessoa:      listaParaEnviar.person,
+        titulo:      listaParaEnviar.title,
+        totalItens:  listaParaEnviar.products.length,
+        dataCriacao: listaParaEnviar.createdAt.toISOString(),
         produtos:    hydratedProducts.map(({ product, photoDataUrl }) => ({
           barcode:    product.barcode,
           sku:        product.sku || "",
@@ -417,10 +433,10 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       };
 
       await enviarParaClickUp(payload);
-      marcarListaEnviada(list.id);
-      onUpdateList({ ...list, status: "green", sentToClickUp: true });
+      marcarListaEnviada(listaParaEnviar.id);
+      onUpdateList({ ...listaParaEnviar, status: "green", sentToClickUp: true });
       const dest = `${payload.flag.toUpperCase()} · ${payload.empresa}`;
-      toast({ title: `✅ Chegou no ClickUp! [${dest}]`, description: `Lista "${list.title}" enviada com sucesso.` });
+      toast({ title: `✅ Chegou no ClickUp! [${dest}]`, description: `Lista "${listaParaEnviar.title}" enviada com sucesso.` });
     } catch {
       toast({ title: "❌ Falha no envio", description: "Verifique sua conexão e tente novamente.", variant: "destructive" });
     } finally {
