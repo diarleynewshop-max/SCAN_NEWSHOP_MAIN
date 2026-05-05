@@ -816,14 +816,13 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
             {(() => {
               const l = lists.find(x => x.id === downloadOpen);
               const totalFotosErp = l ? getProdutosComFotoAppParaErp(l).length : 0;
-              if (!l || totalFotosErp === 0) return null;
               return (
                 <button
-                  onClick={() => enviarFotosAppParaErp(l)}
-                  disabled={uploadingPhotoListId === l.id}
-                  style={{ height: 48, borderRadius: 10, background: "hsl(var(--destructive) / 0.1)", color: "hsl(var(--destructive))", border: "1.5px solid hsl(var(--destructive) / 0.35)", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: uploadingPhotoListId === l.id ? "wait" : "pointer", opacity: uploadingPhotoListId === l.id ? 0.65 : 1 }}
+                  onClick={() => l && enviarFotosAppParaErp(l)}
+                  disabled={!l || uploadingPhotoListId === l.id}
+                  style={{ height: 48, borderRadius: 10, background: "hsl(var(--destructive) / 0.1)", color: "hsl(var(--destructive))", border: "1.5px solid hsl(var(--destructive) / 0.35)", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: !l ? "not-allowed" : uploadingPhotoListId === l.id ? "wait" : "pointer", opacity: !l || uploadingPhotoListId === l.id ? 0.65 : 1 }}
                 >
-                  {uploadingPhotoListId === l.id ? "Enviando fotos..." : `Enviar ${totalFotosErp} foto(s) para ERP`}
+                  {l && uploadingPhotoListId === l.id ? "Enviando fotos..." : totalFotosErp > 0 ? `Enviar ${totalFotosErp} foto(s) para ERP` : "Enviar fotos para ERP"}
                 </button>
               );
             })()}
