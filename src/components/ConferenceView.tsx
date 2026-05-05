@@ -1012,40 +1012,68 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     return "Separado";
   };
 
+  const imageUrlToDataUrl = async (src: string | null | undefined): Promise<string | null> => {
+    if (!src) return null;
+    if (src.startsWith("data:image/")) return src;
+
+    try {
+      const response = await fetch(src);
+      if (!response.ok) return null;
+      const blob = await response.blob();
+      if (!blob.type.startsWith("image/")) return null;
+
+      return await new Promise<string>((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onloadend = () => resolve(String(reader.result ?? ""));
+        reader.onerror = () => reject(new Error("Falha ao ler foto"));
+        reader.readAsDataURL(blob);
+      });
+    } catch {
+      return null;
+    }
+  };
+
   const exportRelatorioDiarioHTML = async (relatorio: RelatorioDiario) => {
     const itensBase = relatorio.itens?.length ? relatorio.itens : relatorio.itensCriticos;
     const itensEnriquecidos = await Promise.all(
       itensBase.map(async (item: RelatorioDiarioItem) => {
         try {
           const produto = await buscarProdutoVarejoFacil(item.codigo, { empresa: relatorio.empresa, flag: relatorio.flag });
+          const photo = await imageUrlToDataUrl(produto?.imagem);
           return {
             ...item,
             sku: produto?.descricao || item.sku,
             secao: produto?.secao || item.secao,
             estoque: produto?.estoque ?? null,
+            photo,
           };
         } catch {
-          return { ...item, estoque: null };
+          return { ...item, estoque: null, photo: null };
         }
       })
     );
 
-    const rows = itensEnriquecidos.map((item, index) => `
-      <tr data-status="${escapeHtml(item.status)}">
-        <td>${index + 1}</td>
-        <td class="mono">${escapeHtml(item.codigo)}</td>
-        <td>${escapeHtml(item.sku || "-")}</td>
-        <td>${escapeHtml(item.secao || "Sem categoria")}</td>
-        <td>${escapeHtml(item.conferente)}</td>
-        <td>${item.pedido}</td>
-        <td>${item.real ?? "-"}</td>
-        <td>${item.estoque ?? "-"}</td>
-        <td><span class="pill ${escapeHtml(item.status)}">${escapeHtml(statusRelatorioLabel(item.status))}</span></td>
-      </tr>
+    const cards = itensEnriquecidos.map((item) => `
+      <article class="card ${escapeHtml(item.status)}" data-status="${escapeHtml(item.status)}" data-code="${escapeHtml(item.codigo)}">
+        ${item.photo
+          ? `<img class="card-img" src="${item.photo}" alt="${escapeHtml(item.codigo)}" loading="lazy">`
+          : `<div class="card-no-img">📦</div>`}
+        <div class="card-body">
+          <div class="card-code">${escapeHtml(item.codigo)}</div>
+          <div class="card-sku">${escapeHtml(item.sku || "-")}</div>
+          <div class="card-meta">${escapeHtml(item.secao || "Sem categoria")} · ${escapeHtml(item.conferente)}</div>
+          <div class="card-footer">
+            <div class="card-qty"><strong>${item.pedido}</strong><span>pedido</span></div>
+            <div class="card-qty"><strong>${item.real ?? "-"}</strong><span>real</span></div>
+            <span class="tag ${escapeHtml(item.status)}">${escapeHtml(statusRelatorioLabel(item.status))}</span>
+          </div>
+          <div class="card-stock">Estoque API: ${item.estoque ?? "-"}</div>
+        </div>
+      </article>
     `).join("");
 
     const dataLabel = formatarDataRelatorio(relatorio.data);
-    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>Relatorio ${relatorio.empresa} ${dataLabel}</title><style>body{font-family:Arial,sans-serif;background:#f6f6f4;color:#171717;margin:0;padding:24px;}header{margin-bottom:20px;}h1{margin:0;font-size:26px;}p{margin:4px 0;color:#555}.cards{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin:18px 0}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:14px}.card strong{display:block;font-size:26px}.filters{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.filters button{border:1px solid #ddd;background:#fff;border-radius:8px;padding:9px 12px;font-weight:700;cursor:pointer}.filters button.active{background:#111;color:#fff;border-color:#111}table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden}th,td{border-bottom:1px solid #eee;padding:9px;text-align:left;font-size:13px}th{background:#111;color:#fff;position:sticky;top:0}.mono{font-family:monospace;font-weight:700}.pill{display:inline-block;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700}.separado{background:#dcfce7;color:#166534}.nao_tem{background:#fee2e2;color:#991b1b}.parcial{background:#fef3c7;color:#92400e}.pendente{background:#e5e7eb;color:#374151}@media(max-width:760px){body{padding:12px}.cards{grid-template-columns:repeat(2,1fr)}table{display:block;overflow:auto}}</style></head><body><header><h1>Relatorio de conferencia</h1><p>${escapeHtml(relatorio.empresa)} - ${escapeHtml(relatorio.flag.toUpperCase())} - ${escapeHtml(dataLabel)}</p><p>Gerado em ${escapeHtml(new Date(relatorio.geradoEm).toLocaleString("pt-BR"))} | Conferencias: ${relatorio.totalConferencias}</p></header><section class="cards"><div class="card"><strong>${relatorio.resumo.separado}</strong>Separado</div><div class="card"><strong>${relatorio.resumo.naoTem}</strong>Nao tem</div><div class="card"><strong>${relatorio.resumo.parcial}</strong>Parcial</div><div class="card"><strong>${relatorio.resumo.pendente}</strong>Pendente</div></section><div class="filters"><button class="active" data-filter="todos">Todos</button><button data-filter="separado">Separado</button><button data-filter="nao_tem">Nao tem</button><button data-filter="parcial">Parcial</button><button data-filter="pendente">Pendente</button></div><table><thead><tr><th>#</th><th>Codigo</th><th>SKU/API</th><th>Secao</th><th>Conferente</th><th>Pedido</th><th>Real</th><th>Estoque API</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table><script>const buttons=document.querySelectorAll("[data-filter]");const rows=[...document.querySelectorAll("tbody tr")];buttons.forEach(btn=>btn.onclick=()=>{buttons.forEach(b=>b.classList.remove("active"));btn.classList.add("active");const f=btn.dataset.filter;rows.forEach(row=>{row.style.display=f==="todos"||row.dataset.status===f?"":"none";});});</script></body></html>`;
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>Relatorio ${relatorio.empresa} ${dataLabel}</title><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet"/><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}body{font-family:'DM Sans',sans-serif;background:#f4f3f0;color:#1a1916;padding:32px 24px 60px;}header,.stats,.filters,.grid{max-width:1200px;margin-left:auto;margin-right:auto;}header{margin-bottom:18px;}header h1{font-size:26px;font-weight:900;}header p{font-family:'DM Mono',monospace;font-size:11px;color:#8a8780;margin-top:4px;}.stats{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin-bottom:14px}.stat{background:#fff;border:1.5px solid #e2e0da;border-radius:12px;padding:12px}.stat strong{display:block;font-size:24px;line-height:1;font-weight:900}.stat span{font-size:11px;color:#8a8780;font-family:'DM Mono',monospace}.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.filters button{border:1.5px solid #e2e0da;background:#fff;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;font-size:12px}.filters button.active{background:#1a1916;color:#fff;border-color:#1a1916}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}.card{background:#fff;border-radius:16px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;position:relative}.card:hover{transform:translateY(-3px);box-shadow:0 12px 32px rgba(0,0,0,.1)}.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:#22c55e}.card.nao_tem::before{background:#ef4444}.card.parcial::before{background:#f0a500}.card.pendente::before{background:#9ca3af}.card-img{width:100%;aspect-ratio:1;object-fit:cover;display:block}.card-no-img{width:100%;aspect-ratio:1;background:#f0ede8;display:flex;align-items:center;justify-content:center;font-size:42px;color:#e2e0da}.card-body{padding:11px 13px 13px;border-top:1.5px solid #e2e0da}.card-code{font-family:'DM Mono',monospace;font-size:12px;font-weight:500;word-break:break-all}.card-sku{font-size:11px;color:#8a8780;margin-top:2px;line-height:1.25;min-height:28px}.card-meta,.card-stock{font-size:10px;color:#8a8780;margin-top:5px}.card-footer{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:8px}.card-qty strong{font-size:20px;font-weight:900;display:block;line-height:1}.card-qty span{font-size:10px;color:#8a8780;font-family:'DM Mono',monospace}.tag{font-size:10px;font-weight:800;padding:3px 7px;border-radius:6px;font-family:'DM Mono',monospace;white-space:nowrap}.tag.separado{background:#e8f5ee;color:#1e7d4a}.tag.nao_tem{background:#fee2e2;color:#991b1b}.tag.parcial{background:#fff3e0;color:#a05c00}.tag.pendente{background:#e5e7eb;color:#374151}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1916;color:#fff;padding:12px 24px;border-radius:40px;font-size:13px;font-weight:600;opacity:0;transition:all .25s cubic-bezier(.34,1.56,.64,1);pointer-events:none;white-space:nowrap;z-index:999}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}@media(max-width:760px){body{padding:18px 12px 42px}.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px}}</style></head><body><header><h1>📦 Relatorio de conferencia</h1><p>👤 ${escapeHtml(relatorio.empresa)} · ${escapeHtml(relatorio.flag.toUpperCase())} · ${escapeHtml(dataLabel)} · Clique no card para copiar o codigo</p><p>Gerado em ${escapeHtml(new Date(relatorio.geradoEm).toLocaleString("pt-BR"))} · Conferencias: ${relatorio.totalConferencias}</p></header><section class="stats"><div class="stat"><strong>${relatorio.resumo.separado}</strong><span>Separado</span></div><div class="stat"><strong>${relatorio.resumo.naoTem}</strong><span>Nao tem</span></div><div class="stat"><strong>${relatorio.resumo.parcial}</strong><span>Parcial</span></div><div class="stat"><strong>${relatorio.resumo.pendente}</strong><span>Pendente</span></div></section><div class="filters"><button class="active" data-filter="todos">Todos</button><button data-filter="separado">Separado</button><button data-filter="nao_tem">Nao tem</button><button data-filter="parcial">Parcial</button><button data-filter="pendente">Pendente</button></div><main class="grid">${cards}</main><div class="toast" id="toast"></div><script>const buttons=document.querySelectorAll("[data-filter]");const cards=[...document.querySelectorAll(".grid .card")];buttons.forEach(btn=>btn.onclick=()=>{buttons.forEach(b=>b.classList.remove("active"));btn.classList.add("active");const f=btn.dataset.filter;cards.forEach(card=>{card.style.display=f==="todos"||card.dataset.status===f?"":"none";});});cards.forEach(card=>{card.onclick=()=>navigator.clipboard.writeText(card.dataset.code).then(()=>{const t=document.getElementById("toast");t.textContent="Copiado: "+card.dataset.code;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800);});});</script></body></html>`;
     const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
