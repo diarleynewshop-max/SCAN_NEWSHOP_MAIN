@@ -123,7 +123,6 @@ const Index = () => {
   const [showProductInfo, setShowProductInfo] = useState(false);
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
   const [photoProductId, setPhotoProductId] = useState<string | null>(null);
-  const [lastLookupBarcode, setLastLookupBarcode] = useState<string | null>(null);
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
@@ -144,7 +143,6 @@ const Index = () => {
     (code: string) => {
       const normalizedCode = code.trim();
       if (!normalizedCode) return;
-      setLastLookupBarcode(normalizedCode);
       lookupProduct(normalizedCode);
     },
     [lookupProduct]
@@ -302,11 +300,10 @@ const Index = () => {
 
   const handleAdd = async () => {
     const codigoAtual = barcode.trim();
-    const lookupFoiDoProdutoAtual = lastLookupBarcode === codigoAtual;
     const erpPhotoMissing = Boolean(
-      lookupFoiDoProdutoAtual &&
-      (!productInfo || productInfo.codigo === codigoAtual) &&
-      !productInfo?.imagem
+      !modoLeve &&
+      photo &&
+      (!productInfo || productInfo.codigo !== codigoAtual || !productInfo.imagem)
     );
     const ok = await addProduct({
       barcode,
@@ -327,7 +324,6 @@ const Index = () => {
     sessionStorage.removeItem("scan_sku");
     sessionStorage.removeItem("scan_photo");
     sessionStorage.removeItem("scan_quantity");
-    setLastLookupBarcode(null);
   };
 
   const productCount = activeList?.products.length ?? 0;
