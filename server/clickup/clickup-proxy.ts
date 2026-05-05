@@ -138,12 +138,12 @@ function normalizeStatus(status: unknown): string {
     .toLowerCase();
 }
 
-async function fetchTasksFromList(listId: string, token: string): Promise<any[]> {
+async function fetchTasksFromList(listId: string, token: string, includeClosed = false): Promise<any[]> {
   const allTasks: any[] = [];
 
   for (let page = 0; page < 5; page++) {
     const response = await fetch(
-      `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=false&page=${page}`,
+      `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=${includeClosed ? 'true' : 'false'}&page=${page}`,
       { headers: { Authorization: token } }
     );
 
@@ -373,7 +373,7 @@ ${faltas}`;
 
 async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: string) {
   const listId = getListId(empresa, flag);
-  const rawTasks = await fetchTasksFromList(listId, token);
+  const rawTasks = await fetchTasksFromList(listId, token, true);
   const concluidas = rawTasks.filter((task) => {
     const status = normalizeStatus(task.status?.status);
     const name = normalizeText(task.name);
@@ -438,7 +438,7 @@ function sortByTotalDesc<T extends { total?: number; totalItens?: number }>(item
 
 async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: string, dateKey: string) {
   const listId = getListId(empresa, flag);
-  const rawTasks = await fetchTasksFromList(listId, token);
+  const rawTasks = await fetchTasksFromList(listId, token, true);
   const concluidas = rawTasks.filter((task) => {
     const status = normalizeStatus(task.status?.status);
     const name = normalizeText(task.name);
