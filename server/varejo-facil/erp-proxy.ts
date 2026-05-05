@@ -214,18 +214,28 @@ async function uploadArquivoImagem(
     body: BodyInit;
   }> = [
     {
-      endpoint: `${origin}/CadastrosEstruturaisAPI/api/v1/Produto/produto-imagem`,
-      fieldName: "json",
-      mode: "totvs-produto-imagem-base64",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(totvsImagemPayload),
+      endpoint: `${origin}/arquivo/upload`,
+      fieldName: "upload",
+      mode: "erp-frame-multipart-upload",
+      headers: {},
+      body: (() => {
+        const formData = new FormData();
+        const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
+        formData.append("upload", blob, `nao_tem_${codigoProduto}.jpg`);
+        return formData;
+      })(),
     },
     {
-      endpoint: `${origin}/CadastrosEstruturaisAPI/api/v1/produto/produto-imagem`,
-      fieldName: "json",
-      mode: "totvs-produto-imagem-base64-lower",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(totvsImagemPayload),
+      endpoint: `${baseUrl}/v1/arquivo/upload`,
+      fieldName: "upload",
+      mode: "api-multipart-upload",
+      headers: {},
+      body: (() => {
+        const formData = new FormData();
+        const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
+        formData.append("upload", blob, `nao_tem_${codigoProduto}.jpg`);
+        return formData;
+      })(),
     },
     {
       endpoint: `${baseUrl}/v1/arquivo/upload`,
@@ -252,18 +262,11 @@ async function uploadArquivoImagem(
       }),
     },
     {
-      endpoint: `${origin}/arquivo/upload`,
-      fieldName: "file",
-      mode: "erp-web-multipart",
-      headers: {},
-      body: (() => {
-        const formData = new FormData();
-        const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
-        formData.append("file", blob, arquivo.filename);
-        formData.append("nome", arquivo.filename);
-        formData.append("descricao", codigoProduto);
-        return formData;
-      })(),
+      endpoint: `${origin}/CadastrosEstruturaisAPI/api/v1/Produto/produto-imagem`,
+      fieldName: "json",
+      mode: "totvs-produto-imagem-base64",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(totvsImagemPayload),
     },
   ];
 
