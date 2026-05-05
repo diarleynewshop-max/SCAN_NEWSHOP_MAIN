@@ -3,7 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
 type ErpProduto = Record<string, unknown> & { id?: number | string; imagem?: string };
 type UploadedArquivo = { uuid: string; raw: unknown };
-type UploadAttempt = { endpoint: string; fieldName: string; status: number | null; preview: string };
+type UploadAttempt = { endpoint: string; fieldName: string; mode: string; status: number | null; preview: string };
 
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
@@ -127,7 +127,7 @@ function getOriginFromBaseUrl(baseUrl: string): string {
   return baseUrl.replace(/\/api$/, "");
 }
 
-function dataUrlToArquivo(photo: string): { buffer: Buffer; mimeType: string; filename: string } {
+function dataUrlToArquivo(photo: string): { buffer: Buffer; mimeType: string; filename: string; rawBase64: string } {
   const match = photo.match(/^data:(image\/[a-zA-Z0-9.+-]+)(?:;[^;,]+)*;base64,(.+)$/);
   if (!match) {
     throw new Error("Foto precisa estar em data:image base64.");
@@ -140,6 +140,7 @@ function dataUrlToArquivo(photo: string): { buffer: Buffer; mimeType: string; fi
     buffer: Buffer.from(rawBase64, "base64"),
     mimeType,
     filename: "imagem.png",
+    rawBase64,
   };
 }
 
@@ -215,6 +216,7 @@ async function uploadArquivoImagem(
           attempts.push({
             endpoint,
             fieldName,
+            mode: "multipart",
             status: result.response.status,
             preview,
           });
@@ -227,6 +229,7 @@ async function uploadArquivoImagem(
         attempts.push({
           endpoint,
           fieldName,
+          mode: "multipart",
           status: result.response.status,
           preview: preview || "Resposta sem UUID",
         });
@@ -234,11 +237,120 @@ async function uploadArquivoImagem(
         attempts.push({
           endpoint,
           fieldName,
+          mode: "multipart",
           status: null,
           preview: error instanceof Error ? error.message : "Erro desconhecido",
         });
       }
     }
+  }
+
+  const jsonEndpoint = `${baseUrl}/v1/arquivo/upload`;
+  const jsonPayloads: Array<{ mode: string; body: Record<string, unknown> }> = [
+    {
+      mode: "json-arquivo-base64",
+      body: {
+        nome: arquivo.filename,
+        descricao: codigoProduto,
+        mimeType: arquivo.mimeType,
+        arquivo: arquivo.rawBase64,
+      },
+    },
+    {
+      mode: "json-file-base64",
+      body: {
+        filename: arquivo.filename,
+        codigo: codigoProduto,
+        contentType: arquivo.mimeType,
+        file: arquivo.rawBase64,
+      },
+    },
+    {
+      mode: "json-dataurl",
+      body: {
+        nome: arquivo.filename,
+        descricao: codigoProduto,
+        arquivo: `data:${arquivo.mimeType};base64,${arquivo.rawBase64}`,
+      },
+    },
+  ];
+
+  for (const payload of jsonPayloads) {
+    try {
+      const result = await fetchErpRaw(jsonEndpoint, token, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload.body),
+      });
+
+      if (result.response.status === 401) tokenCache.clear();
+      const preview = result.text.replace(/\s+/g, " ").slice(0, 320);
+
+      if (!result.response.ok) {
+        attempts.push({
+          endpoint: jsonEndpoint,
+          fieldName: "json",
+          mode: payload.mode,
+          status: result.response.status,
+          preview,
+        });
+        continue;
+      }
+
+      const uuid = findUuid(result.data);
+      if (uuid) return { uuid, raw: result.data };
+
+      attempts.push({
+        endpoint: jsonEndpoint,
+        fieldName: "json",
+        mode: payload.mode,
+        status: result.response.status,
+        preview: preview || "Resposta sem UUID",
+      });
+    } catch (error) {
+      attempts.push({
+        endpoint: jsonEndpoint,
+        fieldName: "json",
+        mode: payload.mode,
+        status: null,
+        preview: error instanceof Error ? error.message : "Erro desconhecido",
+      });
+    }
+  }
+
+  try {
+    const result = await fetchErpRaw(jsonEndpoint, token, {
+      method: "POST",
+      headers: {
+        "Content-Type": arquivo.mimeType,
+        "Content-Disposition": `attachment; filename="${arquivo.filename}"`,
+      },
+      body: arquivo.buffer as unknown as BodyInit,
+    });
+
+    if (result.response.status === 401) tokenCache.clear();
+    const preview = result.text.replace(/\s+/g, " ").slice(0, 320);
+
+    if (result.response.ok) {
+      const uuid = findUuid(result.data);
+      if (uuid) return { uuid, raw: result.data };
+    }
+
+    attempts.push({
+      endpoint: jsonEndpoint,
+      fieldName: "binary",
+      mode: "raw-bytes",
+      status: result.response.status,
+      preview: preview || "Resposta sem UUID",
+    });
+  } catch (error) {
+    attempts.push({
+      endpoint: jsonEndpoint,
+      fieldName: "binary",
+      mode: "raw-bytes",
+      status: null,
+      preview: error instanceof Error ? error.message : "Erro desconhecido",
+    });
   }
 
   throw new UploadArquivoError("Nao foi possivel enviar arquivo ao ERP.", attempts);
