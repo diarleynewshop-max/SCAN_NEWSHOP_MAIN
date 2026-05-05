@@ -232,7 +232,16 @@ async function uploadArquivoImagem(
       endpoint: `${origin}/arquivo/upload`,
       fieldName: "upload",
       mode: "erp-frame-multipart-upload",
-      headers: webCookie ? { Cookie: webCookie } : {},
+      headers: {
+        Accept: "application/json, text/javascript, */*; q=0.01",
+        Origin: origin,
+        Referer: `${origin}/arquivo/frame`,
+        "X-Requested-With": "XMLHttpRequest",
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36 Edg/147.0.0.0",
+        "Content-Disposition": `attachment; filename="nao_tem_${codigoProduto}.jpg"`,
+        ...(webCookie ? { Cookie: webCookie } : {}),
+      },
       body: (() => {
         const formData = new FormData();
         const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
