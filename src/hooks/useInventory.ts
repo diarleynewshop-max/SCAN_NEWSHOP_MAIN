@@ -2,13 +2,14 @@ import { useState, useCallback, useEffect, useRef } from "react";
 import { Product, ListData, ListFlag } from "@/components/ProductCard";
 import { useToast } from "@/hooks/use-toast";
 import {
+  dataUrlToBlob,
   isDataPhotoUrl,
   isObjectPhotoUrl,
   revokePhotoUrl,
   shouldPersistPhoto,
   stripPhotoForPersistence,
 } from "@/lib/photoUtils";
-import { deletePhotoBlob, getPhotoBlob } from "@/lib/photoStore";
+import { deletePhotoBlob, getPhotoBlob, putPhotoBlob } from "@/lib/photoStore";
 
 interface OpenListParams {
   title: string;
@@ -37,6 +38,14 @@ type SaveListsResult = "ok" | "without-photos" | "failed";
 
 type PreparedPhoto = Pick<Product, "photo" | "photoBlob" | "photoAssetId">;
 
+function createPhotoAssetId(): string {
+  if (typeof crypto !== "undefined" && typeof crypto.randomUUID === "function") {
+    return crypto.randomUUID();
+  }
+
+  return `photo-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+}
+
 async function preparePhotoForRuntime(photo: string | null | undefined): Promise<PreparedPhoto> {
   if (!photo) {
     return { photo: null, photoBlob: null, photoAssetId: null };
@@ -46,10 +55,14 @@ async function preparePhotoForRuntime(photo: string | null | undefined): Promise
     return { photo, photoBlob: null, photoAssetId: null };
   }
 
+  const blob = dataUrlToBlob(photo);
+  const photoAssetId = createPhotoAssetId();
+  await putPhotoBlob(photoAssetId, blob);
+
   return {
-    photo,
-    photoBlob: null,
-    photoAssetId: null,
+    photo: URL.createObjectURL(blob),
+    photoBlob: blob,
+    photoAssetId,
   };
 }
 
@@ -79,6 +92,7 @@ function hasNonPersistablePhotos(lists: ListData[]): boolean {
     list.products.some(
       (product) =>
         Boolean(product.photo) &&
+        !product.photoAssetId &&
         !shouldPersistPhoto(product)
     )
   );

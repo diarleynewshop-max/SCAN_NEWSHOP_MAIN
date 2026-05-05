@@ -46,7 +46,10 @@ export function shouldPersistPhoto(photo: RuntimePhotoLike | null | undefined): 
 }
 
 export function stripPhotoForPersistence<T extends RuntimePhotoLike>(photo: T): T {
-  const persistedPhoto = shouldPersistPhoto(photo) ? photo.photo : null;
+  const persistedPhoto =
+    isRemotePhotoUrl(photo.photo) || (isDataPhotoUrl(photo.photo) && !photo.photoAssetId)
+      ? photo.photo
+      : null;
 
   return {
     ...photo,
