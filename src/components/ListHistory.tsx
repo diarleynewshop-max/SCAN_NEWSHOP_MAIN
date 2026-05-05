@@ -67,6 +67,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
   const [estoqueListId, setEstoqueListId] = useState<string | null>(null); // GUARDA O ID PARA ATUALIZAR A LISTA
 
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [uploadingPhotoListId, setUploadingPhotoListId] = useState<string | null>(null);
 
   const sortedLists = [...lists]
     .filter((l) => l.status !== "open")
@@ -224,6 +225,77 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
         photoDataUrl: await resolvePhotoToDataUrl(product),
       }))
     );
+  };
+
+  const enviarFotosAppParaErp = async (list: ListData) => {
+    const candidatos = list.products.filter((product) => product.appPhotoWithoutErp && product.photo);
+
+    if (candidatos.length === 0) {
+      toast({ title: "Nenhuma foto pendente", description: "Esta lista nao tem item vermelho com foto do app." });
+      return;
+    }
+
+    if (!window.confirm(`Enviar ${candidatos.length} foto(s) para o cadastro do ERP?`)) return;
+
+    setUploadingPhotoListId(list.id);
+    let enviados = 0;
+    let naoEncontrados = 0;
+    let falhas = 0;
+    const produtosAtualizados = new Set<string>();
+
+    try {
+      for (const product of candidatos) {
+        try {
+          const photoDataUrl = await resolvePhotoToDataUrl(product);
+          if (!photoDataUrl) {
+            falhas += 1;
+            continue;
+          }
+
+          const response = await fetch(`/api/erp-proxy?action=upload-product-photo&empresa=${encodeURIComponent(list.empresa || "NEWSHOP")}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              codigo: product.barcode,
+              photo: photoDataUrl,
+            }),
+          });
+
+          if (response.ok) {
+            enviados += 1;
+            produtosAtualizados.add(product.id);
+            continue;
+          }
+
+          if (response.status === 404) {
+            naoEncontrados += 1;
+          } else {
+            falhas += 1;
+          }
+        } catch {
+          falhas += 1;
+        }
+      }
+
+      if (produtosAtualizados.size > 0) {
+        onUpdateList({
+          ...list,
+          products: list.products.map((product) =>
+            produtosAtualizados.has(product.id)
+              ? { ...product, appPhotoWithoutErp: false, erpPhotoMissing: false }
+              : product
+          ),
+        });
+      }
+
+      toast({
+        title: "Envio de fotos finalizado",
+        description: `Enviadas: ${enviados} | Nao encontrado: ${naoEncontrados} | Falhas: ${falhas}`,
+        variant: falhas > 0 ? "destructive" : undefined,
+      });
+    } finally {
+      setUploadingPhotoListId(null);
+    }
   };
 
   const exportJSON = async (list: ListData) => {
@@ -719,6 +791,20 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
             <div style={{ display: "flex", alignItems: "center", gap: 10, color: "hsl(var(--muted-foreground))", fontSize: 11 }}>
               <div style={{ flex: 1, height: 1, background: "hsl(var(--border))" }} /> outras opções <div style={{ flex: 1, height: 1, background: "hsl(var(--border))" }} />
             </div>
+            {(() => {
+              const l = lists.find(x => x.id === downloadOpen);
+              const totalFotosErp = l?.products.filter((product) => product.appPhotoWithoutErp && product.photo).length ?? 0;
+              if (!l || totalFotosErp === 0) return null;
+              return (
+                <button
+                  onClick={() => enviarFotosAppParaErp(l)}
+                  disabled={uploadingPhotoListId === l.id}
+                  style={{ height: 48, borderRadius: 10, background: "hsl(var(--destructive) / 0.1)", color: "hsl(var(--destructive))", border: "1.5px solid hsl(var(--destructive) / 0.35)", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: uploadingPhotoListId === l.id ? "wait" : "pointer", opacity: uploadingPhotoListId === l.id ? 0.65 : 1 }}
+                >
+                  {uploadingPhotoListId === l.id ? "Enviando fotos..." : `Enviar ${totalFotosErp} foto(s) para ERP`}
+                </button>
+              );
+            })()}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
               {[
                 { label: "PDF", Icon: FileText, action: () => { const l = lists.find(x => x.id === downloadOpen); if (l) exportPDF(l); } },
