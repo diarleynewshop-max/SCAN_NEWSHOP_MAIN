@@ -227,12 +227,18 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     );
   };
 
+  const getProdutosComFotoAppParaErp = (list: ListData) =>
+    list.products.filter((product) => {
+      if (!product.photo && !product.photoAssetId && !product.photoBlob) return false;
+      return product.appPhotoWithoutErp || product.erpPhotoMissing || Boolean(product.photoAssetId);
+    });
+
   const enviarFotosAppParaErp = async (list: ListData, perguntarAntes = true): Promise<ListData> => {
-    const candidatos = list.products.filter((product) => product.appPhotoWithoutErp && product.photo);
+    const candidatos = getProdutosComFotoAppParaErp(list);
 
     if (candidatos.length === 0) {
       if (perguntarAntes) {
-        toast({ title: "Nenhuma foto pendente", description: "Esta lista nao tem item vermelho com foto do app." });
+        toast({ title: "Nenhuma foto pendente", description: "Esta lista nao tem item vermelho ou foto tirada pelo app." });
       }
       return list;
     }
@@ -405,7 +411,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
 
     try {
       let listaParaEnviar = list;
-      const totalFotosErp = list.products.filter((product) => product.appPhotoWithoutErp && product.photo).length;
+      const totalFotosErp = getProdutosComFotoAppParaErp(list).length;
 
       if (
         totalFotosErp > 0 &&
@@ -809,7 +815,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
             </div>
             {(() => {
               const l = lists.find(x => x.id === downloadOpen);
-              const totalFotosErp = l?.products.filter((product) => product.appPhotoWithoutErp && product.photo).length ?? 0;
+              const totalFotosErp = l ? getProdutosComFotoAppParaErp(l).length : 0;
               if (!l || totalFotosErp === 0) return null;
               return (
                 <button
