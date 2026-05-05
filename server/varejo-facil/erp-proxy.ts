@@ -353,6 +353,177 @@ async function uploadArquivoImagem(
     });
   }
 
+  const formPayloads: Array<{ mode: string; body: URLSearchParams }> = [
+    {
+      mode: "form-arquivo-base64",
+      body: new URLSearchParams({
+        nome: arquivo.filename,
+        nomeArquivo: arquivo.filename,
+        descricao: codigoProduto,
+        mimeType: arquivo.mimeType,
+        arquivo: arquivo.rawBase64,
+      }),
+    },
+    {
+      mode: "form-file-base64",
+      body: new URLSearchParams({
+        filename: arquivo.filename,
+        contentType: arquivo.mimeType,
+        codigo: codigoProduto,
+        file: arquivo.rawBase64,
+      }),
+    },
+    {
+      mode: "form-base64",
+      body: new URLSearchParams({
+        nome: arquivo.filename,
+        descricao: codigoProduto,
+        tipo: arquivo.mimeType,
+        base64: arquivo.rawBase64,
+      }),
+    },
+    {
+      mode: "form-conteudo",
+      body: new URLSearchParams({
+        nomeArquivo: arquivo.filename,
+        descricao: codigoProduto,
+        contentType: arquivo.mimeType,
+        conteudo: arquivo.rawBase64,
+      }),
+    },
+  ];
+
+  for (const payload of formPayloads) {
+    try {
+      const result = await fetchErpRaw(jsonEndpoint, token, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body: payload.body,
+      });
+
+      if (result.response.status === 401) tokenCache.clear();
+      const preview = result.text.replace(/\s+/g, " ").slice(0, 320);
+
+      if (result.response.ok) {
+        const uuid = findUuid(result.data);
+        if (uuid) return { uuid, raw: result.data };
+      }
+
+      attempts.push({
+        endpoint: jsonEndpoint,
+        fieldName: "form",
+        mode: payload.mode,
+        status: result.response.status,
+        preview: preview || "Resposta sem UUID",
+      });
+    } catch (error) {
+      attempts.push({
+        endpoint: jsonEndpoint,
+        fieldName: "form",
+        mode: payload.mode,
+        status: null,
+        preview: error instanceof Error ? error.message : "Erro desconhecido",
+      });
+    }
+  }
+
+  const rawAttempts: Array<{
+    endpoint: string;
+    fieldName: string;
+    mode: string;
+    headers: Record<string, string>;
+    body: BodyInit;
+  }> = [
+    {
+      endpoint: jsonEndpoint,
+      fieldName: "text",
+      mode: "text-base64",
+      headers: {
+        "Content-Type": "text/plain",
+        "X-Filename": arquivo.filename,
+        "X-File-Name": arquivo.filename,
+        "X-Mime-Type": arquivo.mimeType,
+        "X-Descricao": codigoProduto,
+      },
+      body: arquivo.rawBase64,
+    },
+    {
+      endpoint: jsonEndpoint,
+      fieldName: "binary",
+      mode: "octet-stream",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${arquivo.filename}"`,
+        "X-Filename": arquivo.filename,
+        "X-Mime-Type": arquivo.mimeType,
+        "X-Descricao": codigoProduto,
+      },
+      body: arquivo.buffer as unknown as BodyInit,
+    },
+    {
+      endpoint: `${jsonEndpoint}?${new URLSearchParams({
+        nome: arquivo.filename,
+        descricao: codigoProduto,
+        contentType: arquivo.mimeType,
+      }).toString()}`,
+      fieldName: "binary",
+      mode: "octet-stream-query-nome",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${arquivo.filename}"`,
+      },
+      body: arquivo.buffer as unknown as BodyInit,
+    },
+    {
+      endpoint: `${jsonEndpoint}?${new URLSearchParams({
+        nomeArquivo: arquivo.filename,
+        descricao: codigoProduto,
+        mimeType: arquivo.mimeType,
+      }).toString()}`,
+      fieldName: "binary",
+      mode: "octet-stream-query-nomeArquivo",
+      headers: {
+        "Content-Type": "application/octet-stream",
+        "Content-Disposition": `attachment; filename="${arquivo.filename}"`,
+      },
+      body: arquivo.buffer as unknown as BodyInit,
+    },
+  ];
+
+  for (const rawAttempt of rawAttempts) {
+    try {
+      const result = await fetchErpRaw(rawAttempt.endpoint, token, {
+        method: "POST",
+        headers: rawAttempt.headers,
+        body: rawAttempt.body,
+      });
+
+      if (result.response.status === 401) tokenCache.clear();
+      const preview = result.text.replace(/\s+/g, " ").slice(0, 320);
+
+      if (result.response.ok) {
+        const uuid = findUuid(result.data);
+        if (uuid) return { uuid, raw: result.data };
+      }
+
+      attempts.push({
+        endpoint: rawAttempt.endpoint,
+        fieldName: rawAttempt.fieldName,
+        mode: rawAttempt.mode,
+        status: result.response.status,
+        preview: preview || "Resposta sem UUID",
+      });
+    } catch (error) {
+      attempts.push({
+        endpoint: rawAttempt.endpoint,
+        fieldName: rawAttempt.fieldName,
+        mode: rawAttempt.mode,
+        status: null,
+        preview: error instanceof Error ? error.message : "Erro desconhecido",
+      });
+    }
+  }
+
   throw new UploadArquivoError("Nao foi possivel enviar arquivo ao ERP.", attempts);
 }
 
