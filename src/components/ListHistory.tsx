@@ -292,14 +292,16 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
             } catch {
               detail = detailText;
             }
-            console.error("[ERP Foto] Falha ao enviar foto", {
+            const erroFormatado = {
               produtoCodigo: product.barcode,
               status: response.status,
               detail,
-            });
+            };
+            console.error("[ERP Foto] Falha ao enviar foto", JSON.stringify(erroFormatado, null, 2));
             if (detail && typeof detail === "object") {
               const maybeAttempts = (detail as { attempts?: unknown }).attempts;
               if (Array.isArray(maybeAttempts)) {
+                console.error("[ERP Foto] Tentativas de upload JSON", JSON.stringify(maybeAttempts, null, 2));
                 console.groupCollapsed(`[ERP Foto] Tentativas de upload (${maybeAttempts.length})`);
                 console.table(maybeAttempts);
                 console.groupEnd();

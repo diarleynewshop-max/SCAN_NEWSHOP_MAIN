@@ -3,7 +3,15 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
 type ErpProduto = Record<string, unknown> & { id?: number | string; imagem?: string };
 type UploadedArquivo = { uuid?: string; raw: unknown; directUpdate?: boolean };
-type UploadAttempt = { endpoint: string; fieldName: string; mode: string; status: number | null; preview: string };
+type UploadAttempt = {
+  endpoint: string;
+  fieldName: string;
+  mode: string;
+  status: number | null;
+  contentType?: string;
+  isHtml?: boolean;
+  preview: string;
+};
 
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
@@ -172,6 +180,14 @@ function findUuid(value: unknown): string {
   return "";
 }
 
+function resolveUploadErrorMessage(attempts: UploadAttempt[]): string {
+  if (attempts.some((attempt) => attempt.isHtml)) {
+    return "Endpoint retornou HTML/login, nao JSON da API.";
+  }
+
+  return "ERP nao aceitou upload de imagem pela API configurada. Verifique permissao/API de CadastrosEstruturais ou contrato do endpoint arquivo/upload.";
+}
+
 async function uploadArquivoImagem(
   baseUrl: string,
   token: string,
@@ -273,6 +289,8 @@ async function uploadArquivoImagem(
         fieldName: uploadAttempt.fieldName,
         mode: uploadAttempt.mode,
         status: result.response.status,
+        contentType,
+        isHtml: contentType.includes("text/html"),
         preview: preview || "Resposta sem UUID",
       });
     } catch (error) {
@@ -281,12 +299,14 @@ async function uploadArquivoImagem(
         fieldName: uploadAttempt.fieldName,
         mode: uploadAttempt.mode,
         status: null,
+        contentType: "",
+        isHtml: false,
         preview: error instanceof Error ? error.message : "Erro desconhecido",
       });
     }
   }
 
-  throw new UploadArquivoError("Nao foi possivel enviar arquivo ao ERP.", attempts);
+  throw new UploadArquivoError(resolveUploadErrorMessage(attempts), attempts);
 }
 
 function normalizarEans(codigo: string): string[] {
