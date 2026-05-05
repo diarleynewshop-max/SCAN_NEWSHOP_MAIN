@@ -3,6 +3,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
 type ErpProduto = Record<string, unknown> & { id?: number | string; imagem?: string };
 type UploadedArquivo = { uuid: string; raw: unknown };
+type UploadAttempt = { endpoint: string; fieldName: string; status: number | null; preview: string };
 
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
@@ -11,6 +12,16 @@ const HOSTS: Record<EmpresaKey, string> = {
 };
 
 const tokenCache = new Map<string, string>();
+
+class UploadArquivoError extends Error {
+  attempts: UploadAttempt[];
+
+  constructor(message: string, attempts: UploadAttempt[]) {
+    super(message);
+    this.name = "UploadArquivoError";
+    this.attempts = attempts;
+  }
+}
 
 function getSingle(value: string | string[] | undefined): string {
   return Array.isArray(value) ? value[0] ?? "" : value ?? "";
@@ -173,7 +184,7 @@ async function uploadArquivoImagem(baseUrl: string, token: string, photo: string
     `${origin}/arquivo/upload`,
   ];
   const fieldNames = ["file", "arquivo"];
-  const errors: string[] = [];
+  const attempts: UploadAttempt[] = [];
 
   for (const endpoint of endpoints) {
     for (const fieldName of fieldNames) {
@@ -182,26 +193,46 @@ async function uploadArquivoImagem(baseUrl: string, token: string, photo: string
       formData.append(fieldName, blob, arquivo.filename);
       formData.append("nome", arquivo.filename);
 
-      const result = await fetchErpRaw(endpoint, token, {
-        method: "POST",
-        body: formData,
-      });
+      try {
+        const result = await fetchErpRaw(endpoint, token, {
+          method: "POST",
+          body: formData,
+        });
 
-      if (result.response.status === 401) tokenCache.clear();
-      if (!result.response.ok) {
-        const preview = result.text.replace(/\s+/g, " ").slice(0, 180);
-        errors.push(`${endpoint} [${fieldName}] -> ${result.response.status}${preview ? `: ${preview}` : ""}`);
-        continue;
+        if (result.response.status === 401) tokenCache.clear();
+        const preview = result.text.replace(/\s+/g, " ").slice(0, 320);
+
+        if (!result.response.ok) {
+          attempts.push({
+            endpoint,
+            fieldName,
+            status: result.response.status,
+            preview,
+          });
+          continue;
+        }
+
+        const uuid = findUuid(result.data);
+        if (uuid) return { uuid, raw: result.data };
+
+        attempts.push({
+          endpoint,
+          fieldName,
+          status: result.response.status,
+          preview: preview || "Resposta sem UUID",
+        });
+      } catch (error) {
+        attempts.push({
+          endpoint,
+          fieldName,
+          status: null,
+          preview: error instanceof Error ? error.message : "Erro desconhecido",
+        });
       }
-
-      const uuid = findUuid(result.data);
-      if (uuid) return { uuid, raw: result.data };
-      const preview = result.text.replace(/\s+/g, " ").slice(0, 180);
-      errors.push(`${endpoint} [${fieldName}] -> sem uuid${preview ? `: ${preview}` : ""}`);
     }
   }
 
-  throw new Error(`Nao foi possivel enviar arquivo ao ERP. Tentativas: ${errors.join(" | ")}`);
+  throw new UploadArquivoError("Nao foi possivel enviar arquivo ao ERP.", attempts);
 }
 
 function normalizarEans(codigo: string): string[] {
@@ -329,8 +360,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return res.status(400).json({ error: "codigo e photo data:image sao obrigatorios" });
       }
 
-      const result = await atualizarFotoProduto(baseUrl, token, codigo, photo);
-      return res.status(result.ok ? 200 : result.status || 500).json({ ...result, empresa, codigo });
+      try {
+        const result = await atualizarFotoProduto(baseUrl, token, codigo, photo);
+        return res.status(result.ok ? 200 : result.status || 500).json({ ...result, empresa, codigo });
+      } catch (error) {
+        if (error instanceof UploadArquivoError) {
+          return res.status(422).json({
+            ok: false,
+            status: 422,
+            error: error.message,
+            attempts: error.attempts,
+            empresa,
+            codigo,
+          });
+        }
+        throw error;
+      }
     }
 
     const response = await fetch(`${baseUrl}${path}`, {

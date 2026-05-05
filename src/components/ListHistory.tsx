@@ -260,7 +260,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           if (!photoDataUrl) {
             falhas += 1;
             console.error("[ERP Foto] Foto pendente nao foi encontrada no cache", {
-              codigo: product.barcode,
+              produtoCodigo: product.barcode,
               produtoId: product.id,
             });
             continue;
@@ -285,9 +285,15 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
             naoEncontrados += 1;
           } else {
             falhas += 1;
-            const detail = await response.text().catch(() => "");
+            const detailText = await response.text().catch(() => "");
+            let detail: unknown = detailText;
+            try {
+              detail = detailText ? JSON.parse(detailText) : detailText;
+            } catch {
+              detail = detailText;
+            }
             console.error("[ERP Foto] Falha ao enviar foto", {
-              codigo: product.barcode,
+              produtoCodigo: product.barcode,
               status: response.status,
               detail,
             });
@@ -295,7 +301,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
         } catch (error) {
           falhas += 1;
           console.error("[ERP Foto] Erro inesperado ao enviar foto", {
-            codigo: product.barcode,
+            produtoCodigo: product.barcode,
             error,
           });
         }
