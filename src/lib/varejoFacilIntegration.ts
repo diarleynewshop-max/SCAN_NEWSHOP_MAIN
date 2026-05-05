@@ -16,6 +16,7 @@ export interface VarejoFacilProduct {
   estoque: number;
   secao?: string;
   imagem?: string;
+  hasErpImage?: boolean;
 }
 
 export interface ConsultaPrecoVarejoFacilProduto {
@@ -411,7 +412,8 @@ export const buscarProdutoVarejoFacil = async (
   const precoSelecionado = selecionarPrecoDaLoja(precos, contexto);
   const precoVarejo = normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1);
   const precoAtacado = normalizarPreco(precoSelecionado?.precoVenda2, precoSelecionado?.precoOferta2);
-  const imagem = resolverImagemProduto(extrairImagemProduto(produto), produto.id, contexto);
+  const imagemOriginal = extrairImagemProduto(produto);
+  const imagem = resolverImagemProduto(imagemOriginal, produto.id, contexto);
 
   console.info("[VarejoFacil][Produto] Produto resolvido", {
     codigo,
@@ -431,6 +433,7 @@ export const buscarProdutoVarejoFacil = async (
     estoque,
     secao: secao || undefined,
     imagem,
+    hasErpImage: Boolean(imagemOriginal),
   };
 };
 

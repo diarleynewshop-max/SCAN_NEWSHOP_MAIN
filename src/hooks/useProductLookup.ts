@@ -11,6 +11,7 @@ interface ProductInfo {
   descricao?: string;
   secao?: string;
   imagem?: string;
+  hasErpImage?: boolean;
 }
 
 interface UseProductLookupReturn {
@@ -65,6 +66,7 @@ export const useProductLookup = ({ enabled = true, empresa, flag }: UseProductLo
           nome_produto: produtoVarejoFacil.descricao,
           secao: produtoVarejoFacil.secao,
           imagem: produtoVarejoFacil.imagem,
+          hasErpImage: produtoVarejoFacil.hasErpImage,
         };
 
         setProductInfo(productData);
