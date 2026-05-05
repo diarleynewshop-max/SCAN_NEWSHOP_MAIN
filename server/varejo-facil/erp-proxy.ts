@@ -10,6 +10,8 @@ type UploadAttempt = {
   status: number | null;
   contentType?: string;
   isHtml?: boolean;
+  cookieConfigured?: boolean;
+  cookieLength?: number;
   preview: string;
 };
 
@@ -307,6 +309,8 @@ async function uploadArquivoImagem(
         status: result.response.status,
         contentType,
         isHtml: contentType.includes("text/html"),
+        cookieConfigured: uploadAttempt.mode === "erp-frame-multipart-upload" ? Boolean(webCookie) : undefined,
+        cookieLength: uploadAttempt.mode === "erp-frame-multipart-upload" ? webCookie.length : undefined,
         preview: preview || "Resposta sem UUID",
       });
     } catch (error) {
@@ -317,6 +321,8 @@ async function uploadArquivoImagem(
         status: null,
         contentType: "",
         isHtml: false,
+        cookieConfigured: uploadAttempt.mode === "erp-frame-multipart-upload" ? Boolean(webCookie) : undefined,
+        cookieLength: uploadAttempt.mode === "erp-frame-multipart-upload" ? webCookie.length : undefined,
         preview: error instanceof Error ? error.message : "Erro desconhecido",
       });
     }
