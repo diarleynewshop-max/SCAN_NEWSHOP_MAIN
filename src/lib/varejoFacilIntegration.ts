@@ -356,6 +356,9 @@ const resolverImagemProduto = (imagem: string | undefined, produtoId: number, co
   return `/api/erp-image-proxy?empresa=${empresa.toLowerCase()}&produtoId=${produtoId}&src=${encodeURIComponent(imagemOuProduto)}`;
 };
 
+const isReferenciaImagemErpValida = (imagem: string | undefined): boolean =>
+  Boolean(imagem && !/^data:image\//i.test(imagem));
+
 export const buscarProdutoVarejoFacil = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
@@ -413,6 +416,7 @@ export const buscarProdutoVarejoFacil = async (
   const precoVarejo = normalizarPreco(precoSelecionado?.precoVenda1, precoSelecionado?.precoOferta1);
   const precoAtacado = normalizarPreco(precoSelecionado?.precoVenda2, precoSelecionado?.precoOferta2);
   const imagemOriginal = extrairImagemProduto(produto);
+  const hasErpImage = isReferenciaImagemErpValida(imagemOriginal);
   const imagem = resolverImagemProduto(imagemOriginal, produto.id, contexto);
 
   console.info("[VarejoFacil][Produto] Produto resolvido", {
@@ -433,7 +437,7 @@ export const buscarProdutoVarejoFacil = async (
     estoque,
     secao: secao || undefined,
     imagem,
-    hasErpImage: Boolean(imagemOriginal),
+    hasErpImage,
   };
 };
 

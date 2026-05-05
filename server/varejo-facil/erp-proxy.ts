@@ -2,6 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
 type ErpProduto = Record<string, unknown> & { id?: number | string; imagem?: string };
+type UploadedArquivo = { uuid: string; raw: unknown };
 
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
@@ -82,6 +83,125 @@ async function fetchErpJson<T>(
   return { response, data, text };
 }
 
+async function fetchErpRaw(
+  url: string,
+  token: string,
+  init: RequestInit = {}
+): Promise<{ response: Response; data: unknown; text: string }> {
+  const response = await fetch(url, {
+    ...init,
+    headers: {
+      Authorization: token,
+      Accept: "application/json",
+      ...(init.headers || {}),
+    },
+  });
+
+  const text = await response.text();
+  const contentType = response.headers.get("content-type") || "";
+  let data: unknown = text;
+
+  if (contentType.includes("application/json") && text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+  }
+
+  return { response, data, text };
+}
+
+function getOriginFromBaseUrl(baseUrl: string): string {
+  return baseUrl.replace(/\/api$/, "");
+}
+
+function dataUrlToArquivo(photo: string): { buffer: Buffer; mimeType: string; filename: string } {
+  const match = photo.match(/^data:(image\/[a-zA-Z0-9.+-]+)(?:;[^;,]+)*;base64,(.+)$/);
+  if (!match) {
+    throw new Error("Foto precisa estar em data:image base64.");
+  }
+
+  const mimeType = match[1];
+  const rawBase64 = match[2];
+  const extension = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg";
+
+  return {
+    buffer: Buffer.from(rawBase64, "base64"),
+    mimeType,
+    filename: `produto-${Date.now()}.${extension}`,
+  };
+}
+
+function findUuid(value: unknown): string {
+  if (typeof value === "string") {
+    const uuid = value.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0];
+    return uuid || "";
+  }
+
+  if (!value || typeof value !== "object") return "";
+
+  const record = value as Record<string, unknown>;
+  const direct = [
+    record.uuid,
+    record.uid,
+    record.id,
+    record.nome,
+    record.name,
+  ].find((item): item is string => typeof item === "string" && item.trim().length > 0);
+
+  const directUuid = findUuid(direct);
+  if (directUuid) return directUuid;
+
+  for (const item of Object.values(record)) {
+    const nested = findUuid(item);
+    if (nested) return nested;
+  }
+
+  return "";
+}
+
+async function uploadArquivoImagem(baseUrl: string, token: string, photo: string): Promise<UploadedArquivo> {
+  const origin = getOriginFromBaseUrl(baseUrl);
+  const arquivo = dataUrlToArquivo(photo);
+  const endpoints = [
+    `${baseUrl}/v1/arquivo`,
+    `${baseUrl}/v1/arquivos`,
+    `${baseUrl}/v1/arquivo/upload`,
+    `${baseUrl}/v1/arquivos/upload`,
+    `${baseUrl}/arquivo`,
+    `${baseUrl}/arquivo/upload`,
+    `${origin}/arquivo/upload`,
+  ];
+  const fieldNames = ["file", "arquivo"];
+  const errors: string[] = [];
+
+  for (const endpoint of endpoints) {
+    for (const fieldName of fieldNames) {
+      const formData = new FormData();
+      const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
+      formData.append(fieldName, blob, arquivo.filename);
+
+      const result = await fetchErpRaw(endpoint, token, {
+        method: "POST",
+        body: formData,
+      });
+
+      if (result.response.status === 401) tokenCache.clear();
+      if (!result.response.ok) {
+        errors.push(`${endpoint} [${fieldName}] -> ${result.response.status}`);
+        continue;
+      }
+
+      const uuid = findUuid(result.data);
+      if (uuid) return { uuid, raw: result.data };
+      errors.push(`${endpoint} [${fieldName}] -> sem uuid`);
+    }
+  }
+
+  throw new Error(`Nao foi possivel enviar arquivo ao ERP. Tentativas: ${errors.join(" | ")}`);
+}
+
 function normalizarEans(codigo: string): string[] {
   const limpo = codigo.replace(/\s+/g, "");
   const candidatos = [limpo];
@@ -121,7 +241,8 @@ async function atualizarFotoProduto(baseUrl: string, token: string, codigo: stri
     return { ok: false, status: 404, error: "Produto nao encontrado no ERP" };
   }
 
-  const payload = { ...produto, imagem: photo };
+  const arquivo = await uploadArquivoImagem(baseUrl, token, photo);
+  const payload = { ...produto, imagem: arquivo.uuid };
   const produtoId = encodeURIComponent(String(produto.id));
   const update = await fetchErpJson<ErpProduto>(baseUrl, token, `/v1/produto/produtos/${produtoId}`, {
     method: "PUT",
@@ -139,7 +260,7 @@ async function atualizarFotoProduto(baseUrl: string, token: string, codigo: stri
     };
   }
 
-  return { ok: true, status: update.response.status, produtoId: produto.id };
+  return { ok: true, status: update.response.status, produtoId: produto.id, uuid: arquivo.uuid };
 }
 
 async function getAccessToken(empresa: EmpresaKey, baseUrl: string): Promise<string> {
