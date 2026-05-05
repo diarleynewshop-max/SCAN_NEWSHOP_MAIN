@@ -417,7 +417,7 @@ export const buscarProdutoVarejoFacil = async (
   const precoAtacado = normalizarPreco(precoSelecionado?.precoVenda2, precoSelecionado?.precoOferta2);
   const imagemOriginal = extrairImagemProduto(produto);
   const hasErpImage = isReferenciaImagemErpValida(imagemOriginal);
-  const imagem = resolverImagemProduto(imagemOriginal, produto.id, contexto);
+  const imagem = hasErpImage ? resolverImagemProduto(imagemOriginal, produto.id, contexto) : undefined;
 
   console.info("[VarejoFacil][Produto] Produto resolvido", {
     codigo,
