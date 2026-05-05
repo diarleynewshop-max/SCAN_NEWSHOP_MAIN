@@ -171,7 +171,12 @@ function findUuid(value: unknown): string {
   return "";
 }
 
-async function uploadArquivoImagem(baseUrl: string, token: string, photo: string): Promise<UploadedArquivo> {
+async function uploadArquivoImagem(
+  baseUrl: string,
+  token: string,
+  photo: string,
+  codigoProduto: string
+): Promise<UploadedArquivo> {
   const origin = getOriginFromBaseUrl(baseUrl);
   const arquivo = dataUrlToArquivo(photo);
   const endpoints = [
@@ -192,6 +197,10 @@ async function uploadArquivoImagem(baseUrl: string, token: string, photo: string
       const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
       formData.append(fieldName, blob, arquivo.filename);
       formData.append("nome", arquivo.filename);
+      formData.append("descricao", codigoProduto);
+      formData.append("titulo", codigoProduto);
+      formData.append("observacao", codigoProduto);
+      formData.append("codigo", codigoProduto);
 
       try {
         const result = await fetchErpRaw(endpoint, token, {
@@ -274,7 +283,7 @@ async function atualizarFotoProduto(baseUrl: string, token: string, codigo: stri
     return { ok: false, status: 404, error: "Produto nao encontrado no ERP" };
   }
 
-  const arquivo = await uploadArquivoImagem(baseUrl, token, photo);
+  const arquivo = await uploadArquivoImagem(baseUrl, token, photo, codigo);
   const payload = { ...produto, imagem: arquivo.uuid };
   const produtoId = encodeURIComponent(String(produto.id));
   const update = await fetchErpJson<ErpProduto>(baseUrl, token, `/v1/produto/produtos/${produtoId}`, {
