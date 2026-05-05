@@ -297,6 +297,14 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
               status: response.status,
               detail,
             });
+            if (detail && typeof detail === "object") {
+              const maybeAttempts = (detail as { attempts?: unknown }).attempts;
+              if (Array.isArray(maybeAttempts)) {
+                console.groupCollapsed(`[ERP Foto] Tentativas de upload (${maybeAttempts.length})`);
+                console.table(maybeAttempts);
+                console.groupEnd();
+              }
+            }
           }
         } catch (error) {
           falhas += 1;
