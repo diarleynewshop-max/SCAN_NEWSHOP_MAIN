@@ -52,6 +52,14 @@ function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOK
   );
 }
 
+function getWebCookie(empresa: EmpresaKey): string {
+  return (
+    process.env[`ERP_WEB_COOKIE_${empresa}`] ||
+    process.env.ERP_WEB_COOKIE ||
+    ""
+  );
+}
+
 function resolveBaseUrl(empresa: EmpresaKey): string {
   const configuredUrl = (getEnv(empresa, "URL") || `https://${HOSTS[empresa]}`).replace(/\/$/, "");
   return configuredUrl.endsWith("/api") ? configuredUrl : `${configuredUrl}/api`;
@@ -181,6 +189,10 @@ function findUuid(value: unknown): string {
 }
 
 function resolveUploadErrorMessage(attempts: UploadAttempt[]): string {
+  if (attempts.some((attempt) => attempt.mode === "erp-frame-multipart-upload" && attempt.isHtml)) {
+    return "Upload /arquivo/upload exige cookie JSESSIONID da sessao web do ERP. Configure ERP_WEB_COOKIE_NEWSHOP.";
+  }
+
   if (attempts.some((attempt) => attempt.isHtml)) {
     return "Endpoint retornou HTML/login, nao JSON da API.";
   }
@@ -193,7 +205,8 @@ async function uploadArquivoImagem(
   token: string,
   photo: string,
   codigoProduto: string,
-  produtoId?: string
+  produtoId?: string,
+  webCookie = ""
 ): Promise<UploadedArquivo> {
   const origin = getOriginFromBaseUrl(baseUrl);
   const arquivo = dataUrlToArquivo(photo);
@@ -217,7 +230,7 @@ async function uploadArquivoImagem(
       endpoint: `${origin}/arquivo/upload`,
       fieldName: "upload",
       mode: "erp-frame-multipart-upload",
-      headers: {},
+      headers: webCookie ? { Cookie: webCookie } : {},
       body: (() => {
         const formData = new FormData();
         const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
@@ -345,13 +358,13 @@ async function buscarProdutoPorCodigo(baseUrl: string, token: string, codigo: st
   return null;
 }
 
-async function atualizarFotoProduto(baseUrl: string, token: string, codigo: string, photo: string) {
+async function atualizarFotoProduto(baseUrl: string, token: string, codigo: string, photo: string, webCookie = "") {
   const produto = await buscarProdutoPorCodigo(baseUrl, token, codigo);
   if (!produto?.id) {
     return { ok: false, status: 404, error: "Produto nao encontrado no ERP" };
   }
 
-  const arquivo = await uploadArquivoImagem(baseUrl, token, photo, codigo, String(produto.id));
+  const arquivo = await uploadArquivoImagem(baseUrl, token, photo, codigo, String(produto.id), webCookie);
   if (arquivo.directUpdate && !arquivo.uuid) {
     return { ok: true, status: 200, produtoId: produto.id, directUpdate: true };
   }
@@ -445,13 +458,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const body = parseBody(req.body);
       const codigo = String(body.codigo ?? "").trim();
       const photo = String(body.photo ?? "").trim();
+      const webCookie = getWebCookie(empresa);
 
       if (!codigo || !photo.startsWith("data:image/")) {
         return res.status(400).json({ error: "codigo e photo data:image sao obrigatorios" });
       }
 
       try {
-        const result = await atualizarFotoProduto(baseUrl, token, codigo, photo);
+        const result = await atualizarFotoProduto(baseUrl, token, codigo, photo, webCookie);
         return res.status(result.ok ? 200 : result.status || 500).json({ ...result, empresa, codigo });
       } catch (error) {
         if (error instanceof UploadArquivoError) {
