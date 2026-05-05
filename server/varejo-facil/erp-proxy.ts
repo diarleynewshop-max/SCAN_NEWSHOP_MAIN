@@ -2,7 +2,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
 
 type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
 type ErpProduto = Record<string, unknown> & { id?: number | string; imagem?: string };
-type UploadedArquivo = { uuid: string; raw: unknown };
+type UploadedArquivo = { uuid?: string; raw: unknown; directUpdate?: boolean };
 type UploadAttempt = { endpoint: string; fieldName: string; mode: string; status: number | null; preview: string };
 
 const HOSTS: Record<EmpresaKey, string> = {
@@ -176,7 +176,8 @@ async function uploadArquivoImagem(
   baseUrl: string,
   token: string,
   photo: string,
-  codigoProduto: string
+  codigoProduto: string,
+  produtoId?: string
 ): Promise<UploadedArquivo> {
   const origin = getOriginFromBaseUrl(baseUrl);
   const arquivo = dataUrlToArquivo(photo);
@@ -524,6 +525,171 @@ async function uploadArquivoImagem(
     }
   }
 
+  if (produtoId) {
+    const produtoImagemEndpoints = [
+      `${baseUrl}/v1/produto/produtos/${encodeURIComponent(produtoId)}/imagem`,
+      `${baseUrl}/v1/produto/produtos/${encodeURIComponent(produtoId)}/imagens`,
+      `${baseUrl}/v1/produto/produtos/${encodeURIComponent(produtoId)}/foto`,
+      `${baseUrl}/v1/produto/produtos/${encodeURIComponent(produtoId)}/fotos`,
+    ];
+    const produtoFieldNames = ["file", "arquivo", "imagem", "foto"];
+
+    for (const endpoint of produtoImagemEndpoints) {
+      for (const method of ["POST", "PUT"]) {
+        for (const fieldName of produtoFieldNames) {
+          const formData = new FormData();
+          const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
+          formData.append(fieldName, blob, arquivo.filename);
+          formData.append("nome", arquivo.filename);
+          formData.append("nomeArquivo", arquivo.filename);
+          formData.append("descricao", codigoProduto);
+          formData.append("codigo", codigoProduto);
+
+          try {
+            const result = await fetchErpRaw(endpoint, token, {
+              method,
+              body: formData,
+            });
+
+            if (result.response.status === 401) tokenCache.clear();
+            const contentType = result.response.headers.get("content-type") || "";
+            const preview = result.text.replace(/\s+/g, " ").slice(0, 320);
+
+            if (result.response.ok && !contentType.includes("text/html")) {
+              const uuid = findUuid(result.data);
+              return { uuid: uuid || undefined, raw: result.data, directUpdate: true };
+            }
+
+            attempts.push({
+              endpoint,
+              fieldName,
+              mode: `produto-${method.toLowerCase()}-multipart`,
+              status: result.response.status,
+              preview: preview || "Resposta sem UUID",
+            });
+          } catch (error) {
+            attempts.push({
+              endpoint,
+              fieldName,
+              mode: `produto-${method.toLowerCase()}-multipart`,
+              status: null,
+              preview: error instanceof Error ? error.message : "Erro desconhecido",
+            });
+          }
+        }
+      }
+    }
+
+    const produtoJsonPayloads: Array<{ mode: string; body: Record<string, unknown> }> = [
+      {
+        mode: "produto-json-arquivo-base64",
+        body: {
+          nome: arquivo.filename,
+          nomeArquivo: arquivo.filename,
+          descricao: codigoProduto,
+          mimeType: arquivo.mimeType,
+          arquivo: arquivo.rawBase64,
+        },
+      },
+      {
+        mode: "produto-json-imagem-base64",
+        body: {
+          nome: arquivo.filename,
+          descricao: codigoProduto,
+          contentType: arquivo.mimeType,
+          imagem: arquivo.rawBase64,
+        },
+      },
+      {
+        mode: "produto-json-dataurl",
+        body: {
+          nome: arquivo.filename,
+          descricao: codigoProduto,
+          imagem: `data:${arquivo.mimeType};base64,${arquivo.rawBase64}`,
+        },
+      },
+    ];
+
+    for (const endpoint of produtoImagemEndpoints) {
+      for (const method of ["POST", "PUT"]) {
+        for (const payload of produtoJsonPayloads) {
+          try {
+            const result = await fetchErpRaw(endpoint, token, {
+              method,
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload.body),
+            });
+
+            if (result.response.status === 401) tokenCache.clear();
+            const contentType = result.response.headers.get("content-type") || "";
+            const preview = result.text.replace(/\s+/g, " ").slice(0, 320);
+
+            if (result.response.ok && !contentType.includes("text/html")) {
+              const uuid = findUuid(result.data);
+              return { uuid: uuid || undefined, raw: result.data, directUpdate: true };
+            }
+
+            attempts.push({
+              endpoint,
+              fieldName: "json",
+              mode: `${payload.mode}-${method.toLowerCase()}`,
+              status: result.response.status,
+              preview: preview || "Resposta sem UUID",
+            });
+          } catch (error) {
+            attempts.push({
+              endpoint,
+              fieldName: "json",
+              mode: `${payload.mode}-${method.toLowerCase()}`,
+              status: null,
+              preview: error instanceof Error ? error.message : "Erro desconhecido",
+            });
+          }
+        }
+      }
+    }
+
+    for (const endpoint of produtoImagemEndpoints) {
+      for (const method of ["POST", "PUT"]) {
+        try {
+          const result = await fetchErpRaw(endpoint, token, {
+            method,
+            headers: {
+              "Content-Type": arquivo.mimeType,
+              "Content-Disposition": `attachment; filename="${arquivo.filename}"`,
+            },
+            body: arquivo.buffer as unknown as BodyInit,
+          });
+
+          if (result.response.status === 401) tokenCache.clear();
+          const contentType = result.response.headers.get("content-type") || "";
+          const preview = result.text.replace(/\s+/g, " ").slice(0, 320);
+
+          if (result.response.ok && !contentType.includes("text/html")) {
+            const uuid = findUuid(result.data);
+            return { uuid: uuid || undefined, raw: result.data, directUpdate: true };
+          }
+
+          attempts.push({
+            endpoint,
+            fieldName: "binary",
+            mode: `produto-${method.toLowerCase()}-raw-bytes`,
+            status: result.response.status,
+            preview: preview || "Resposta sem UUID",
+          });
+        } catch (error) {
+          attempts.push({
+            endpoint,
+            fieldName: "binary",
+            mode: `produto-${method.toLowerCase()}-raw-bytes`,
+            status: null,
+            preview: error instanceof Error ? error.message : "Erro desconhecido",
+          });
+        }
+      }
+    }
+  }
+
   throw new UploadArquivoError("Nao foi possivel enviar arquivo ao ERP.", attempts);
 }
 
@@ -566,7 +732,20 @@ async function atualizarFotoProduto(baseUrl: string, token: string, codigo: stri
     return { ok: false, status: 404, error: "Produto nao encontrado no ERP" };
   }
 
-  const arquivo = await uploadArquivoImagem(baseUrl, token, photo, codigo);
+  const arquivo = await uploadArquivoImagem(baseUrl, token, photo, codigo, String(produto.id));
+  if (arquivo.directUpdate && !arquivo.uuid) {
+    return { ok: true, status: 200, produtoId: produto.id, directUpdate: true };
+  }
+
+  if (!arquivo.uuid) {
+    return {
+      ok: false,
+      status: 422,
+      produtoId: produto.id,
+      error: "ERP aceitou o envio, mas nao retornou UUID da imagem",
+    };
+  }
+
   const payload = { ...produto, imagem: arquivo.uuid };
   const produtoId = encodeURIComponent(String(produto.id));
   const update = await fetchErpJson<ErpProduto>(baseUrl, token, `/v1/produto/produtos/${produtoId}`, {
