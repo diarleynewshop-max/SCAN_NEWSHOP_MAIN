@@ -67,10 +67,18 @@ export interface RelatorioDiario {
   };
   porConferente: RelatorioDiarioConferente[];
   porSecao: RelatorioDiarioSecao[];
+  itens?: RelatorioDiarioItem[];
   itensCriticos: RelatorioDiarioItem[];
   conferencias: Array<{ taskId: string; name: string; conferente: string; totalItens: number }>;
   ignoradas: Array<{ taskId: string; name: string; motivo: string }>;
   clickupTaskId: string | null;
+}
+
+export interface RelatorioDataOption {
+  data: string;
+  label: string;
+  total: number;
+  relatorioGerado: boolean;
 }
 
 // ── Configuração por empresa/flag ─────────────────────────────────────────────
@@ -185,6 +193,22 @@ export async function gerarRelatorioDiario(
   });
   if (!response.ok) throw new Error(`Erro ${response.status} ao gerar relatorio diario`);
   return await response.json();
+}
+
+export async function listarDatasRelatorio(
+  empresa: EmpresaKey,
+  flag: FlagKey
+): Promise<RelatorioDataOption[]> {
+  const params = new URLSearchParams({
+    action: "listar-datas-relatorio",
+    empresa,
+    flag,
+  });
+
+  const response = await fetch(`/api/clickup-proxy?${params.toString()}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao buscar datas de relatorio`);
+  const data = await response.json();
+  return data.datas ?? [];
 }
 
 export async function buscarAttachmentsDaTask(

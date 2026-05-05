@@ -15,6 +15,8 @@ type RelatorioItem = {
   taskId: string;
 };
 
+const RELATORIO_GERADO_TAG = 'RELATORIO GERADO';
+
 const DEFAULT_LIST_IDS: Record<EmpresaKey, Record<ListaKey, string>> = {
   NEWSHOP: { loja: '901325900510', cd: '901325900510', compras: '901326684020' },
   SOYE: { loja: '901326607319', cd: '901326461924', compras: '901326684020' },
@@ -221,6 +223,40 @@ function taskMatchesDate(task: any, dateKey: string): boolean {
   return formatDateKey(new Date(timestamp)) === dateKey;
 }
 
+function extractDateKeyFromText(value: string): string | null {
+  const match = value.match(/(\d{2})\/(\d{2})\/(\d{4})/);
+  if (!match) return null;
+  return `${match[3]}-${match[2]}-${match[1]}`;
+}
+
+function taskReportDateKey(task: any, description = ''): string | null {
+  return (
+    extractDateKeyFromText(description) ||
+    extractDateKeyFromText(String(task?.name ?? '')) ||
+    extractDateKeyFromText(String(task?.description ?? task?.text_content ?? '')) ||
+    null
+  );
+}
+
+function taskHasTag(task: any, tagName: string): boolean {
+  const tagNorm = normalizeText(tagName).trim();
+  return Array.isArray(task?.tags) && task.tags.some((tag: any) => normalizeText(tag?.name ?? tag).trim() === tagNorm);
+}
+
+async function addTaskTag(token: string, taskId: string, tagName: string): Promise<void> {
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/tag/${encodeURIComponent(tagName)}`, {
+    method: 'POST',
+    headers: {
+      Authorization: token,
+      'Content-Type': 'application/json',
+    },
+  });
+
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`ClickUp ${response.status} ao aplicar tag ${tagName}: ${await response.text()}`);
+  }
+}
+
 function normalizeText(value: unknown): string {
   return String(value ?? '')
     .normalize('NFD')
@@ -279,8 +315,6 @@ function parseConferenceItems(description: string, conferente: string, taskId: s
     if (!itemMatch) continue;
 
     const status = normalizeReportStatus(itemMatch[5]);
-    if (status !== 'nao_tem' && status !== 'parcial') continue;
-
     const realText = itemMatch[4].trim();
     items.push({
       codigo: itemMatch[1].trim(),
@@ -337,6 +371,50 @@ ITENS FALTANTES/PARCIAIS
 ${faltas}`;
 }
 
+async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: string) {
+  const listId = getListId(empresa, flag);
+  const rawTasks = await fetchTasksFromList(listId, token);
+  const concluidas = rawTasks.filter((task) => {
+    const status = normalizeStatus(task.status?.status);
+    const name = normalizeText(task.name);
+    return (status === 'concluido' || status === 'complete') && !name.includes('relatorio diario');
+  });
+
+  const dateMap = new Map<string, { data: string; label: string; total: number; relatorioGerado: boolean }>();
+
+  for (const task of concluidas) {
+    try {
+      const detail = await fetchTaskDetail(task.id, token);
+      const description = String(detail.description ?? detail.text_content ?? task.description ?? '');
+      const dateKey = taskReportDateKey(task, description);
+      if (!dateKey) continue;
+
+      const current = dateMap.get(dateKey) ?? {
+        data: dateKey,
+        label: formatDatePtBr(dateKey),
+        total: 0,
+        relatorioGerado: false,
+      };
+      current.total += 1;
+      current.relatorioGerado = current.relatorioGerado || taskHasTag(detail, RELATORIO_GERADO_TAG) || taskHasTag(task, RELATORIO_GERADO_TAG);
+      dateMap.set(dateKey, current);
+    } catch {
+      const fallbackDate = taskReportDateKey(task);
+      if (!fallbackDate) continue;
+      const current = dateMap.get(fallbackDate) ?? {
+        data: fallbackDate,
+        label: formatDatePtBr(fallbackDate),
+        total: 0,
+        relatorioGerado: false,
+      };
+      current.total += 1;
+      dateMap.set(fallbackDate, current);
+    }
+  }
+
+  return Array.from(dateMap.values()).sort((a, b) => b.data.localeCompare(a.data));
+}
+
 async function criarTarefaClickUp(listId: string, token: string, name: string, description: string, status = 'complete') {
   const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
     method: 'POST',
@@ -367,15 +445,19 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
     return (status === 'concluido' || status === 'complete') && !name.includes('relatorio diario');
   });
 
-  const tasksDoDia = concluidas.filter((task) => taskMatchesDate(task, dateKey));
   const conferencias: any[] = [];
   const ignoradas: Array<{ taskId: string; name: string; motivo: string }> = [];
-  const itensCriticos: RelatorioItem[] = [];
+  const itens: RelatorioItem[] = [];
 
-  for (const task of tasksDoDia) {
+  for (const task of concluidas) {
     try {
       const detail = await fetchTaskDetail(task.id, token);
       const description = String(detail.description ?? detail.text_content ?? task.description ?? '');
+      const detailDateKey = taskReportDateKey(task, description);
+      if (detailDateKey ? detailDateKey !== dateKey : !taskMatchesDate(task, dateKey)) {
+        continue;
+      }
+
       if (!description || !normalizeText(description).includes('resumo')) {
         ignoradas.push({ taskId: task.id, name: task.name, motivo: 'Descricao fora do padrao da conferencia' });
         continue;
@@ -397,7 +479,7 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
         totalItens,
         resumo,
       });
-      itensCriticos.push(...parseConferenceItems(description, conferente, task.id));
+      itens.push(...parseConferenceItems(description, conferente, task.id));
     } catch (error: any) {
       ignoradas.push({ taskId: task.id, name: task.name, motivo: error?.message ?? 'Erro ao ler task' });
     }
@@ -436,7 +518,8 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
   }
 
   const secaoMap = new Map<string, any>();
-  for (const item of itensCriticos) {
+  for (const item of itens) {
+    if (item.status !== 'nao_tem' && item.status !== 'parcial') continue;
     const current = secaoMap.get(item.secao) ?? { nome: item.secao, total: 0, naoTem: 0, parcial: 0 };
     current.total += 1;
     if (item.status === 'nao_tem') current.naoTem += 1;
@@ -454,7 +537,8 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
     resumo,
     porConferente: sortByTotalDesc(Array.from(conferenteMap.values())),
     porSecao: sortByTotalDesc(Array.from(secaoMap.values())),
-    itensCriticos,
+    itens,
+    itensCriticos: itens.filter((item) => item.status === 'nao_tem' || item.status === 'parcial'),
     conferencias,
     ignoradas,
     clickupTaskId: null as string | null,
@@ -463,11 +547,14 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
   if (conferencias.length > 0) {
     const task = await criarTarefaClickUp(
       listId,
+      token,
       `Relatorio Diario - ${empresa} - ${formatDatePtBr(dateKey)}`,
       buildRelatorioDescription(report),
       'complete'
     );
     report.clickupTaskId = task.id ?? null;
+
+    await Promise.allSettled(conferencias.map((item) => addTaskTag(token, item.taskId, RELATORIO_GERADO_TAG)));
   }
 
   return report;
@@ -704,6 +791,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'gerar-relatorio-diario') {
       const relatorio = await gerarRelatorioDiario(empresa, flag, token, dataRelatorio);
       return res.status(200).json(relatorio);
+    }
+
+    if (action === 'listar-datas-relatorio') {
+      const datas = await listarDatasRelatorio(empresa, flag, token);
+      return res.status(200).json({ datas, empresa, flag });
     }
 
     if (action === 'deletar-task') {

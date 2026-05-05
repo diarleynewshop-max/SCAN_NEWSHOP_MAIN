@@ -31,12 +31,16 @@ import {
   buscarAttachmentsDaTask,
   consolidarJsonsAnalisados,
   gerarRelatorioDiario,
+  listarDatasRelatorio,
   deletarTask,
   type ClickUpTask,
   type EmpresaKey,
   type FlagKey,
   type RelatorioDiario,
+  type RelatorioDataOption,
+  type RelatorioDiarioItem,
 } from "@/lib/clickupApi";
+import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
 import { z } from "zod";
 
 export type ConferenceStatus =
@@ -112,6 +116,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [loadingJson, setLoadingJson] = useState(false);
   const [consolidandoJson, setConsolidandoJson] = useState(false);
   const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
+  const [relatorioPopupOpen, setRelatorioPopupOpen] = useState(false);
+  const [relatorioDatas, setRelatorioDatas] = useState<RelatorioDataOption[]>([]);
+  const [loadingRelatorioDatas, setLoadingRelatorioDatas] = useState(false);
+  const [relatorioDatasErro, setRelatorioDatasErro] = useState<string | null>(null);
   const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -989,25 +997,102 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     doc.save(`relatorio_diario_${relatorio.empresa}_${relatorio.data}.pdf`);
   };
 
-  const gerarRelatorioDoDia = async () => {
+  const escapeHtml = (value: unknown) =>
+    String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#039;");
+
+  const statusRelatorioLabel = (status: string) => {
+    if (status === "nao_tem") return "Nao tem";
+    if (status === "parcial") return "Parcial";
+    if (status === "pendente") return "Pendente";
+    return "Separado";
+  };
+
+  const exportRelatorioDiarioHTML = async (relatorio: RelatorioDiario) => {
+    const itensBase = relatorio.itens?.length ? relatorio.itens : relatorio.itensCriticos;
+    const itensEnriquecidos = await Promise.all(
+      itensBase.map(async (item: RelatorioDiarioItem) => {
+        try {
+          const produto = await buscarProdutoVarejoFacil(item.codigo, { empresa: relatorio.empresa, flag: relatorio.flag });
+          return {
+            ...item,
+            sku: produto?.descricao || item.sku,
+            secao: produto?.secao || item.secao,
+            estoque: produto?.estoque ?? null,
+          };
+        } catch {
+          return { ...item, estoque: null };
+        }
+      })
+    );
+
+    const rows = itensEnriquecidos.map((item, index) => `
+      <tr data-status="${escapeHtml(item.status)}">
+        <td>${index + 1}</td>
+        <td class="mono">${escapeHtml(item.codigo)}</td>
+        <td>${escapeHtml(item.sku || "-")}</td>
+        <td>${escapeHtml(item.secao || "Sem categoria")}</td>
+        <td>${escapeHtml(item.conferente)}</td>
+        <td>${item.pedido}</td>
+        <td>${item.real ?? "-"}</td>
+        <td>${item.estoque ?? "-"}</td>
+        <td><span class="pill ${escapeHtml(item.status)}">${escapeHtml(statusRelatorioLabel(item.status))}</span></td>
+      </tr>
+    `).join("");
+
+    const dataLabel = formatarDataRelatorio(relatorio.data);
+    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>Relatorio ${relatorio.empresa} ${dataLabel}</title><style>body{font-family:Arial,sans-serif;background:#f6f6f4;color:#171717;margin:0;padding:24px;}header{margin-bottom:20px;}h1{margin:0;font-size:26px;}p{margin:4px 0;color:#555}.cards{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin:18px 0}.card{background:#fff;border:1px solid #ddd;border-radius:8px;padding:14px}.card strong{display:block;font-size:26px}.filters{display:flex;gap:8px;flex-wrap:wrap;margin:14px 0}.filters button{border:1px solid #ddd;background:#fff;border-radius:8px;padding:9px 12px;font-weight:700;cursor:pointer}.filters button.active{background:#111;color:#fff;border-color:#111}table{width:100%;border-collapse:collapse;background:#fff;border-radius:8px;overflow:hidden}th,td{border-bottom:1px solid #eee;padding:9px;text-align:left;font-size:13px}th{background:#111;color:#fff;position:sticky;top:0}.mono{font-family:monospace;font-weight:700}.pill{display:inline-block;border-radius:999px;padding:4px 8px;font-size:12px;font-weight:700}.separado{background:#dcfce7;color:#166534}.nao_tem{background:#fee2e2;color:#991b1b}.parcial{background:#fef3c7;color:#92400e}.pendente{background:#e5e7eb;color:#374151}@media(max-width:760px){body{padding:12px}.cards{grid-template-columns:repeat(2,1fr)}table{display:block;overflow:auto}}</style></head><body><header><h1>Relatorio de conferencia</h1><p>${escapeHtml(relatorio.empresa)} - ${escapeHtml(relatorio.flag.toUpperCase())} - ${escapeHtml(dataLabel)}</p><p>Gerado em ${escapeHtml(new Date(relatorio.geradoEm).toLocaleString("pt-BR"))} | Conferencias: ${relatorio.totalConferencias}</p></header><section class="cards"><div class="card"><strong>${relatorio.resumo.separado}</strong>Separado</div><div class="card"><strong>${relatorio.resumo.naoTem}</strong>Nao tem</div><div class="card"><strong>${relatorio.resumo.parcial}</strong>Parcial</div><div class="card"><strong>${relatorio.resumo.pendente}</strong>Pendente</div></section><div class="filters"><button class="active" data-filter="todos">Todos</button><button data-filter="separado">Separado</button><button data-filter="nao_tem">Nao tem</button><button data-filter="parcial">Parcial</button><button data-filter="pendente">Pendente</button></div><table><thead><tr><th>#</th><th>Codigo</th><th>SKU/API</th><th>Secao</th><th>Conferente</th><th>Pedido</th><th>Real</th><th>Estoque API</th><th>Status</th></tr></thead><tbody>${rows}</tbody></table><script>const buttons=document.querySelectorAll("[data-filter]");const rows=[...document.querySelectorAll("tbody tr")];buttons.forEach(btn=>btn.onclick=()=>{buttons.forEach(b=>b.classList.remove("active"));btn.classList.add("active");const f=btn.dataset.filter;rows.forEach(row=>{row.style.display=f==="todos"||row.dataset.status===f?"":"none";});});</script></body></html>`;
+    const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `relatorio_conferencia_${relatorio.empresa}_${relatorio.data}.html`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
+
+  const abrirRelatorioPopup = async () => {
+    setRelatorioPopupOpen(true);
+    setLoadingRelatorioDatas(true);
+    setRelatorioDatasErro(null);
+    try {
+      const datas = await listarDatasRelatorio(empresa as EmpresaKey, flag as FlagKey);
+      setRelatorioDatas(datas);
+    } catch (e: any) {
+      setRelatorioDatasErro(e.message ?? "Falha ao buscar datas");
+    } finally {
+      setLoadingRelatorioDatas(false);
+    }
+  };
+
+  const gerarRelatorioDaData = async (data: string) => {
     if (gerandoRelatorio) return;
 
     setGerandoRelatorio(true);
     try {
-      const hoje = new Date().toLocaleDateString("en-CA", { timeZone: "America/Sao_Paulo" });
-      const relatorio = await gerarRelatorioDiario(empresa as EmpresaKey, flag as FlagKey, hoje);
+      const relatorio = await gerarRelatorioDiario(empresa as EmpresaKey, flag as FlagKey, data);
 
       if (relatorio.totalConferencias === 0) {
-        toast({ title: "Nenhuma conferencia concluida hoje", variant: "destructive" });
+        toast({ title: "Nenhuma conferencia concluida nessa data", variant: "destructive" });
         return;
       }
 
-      exportRelatorioDiarioPDF(relatorio);
+      await exportRelatorioDiarioHTML(relatorio);
+      setRelatorioDatas((prev) =>
+        prev.map((item) => (item.data === data ? { ...item, relatorioGerado: true } : item))
+      );
+      setRelatorioPopupOpen(false);
       toast({
         title: "Relatorio diario gerado",
         description: relatorio.clickupTaskId
-          ? `PDF baixado e task ${relatorio.clickupTaskId} criada no ClickUp.`
-          : "PDF baixado.",
+          ? `HTML baixado e tag RELATORIO GERADO aplicada.`
+          : "HTML baixado.",
       });
     } catch (e: any) {
       toast({ title: "Erro ao gerar relatorio", description: e.message ?? "Falha no relatorio diario", variant: "destructive" });
@@ -1158,9 +1243,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <ArrowLeft className="w-4 h-4" /> Voltar
           </button>
           <div className="flex items-center gap-3">
-            <button onClick={gerarRelatorioDoDia} disabled={gerandoRelatorio}
+            <button onClick={abrirRelatorioPopup} disabled={gerandoRelatorio || loadingRelatorioDatas}
               className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
-              {gerandoRelatorio ? (
+              {gerandoRelatorio || loadingRelatorioDatas ? (
                 <span className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
               ) : (
                 <FileText className="w-3.5 h-3.5" />
@@ -1181,6 +1266,58 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           </div>
           <EmpresaBadge />
         </div>
+
+        {relatorioPopupOpen && (
+          <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
+            <div className="w-full max-w-md rounded-xl bg-background border border-border shadow-xl p-4 space-y-3">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <p className="text-base font-bold text-foreground">Gerar relatorio</p>
+                  <p className="text-xs text-muted-foreground">Escolha a data concluida no ClickUp.</p>
+                </div>
+                <button onClick={() => setRelatorioPopupOpen(false)} className="h-8 px-3 rounded-lg bg-muted text-muted-foreground text-xs font-bold">
+                  Fechar
+                </button>
+              </div>
+
+              {loadingRelatorioDatas && (
+                <div className="flex items-center justify-center py-8 gap-3 text-muted-foreground">
+                  <span className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+                  <span className="text-sm">Buscando datas...</span>
+                </div>
+              )}
+
+              {relatorioDatasErro && (
+                <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{relatorioDatasErro}</div>
+              )}
+
+              {!loadingRelatorioDatas && !relatorioDatasErro && relatorioDatas.length === 0 && (
+                <div className="rounded-xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
+                  Nenhuma conferencia concluida encontrada.
+                </div>
+              )}
+
+              <div className="space-y-2 max-h-[55vh] overflow-auto">
+                {relatorioDatas.map((item) => (
+                  <button
+                    key={item.data}
+                    onClick={() => gerarRelatorioDaData(item.data)}
+                    disabled={gerandoRelatorio}
+                    className="w-full rounded-xl border border-border bg-card p-3 text-left flex items-center justify-between gap-3 disabled:opacity-60"
+                  >
+                    <span>
+                      <span className="block text-sm font-bold text-foreground">{item.label}</span>
+                      <span className="block text-xs text-muted-foreground">{item.total} conferencia(s)</span>
+                    </span>
+                    <span className={`text-[11px] font-black rounded-full px-2 py-1 ${item.relatorioGerado ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]" : "bg-muted text-muted-foreground"}`}>
+                      {item.relatorioGerado ? "RELATORIO GERADO" : "GERAR"}
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
 
         {!loadingTasks && gruposMesmoNome.length > 0 && (
           <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
