@@ -124,12 +124,11 @@ function dataUrlToArquivo(photo: string): { buffer: Buffer; mimeType: string; fi
 
   const mimeType = match[1];
   const rawBase64 = match[2];
-  const extension = mimeType.includes("png") ? "png" : mimeType.includes("webp") ? "webp" : "jpg";
 
   return {
     buffer: Buffer.from(rawBase64, "base64"),
     mimeType,
-    filename: `produto-${Date.now()}.${extension}`,
+    filename: "imagem.png",
   };
 }
 
@@ -181,6 +180,7 @@ async function uploadArquivoImagem(baseUrl: string, token: string, photo: string
       const formData = new FormData();
       const blob = new Blob([arquivo.buffer], { type: arquivo.mimeType });
       formData.append(fieldName, blob, arquivo.filename);
+      formData.append("nome", arquivo.filename);
 
       const result = await fetchErpRaw(endpoint, token, {
         method: "POST",
@@ -189,13 +189,15 @@ async function uploadArquivoImagem(baseUrl: string, token: string, photo: string
 
       if (result.response.status === 401) tokenCache.clear();
       if (!result.response.ok) {
-        errors.push(`${endpoint} [${fieldName}] -> ${result.response.status}`);
+        const preview = result.text.replace(/\s+/g, " ").slice(0, 180);
+        errors.push(`${endpoint} [${fieldName}] -> ${result.response.status}${preview ? `: ${preview}` : ""}`);
         continue;
       }
 
       const uuid = findUuid(result.data);
       if (uuid) return { uuid, raw: result.data };
-      errors.push(`${endpoint} [${fieldName}] -> sem uuid`);
+      const preview = result.text.replace(/\s+/g, " ").slice(0, 180);
+      errors.push(`${endpoint} [${fieldName}] -> sem uuid${preview ? `: ${preview}` : ""}`);
     }
   }
 
