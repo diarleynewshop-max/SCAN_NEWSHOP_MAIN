@@ -306,18 +306,17 @@ const Index = () => {
       productInfo.hasErpImage === false ||
       (!productInfo.hasErpImage && !productInfo.imagem);
     const erpPhotoMissing = Boolean(
-      !modoLeve &&
       photo &&
       produtoAtualSemFotoErp
     );
     const ok = await addProduct({
       barcode,
       sku,
-      photo: modoLeve ? null : photo,
+      photo,
       quantity: Number(quantity),
       secao: productInfo?.secao,
       erpPhotoMissing,
-      appPhotoWithoutErp: Boolean(!modoLeve && photo && erpPhotoMissing),
+      appPhotoWithoutErp: Boolean(photo && erpPhotoMissing),
     });
     if (!ok) return;
 
@@ -471,7 +470,7 @@ const Index = () => {
                   <p style={{ fontSize: modoDesktop ? 13 : 12, color: "hsl(var(--foreground))", fontWeight: 500 }}>
                     {consultaBloqueadaPorFlag
                       ? "Consulta de produto ativa apenas para flag LOJA."
-                      : "Modo Leve ativo: fotos desativadas, consulta de preco liberada."}
+                      : "Modo Leve ativo: foto manual habilitada com compressao leve."}
                   </p>
                 </div>
               )}
@@ -557,23 +556,21 @@ const Index = () => {
                 <input type="text" placeholder="Ex: BM-5050" value={sku} onChange={(e) => setSku(e.target.value)} style={S.inputBase} />
               </div>
 
-              {!modoLeve && (
-                <div>
-                  <label style={S.label}>Foto do Produto</label>
-                  <div data-tut="scanner-foto">
-                    <PhotoCapture
-                      photo={photo}
-                      onCapture={(nextPhoto) => {
-                        setDraftPhoto(nextPhoto);
-                      }}
-                      onRemove={() => {
-                        clearDraftPhoto();
-                      }}
-                      compressionPreset="default"
-                    />
-                  </div>
+              <div>
+                <label style={S.label}>Foto do Produto</label>
+                <div data-tut="scanner-foto">
+                  <PhotoCapture
+                    photo={photo}
+                    onCapture={(nextPhoto) => {
+                      setDraftPhoto(nextPhoto);
+                    }}
+                    onRemove={() => {
+                      clearDraftPhoto();
+                    }}
+                    compressionPreset={modoLeve ? "light" : "default"}
+                  />
                 </div>
-              )}
+              </div>
 
               <div>
                 <label style={S.label}>Quantidade</label>
@@ -606,7 +603,7 @@ const Index = () => {
                       onDelete={deleteProduct}
                       onUpdate={updateProduct}
                       onMoveToTop={moveProductToTop}
-                      onCapturePhoto={modoLeve ? undefined : (id) => {
+                      onCapturePhoto={(id) => {
                         setPhotoProductId(id);
                         setShowPhotoCapture(true);
                       }}
@@ -627,7 +624,7 @@ const Index = () => {
                     onDelete={deleteProduct}
                     onUpdate={updateProduct}
                     onMoveToTop={moveProductToTop}
-                    onCapturePhoto={modoLeve ? undefined : (id) => {
+                    onCapturePhoto={(id) => {
                       setPhotoProductId(id);
                       setShowPhotoCapture(true);
                     }}
@@ -660,7 +657,7 @@ const Index = () => {
         </Suspense>
       )}
 
-      {!modoLeve && showPhotoCapture && photoProductId && (
+      {showPhotoCapture && photoProductId && (
         <Suspense fallback={LAZY_FALLBACK}>
           <PhotoCapture
             photo={activeList?.products.find((p) => p.id === photoProductId)?.photo || null}
