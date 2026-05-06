@@ -1078,7 +1078,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         return;
       }
 
-      await exportRelatorioDiarioHTML(relatorio);
       setRelatorioDatas((prev) =>
         prev.map((item) => (item.data === data ? { ...item, relatorioGerado: true } : item))
       );
@@ -1086,8 +1085,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       toast({
         title: "Relatorio diario gerado",
         description: relatorio.clickupTaskId
-          ? `HTML baixado e tag RELATORIO GERADO aplicada.`
-          : "HTML baixado.",
+          ? `Task de resumo criada e tag RELATORIO GERADO aplicada.`
+          : "Relatorio processado.",
       });
     } catch (e: any) {
       toast({ title: "Erro ao gerar relatorio", description: e.message ?? "Falha no relatorio diario", variant: "destructive" });

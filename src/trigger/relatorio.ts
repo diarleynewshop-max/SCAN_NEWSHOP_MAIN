@@ -150,14 +150,22 @@ async function criarTarefaClickUp(token: string, listId: string, nome: string, d
   let response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
     method: "POST",
     headers: { Authorization: token, "Content-Type": "application/json" },
-    body: JSON.stringify({ ...baseBody, status: "complete" }),
+    body: JSON.stringify(baseBody),
   });
 
   if (!response.ok) {
     response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
       method: "POST",
       headers: { Authorization: token, "Content-Type": "application/json" },
-      body: JSON.stringify(baseBody),
+      body: JSON.stringify({ ...baseBody, status: "to do" }),
+    });
+  }
+
+  if (!response.ok) {
+    response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
+      method: "POST",
+      headers: { Authorization: token, "Content-Type": "application/json" },
+      body: JSON.stringify({ ...baseBody, status: "complete" }),
     });
   }
 
@@ -212,7 +220,7 @@ export const relatorioDiretoria = task({
     if (!token) throw new Error(`Token ClickUp nao configurado para ${empresa}.`);
 
     const nome = `Relatorio - ${empresa} ${flag.toUpperCase()} - ${payload.conferente || "Sem conferente"} - ${dataLabel}`;
-    const descricao = `Relatorio de conferencia para diretoria.
+    const descricao = `TASK 3 - Relatorio de conferencia para diretoria.
 
 Empresa: ${empresa}
 Tipo: ${flag.toUpperCase()}
@@ -232,7 +240,7 @@ HTML com fotos anexado nesta task.`;
     const nomeArquivo = sanitizarNomeArquivo(`relatorio_${empresa}_${flag}_${payload.conferente || "sem_conferente"}_${dataLabel}`);
     await anexarHtmlNaTarefa(token, taskId, nomeArquivo, html);
 
-    console.log(`[TASK 3] Relatorio criado em ${empresa}: ${taskId}`);
-    return { taskId, empresa, flag, totalItens: itens.length };
+    console.log(`[TASK 3] Relatorio criado em ${empresa}: ${taskId} | lista=${listId} | url=https://app.clickup.com/t/${taskId}`);
+    return { taskId, empresa, flag, listId, url: `https://app.clickup.com/t/${taskId}`, totalItens: itens.length };
   },
 });
