@@ -17,20 +17,19 @@ const DEFAULT_LISTS: Record<EmpresaKey, { compras: string; conferencia: string }
     conferencia: "901325900510",
   },
   SOYE: {
-    compras: "901326684020",
+    compras: "901326607319",
     conferencia: "901326607319",
   },
   FACIL: {
-    compras: "901326684020",
+    compras: "901326607320",
     conferencia: "901326607320",
   },
 };
 
 export function normalizeEmpresa(value: unknown): EmpresaKey {
-  const empresa = String(value ?? "NEWSHOP").toUpperCase();
-  if (empresa === "SOYE" || empresa === "FACIL") {
-    return empresa;
-  }
+  const empresa = String(value ?? "NEWSHOP").trim().toUpperCase();
+  if (empresa.includes("SOYE")) return "SOYE";
+  if (empresa.includes("FACIL")) return "FACIL";
   return "NEWSHOP";
 }
 
@@ -73,24 +72,18 @@ export function getClickUpListId(empresa: EmpresaKey, lista: ListaKey): string {
     if (empresa === "SOYE") {
       return (
         process.env.CLICKUP_TODO_LIST_ID_SOYE ||
-        process.env.CLICKUP_TODO_LIST_ID_SF ||
-        process.env.CLICKUP_TODO_LIST_ID ||
         process.env.CLICKUP_LIST_ID_COMPRAS_SOYE ||
         process.env.CLICKUP_LIST_ID_COMPRAS_SF ||
-        process.env.CLICKUP_LIST_ID_COMPRAS ||
-        process.env.VITE_CLICKUP_LIST_ID_COMPRAS ||
+        process.env.CLICKUP_TODO_LIST_ID_SF ||
         defaults.compras
       );
     }
 
     return (
       process.env.CLICKUP_TODO_LIST_ID_FACIL ||
-      process.env.CLICKUP_TODO_LIST_ID_SF ||
-      process.env.CLICKUP_TODO_LIST_ID ||
       process.env.CLICKUP_LIST_ID_COMPRAS_FACIL ||
       process.env.CLICKUP_LIST_ID_COMPRAS_SF ||
-      process.env.CLICKUP_LIST_ID_COMPRAS ||
-      process.env.VITE_CLICKUP_LIST_ID_COMPRAS ||
+      process.env.CLICKUP_TODO_LIST_ID_SF ||
       defaults.compras
     );
   }

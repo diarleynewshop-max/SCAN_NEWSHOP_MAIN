@@ -4,6 +4,11 @@ type EmpresaRelatorio = "NEWSHOP" | "SOYE" | "FACIL";
 type FlagRelatorio = "loja" | "cd";
 
 const MAX_CLICKUP_DESCRIPTION_CHARS = 12000;
+const DEFAULT_RELATORIO_LISTS: Record<EmpresaRelatorio, string> = {
+  NEWSHOP: "901325900510",
+  SOYE: "901326607319",
+  FACIL: "901326607320",
+};
 
 function normalizarEmpresa(value: unknown): EmpresaRelatorio {
   const empresa = String(value ?? "NEWSHOP").trim().toUpperCase();
@@ -34,23 +39,34 @@ function getClickUpToken(empresa: EmpresaRelatorio): string {
 }
 
 function getRelatorioListId(empresa: EmpresaRelatorio): string {
-  const listId = getPrimeiraEnv(
-    `CLICKUP_RELATORIO_LIST_ID_${empresa}`,
-    `CLICKUP_LIST_ID_RELATORIO_${empresa}`,
-    "CLICKUP_RELATORIO_LIST_ID",
-    "CLICKUP_LIST_ID_RELATORIO",
-    ...(empresa === "NEWSHOP" ? ["CLICKUP_LIST_ID"] : ["CLICKUP_LIST_ID_SF"])
-  );
+  const listId = empresa === "NEWSHOP"
+    ? getPrimeiraEnv(
+        "CLICKUP_RELATORIO_LIST_ID_NEWSHOP",
+        "CLICKUP_LIST_ID_RELATORIO_NEWSHOP",
+        "CLICKUP_RELATORIO_LIST_ID",
+        "CLICKUP_LIST_ID_RELATORIO",
+        "CLICKUP_LIST_ID"
+      )
+    : getPrimeiraEnv(
+        `CLICKUP_RELATORIO_LIST_ID_${empresa}`,
+        `CLICKUP_LIST_ID_RELATORIO_${empresa}`,
+        "CLICKUP_RELATORIO_LIST_ID_SF",
+        "CLICKUP_LIST_ID_RELATORIO_SF",
+        `CLICKUP_LIST_ID_${empresa}_LOJA`,
+        `CLICKUP_LOJA_LIST_ID_${empresa}`,
+        `CLICKUP_LIST_ID_${empresa}`,
+        "CLICKUP_LIST_ID_SF"
+      );
 
-  if (!listId) {
-    throw new Error(
-      empresa === "NEWSHOP"
-        ? "Configure CLICKUP_LIST_ID com o ID da lista Relatorio."
-        : "Configure CLICKUP_LIST_ID_SF com o ID da lista Relatorio SF."
+  if (listId) return listId;
+
+  if (empresa !== "NEWSHOP") {
+    console.warn(
+      `[TASK 3] Lista de relatorio ${empresa} nao configurada. Usando lista LOJA ${empresa} para evitar envio para NEWSHOP.`
     );
   }
 
-  return listId;
+  return DEFAULT_RELATORIO_LISTS[empresa];
 }
 
 function escapeHtml(value: unknown): string {

@@ -4,8 +4,9 @@ import * as XLSX from 'xlsx';
 type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
 
 function normalizeEmpresa(value: unknown): EmpresaKey {
-  const empresa = String(value ?? 'NEWSHOP').toUpperCase();
-  if (empresa === 'SOYE' || empresa === 'FACIL') return empresa;
+  const empresa = String(value ?? 'NEWSHOP').trim().toUpperCase();
+  if (empresa.includes('SOYE')) return 'SOYE';
+  if (empresa.includes('FACIL')) return 'FACIL';
   return 'NEWSHOP';
 }
 
@@ -22,9 +23,9 @@ function getComprasListId(empresa: EmpresaKey): string {
     return process.env.CLICKUP_LIST_ID_COMPRAS_NEWSHOP || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
   }
   if (empresa === 'SOYE') {
-    return process.env.CLICKUP_LIST_ID_COMPRAS_SOYE || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+    return process.env.CLICKUP_TODO_LIST_ID_SOYE || process.env.CLICKUP_LIST_ID_COMPRAS_SOYE || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_TODO_LIST_ID_SF || '901326607319';
   }
-  return process.env.CLICKUP_LIST_ID_COMPRAS_FACIL || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_LIST_ID_COMPRAS || process.env.VITE_CLICKUP_LIST_ID_COMPRAS || '901326684020';
+  return process.env.CLICKUP_TODO_LIST_ID_FACIL || process.env.CLICKUP_LIST_ID_COMPRAS_FACIL || process.env.CLICKUP_LIST_ID_COMPRAS_SF || process.env.CLICKUP_TODO_LIST_ID_SF || '901326607320';
 }
 
 interface ItemPlanilha {

@@ -20,8 +20,8 @@ const RELATORIO_DETAIL_CONCURRENCY = 6;
 
 const DEFAULT_LIST_IDS: Record<EmpresaKey, Record<ListaKey, string>> = {
   NEWSHOP: { loja: '901325900510', cd: '901325900510', compras: '901326684020' },
-  SOYE: { loja: '901326607319', cd: '901326461924', compras: '901326684020' },
-  FACIL: { loja: '901326607320', cd: '901326461915', compras: '901326684020' },
+  SOYE: { loja: '901326607319', cd: '901326461924', compras: '901326607319' },
+  FACIL: { loja: '901326607320', cd: '901326461915', compras: '901326607320' },
 };
 
 function getSingle(value: unknown): string {
@@ -99,11 +99,9 @@ function getListId(empresa: EmpresaKey, lista: ListaKey): string {
 
     return getEnv(
       `CLICKUP_TODO_LIST_ID_${empresa}`,
-      'CLICKUP_TODO_LIST_ID_SF',
-      'CLICKUP_TODO_LIST_ID',
       `CLICKUP_LIST_ID_COMPRAS_${empresa}`,
       'CLICKUP_LIST_ID_COMPRAS_SF',
-      'CLICKUP_LIST_ID_COMPRAS'
+      'CLICKUP_TODO_LIST_ID_SF'
     ) ?? defaults.compras;
   }
 

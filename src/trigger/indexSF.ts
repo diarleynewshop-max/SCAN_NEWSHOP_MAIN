@@ -15,10 +15,6 @@ const CLICKUP_CD_LIST_ID_SOYE =
   process.env.CLICKUP_CD_LIST_ID_SOYE ?? DEFAULT_CD_LIST_ID_SOYE;
 const CLICKUP_CD_LIST_ID_FACIL =
   process.env.CLICKUP_CD_LIST_ID_FACIL ?? DEFAULT_CD_LIST_ID_FACIL;
-const CLICKUP_TODO_LIST_ID_SF =
-  process.env.CLICKUP_TODO_LIST_ID_SF ??
-  process.env.CLICKUP_TODO_LIST_ID ??
-  "901326684020";
 const MAX_CLICKUP_DESCRIPTION_CHARS = 18000;
 const MAX_CLICKUP_DESCRIPTION_PREVIEW_CHARS = 8000;
 
@@ -85,6 +81,23 @@ function getListId(empresa: EmpresaSF, flag: FlagLista): string {
   }
 
   return flag === "cd" ? CLICKUP_CD_LIST_ID_SOYE : CLICKUP_LIST_ID_SOYE;
+}
+
+function getComprasListId(empresa: EmpresaSF): string {
+  const listId = getPrimeiraEnv(
+    `CLICKUP_TODO_LIST_ID_${empresa}`,
+    `CLICKUP_LIST_ID_COMPRAS_${empresa}`,
+    "CLICKUP_LIST_ID_COMPRAS_SF",
+    "CLICKUP_TODO_LIST_ID_SF"
+  );
+
+  if (listId) return listId;
+
+  const fallbackListId = getListId(empresa, "loja");
+  console.warn(
+    `[indexSF] Lista de COMPRAS ${empresa} nao configurada. Usando lista LOJA ${empresa} para evitar envio para NEWSHOP.`
+  );
+  return fallbackListId;
 }
 
 async function criarTarefaClickUp(
@@ -383,11 +396,12 @@ async function criarTarefasComprasIndividuaisSF(
 ): Promise<string | null> {
   let primeiraTaskId: string | null = null;
   const empresa = normalizarEmpresa(payload.empresa);
+  const comprasListId = getComprasListId(empresa);
 
   for (const item of itens) {
     const tagSecao = normalizarTagSecao(item.secao);
     const taskId = await criarTarefaClickUp(
-      CLICKUP_TODO_LIST_ID_SF,
+      comprasListId,
       `Compras ${empresa}: ${item.codigo} - ${payload.conferente} - ${dataFormatada}`,
       `Relatorio gerado automaticamente apos conferencia.
 
@@ -446,6 +460,7 @@ export const listaBaixadaSF = task({
       const flag = normalizarFlag(payload.flag);
       const isCD = flag === "cd";
       const listId = getListId(empresa, flag);
+      const comprasListId = getComprasListId(empresa);
       const flagLabel = isCD ? "CD" : "LOJA";
 
       taskId = await criarTarefaClickUp(
@@ -501,7 +516,7 @@ Data: ${dataFormatada}`,
           .join("\n");
 
         comprasTaskId = await criarTarefaClickUp(
-          CLICKUP_TODO_LIST_ID_SF,
+          comprasListId,
           `Compras ${empresa} (Falta Estoque): ${payload.titulo} - ${payload.pessoa}`,
           `Relatorio gerado no momento do envio da lista para conferencia.
 Estes itens constam com 0 estoque no sistema.

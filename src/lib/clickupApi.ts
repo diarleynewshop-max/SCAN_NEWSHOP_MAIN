@@ -100,13 +100,13 @@ const CONFIGS: Record<EmpresaKey, EmpresaConfig> = {
   SOYE: {
     token:    import.meta.env.VITE_CLICKUP_TOKEN_SF as string,
     listId:   import.meta.env.VITE_CLICKUP_LIST_ID_SOYE    ?? "901326607319",
-    todoListId: import.meta.env.VITE_CLICKUP_TODO_LIST_ID_SOYE ?? "901326684020",
+    todoListId: import.meta.env.VITE_CLICKUP_TODO_LIST_ID_SOYE ?? "901326607319",
     senha:    "s91",
   },
   FACIL: {
     token:    import.meta.env.VITE_CLICKUP_TOKEN_SF as string,
     listId:   import.meta.env.VITE_CLICKUP_LIST_ID_FACIL    ?? "901326607320",
-    todoListId: import.meta.env.VITE_CLICKUP_TODO_LIST_ID_FACIL ?? "901326684020",
+    todoListId: import.meta.env.VITE_CLICKUP_TODO_LIST_ID_FACIL ?? "901326607320",
     senha:    "f91",
   },
 };

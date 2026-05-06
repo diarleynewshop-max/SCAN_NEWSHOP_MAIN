@@ -11,6 +11,7 @@ const MAX_TRIGGER_PAYLOAD_KB = 220;
 const MAX_FOTOS_TRIGGER_RETRY = 3;
 
 type ListFlag = "loja" | "cd";
+type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
 
 export interface WebhookPayload {
   flag: ListFlag;
@@ -183,6 +184,13 @@ function prepararPayloadParaTrigger(payload: object): { payload: object; changed
   return { payload, changed: false };
 }
 
+function normalizarEmpresa(value: unknown): EmpresaKey {
+  const empresa = String(value ?? "NEWSHOP").trim().toUpperCase();
+  if (empresa.includes("SOYE")) return "SOYE";
+  if (empresa.includes("FACIL")) return "FACIL";
+  return "NEWSHOP";
+}
+
 async function dispararTrigger(taskId: string, payload: object) {
   if (!TRIGGER_API_KEY) {
     throw new Error("[Trigger.dev] VITE_TRIGGER_API_KEY nao configurada");
@@ -233,8 +241,9 @@ async function dispararTrigger(taskId: string, payload: object) {
 }
 
 export async function enviarParaClickUp(payload: WebhookPayload): Promise<void> {
-  const { flag, empresa } = payload;
-  const p = { ...payload, dataDownload: new Date().toISOString() };
+  const { flag } = payload;
+  const empresa = normalizarEmpresa(payload.empresa);
+  const p = { ...payload, empresa, dataDownload: new Date().toISOString() };
 
   if (empresa === "NEWSHOP") {
     await dispararTrigger("lista-baixada", p);
@@ -251,8 +260,8 @@ export async function enviarParaClickUp(payload: WebhookPayload): Promise<void> 
 
 export async function enviarConferenciaParaClickUp(payload: object & { flag?: string; empresa?: string }): Promise<void> {
   const flag = payload.flag ?? "loja";
-  const empresa = payload.empresa ?? "NEWSHOP";
-  const p = { ...payload, dataConferencia: new Date().toISOString() };
+  const empresa = normalizarEmpresa(payload.empresa);
+  const p = { ...payload, empresa, dataConferencia: new Date().toISOString() };
 
   if (empresa === "NEWSHOP") {
     await dispararTrigger("conferencia-baixada", p);
