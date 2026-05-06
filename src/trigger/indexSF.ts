@@ -224,29 +224,23 @@ async function anexarJsonNaTarefa(
 ) {
   try {
     const jsonString = JSON.stringify(conteudo, null, 2);
-    const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
-    const body = [
-      `--${boundary}`,
-      `Content-Disposition: form-data; name="attachment"; filename="${nomeArquivo}.json"`,
-      `Content-Type: application/json`,
-      ``,
-      jsonString,
-      `--${boundary}--`,
-    ].join("\r\n");
+    const formData = new FormData();
+    const blob = new Blob([jsonString], { type: "application/json;charset=utf-8" });
+    formData.append("attachment", blob, `${nomeArquivo}.json`);
 
     const response = await fetch(
       `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
       {
         method: "POST",
-        headers: {
-          Authorization: CLICKUP_TOKEN_SF,
-          "Content-Type": `multipart/form-data; boundary=${boundary}`,
-        },
-        body,
+        headers: { Authorization: CLICKUP_TOKEN_SF },
+        body: formData,
       }
     );
 
     console.log("JSON STATUS:", response.status);
+    if (!response.ok) {
+      console.error("JSON ERROR:", await response.text());
+    }
   } catch (err) {
     console.error("Erro ao anexar JSON:", err);
   }
@@ -258,29 +252,23 @@ async function anexarTxtNaTarefa(
   conteudo: string
 ) {
   try {
-    const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
-    const body = [
-      `--${boundary}`,
-      `Content-Disposition: form-data; name="attachment"; filename="${nomeArquivo}.txt"`,
-      `Content-Type: text/plain`,
-      ``,
-      conteudo,
-      `--${boundary}--`,
-    ].join("\r\n");
+    const formData = new FormData();
+    const blob = new Blob([conteudo], { type: "text/plain;charset=utf-8" });
+    formData.append("attachment", blob, `${nomeArquivo}.txt`);
 
     const response = await fetch(
       `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
       {
         method: "POST",
-        headers: {
-          Authorization: CLICKUP_TOKEN_SF,
-          "Content-Type": `multipart/form-data; boundary=${boundary}`,
-        },
-        body,
+        headers: { Authorization: CLICKUP_TOKEN_SF },
+        body: formData,
       }
     );
 
     console.log("TXT STATUS:", response.status);
+    if (!response.ok) {
+      console.error("TXT ERROR:", await response.text());
+    }
   } catch (err) {
     console.error("Erro ao anexar TXT:", err);
   }
