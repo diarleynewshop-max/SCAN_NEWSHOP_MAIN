@@ -97,6 +97,24 @@ function montarMultipartAttachment(filename: string, mimeType: string, content: 
   };
 }
 
+async function anexarArquivoTextoClickUp(
+  taskId: string,
+  filename: string,
+  mimeType: string,
+  content: string
+): Promise<Response> {
+  const { body, contentType } = montarMultipartAttachment(filename, mimeType, content);
+  return await fetch(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, {
+    method: "POST",
+    headers: {
+      Authorization: CLICKUP_TOKEN,
+      "Content-Type": contentType,
+      "Content-Length": String(body.length),
+    },
+    body,
+  });
+}
+
 async function criarTarefaComDescricaoFallback(
   listId: string,
   nome: string,
@@ -150,22 +168,11 @@ async function anexarJsonNaTarefa(
 ) {
   try {
     const jsonString = JSON.stringify(conteudo, null, 2);
-    const { body, contentType } = montarMultipartAttachment(
+    const response = await anexarArquivoTextoClickUp(
+      taskId,
       `${nomeArquivo}.json`,
       "application/json; charset=utf-8",
       jsonString
-    );
-
-    const response = await fetch(
-      `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: CLICKUP_TOKEN,
-          "Content-Type": contentType,
-        },
-        body,
-      }
     );
 
     console.log("JSON STATUS:", response.status);
@@ -183,22 +190,11 @@ async function anexarTxtNaTarefa(
   conteudo: string
 ) {
   try {
-    const { body, contentType } = montarMultipartAttachment(
+    const response = await anexarArquivoTextoClickUp(
+      taskId,
       `${nomeArquivo}.txt`,
       "text/plain; charset=utf-8",
       conteudo
-    );
-
-    const response = await fetch(
-      `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: CLICKUP_TOKEN,
-          "Content-Type": contentType,
-        },
-        body,
-      }
     );
 
     console.log("TXT STATUS:", response.status);
