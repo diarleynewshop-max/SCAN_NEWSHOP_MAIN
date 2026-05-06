@@ -38,11 +38,16 @@ function getRelatorioListId(empresa: EmpresaRelatorio): string {
     `CLICKUP_RELATORIO_LIST_ID_${empresa}`,
     `CLICKUP_LIST_ID_RELATORIO_${empresa}`,
     "CLICKUP_RELATORIO_LIST_ID",
-    "CLICKUP_LIST_ID_RELATORIO"
+    "CLICKUP_LIST_ID_RELATORIO",
+    ...(empresa === "NEWSHOP" ? ["CLICKUP_LIST_ID"] : ["CLICKUP_LIST_ID_SF"])
   );
 
   if (!listId) {
-    throw new Error(`Configure CLICKUP_RELATORIO_LIST_ID_${empresa} com o ID da lista Relatorio.`);
+    throw new Error(
+      empresa === "NEWSHOP"
+        ? "Configure CLICKUP_LIST_ID com o ID da lista Relatorio."
+        : "Configure CLICKUP_LIST_ID_SF com o ID da lista Relatorio SF."
+    );
   }
 
   return listId;
