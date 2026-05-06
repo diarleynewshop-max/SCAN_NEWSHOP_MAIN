@@ -11,7 +11,7 @@ interface PhotoCaptureProps {
 
 const PRESET_CONFIG: Record<CompressionPreset, { maxEdge: number; quality: number }> = {
   default: { maxEdge: 1600, quality: 0.72 },
-  light: { maxEdge: 1024, quality: 0.5 },
+  light: { maxEdge: 768, quality: 0.42 },
 };
 
 function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {

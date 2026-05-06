@@ -7,7 +7,8 @@
  */
 
 const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
-const MAX_FOTOS_TRIGGER_RETRY = 10;
+const MAX_TRIGGER_PAYLOAD_KB = 220;
+const MAX_FOTOS_TRIGGER_RETRY = 3;
 
 type ListFlag = "loja" | "cd";
 
@@ -36,6 +37,17 @@ function getPayloadSizeKb(payload: object): number {
   return Math.round(new Blob([JSON.stringify({ payload })]).size / 1024);
 }
 
+function anexarMetaReducaoFotos(payload: Record<string, any>, meta: Record<string, any>): Record<string, any> {
+  return {
+    ...payload,
+    _meta: {
+      ...(payload._meta ?? {}),
+      ...meta,
+      maxFotosMantidas: MAX_FOTOS_TRIGGER_RETRY,
+    },
+  };
+}
+
 function reduzirFotosParaTrigger(payload: object): { payload: object; changed: boolean } {
   const original = payload as Record<string, any>;
   let fotosMantidas = 0;
@@ -61,15 +73,10 @@ function reduzirFotosParaTrigger(payload: object): { payload: object; changed: b
 
     return {
       changed,
-      payload: {
+      payload: anexarMetaReducaoFotos({
         ...original,
         itens,
-        _meta: {
-          ...(original._meta ?? {}),
-          fotosReduzidasNoRetry: changed,
-          maxFotosMantidas: MAX_FOTOS_TRIGGER_RETRY,
-        },
-      },
+      }, { fotosReduzidasNoRetry: changed }),
     };
   }
 
@@ -94,15 +101,82 @@ function reduzirFotosParaTrigger(payload: object): { payload: object; changed: b
 
     return {
       changed,
-      payload: {
+      payload: anexarMetaReducaoFotos({
         ...original,
         produtos,
-        _meta: {
-          ...(original._meta ?? {}),
-          fotosReduzidasNoRetry: changed,
-          maxFotosMantidas: MAX_FOTOS_TRIGGER_RETRY,
-        },
-      },
+      }, { fotosReduzidasNoRetry: changed }),
+    };
+  }
+
+  return { payload, changed: false };
+}
+
+function removerTodasFotosParaTrigger(payload: object): { payload: object; changed: boolean } {
+  const original = payload as Record<string, any>;
+  let changed = false;
+
+  if (Array.isArray(original.itens)) {
+    const itens = original.itens.map((item: Record<string, any>) => {
+      if (!item.photo) return item;
+      changed = true;
+      return { ...item, photo: null };
+    });
+
+    return {
+      changed,
+      payload: anexarMetaReducaoFotos({
+        ...original,
+        itens,
+      }, { fotosRemovidasPorLimiteTrigger: changed }),
+    };
+  }
+
+  if (Array.isArray(original.produtos)) {
+    const produtos = original.produtos.map((produto: Record<string, any>) => {
+      if (!produto.photo) return produto;
+      changed = true;
+      return { ...produto, photo: null };
+    });
+
+    return {
+      changed,
+      payload: anexarMetaReducaoFotos({
+        ...original,
+        produtos,
+      }, { fotosRemovidasPorLimiteTrigger: changed }),
+    };
+  }
+
+  return { payload, changed: false };
+}
+
+function prepararPayloadParaTrigger(payload: object): { payload: object; changed: boolean; motivo?: string } {
+  const tamanhoOriginalKb = getPayloadSizeKb(payload);
+  if (tamanhoOriginalKb <= MAX_TRIGGER_PAYLOAD_KB) {
+    return { payload, changed: false };
+  }
+
+  const reduzido = reduzirFotosParaTrigger(payload);
+  if (reduzido.changed && getPayloadSizeKb(reduzido.payload) <= MAX_TRIGGER_PAYLOAD_KB) {
+    return {
+      payload: anexarMetaReducaoFotos(reduzido.payload as Record<string, any>, {
+        fotosReduzidasAntesDoEnvio: true,
+        payloadOriginalKb: tamanhoOriginalKb,
+      }),
+      changed: true,
+      motivo: "fotos nao essenciais",
+    };
+  }
+
+  const semFotos = removerTodasFotosParaTrigger(reduzido.payload);
+  if (semFotos.changed) {
+    return {
+      payload: anexarMetaReducaoFotos(semFotos.payload as Record<string, any>, {
+        fotosReduzidasAntesDoEnvio: true,
+        payloadOriginalKb: tamanhoOriginalKb,
+      }),
+      changed: true,
+      motivo: "limite de tamanho",
     };
   }
 
@@ -123,18 +197,28 @@ async function dispararTrigger(taskId: string, payload: object) {
     body: JSON.stringify({ payload: nextPayload }),
   });
 
-  let res = await disparar(payload);
+  const payloadPreparado = prepararPayloadParaTrigger(payload);
+  let payloadAtual = payloadPreparado.payload;
+
+  if (payloadPreparado.changed) {
+    console.warn(
+      `[Trigger.dev] ${taskId} payload ${getPayloadSizeKb(payload)}KB reduzido para ${getPayloadSizeKb(payloadAtual)}KB antes do envio (${payloadPreparado.motivo}).`
+    );
+  }
+
+  let res = await disparar(payloadAtual);
 
   if (!res.ok && res.status === 400) {
     const firstError = await res.text().catch(() => "");
-    const retry = reduzirFotosParaTrigger(payload);
+    const retry = removerTodasFotosParaTrigger(payloadAtual);
 
     if (retry.changed) {
       console.warn(
-        `[Trigger.dev] ${taskId} retornou 400 com payload de ${getPayloadSizeKb(payload)} KB. Tentando retry sem fotos excedentes.`,
+        `[Trigger.dev] ${taskId} retornou 400 com payload de ${getPayloadSizeKb(payloadAtual)} KB. Tentando retry sem fotos.`,
         firstError
       );
-      res = await disparar(retry.payload);
+      payloadAtual = retry.payload;
+      res = await disparar(payloadAtual);
     } else {
       throw new Error(`[Trigger.dev] Erro 400 ao disparar ${taskId}: ${firstError || "sem detalhe"}`);
     }
@@ -142,7 +226,7 @@ async function dispararTrigger(taskId: string, payload: object) {
 
   if (!res.ok) {
     const errorText = await res.text().catch(() => "");
-    throw new Error(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}: ${errorText || "sem detalhe"} | payload=${getPayloadSizeKb(payload)}KB`);
+    throw new Error(`[Trigger.dev] Erro ${res.status} ao disparar ${taskId}: ${errorText || "sem detalhe"} | payload=${getPayloadSizeKb(payloadAtual)}KB`);
   }
 
   console.info(`[Trigger.dev] ${taskId} disparada`);
