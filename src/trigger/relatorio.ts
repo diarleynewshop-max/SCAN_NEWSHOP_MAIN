@@ -147,11 +147,14 @@ function montarHtmlRelatorio(payload: any, empresa: EmpresaRelatorio, flag: Flag
 
 async function criarTarefaClickUp(token: string, listId: string, nome: string, descricao: string): Promise<string> {
   const baseBody = { name: nome, description: descricao.slice(0, MAX_CLICKUP_DESCRIPTION_CHARS) };
+  console.log(`[TASK 3] Criando task ClickUp | lista=${listId} | nome="${nome}"`);
+
   let response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
     method: "POST",
     headers: { Authorization: token, "Content-Type": "application/json" },
     body: JSON.stringify(baseBody),
   });
+  console.log(`[TASK 3] Criar sem status retornou ${response.status}`);
 
   if (!response.ok) {
     response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
@@ -159,6 +162,7 @@ async function criarTarefaClickUp(token: string, listId: string, nome: string, d
       headers: { Authorization: token, "Content-Type": "application/json" },
       body: JSON.stringify({ ...baseBody, status: "to do" }),
     });
+    console.log(`[TASK 3] Criar com status "to do" retornou ${response.status}`);
   }
 
   if (!response.ok) {
@@ -167,6 +171,7 @@ async function criarTarefaClickUp(token: string, listId: string, nome: string, d
       headers: { Authorization: token, "Content-Type": "application/json" },
       body: JSON.stringify({ ...baseBody, status: "complete" }),
     });
+    console.log(`[TASK 3] Criar com status "complete" retornou ${response.status}`);
   }
 
   if (!response.ok) {
@@ -181,6 +186,7 @@ async function anexarHtmlNaTarefa(token: string, taskId: string, nomeArquivo: st
   const formData = new FormData();
   const blob = new Blob([html], { type: "text/html;charset=utf-8" });
   formData.append("attachment", blob, `${nomeArquivo}.html`);
+  console.log(`[TASK 3] Anexando HTML | task=${taskId} | arquivo=${nomeArquivo}.html | bytes=${html.length}`);
 
   const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, {
     method: "POST",
@@ -193,6 +199,8 @@ async function anexarHtmlNaTarefa(token: string, taskId: string, nomeArquivo: st
   if (!response.ok) {
     throw new Error(`ClickUp ${response.status} ao anexar HTML: ${await response.text()}`);
   }
+
+  console.log(`[TASK 3] HTML anexado | task=${taskId} | status=${response.status}`);
 }
 
 export const relatorioDiretoria = task({
@@ -211,7 +219,9 @@ export const relatorioDiretoria = task({
 
     if (!token) throw new Error(`Token ClickUp nao configurado para ${empresa}.`);
 
-    const nome = `Relatorio - ${empresa} ${flag.toUpperCase()} - ${payload.conferente || "Sem conferente"} - ${dataLabel}`;
+    console.log(`[TASK 3] Inicio | empresa=${empresa} | flag=${flag} | lista=${listId} | itens=${itens.length}`);
+
+    const nome = `TASK 3 - Relatorio - ${empresa} ${flag.toUpperCase()} - ${payload.conferente || "Sem conferente"} - ${dataLabel}`;
     const descricao = `TASK 3 - Relatorio de conferencia para diretoria.
 
 Empresa: ${empresa}
