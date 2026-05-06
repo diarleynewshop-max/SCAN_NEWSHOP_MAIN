@@ -115,12 +115,13 @@ async function fetchErpJson<T>(
 async function fetchErpRaw(
   url: string,
   token: string,
-  init: RequestInit = {}
+  init: RequestInit = {},
+  includeAuthorization = true
 ): Promise<{ response: Response; data: unknown; text: string }> {
   const response = await fetch(url, {
     ...init,
     headers: {
-      Authorization: token,
+      ...(includeAuthorization ? { Authorization: token } : {}),
       Accept: "application/json",
       ...(init.headers || {}),
     },
@@ -300,7 +301,7 @@ async function uploadArquivoImagem(
         method: "POST",
         headers: uploadAttempt.headers,
         body: uploadAttempt.body,
-      });
+      }, uploadAttempt.mode !== "erp-frame-multipart-upload");
 
       if (result.response.status === 401) tokenCache.clear();
       const contentType = result.response.headers.get("content-type") || "";

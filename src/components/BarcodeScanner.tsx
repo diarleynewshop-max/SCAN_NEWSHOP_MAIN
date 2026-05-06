@@ -51,14 +51,15 @@ function getNativeBarcodeDetector(): NativeBarcodeDetectorConstructor | null {
 }
 
 const hasNativeBarcodeDetector = Boolean(getNativeBarcodeDetector());
+let nativeBarcodeDetector: NativeBarcodeDetector | null = null;
 
 async function detectWithNativeBarcodeDetector(source: CanvasImageSource): Promise<string | null> {
   const BarcodeDetectorClass = getNativeBarcodeDetector();
   if (!BarcodeDetectorClass) return null;
 
   try {
-    const detector = new BarcodeDetectorClass({ formats: NATIVE_BARCODE_FORMATS });
-    const barcodes = await detector.detect(source);
+    nativeBarcodeDetector ??= new BarcodeDetectorClass({ formats: NATIVE_BARCODE_FORMATS });
+    const barcodes = await nativeBarcodeDetector.detect(source);
     const detected = barcodes.find((barcode) => typeof barcode.rawValue === "string" && barcode.rawValue.trim());
     return detected?.rawValue?.trim() ?? null;
   } catch {

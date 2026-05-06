@@ -16,6 +16,7 @@ type RelatorioItem = {
 };
 
 const RELATORIO_GERADO_TAG = 'RELATORIO GERADO';
+const RELATORIO_DETAIL_CONCURRENCY = 6;
 
 const DEFAULT_LIST_IDS: Record<EmpresaKey, Record<ListaKey, string>> = {
   NEWSHOP: { loja: '901325900510', cd: '901325900510', compras: '901326684020' },
@@ -192,6 +193,25 @@ async function fetchTaskDetail(taskId: string, token: string): Promise<any> {
   return await response.json();
 }
 
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  limit: number,
+  mapper: (item: T) => Promise<R>
+): Promise<R[]> {
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (nextIndex < items.length) {
+      const currentIndex = nextIndex++;
+      results[currentIndex] = await mapper(items[currentIndex]);
+    }
+  });
+
+  await Promise.all(workers);
+  return results;
+}
+
 function formatDateKey(date = new Date()): string {
   const parts = new Intl.DateTimeFormat('en-CA', {
     timeZone: 'America/Sao_Paulo',
@@ -229,11 +249,18 @@ function extractDateKeyFromText(value: string): string | null {
   return `${match[3]}-${match[2]}-${match[1]}`;
 }
 
+function taskTimestampDateKey(task: any): string | null {
+  const timestamp = Number(task?.date_done || task?.date_closed || task?.date_updated || task?.date_created || 0);
+  if (!timestamp) return null;
+  return formatDateKey(new Date(timestamp));
+}
+
 function taskReportDateKey(task: any, description = ''): string | null {
   return (
     extractDateKeyFromText(description) ||
     extractDateKeyFromText(String(task?.name ?? '')) ||
     extractDateKeyFromText(String(task?.description ?? task?.text_content ?? '')) ||
+    taskTimestampDateKey(task) ||
     null
   );
 }
@@ -382,34 +409,21 @@ async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: s
 
   const dateMap = new Map<string, { data: string; label: string; total: number; relatorioGerado: boolean }>();
 
-  for (const task of concluidas) {
-    try {
-      const detail = await fetchTaskDetail(task.id, token);
-      const description = String(detail.description ?? detail.text_content ?? task.description ?? '');
-      const dateKey = taskReportDateKey(task, description);
-      if (!dateKey) continue;
+  const addDate = (dateKey: string, task: any) => {
+    const current = dateMap.get(dateKey) ?? {
+      data: dateKey,
+      label: formatDatePtBr(dateKey),
+      total: 0,
+      relatorioGerado: false,
+    };
+    current.total += 1;
+    current.relatorioGerado = current.relatorioGerado || taskHasTag(task, RELATORIO_GERADO_TAG);
+    dateMap.set(dateKey, current);
+  };
 
-      const current = dateMap.get(dateKey) ?? {
-        data: dateKey,
-        label: formatDatePtBr(dateKey),
-        total: 0,
-        relatorioGerado: false,
-      };
-      current.total += 1;
-      current.relatorioGerado = current.relatorioGerado || taskHasTag(detail, RELATORIO_GERADO_TAG) || taskHasTag(task, RELATORIO_GERADO_TAG);
-      dateMap.set(dateKey, current);
-    } catch {
-      const fallbackDate = taskReportDateKey(task);
-      if (!fallbackDate) continue;
-      const current = dateMap.get(fallbackDate) ?? {
-        data: fallbackDate,
-        label: formatDatePtBr(fallbackDate),
-        total: 0,
-        relatorioGerado: false,
-      };
-      current.total += 1;
-      dateMap.set(fallbackDate, current);
-    }
+  for (const task of concluidas) {
+    const dateKey = taskReportDateKey(task);
+    if (dateKey) addDate(dateKey, task);
   }
 
   return Array.from(dateMap.values()).sort((a, b) => b.data.localeCompare(a.data));
@@ -449,18 +463,23 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
   const ignoradas: Array<{ taskId: string; name: string; motivo: string }> = [];
   const itens: RelatorioItem[] = [];
 
-  for (const task of concluidas) {
+  const candidatas = concluidas.filter((task) => {
+    const taskDateKey = taskReportDateKey(task);
+    return taskDateKey ? taskDateKey === dateKey : taskMatchesDate(task, dateKey);
+  });
+
+  await mapWithConcurrency(candidatas, RELATORIO_DETAIL_CONCURRENCY, async (task) => {
     try {
       const detail = await fetchTaskDetail(task.id, token);
       const description = String(detail.description ?? detail.text_content ?? task.description ?? '');
-      const detailDateKey = taskReportDateKey(task, description);
+      const detailDateKey = taskReportDateKey(detail, description);
       if (detailDateKey ? detailDateKey !== dateKey : !taskMatchesDate(task, dateKey)) {
-        continue;
+        return;
       }
 
       if (!description || !normalizeText(description).includes('resumo')) {
         ignoradas.push({ taskId: task.id, name: task.name, motivo: 'Descricao fora do padrao da conferencia' });
-        continue;
+        return;
       }
 
       const conferente = extractConferente(task, description);
@@ -483,7 +502,7 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
     } catch (error: any) {
       ignoradas.push({ taskId: task.id, name: task.name, motivo: error?.message ?? 'Erro ao ler task' });
     }
-  }
+  });
 
   const resumo = conferencias.reduce(
     (acc, item) => {

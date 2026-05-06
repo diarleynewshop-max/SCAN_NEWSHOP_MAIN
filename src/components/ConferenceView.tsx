@@ -38,16 +38,15 @@ import {
   type FlagKey,
   type RelatorioDiario,
   type RelatorioDataOption,
-  type RelatorioDiarioItem,
 } from "@/lib/clickupApi";
-import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
 import { z } from "zod";
 
 export type ConferenceStatus =
   | "separado"
   | "nao_tem"
   | "nao_tem_tudo"
-  | "pendente";
+  | "pendente"
+  | "aguardando";
 
 export interface ConferenceItem {
   id: string;
@@ -233,7 +232,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         secao: item.secao ?? null,
         quantidadePedida: item.quantidade,
         quantidadeReal: null,
-        status: "pendente" as ConferenceStatus,
+        status: "aguardando" as ConferenceStatus,
         photo: item.photo ?? null,
         digito: digitoMap[item.codigo] ?? null,
       }));
@@ -278,7 +277,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         secao: item.secao ?? null,
         quantidadePedida: item.quantidade,
         quantidadeReal: null,
-        status: "pendente" as ConferenceStatus,
+        status: "aguardando" as ConferenceStatus,
         photo: item.photo ?? null,
         digito: digitoMap[item.codigo] ?? null,
       }));
@@ -329,7 +328,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         secao: item.secao ?? null,
         quantidadePedida: item.quantidade,
         quantidadeReal: null,
-        status: "pendente" as ConferenceStatus,
+        status: "aguardando" as ConferenceStatus,
         photo: item.photo ?? null,
         digito: digitoMap[item.codigo] ?? null,
       }));
@@ -427,7 +426,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         sku: "",
         quantidadePedida: qtdErp,
         quantidadeReal: null,
-        status: "pendente",
+        status: "aguardando",
         photo: null,
         digito,
       });
@@ -503,7 +502,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             secao: item.secao ?? null,
             quantidadePedida: item.quantidade,
             quantidadeReal: null,
-            status: "pendente" as ConferenceStatus,
+            status: "aguardando" as ConferenceStatus,
             photo: item.photo ?? null,
             digito: digitoMap[item.codigo] ?? null,
           }));
@@ -562,7 +561,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   };
 
   const finishConference = () => {
-    if (items.some((i) => i.status === "pendente")) {
+    if (items.some((i) => i.status === "aguardando")) {
       toast({ title: "Todos os itens precisam ter um status", variant: "destructive" });
       return;
     }
@@ -576,6 +575,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         if (item.id !== id) return item;
         if (status === "separado") return { ...item, status, quantidadeReal: item.quantidadePedida };
         if (status === "nao_tem") return { ...item, status, quantidadeReal: 0 };
+        if (status === "pendente") return { ...item, status, quantidadeReal: null };
         if (status === "nao_tem_tudo") return { ...item, status, quantidadeReal: quantidadeReal ?? null };
         return { ...item, status, quantidadeReal: quantidadeReal ?? null };
       })
@@ -677,7 +677,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const currentItem = items[currentIndex];
   const isCurrentComplete =
     currentItem &&
-    currentItem.status !== "pendente" &&
+    currentItem.status !== "aguardando" &&
     (currentItem.status !== "nao_tem_tudo" ||
       (currentItem.quantidadeReal !== null && currentItem.quantidadeReal > 0));
   const isLastItem = currentIndex === items.length - 1;
@@ -685,7 +685,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     items.length > 0 &&
     items.every(
       (i) =>
-        i.status !== "pendente" &&
+        i.status !== "aguardando" &&
         (i.status !== "nao_tem_tudo" ||
           (i.quantidadeReal !== null && i.quantidadeReal > 0))
     );
@@ -704,6 +704,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       case "separado": return "border-l-4 border-l-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]";
       case "nao_tem": return "border-l-4 border-l-destructive bg-destructive/5";
       case "nao_tem_tudo": return "border-l-4 border-l-[hsl(var(--warning))] bg-[hsl(var(--warning)/0.08)]";
+      case "pendente": return "border-l-4 border-l-muted-foreground bg-muted/50";
       default: return "border-l-4 border-l-border bg-card";
     }
   };
@@ -713,7 +714,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       case "separado": return { text: "Separado", icon: CheckCircle2, color: "text-[hsl(var(--success))]" };
       case "nao_tem": return { text: "Não tem", icon: XCircle, color: "text-destructive" };
       case "nao_tem_tudo": return { text: "Parcial", icon: AlertTriangle, color: "text-[hsl(var(--warning))]" };
-      default: return { text: "Pendente", icon: AlertTriangle, color: "text-muted-foreground" };
+      case "pendente": return { text: "Pendente", icon: Timer, color: "text-muted-foreground" };
+      default: return { text: "Sem status", icon: AlertTriangle, color: "text-muted-foreground" };
     }
   };
 
@@ -761,9 +763,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       nao_tem:      [239, 68,  68 ],
       nao_tem_tudo: [234, 179, 8  ],
       pendente:     [156, 163, 175],
+      aguardando:   [156, 163, 175],
     };
     const statusLabels: Record<ConferenceStatus, string> = {
-      separado: "SEPARADO", nao_tem: "NÃO TEM", nao_tem_tudo: "PARCIAL", pendente: "PENDENTE",
+      separado: "SEPARADO", nao_tem: "NÃO TEM", nao_tem_tudo: "PARCIAL", pendente: "PENDENTE", aguardando: "SEM STATUS",
     };
 
     let y = resumoY + 22;
@@ -842,7 +845,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
   const exportJSON = async () => {
     const statusMap: Record<ConferenceStatus, string> = {
-      separado: "separado", nao_tem: "nao_tem", nao_tem_tudo: "parcial", pendente: "pendente",
+      separado: "separado", nao_tem: "nao_tem", nao_tem_tudo: "parcial", pendente: "pendente", aguardando: "pendente",
     };
 
     const data = {
@@ -1012,48 +1015,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     return "Separado";
   };
 
-  const imageUrlToDataUrl = async (src: string | null | undefined): Promise<string | null> => {
-    if (!src) return null;
-    if (src.startsWith("data:image/")) return src;
-
-    try {
-      const response = await fetch(src);
-      if (!response.ok) return null;
-      const blob = await response.blob();
-      if (!blob.type.startsWith("image/")) return null;
-
-      return await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onloadend = () => resolve(String(reader.result ?? ""));
-        reader.onerror = () => reject(new Error("Falha ao ler foto"));
-        reader.readAsDataURL(blob);
-      });
-    } catch {
-      return null;
-    }
-  };
-
-  const exportRelatorioDiarioHTML = async (relatorio: RelatorioDiario) => {
+  const exportRelatorioDiarioHTML = (relatorio: RelatorioDiario) => {
     const itensBase = relatorio.itens?.length ? relatorio.itens : relatorio.itensCriticos;
-    const itensEnriquecidos = await Promise.all(
-      itensBase.map(async (item: RelatorioDiarioItem) => {
-        try {
-          const produto = await buscarProdutoVarejoFacil(item.codigo, { empresa: relatorio.empresa, flag: relatorio.flag });
-          const photo = await imageUrlToDataUrl(produto?.imagem);
-          return {
-            ...item,
-            sku: produto?.descricao || item.sku,
-            secao: produto?.secao || item.secao,
-            estoque: produto?.estoque ?? null,
-            photo,
-          };
-        } catch {
-          return { ...item, estoque: null, photo: null };
-        }
-      })
-    );
 
-    const cards = itensEnriquecidos.map((item) => `
+    const cards = itensBase.map((itemBase) => {
+      const item = { ...itemBase, photo: null as string | null };
+      return `
       <article class="card ${escapeHtml(item.status)}" data-status="${escapeHtml(item.status)}" data-code="${escapeHtml(item.codigo)}">
         ${item.photo
           ? `<img class="card-img" src="${item.photo}" alt="${escapeHtml(item.codigo)}" loading="lazy">`
@@ -1067,10 +1034,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <div class="card-qty"><strong>${item.real ?? "-"}</strong><span>real</span></div>
             <span class="tag ${escapeHtml(item.status)}">${escapeHtml(statusRelatorioLabel(item.status))}</span>
           </div>
-          <div class="card-stock">Estoque API: ${item.estoque ?? "-"}</div>
         </div>
       </article>
-    `).join("");
+    `;
+    }).join("");
 
     const dataLabel = formatarDataRelatorio(relatorio.data);
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>Relatorio ${relatorio.empresa} ${dataLabel}</title><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet"/><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}body{font-family:'DM Sans',sans-serif;background:#f4f3f0;color:#1a1916;padding:32px 24px 60px;}header,.stats,.filters,.grid{max-width:1200px;margin-left:auto;margin-right:auto;}header{margin-bottom:18px;}header h1{font-size:26px;font-weight:900;}header p{font-family:'DM Mono',monospace;font-size:11px;color:#8a8780;margin-top:4px;}.stats{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin-bottom:14px}.stat{background:#fff;border:1.5px solid #e2e0da;border-radius:12px;padding:12px}.stat strong{display:block;font-size:24px;line-height:1;font-weight:900}.stat span{font-size:11px;color:#8a8780;font-family:'DM Mono',monospace}.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.filters button{border:1.5px solid #e2e0da;background:#fff;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;font-size:12px}.filters button.active{background:#1a1916;color:#fff;border-color:#1a1916}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}.card{background:#fff;border-radius:16px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;position:relative}.card:hover{transform:translateY(-3px);box-shadow:0 12px 32px rgba(0,0,0,.1)}.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:#22c55e}.card.nao_tem::before{background:#ef4444}.card.parcial::before{background:#f0a500}.card.pendente::before{background:#9ca3af}.card-img{width:100%;aspect-ratio:1;object-fit:cover;display:block}.card-no-img{width:100%;aspect-ratio:1;background:#f0ede8;display:flex;align-items:center;justify-content:center;font-size:42px;color:#e2e0da}.card-body{padding:11px 13px 13px;border-top:1.5px solid #e2e0da}.card-code{font-family:'DM Mono',monospace;font-size:12px;font-weight:500;word-break:break-all}.card-sku{font-size:11px;color:#8a8780;margin-top:2px;line-height:1.25;min-height:28px}.card-meta,.card-stock{font-size:10px;color:#8a8780;margin-top:5px}.card-footer{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:8px}.card-qty strong{font-size:20px;font-weight:900;display:block;line-height:1}.card-qty span{font-size:10px;color:#8a8780;font-family:'DM Mono',monospace}.tag{font-size:10px;font-weight:800;padding:3px 7px;border-radius:6px;font-family:'DM Mono',monospace;white-space:nowrap}.tag.separado{background:#e8f5ee;color:#1e7d4a}.tag.nao_tem{background:#fee2e2;color:#991b1b}.tag.parcial{background:#fff3e0;color:#a05c00}.tag.pendente{background:#e5e7eb;color:#374151}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1916;color:#fff;padding:12px 24px;border-radius:40px;font-size:13px;font-weight:600;opacity:0;transition:all .25s cubic-bezier(.34,1.56,.64,1);pointer-events:none;white-space:nowrap;z-index:999}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}@media(max-width:760px){body{padding:18px 12px 42px}.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px}}</style></head><body><header><h1>📦 Relatorio de conferencia</h1><p>👤 ${escapeHtml(relatorio.empresa)} · ${escapeHtml(relatorio.flag.toUpperCase())} · ${escapeHtml(dataLabel)} · Clique no card para copiar o codigo</p><p>Gerado em ${escapeHtml(new Date(relatorio.geradoEm).toLocaleString("pt-BR"))} · Conferencias: ${relatorio.totalConferencias}</p></header><section class="stats"><div class="stat"><strong>${relatorio.resumo.separado}</strong><span>Separado</span></div><div class="stat"><strong>${relatorio.resumo.naoTem}</strong><span>Nao tem</span></div><div class="stat"><strong>${relatorio.resumo.parcial}</strong><span>Parcial</span></div><div class="stat"><strong>${relatorio.resumo.pendente}</strong><span>Pendente</span></div></section><div class="filters"><button class="active" data-filter="todos">Todos</button><button data-filter="separado">Separado</button><button data-filter="nao_tem">Nao tem</button><button data-filter="parcial">Parcial</button><button data-filter="pendente">Pendente</button></div><main class="grid">${cards}</main><div class="toast" id="toast"></div><script>const buttons=document.querySelectorAll("[data-filter]");const cards=[...document.querySelectorAll(".grid .card")];buttons.forEach(btn=>btn.onclick=()=>{buttons.forEach(b=>b.classList.remove("active"));btn.classList.add("active");const f=btn.dataset.filter;cards.forEach(card=>{card.style.display=f==="todos"||card.dataset.status===f?"":"none";});});cards.forEach(card=>{card.onclick=()=>navigator.clipboard.writeText(card.dataset.code).then(()=>{const t=document.getElementById("toast");t.textContent="Copiado: "+card.dataset.code;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800);});});</script></body></html>`;
@@ -1445,6 +1412,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     const separados = items.filter((i) => i.status === "separado").length;
     const naoTem = items.filter((i) => i.status === "nao_tem").length;
     const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
+    const pendentes = items.filter((i) => i.status === "pendente").length;
     return (
       <div className="p-4 space-y-4">
         <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
@@ -1466,6 +1434,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <span className="px-2 py-1 rounded-lg bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]">✅ {separados}</span>
             <span className="px-2 py-1 rounded-lg bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]">⚠️ {naoTemTudo}</span>
             <span className="px-2 py-1 rounded-lg bg-destructive/10 text-destructive">❌ {naoTem}</span>
+            <span className="px-2 py-1 rounded-lg bg-muted text-muted-foreground">Pendente {pendentes}</span>
           </div>
         </div>
         <div className="grid grid-cols-3 gap-2">
@@ -1532,7 +1501,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const naoTem = items.filter((i) => i.status === "nao_tem").length;
   const naoTemTudo = items.filter((i) => i.status === "nao_tem_tudo").length;
   const pendentes = items.filter((i) => i.status === "pendente").length;
-  const doneCount = items.length - pendentes;
+  const aguardando = items.filter((i) => i.status === "aguardando").length;
+  const doneCount = items.length - aguardando;
   const label = currentItem ? getStatusLabel(currentItem.status) : null;
   const StatusIcon = label?.icon;
 
@@ -1561,6 +1531,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           <span className="px-2 py-0.5 rounded-lg bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))]">⚠️ {naoTemTudo}</span>
           <span className="px-2 py-0.5 rounded-lg bg-destructive/10 text-destructive">❌ {naoTem}</span>
           {pendentes > 0 && <span className="px-2 py-0.5 rounded-lg bg-muted text-muted-foreground">⏳ {pendentes}</span>}
+          {aguardando > 0 && <span className="px-2 py-0.5 rounded-lg bg-muted/70 text-muted-foreground">Sem status {aguardando}</span>}
         </div>
       </div>
 
@@ -1585,7 +1556,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               Quantidade pedida: <strong className="text-foreground text-lg">{currentItem.quantidadePedida}</strong>
             </p>
           </div>
-          {currentItem.status !== "pendente" && label && StatusIcon && (
+          {currentItem.status !== "aguardando" && label && StatusIcon && (
             <div className={`flex items-center justify-center gap-2 text-sm font-bold ${label.color}`}>
               <StatusIcon className="w-5 h-5" /> {label.text}
               {currentItem.quantidadeReal !== null && currentItem.status === "nao_tem_tudo" && (
@@ -1593,7 +1564,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               )}
             </div>
           )}
-          <div className="flex gap-2">
+          <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setStatus(currentItem.id, "separado")}
               className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
                 currentItem.status === "separado"
@@ -1617,6 +1588,14 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                   : "bg-[hsl(var(--warning)/0.15)] text-[hsl(var(--warning))] hover:bg-[hsl(var(--warning)/0.25)]"
               }`}>
               <AlertTriangle className="w-4 h-4" /> Parcial
+            </button>
+            <button onClick={() => setStatus(currentItem.id, "pendente")}
+              className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
+                currentItem.status === "pendente"
+                  ? "bg-muted-foreground text-background ring-2 ring-muted-foreground ring-offset-2"
+                  : "bg-muted text-muted-foreground hover:bg-muted/80"
+              }`}>
+              <Timer className="w-4 h-4" /> Pendente
             </button>
           </div>
           {currentItem.status === "nao_tem_tudo" && (
