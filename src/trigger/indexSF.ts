@@ -1,4 +1,5 @@
 import { task } from "@trigger.dev/sdk/v3";
+import { request as httpsRequest } from "node:https";
 import sharp from "sharp";
 
 type EmpresaSF = "SOYE" | "FACIL";
@@ -189,22 +190,51 @@ function montarMultipartAttachment(filename: string, mimeType: string, content: 
   };
 }
 
+function postClickUpAttachment(
+  taskId: string,
+  token: string,
+  body: Buffer,
+  contentType: string
+): Promise<{ status: number; text: string }> {
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(
+      {
+        hostname: "api.clickup.com",
+        path: `/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
+        method: "POST",
+        headers: {
+          Authorization: token,
+          "Content-Type": contentType,
+          "Content-Length": body.length,
+        },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
+        res.on("end", () => {
+          resolve({
+            status: res.statusCode ?? 0,
+            text: Buffer.concat(chunks).toString("utf8"),
+          });
+        });
+      }
+    );
+
+    req.on("error", reject);
+    req.write(body);
+    req.end();
+  });
+}
+
 async function anexarArquivoTextoClickUp(
   taskId: string,
   filename: string,
   mimeType: string,
   content: string
-): Promise<Response> {
+): Promise<{ ok: boolean; status: number; text: string }> {
   const { body, contentType } = montarMultipartAttachment(filename, mimeType, content);
-  return await fetch(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, {
-    method: "POST",
-    headers: {
-      Authorization: CLICKUP_TOKEN_SF,
-      "Content-Type": contentType,
-      "Content-Length": String(body.length),
-    },
-    body,
-  });
+  const response = await postClickUpAttachment(taskId, CLICKUP_TOKEN_SF, body, contentType);
+  return { ...response, ok: response.status >= 200 && response.status < 300 };
 }
 
 async function criarTarefaComDescricaoFallback(
@@ -269,7 +299,7 @@ async function anexarJsonNaTarefa(
 
     console.log("JSON STATUS:", response.status);
     if (!response.ok) {
-      console.error("JSON ERROR:", await response.text());
+      console.error("JSON ERROR:", response.text);
     }
   } catch (err) {
     console.error("Erro ao anexar JSON:", err);
@@ -291,7 +321,7 @@ async function anexarTxtNaTarefa(
 
     console.log("TXT STATUS:", response.status);
     if (!response.ok) {
-      console.error("TXT ERROR:", await response.text());
+      console.error("TXT ERROR:", response.text);
     }
   } catch (err) {
     console.error("Erro ao anexar TXT:", err);
