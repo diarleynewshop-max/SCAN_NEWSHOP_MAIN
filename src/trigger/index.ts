@@ -79,6 +79,24 @@ function truncarTexto(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n\n... restante anexado no TXT/JSON da task ...`;
 }
 
+function montarMultipartAttachment(filename: string, mimeType: string, content: string) {
+  const boundary = `----scannewshop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const safeFilename = filename.replace(/"/g, "_");
+  const fileBuffer = Buffer.from(content, "utf8");
+  const header = Buffer.from(
+    `--${boundary}\r\n` +
+      `Content-Disposition: form-data; name="attachment"; filename="${safeFilename}"\r\n` +
+      `Content-Type: ${mimeType}\r\n\r\n`,
+    "utf8"
+  );
+  const footer = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
+
+  return {
+    body: Buffer.concat([header, fileBuffer, footer]),
+    contentType: `multipart/form-data; boundary=${boundary}`,
+  };
+}
+
 async function criarTarefaComDescricaoFallback(
   listId: string,
   nome: string,
@@ -132,16 +150,21 @@ async function anexarJsonNaTarefa(
 ) {
   try {
     const jsonString = JSON.stringify(conteudo, null, 2);
-    const formData = new FormData();
-    const blob = new Blob([jsonString], { type: "application/json;charset=utf-8" });
-    formData.append("attachment", blob, `${nomeArquivo}.json`);
+    const { body, contentType } = montarMultipartAttachment(
+      `${nomeArquivo}.json`,
+      "application/json; charset=utf-8",
+      jsonString
+    );
 
     const response = await fetch(
       `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
       {
         method: "POST",
-        headers: { Authorization: CLICKUP_TOKEN },
-        body: formData,
+        headers: {
+          Authorization: CLICKUP_TOKEN,
+          "Content-Type": contentType,
+        },
+        body,
       }
     );
 
@@ -160,16 +183,21 @@ async function anexarTxtNaTarefa(
   conteudo: string
 ) {
   try {
-    const formData = new FormData();
-    const blob = new Blob([conteudo], { type: "text/plain;charset=utf-8" });
-    formData.append("attachment", blob, `${nomeArquivo}.txt`);
+    const { body, contentType } = montarMultipartAttachment(
+      `${nomeArquivo}.txt`,
+      "text/plain; charset=utf-8",
+      conteudo
+    );
 
     const response = await fetch(
       `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
       {
         method: "POST",
-        headers: { Authorization: CLICKUP_TOKEN },
-        body: formData,
+        headers: {
+          Authorization: CLICKUP_TOKEN,
+          "Content-Type": contentType,
+        },
+        body,
       }
     );
 
