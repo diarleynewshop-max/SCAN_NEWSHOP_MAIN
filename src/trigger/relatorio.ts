@@ -178,24 +178,16 @@ async function criarTarefaClickUp(token: string, listId: string, nome: string, d
 }
 
 async function anexarHtmlNaTarefa(token: string, taskId: string, nomeArquivo: string, html: string) {
-  const boundary = "----FormBoundary" + Math.random().toString(36).slice(2);
-  const body = [
-    `--${boundary}`,
-    `Content-Disposition: form-data; name="attachment"; filename="${nomeArquivo}.html"`,
-    "Content-Type: text/html; charset=utf-8",
-    "",
-    html,
-    `--${boundary}--`,
-    "",
-  ].join("\r\n");
+  const formData = new FormData();
+  const blob = new Blob([html], { type: "text/html;charset=utf-8" });
+  formData.append("attachment", blob, `${nomeArquivo}.html`);
 
   const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, {
     method: "POST",
     headers: {
       Authorization: token,
-      "Content-Type": `multipart/form-data; boundary=${boundary}`,
     },
-    body,
+    body: formData,
   });
 
   if (!response.ok) {
