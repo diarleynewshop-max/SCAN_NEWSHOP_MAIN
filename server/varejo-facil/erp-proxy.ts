@@ -462,6 +462,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const action = getSingle(req.query.action);
   const path = getSingle(req.query.path);
 
+  if (req.method === "POST" && action === "upload-product-photo") {
+    return res.status(410).json({
+      ok: false,
+      error: "Envio de foto para o ERP Varejo Facil desativado. O sistema agora apenas consulta/recebe fotos.",
+    });
+  }
+
   if (req.method === "GET" && (!path || !path.startsWith("/"))) {
     return res.status(400).json({ error: "path obrigatorio" });
   }
@@ -469,34 +476,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     const baseUrl = resolveBaseUrl(empresa);
     const token = await getAccessToken(empresa, baseUrl);
-
-    if (req.method === "POST" && action === "upload-product-photo") {
-      const body = parseBody(req.body);
-      const codigo = String(body.codigo ?? "").trim();
-      const photo = String(body.photo ?? "").trim();
-      const webCookie = getWebCookie(empresa);
-
-      if (!codigo || !photo.startsWith("data:image/")) {
-        return res.status(400).json({ error: "codigo e photo data:image sao obrigatorios" });
-      }
-
-      try {
-        const result = await atualizarFotoProduto(baseUrl, token, codigo, photo, webCookie);
-        return res.status(result.ok ? 200 : result.status || 500).json({ ...result, empresa, codigo });
-      } catch (error) {
-        if (error instanceof UploadArquivoError) {
-          return res.status(422).json({
-            ok: false,
-            status: 422,
-            error: error.message,
-            attempts: error.attempts,
-            empresa,
-            codigo,
-          });
-        }
-        throw error;
-      }
-    }
 
     const response = await fetch(`${baseUrl}${path}`, {
       headers: {

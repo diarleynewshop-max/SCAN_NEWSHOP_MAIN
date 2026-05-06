@@ -144,8 +144,8 @@ function loadLists(): ListData[] {
         ...product,
         photoAssetId: product.photoAssetId ?? null,
         photoBlob: null,
-        erpPhotoMissing: product.erpPhotoMissing ?? false,
-        appPhotoWithoutErp: product.appPhotoWithoutErp ?? false,
+        erpPhotoMissing: false,
+        appPhotoWithoutErp: false,
         createdAt: new Date(product.createdAt),
       })),
     }));
@@ -361,8 +361,6 @@ export function useInventory() {
       const quantity = params.quantity;
       const newProductId = crypto.randomUUID();
       const preparedPhoto = await preparePhotoForRuntime(params.photo);
-      const erpPhotoMissing = params.erpPhotoMissing ?? false;
-      const appPhotoWithoutErp = Boolean(params.appPhotoWithoutErp || (params.photo && erpPhotoMissing));
       let merged = false;
       let replacedProduct: Product | undefined;
 
@@ -382,8 +380,8 @@ export function useInventory() {
               quantity: existing.quantity + quantity,
               ...(params.photo ? preparedPhoto : {}),
               ...(params.secao?.trim() ? { secao: params.secao.trim() } : {}),
-              erpPhotoMissing: existing.erpPhotoMissing || erpPhotoMissing,
-              appPhotoWithoutErp: existing.appPhotoWithoutErp || appPhotoWithoutErp,
+              erpPhotoMissing: false,
+              appPhotoWithoutErp: false,
             };
 
             return { ...list, products: updatedProducts };
@@ -396,8 +394,8 @@ export function useInventory() {
             description: params.description?.trim() || undefined,
             secao: params.secao?.trim() || undefined,
             ...preparedPhoto,
-            erpPhotoMissing,
-            appPhotoWithoutErp,
+            erpPhotoMissing: false,
+            appPhotoWithoutErp: false,
             quantity,
             removeTag: params.removeTag ?? false,
             createdAt: new Date(),
@@ -529,7 +527,8 @@ export function useInventory() {
               return {
                 ...product,
                 ...preparedPhoto,
-                appPhotoWithoutErp: Boolean(product.erpPhotoMissing),
+                erpPhotoMissing: false,
+                appPhotoWithoutErp: false,
               };
             }),
           };

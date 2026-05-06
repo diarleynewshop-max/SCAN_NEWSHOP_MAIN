@@ -50,7 +50,7 @@ const ProductCard = ({ product, onDelete, onUpdate, onCapturePhoto, onMoveToTop,
     <div style={{
       background: "#fff", 
       borderRadius: modoDesktop ? 14 : 12, 
-      border: product.appPhotoWithoutErp ? "2px solid hsl(var(--destructive))" : "1px solid hsl(var(--border))",
+      border: "1px solid hsl(var(--border))",
       padding: modoDesktop ? "16px 18px" : "12px 14px", 
       display: "flex", 
       gap: modoDesktop ? 16 : 12, 

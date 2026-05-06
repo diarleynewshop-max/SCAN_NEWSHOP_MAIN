@@ -299,24 +299,14 @@ const Index = () => {
   }, []);
 
   const handleAdd = async () => {
-    const codigoAtual = barcode.trim();
-    const produtoAtualSemFotoErp =
-      !productInfo ||
-      productInfo.codigo !== codigoAtual ||
-      productInfo.hasErpImage === false ||
-      (!productInfo.hasErpImage && !productInfo.imagem);
-    const erpPhotoMissing = Boolean(
-      photo &&
-      produtoAtualSemFotoErp
-    );
     const ok = await addProduct({
       barcode,
       sku,
       photo,
       quantity: Number(quantity),
       secao: productInfo?.secao,
-      erpPhotoMissing,
-      appPhotoWithoutErp: Boolean(photo && erpPhotoMissing),
+      erpPhotoMissing: false,
+      appPhotoWithoutErp: false,
     });
     if (!ok) return;
 

@@ -67,7 +67,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
   const [estoqueListId, setEstoqueListId] = useState<string | null>(null); // GUARDA O ID PARA ATUALIZAR A LISTA
 
   const [sendingId, setSendingId] = useState<string | null>(null);
-  const [uploadingPhotoListId, setUploadingPhotoListId] = useState<string | null>(null);
 
   const sortedLists = [...lists]
     .filter((l) => l.status !== "open")
@@ -227,121 +226,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     );
   };
 
-  const isFotoAppParaErp = (product: Product) => {
-    if (!product.photo && !product.photoAssetId && !product.photoBlob) return false;
-    return product.appPhotoWithoutErp || product.erpPhotoMissing || Boolean(product.photoAssetId);
-  };
-
-  const getProdutosComFotoAppParaErp = (list: ListData) =>
-    list.products.filter(isFotoAppParaErp);
-
-  const enviarFotosAppParaErp = async (list: ListData, perguntarAntes = true): Promise<ListData> => {
-    const candidatos = getProdutosComFotoAppParaErp(list);
-
-    if (candidatos.length === 0) {
-      if (perguntarAntes) {
-        toast({ title: "Nenhuma foto pendente", description: "Esta lista nao tem item vermelho ou foto tirada pelo app." });
-      }
-      return list;
-    }
-
-    if (perguntarAntes && !window.confirm(`Enviar ${candidatos.length} foto(s) para o cadastro do ERP?`)) return list;
-
-    setUploadingPhotoListId(list.id);
-    let enviados = 0;
-    let naoEncontrados = 0;
-    let falhas = 0;
-    const produtosAtualizados = new Set<string>();
-
-    try {
-      for (const product of candidatos) {
-        try {
-          const photoDataUrl = await resolvePhotoToDataUrl(product);
-          if (!photoDataUrl) {
-            falhas += 1;
-            console.error("[ERP Foto] Foto pendente nao foi encontrada no cache", {
-              produtoCodigo: product.barcode,
-              produtoId: product.id,
-            });
-            continue;
-          }
-
-          const response = await fetch(`/api/erp-proxy?action=upload-product-photo&empresa=${encodeURIComponent(list.empresa || "NEWSHOP")}`, {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              codigo: product.barcode,
-              photo: photoDataUrl,
-            }),
-          });
-
-          if (response.ok) {
-            enviados += 1;
-            produtosAtualizados.add(product.id);
-            continue;
-          }
-
-          if (response.status === 404) {
-            naoEncontrados += 1;
-          } else {
-            falhas += 1;
-            const detailText = await response.text().catch(() => "");
-            let detail: unknown = detailText;
-            try {
-              detail = detailText ? JSON.parse(detailText) : detailText;
-            } catch {
-              detail = detailText;
-            }
-            const erroFormatado = {
-              produtoCodigo: product.barcode,
-              status: response.status,
-              detail,
-            };
-            console.error("[ERP Foto] Falha ao enviar foto", JSON.stringify(erroFormatado, null, 2));
-            if (detail && typeof detail === "object") {
-              const maybeAttempts = (detail as { attempts?: unknown }).attempts;
-              if (Array.isArray(maybeAttempts)) {
-                console.error("[ERP Foto] Tentativas de upload JSON", JSON.stringify(maybeAttempts, null, 2));
-                console.groupCollapsed(`[ERP Foto] Tentativas de upload (${maybeAttempts.length})`);
-                console.table(maybeAttempts);
-                console.groupEnd();
-              }
-            }
-          }
-        } catch (error) {
-          falhas += 1;
-          console.error("[ERP Foto] Erro inesperado ao enviar foto", {
-            produtoCodigo: product.barcode,
-            error,
-          });
-        }
-      }
-
-      if (produtosAtualizados.size > 0) {
-        const updatedList = {
-          ...list,
-          products: list.products.map((product) =>
-            produtosAtualizados.has(product.id)
-              ? { ...product, appPhotoWithoutErp: false, erpPhotoMissing: false }
-              : product
-          ),
-        };
-        onUpdateList(updatedList);
-        return updatedList;
-      }
-
-      toast({
-        title: "Envio de fotos finalizado",
-        description: `Enviadas: ${enviados} | Nao encontrado: ${naoEncontrados} | Falhas: ${falhas}`,
-        variant: falhas > 0 ? "destructive" : undefined,
-      });
-    } finally {
-      setUploadingPhotoListId(null);
-    }
-
-    return list;
-  };
-
   const exportJSON = async (list: ListData) => {
     const hydratedProducts = await hydrateProductsForExport(list);
     const data = {
@@ -378,23 +262,9 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     const produtosJS = JSON.stringify(hydratedProducts.map(({ product, photoDataUrl }) => ({
       codigo: product.barcode, sku: product.sku || "", quantidade: product.quantity,
       removeTag: product.removeTag ?? false, photo: photoDataUrl,
-      appPhotoWithoutErp: isFotoAppParaErp(product),
     })));
     const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>${list.title} — ${list.person}</title><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet"/><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}body{font-family:'DM Sans',sans-serif;background:#f4f3f0;color:#1a1916;padding:32px 24px 60px;}header{max-width:1200px;margin:0 auto 28px;}header h1{font-size:26px;font-weight:900;}header p{font-family:'DM Mono',monospace;font-size:11px;color:#8a8780;margin-top:4px;}.grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;}.card{background:#fff;border-radius:16px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;position:relative;}.card:hover{transform:translateY(-3px);box-shadow:0 12px 32px rgba(0,0,0,.1);}.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:#e2e0da;}.card.has-tag::before{background:#f0a500;}.card-img{width:100%;aspect-ratio:1;object-fit:cover;display:block;}.card-no-img{width:100%;aspect-ratio:1;background:#f0ede8;display:flex;align-items:center;justify-content:center;font-size:42px;color:#e2e0da;}.card-body{padding:11px 13px 13px;border-top:1.5px solid #e2e0da;}.card-code{font-family:'DM Mono',monospace;font-size:12px;font-weight:500;word-break:break-all;}.card-sku{font-size:11px;color:#8a8780;margin-top:2px;}.card-footer{display:flex;align-items:center;justify-content:space-between;margin-top:8px;}.card-qty strong{font-size:20px;font-weight:900;display:block;line-height:1;}.card-qty span{font-size:10px;color:#8a8780;font-family:'DM Mono',monospace;}.tag{font-size:10px;font-weight:700;padding:3px 7px;border-radius:6px;font-family:'DM Mono',monospace;}.tag-etiqueta{background:#fff3e0;color:#a05c00;}.tag-ok{background:#e8f5ee;color:#1e7d4a;}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1916;color:#fff;padding:12px 24px;border-radius:40px;font-size:13px;font-weight:600;opacity:0;transition:all .25s cubic-bezier(.34,1.56,.64,1);pointer-events:none;white-space:nowrap;z-index:999;}.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}</style></head><body><header><h1>📦 ${list.title}</h1><p>👤 ${list.person} · ${list.createdAt.toLocaleDateString("pt-BR")} · Clique no card para copiar o código</p></header><div class="grid" id="grid"></div><div class="toast" id="toast"></div><script>const produtos=${produtosJS};const grid=document.getElementById("grid");produtos.forEach(p=>{const card=document.createElement("div");card.className="card"+(p.removeTag?" has-tag":"");card.onclick=()=>{navigator.clipboard.writeText(p.codigo).then(()=>{const t=document.getElementById("toast");t.textContent="✅ Copiado: "+p.codigo;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2000);});};const img=p.photo?\`<img class="card-img" src="\${p.photo}" alt="\${p.codigo}" loading="lazy">\`:\`<div class="card-no-img">📦</div>\`;card.innerHTML=\`\${img}<div class="card-body"><div class="card-code">\${p.codigo}</div><div class="card-sku">SKU: \${p.sku||"—"}</div><div class="card-footer"><div class="card-qty"><strong>\${p.quantidade}</strong><span>unid</span></div>\${p.removeTag?'<span class="tag tag-etiqueta">Tira etiqueta</span>':'<span class="tag tag-ok">OK</span>'}</div></div>\`;grid.appendChild(card);});</script></body></html>`;
-    const finalHtml = html
-      .replace(
-        ".card{background:#fff;border-radius:16px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;position:relative;}.card:hover",
-        ".card{background:#fff;border-radius:16px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;position:relative;}.card.app-photo-no-erp{border:3px solid #dc2626;box-shadow:0 0 0 2px rgba(220,38,38,.14);}.card:hover"
-      )
-      .replace(
-        ".card.has-tag::before{background:#f0a500;}.card-img",
-        ".card.has-tag::before{background:#f0a500;}.card.app-photo-no-erp::before{background:#dc2626;}.card-img"
-      )
-      .replace(
-        'card.className="card"+(p.removeTag?" has-tag":"");',
-        'card.className="card"+(p.removeTag?" has-tag":"")+(p.appPhotoWithoutErp?" app-photo-no-erp":"");'
-      );
-    const blob = new Blob([finalHtml], { type: "text/html;charset=utf-8;" });
+    const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a"); a.href = url; a.download = `lista_${list.person.replace(/\s/g, "_")}.html`;
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
@@ -442,16 +312,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     setSendingId(list.id);
 
     try {
-      let listaParaEnviar = list;
-      const totalFotosErp = getProdutosComFotoAppParaErp(list).length;
-
-      if (
-        totalFotosErp > 0 &&
-        window.confirm(`Tem ${totalFotosErp} foto(s) tirada(s) pelo app sem foto no ERP. Enviar para o cadastro antes do ClickUp?`)
-      ) {
-        listaParaEnviar = await enviarFotosAppParaErp(list, false);
-      }
-
+      const listaParaEnviar = list;
       const hydratedProducts = await hydrateProductsForExport(listaParaEnviar);
       const payload: WebhookPayload = {
         flag:        listaParaEnviar.flag ?? "loja",
@@ -845,19 +706,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
             <div style={{ display: "flex", alignItems: "center", gap: 10, color: "hsl(var(--muted-foreground))", fontSize: 11 }}>
               <div style={{ flex: 1, height: 1, background: "hsl(var(--border))" }} /> outras opções <div style={{ flex: 1, height: 1, background: "hsl(var(--border))" }} />
             </div>
-            {(() => {
-              const l = lists.find(x => x.id === downloadOpen);
-              const totalFotosErp = l ? getProdutosComFotoAppParaErp(l).length : 0;
-              return (
-                <button
-                  onClick={() => l && enviarFotosAppParaErp(l)}
-                  disabled={!l || uploadingPhotoListId === l.id}
-                  style={{ height: 48, borderRadius: 10, background: "hsl(var(--destructive) / 0.1)", color: "hsl(var(--destructive))", border: "1.5px solid hsl(var(--destructive) / 0.35)", fontWeight: 800, fontSize: 13, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: !l ? "not-allowed" : uploadingPhotoListId === l.id ? "wait" : "pointer", opacity: !l || uploadingPhotoListId === l.id ? 0.65 : 1 }}
-                >
-                  {l && uploadingPhotoListId === l.id ? "Enviando fotos..." : totalFotosErp > 0 ? `Enviar ${totalFotosErp} foto(s) para ERP` : "Enviar fotos para ERP"}
-                </button>
-              );
-            })()}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 8 }}>
               {[
                 { label: "PDF", Icon: FileText, action: () => { const l = lists.find(x => x.id === downloadOpen); if (l) exportPDF(l); } },
