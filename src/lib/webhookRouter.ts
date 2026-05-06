@@ -172,11 +172,17 @@ export async function enviarConferenciaParaClickUp(payload: object & { flag?: st
 
   if (empresa === "NEWSHOP") {
     await dispararTrigger("conferencia-baixada", p);
+    await dispararTrigger("relatorio-diretoria", p).catch((error) => {
+      console.warn("[webhookRouter] TASK 3 relatorio-diretoria falhou:", error);
+    });
     return;
   }
 
   if (empresa === "SOYE" || empresa === "FACIL") {
     await dispararTrigger("conferencia-baixada-sf", p);
+    await dispararTrigger("relatorio-diretoria", p).catch((error) => {
+      console.warn("[webhookRouter] TASK 3 relatorio-diretoria falhou:", error);
+    });
     return;
   }
 
