@@ -30,7 +30,28 @@ const STATUS_FILTROS: Array<{ value: StatusFiltro; label: string }> = [
   { value: "todo", label: "Pendente" },
 ];
 
-const SECOES_FIXAS = ["Eletronico", "Papelaria", "Bijuteria"];
+const SECOES_FIXAS_NEWSHOP = ["Eletronico", "Papelaria", "Bijuteria"];
+const SECOES_FIXAS_SF = [
+  "GERAL",
+  "PET SHOP",
+  "UTILIDADES DOMÉSTICAS",
+  "PAPELARIA",
+  "ÁREA KIDS",
+  "ELETRÔNICOS E INFORMÁTICA",
+  "USO PESSOAL",
+  "AUTOMOTIVO",
+  "ESPORTE E LAZER",
+  "CONSUMO",
+];
+
+function getSecoesFixasPorEmpresa(empresa: string): string[] {
+  const empresaNormalizada = empresa.toUpperCase();
+  if (empresaNormalizada.includes("FACIL") || empresaNormalizada.includes("SOYE")) {
+    return SECOES_FIXAS_SF;
+  }
+
+  return SECOES_FIXAS_NEWSHOP;
+}
 
 const STATUS_PRIORITY: Record<string, number> = {
   fazer_pedido: 0,
@@ -272,7 +293,7 @@ const Compras = () => {
   const secoesDisponiveis = useMemo(() => {
     const secoes = new Map<string, string>();
 
-    for (const secao of SECOES_FIXAS) {
+    for (const secao of getSecoesFixasPorEmpresa(empresa)) {
       secoes.set(normalizarFiltro(secao), secao);
     }
 
@@ -283,7 +304,7 @@ const Compras = () => {
     }
 
     return Array.from(secoes.values()).sort((a, b) => a.localeCompare(b, "pt-BR"));
-  }, [produtosErp]);
+  }, [empresa, produtosErp]);
 
   const filteredProdutos = useMemo(() => {
     return produtosPorBuscaStatus.filter((p) => (

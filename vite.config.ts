@@ -10,10 +10,20 @@ export default defineConfig({
       overlay: false,
     },
     proxy: {
-      "/erp-api": {
+      "/erp-api-facil": {
         target: "https://facil.varejofacil.com",
         changeOrigin: true,
-        rewrite: (path) => path.replace(/^\/erp-api/, ""),
+        rewrite: (path) => path.replace(/^\/erp-api-facil/, ""),
+      },
+      "/erp-api-soye": {
+        target: "https://soye.varejofacil.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/erp-api-soye/, ""),
+      },
+      "/erp-api-newshop": {
+        target: "https://newshop.varejofacil.com",
+        changeOrigin: true,
+        rewrite: (path) => path.replace(/^\/erp-api-newshop/, ""),
       },
     },
   },

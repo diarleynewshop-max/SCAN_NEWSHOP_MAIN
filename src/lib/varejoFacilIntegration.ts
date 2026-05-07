@@ -94,7 +94,7 @@ let cachedAccessToken: string | null = null;
 let cachedAuthKey: string | null = null;
 let tokenPromise: Promise<string> | null = null;
 
-const secaoCache = new Map<number, string>();
+const secaoCache = new Map<string, string>();
 const grupoCache = new Map<string, string>();
 
 const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpresa => {
@@ -106,11 +106,12 @@ const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpre
 };
 
 const resolveErpApiBase = (contexto: VarejoFacilLookupContext = {}) => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+
   if (import.meta.env.DEV) {
-    return "/erp-api/api";
+    return `/erp-api-${empresa.toLowerCase()}/api`;
   }
 
-  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
   const configuredUrl = (
     import.meta.env[`VITE_ERP_API_URL_${empresa}`] ||
     import.meta.env.VITE_ERP_API_URL ||
@@ -236,6 +237,14 @@ const getErpLojaAtiva = (contexto: VarejoFacilLookupContext = {}) => {
   return ERP_LOJA_BY_EMPRESA[empresa] || 1;
 };
 
+const getMercadologicoCacheKey = (
+  contexto: VarejoFacilLookupContext,
+  ...ids: Array<number | undefined>
+) => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  return [empresa, ...ids.map((id) => String(id ?? ""))].join(":");
+};
+
 const buscarCodigoAuxiliarPorEan = async (ean: string, contexto: VarejoFacilLookupContext = {}) => {
   for (const candidato of normalizarEans(ean)) {
     try {
@@ -285,7 +294,8 @@ const selecionarPrecoDaLoja = (precos: ErpPreco[] | null, contexto: VarejoFacilL
 
 const buscarSecao = async (secaoId?: number, contexto: VarejoFacilLookupContext = {}) => {
   if (!secaoId) return "";
-  if (secaoCache.has(secaoId)) return secaoCache.get(secaoId)!;
+  const key = getMercadologicoCacheKey(contexto, secaoId);
+  if (secaoCache.has(key)) return secaoCache.get(key)!;
 
   let descricao = `Secao ${secaoId}`;
   try {
@@ -295,14 +305,14 @@ const buscarSecao = async (secaoId?: number, contexto: VarejoFacilLookupContext 
     // Mantem a consulta de preco funcionando mesmo se o mercadologico falhar.
   }
 
-  secaoCache.set(secaoId, descricao);
+  secaoCache.set(key, descricao);
   return descricao;
 };
 
 const buscarGrupo = async (secaoId?: number, grupoId?: number, contexto: VarejoFacilLookupContext = {}) => {
   if (!secaoId || !grupoId) return "";
 
-  const key = `${secaoId}:${grupoId}`;
+  const key = getMercadologicoCacheKey(contexto, secaoId, grupoId);
   if (grupoCache.has(key)) return grupoCache.get(key)!;
 
   let descricao = `Grupo ${grupoId}`;
