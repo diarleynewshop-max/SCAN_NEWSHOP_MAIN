@@ -108,10 +108,10 @@ async function criarTarefaClickUp(
   status: string,
   tags: string[] = []
 ): Promise<string> {
-  const buildBody = (withTags: boolean) => JSON.stringify({
+  const buildBody = (withTags: boolean, withStatus: boolean) => JSON.stringify({
     name: nome,
     description: descricao,
-    status,
+    ...(withStatus && status ? { status } : {}),
     ...(withTags && tags.length > 0 ? { tags } : {}),
   });
 
@@ -123,7 +123,7 @@ async function criarTarefaClickUp(
         Authorization: CLICKUP_TOKEN_SF,
         "Content-Type": "application/json",
       },
-      body: buildBody(true),
+      body: buildBody(true, true),
     }
   );
 
@@ -137,7 +137,25 @@ async function criarTarefaClickUp(
           Authorization: CLICKUP_TOKEN_SF,
           "Content-Type": "application/json",
         },
-        body: buildBody(false),
+        body: buildBody(false, true),
+      }
+    );
+  }
+
+  if (!response.ok && status) {
+    console.warn(
+      `ClickUp recusou status "${status}". Criando tarefa no status padrao da lista:`,
+      await response.text()
+    );
+    response = await fetch(
+      `https://api.clickup.com/api/v2/list/${listId}/task`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: CLICKUP_TOKEN_SF,
+          "Content-Type": "application/json",
+        },
+        body: buildBody(false, false),
       }
     );
   }
@@ -462,7 +480,7 @@ Pedido: ${item.quantidadePedida}
 Real: ${item.quantidadeReal ?? 0}
 
 Foto anexada abaixo (se houver)`,
-      "to do",
+      "PENDENTE",
       tagSecao ? [tagSecao] : []
     );
 
