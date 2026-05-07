@@ -13,6 +13,7 @@ export interface ClickUpTask {
   name:        string;
   status:      string;
   date_created: string;
+  tags?:       string[];
   attachments: ClickUpAttachment[];
 }
 
@@ -162,7 +163,8 @@ export async function baixarJsonDaTask(
 export async function consolidarJsonsAnalisados(
   empresa: EmpresaKey,
   flag: FlagKey,
-  nome?: string
+  nome?: string,
+  taskIds?: string[]
 ): Promise<object> {
   const params = new URLSearchParams({
     action: "consolidar-jsons",
@@ -170,6 +172,7 @@ export async function consolidarJsonsAnalisados(
     flag,
   });
   if (nome) params.set("nome", nome);
+  if (taskIds?.length) params.set("taskIds", taskIds.join(","));
 
   const response = await fetch(`/api/clickup-proxy?${params.toString()}`);
   if (!response.ok) throw new Error(`Erro ${response.status} ao consolidar JSONs`);
@@ -227,6 +230,37 @@ export async function buscarAttachmentsDaTask(
 }
 
 // ── Deletar uma task ──────────────────────────────────────────────────────────
+export async function reservarTasksConferencia(
+  empresa: EmpresaKey,
+  taskIds: string[]
+): Promise<void> {
+  const response = await fetch(`/api/clickup-proxy?action=reservar-conferencia&empresa=${empresa}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskIds }),
+  });
+
+  if (!response.ok) {
+    const data = await response.json().catch(() => null);
+    throw new Error(data?.reason || data?.error || `Erro ${response.status} ao reservar pedido`);
+  }
+}
+
+export async function liberarTasksConferencia(
+  empresa: EmpresaKey,
+  taskIds: string[]
+): Promise<void> {
+  if (taskIds.length === 0) return;
+
+  const response = await fetch(`/api/clickup-proxy?action=liberar-conferencia&empresa=${empresa}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ taskIds }),
+  });
+
+  if (!response.ok) throw new Error(`Erro ${response.status} ao liberar pedido`);
+}
+
 export async function deletarTask(
   empresa: EmpresaKey,
   taskId: string

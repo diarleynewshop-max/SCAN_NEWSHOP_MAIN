@@ -16,6 +16,7 @@ type RelatorioItem = {
 };
 
 const RELATORIO_GERADO_TAG = 'RELATORIO GERADO';
+const CONFERENCIA_LOCK_TAG = 'pedido em andamento';
 const RELATORIO_DETAIL_CONCURRENCY = 6;
 
 const DEFAULT_LIST_IDS: Record<EmpresaKey, Record<ListaKey, string>> = {
@@ -170,6 +171,7 @@ function mapClickUpTask(task: any, listId: string) {
     date_updated: task.date_updated ?? '',
     description: task.description ?? task.text_content ?? '',
     listId,
+    tags: (task.tags ?? []).map((tag: any) => String(tag?.name ?? tag ?? '')),
     attachments: (task.attachments ?? []).map((attachment: any) => ({
       id: attachment.id,
       title: attachment.title ?? attachment.file_name ?? '',
@@ -280,6 +282,69 @@ async function addTaskTag(token: string, taskId: string, tagName: string): Promi
   if (!response.ok && response.status !== 409) {
     throw new Error(`ClickUp ${response.status} ao aplicar tag ${tagName}: ${await response.text()}`);
   }
+}
+
+async function removeTaskTag(token: string, taskId: string, tagName: string): Promise<void> {
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/tag/${encodeURIComponent(tagName)}`, {
+    method: 'DELETE',
+    headers: { Authorization: token },
+  });
+
+  if (!response.ok && response.status !== 404) {
+    throw new Error(`ClickUp ${response.status} ao remover tag ${tagName}: ${await response.text()}`);
+  }
+}
+
+function getTaskIds(req: VercelRequest, taskId: string): string[] {
+  const bodyIds = Array.isArray(req.body?.taskIds) ? req.body.taskIds : [];
+  const queryIds = getSingle(req.query.taskIds)
+    .split(',')
+    .map((id) => id.trim())
+    .filter(Boolean);
+
+  return unique([
+    taskId,
+    ...bodyIds.map((id: unknown) => String(id ?? '').trim()),
+    ...queryIds,
+  ]);
+}
+
+async function reservarTasksConferencia(taskIds: string[], token: string) {
+  const reservadas: string[] = [];
+
+  for (const id of taskIds) {
+    const task = await fetchTaskDetail(id, token);
+    const status = normalizeStatus(task.status?.status);
+
+    if (status !== 'analisado') {
+      for (const reservada of reservadas) {
+        await removeTaskTag(token, reservada, CONFERENCIA_LOCK_TAG).catch(() => undefined);
+      }
+      return {
+        ok: false,
+        lockedByOther: false,
+        taskId: id,
+        reason: `Task nao esta mais em ANALISADO. Status atual: ${task.status?.status ?? '-'}`,
+      };
+    }
+
+    if (taskHasTag(task, CONFERENCIA_LOCK_TAG)) {
+      for (const reservada of reservadas) {
+        await removeTaskTag(token, reservada, CONFERENCIA_LOCK_TAG).catch(() => undefined);
+      }
+      return {
+        ok: false,
+        lockedByOther: true,
+        taskId: id,
+        reason: 'Pedido ja esta em conferencia por outra pessoa.',
+      };
+    }
+
+    await addTaskTag(token, id, CONFERENCIA_LOCK_TAG);
+    reservadas.push(id);
+  }
+
+  return { ok: true, taskIds: reservadas };
 }
 
 function normalizeText(value: unknown): string {
@@ -627,9 +692,17 @@ async function consolidarJsonsAnalisados(
   empresa: EmpresaKey,
   flag: FlagKey,
   token: string,
-  nomeFiltro = ''
+  nomeFiltro = '',
+  taskIdsFiltro: string[] = []
 ) {
-  const tasks = await buscarTasksAnalisado(empresa, flag, token);
+  const tasks = taskIdsFiltro.length > 0
+    ? await Promise.all(
+        taskIdsFiltro.map(async (id) => {
+          const task = await fetchTaskDetail(id, token);
+          return mapClickUpTask(task, String(task?.list?.id ?? getListId(empresa, flag)));
+        })
+      )
+    : await buscarTasksAnalisado(empresa, flag, token);
   const nomeNormalizado = normalizeTaskName(nomeFiltro);
   const tasksFiltradas = nomeNormalizado
     ? tasks.filter((task) => normalizeTaskName(task.name) === nomeNormalizado)
@@ -721,7 +794,7 @@ async function buscarTasksAnalisado(
   const primaryListId = getListId(empresa, flag);
   const primaryRawTasks = await fetchTasksFromList(primaryListId, token);
   const primaryTasks = primaryRawTasks
-    .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
+    .filter((task) => normalizeStatus(task.status?.status) === 'analisado' && !taskHasTag(task, CONFERENCIA_LOCK_TAG))
     .map((task) => mapClickUpTask(task, primaryListId));
 
   console.log(
@@ -751,6 +824,7 @@ async function buscarTasksAnalisado(
     fallbackTasks.push(
       ...rawTasks
         .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
+        .filter((task) => !taskHasTag(task, CONFERENCIA_LOCK_TAG))
         .map((task) => mapClickUpTask(task, listId))
     );
   }
@@ -800,8 +874,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(json);
     }
 
+    if (action === 'reservar-conferencia') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const taskIds = getTaskIds(req, taskId);
+      if (taskIds.length === 0) return res.status(400).json({ error: 'taskId/taskIds obrigatorio' });
+
+      const result = await reservarTasksConferencia(taskIds, token);
+      if (!result.ok) return res.status(409).json(result);
+      return res.status(200).json(result);
+    }
+
+    if (action === 'liberar-conferencia') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const taskIds = getTaskIds(req, taskId);
+      if (taskIds.length === 0) return res.status(400).json({ error: 'taskId/taskIds obrigatorio' });
+
+      await Promise.all(taskIds.map((id) => removeTaskTag(token, id, CONFERENCIA_LOCK_TAG)));
+      return res.status(200).json({ released: true, taskIds });
+    }
+
     if (action === 'consolidar-jsons') {
-      const json = await consolidarJsonsAnalisados(empresa, flag, token, nome);
+      const json = await consolidarJsonsAnalisados(empresa, flag, token, nome, getTaskIds(req, taskId));
       return res.status(200).json(json);
     }
 

@@ -32,6 +32,8 @@ import {
   consolidarJsonsAnalisados,
   gerarRelatorioDiario,
   listarDatasRelatorio,
+  reservarTasksConferencia,
+  liberarTasksConferencia,
   deletarTask,
   type ClickUpTask,
   type EmpresaKey,
@@ -120,6 +122,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [loadingRelatorioDatas, setLoadingRelatorioDatas] = useState(false);
   const [relatorioDatasErro, setRelatorioDatasErro] = useState<string | null>(null);
   const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
+  const taskOrigemIdsRef = useRef<string[]>([]);
+  const empresaRef = useRef(empresaInicial);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
@@ -154,10 +158,57 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     } catch {}
   };
 
+  const liberarPedidoAtual = async () => {
+    const ids = taskOrigemIdsRef.current;
+    if (ids.length === 0) return;
+
+    await liberarTasksConferencia(empresaRef.current as EmpresaKey, ids);
+    taskOrigemIdsRef.current = [];
+    setTaskOrigemIds([]);
+  };
+
+  const voltarLiberandoPedido = async () => {
+    try {
+      await liberarPedidoAtual();
+    } catch (e: any) {
+      toast({
+        title: "Nao foi possivel liberar o pedido",
+        description: e?.message ?? "Remova a etiqueta PEDIDO EM ANDAMENTO no ClickUp.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    onBack();
+  };
+
   useEffect(() => {
     return () => {
       if (timerRef.current) clearInterval(timerRef.current);
     };
+  }, []);
+
+  useEffect(() => {
+    taskOrigemIdsRef.current = taskOrigemIds;
+  }, [taskOrigemIds]);
+
+  useEffect(() => {
+    empresaRef.current = empresa;
+  }, [empresa]);
+
+  useEffect(() => {
+    const liberarAoFechar = () => {
+      const ids = taskOrigemIdsRef.current;
+      if (ids.length === 0) return;
+
+      navigator.sendBeacon?.(
+        `/api/clickup-proxy?action=liberar-conferencia&empresa=${empresaRef.current}`,
+        new Blob([JSON.stringify({ taskIds: ids })], { type: "application/json" })
+      );
+    };
+
+    window.addEventListener("beforeunload", liberarAoFechar);
+    return () => window.removeEventListener("beforeunload", liberarAoFechar);
   }, []);
 
   useEffect(() => {
@@ -198,7 +249,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const abrirTask = async (task: ClickUpTask) => {
     setLoadingJson(true);
     setTaskSelecionada(task);
+    let reservouPedido = false;
     try {
+      await reservarTasksConferencia(empresa as EmpresaKey, [task.id]);
+      reservouPedido = true;
+
       let attachments = task.attachments;
       if (!attachments || attachments.length === 0) {
         attachments = await buscarAttachmentsDaTask(empresa as EmpresaKey, task.id, flag as FlagKey);
@@ -208,6 +263,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       const json = await baixarJsonDaTask(empresa as EmpresaKey, taskComAnexos);
       if (!json) {
         toast({ title: "Nenhum JSON encontrado nesta task", variant: "destructive" });
+        await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
         setLoadingJson(false);
         setTaskSelecionada(null);
         return;
@@ -215,6 +271,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
       const result = ConferenceFileSchema.safeParse(json);
       if (!result.success) {
+        await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
         toast({ title: "JSON inválido na task", description: result.error.issues[0]?.message, variant: "destructive" });
         setLoadingJson(false);
         setTaskSelecionada(null);
@@ -239,10 +296,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
       setItems(parsed);
       setTaskOrigemIds([task.id]);
+      taskOrigemIdsRef.current = [task.id];
       setPhase("ready");
       toast({ title: `${parsed.length} itens carregados da task!` });
     } catch (e: any) {
+      if (reservouPedido) {
+        await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
+      }
       toast({ title: "Erro ao carregar task", description: e.message, variant: "destructive" });
+      await recarregarTasks().catch(() => undefined);
       setTaskSelecionada(null);
     } finally {
       setLoadingJson(false);
@@ -257,11 +319,17 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
 
     setConsolidandoJson(true);
+    const grupoIds = grupo.map((task) => task.id);
+    let reservouGrupo = false;
     try {
-      const json = await consolidarJsonsAnalisados(empresa as EmpresaKey, flag as FlagKey, nome);
+      await reservarTasksConferencia(empresa as EmpresaKey, grupoIds);
+      reservouGrupo = true;
+
+      const json = await consolidarJsonsAnalisados(empresa as EmpresaKey, flag as FlagKey, nome, grupoIds);
       const result = ConferenceFileSchema.safeParse(json);
 
       if (!result.success) {
+        await liberarTasksConferencia(empresa as EmpresaKey, grupoIds).catch(() => undefined);
         toast({ title: "JSON consolidado invalido", description: result.error.issues[0]?.message, variant: "destructive" });
         return;
       }
@@ -283,6 +351,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       }));
 
       if (parsed.length === 0) {
+        await liberarTasksConferencia(empresa as EmpresaKey, grupoIds).catch(() => undefined);
         toast({ title: "JSON consolidado vazio", variant: "destructive" });
         return;
       }
@@ -294,6 +363,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
       setItems(parsed);
       setTaskOrigemIds(Array.from(new Set(origemIds)));
+      taskOrigemIdsRef.current = Array.from(new Set(origemIds));
       setPhase("ready");
       setCurrentIndex(0);
       toast({
@@ -301,7 +371,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         description: `${meta?.totalPedidos ?? grupo.length} pedido(s) com o mesmo nome juntado(s).`,
       });
     } catch (e: any) {
+      if (reservouGrupo) {
+        await liberarTasksConferencia(empresa as EmpresaKey, grupoIds).catch(() => undefined);
+      }
       toast({ title: "Erro ao juntar pedidos", description: e.message ?? "Falha ao consolidar JSONs", variant: "destructive" });
+      await recarregarTasks().catch(() => undefined);
     } finally {
       setConsolidandoJson(false);
     }
@@ -335,6 +409,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
       setItems(parsed);
       setTaskOrigemIds([]);
+      taskOrigemIdsRef.current = [];
       setPhase("ready");
       setCurrentIndex(0);
       toast({ title: `${parsed.length} itens importados!` });
@@ -411,6 +486,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
       setItems(parsed);
       setTaskOrigemIds([]);
+      taskOrigemIdsRef.current = [];
       setPhase("ready");
       setCurrentIndex(0);
       toast({ title: `${parsed.length} itens prontos após cruzamento com ERP!` });
@@ -439,6 +515,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
     setItems(parsed);
     setTaskOrigemIds([]);
+    taskOrigemIdsRef.current = [];
     setPhase("ready");
     setCurrentIndex(0);
     toast({ title: `${parsed.length} itens importados!` });
@@ -659,6 +736,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         try {
           await Promise.all(taskOrigemIds.map((taskId) => deletarTask(empresa as EmpresaKey, taskId)));
           setTaskOrigemIds([]);
+          taskOrigemIdsRef.current = [];
           toast({ title: "🗑️ Task de origem removida do Analisado." });
         } catch {
           toast({ title: "⚠️ Não foi possível deletar a task de origem", variant: "destructive" });
@@ -1124,7 +1202,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
     return (
       <div className="p-4 space-y-4">
-        <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+        <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
 
@@ -1389,7 +1467,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   if (phase === "ready") {
     return (
       <div className="p-4 space-y-4">
-        <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+        <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
         <div className="text-center py-10">
@@ -1414,7 +1492,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     const pendentes = items.filter((i) => i.status === "pendente").length;
     return (
       <div className="p-4 space-y-4">
-        <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+        <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
         <div className="text-center py-4">
@@ -1508,7 +1586,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   return (
     <div className="p-4 space-y-3">
       <div className="flex items-center justify-between">
-        <button onClick={onBack} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
+        <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
         <div className="flex items-center gap-2 text-sm font-mono font-bold text-foreground bg-card border border-border rounded-lg px-3 py-1.5">
