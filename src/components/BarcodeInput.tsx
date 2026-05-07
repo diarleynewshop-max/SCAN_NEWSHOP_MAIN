@@ -11,17 +11,29 @@ interface BarcodeInputProps {
 const BarcodeInput = ({ value, onChange, onScanPress, onEnterPress }: BarcodeInputProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const submitValue = () => {
+    if (onEnterPress) onEnterPress();
+  };
+
   const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
     if (e.key === "Enter" && onEnterPress) {
-      onEnterPress();
+      e.preventDefault();
+      submitValue();
     }
   };
 
   return (
-    <div style={{ display: "flex", gap: 8 }}>
+    <form
+      onSubmit={(e) => {
+        e.preventDefault();
+        submitValue();
+      }}
+      style={{ display: "flex", gap: 8 }}
+    >
       <div style={{ flex: 1, position: "relative" }}>
         <ScanBarcode style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 18, height: 18, color: "hsl(var(--primary))" }} />
         <input ref={inputRef} type="text" inputMode="numeric" placeholder="000000000000" data-tut="barcode-input"
+          enterKeyHint="done"
           value={value} onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           style={{
@@ -33,7 +45,7 @@ const BarcodeInput = ({ value, onChange, onScanPress, onEnterPress }: BarcodeInp
           }}
         />
       </div>
-      <button onClick={onScanPress}
+      <button type="button" onClick={onScanPress}
         style={{
           height: 48, padding: "0 16px", borderRadius: 10,
           background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))",
@@ -44,7 +56,7 @@ const BarcodeInput = ({ value, onChange, onScanPress, onEnterPress }: BarcodeInp
       >
         <Camera style={{ width: 16, height: 16 }} /> Scan
       </button>
-    </div>
+    </form>
   );
 };
 
