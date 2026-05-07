@@ -258,19 +258,46 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
   };
 
   const exportHTML = async (list: ListData) => {
+    const escapeHtml = (value: unknown) => String(value ?? "")
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;")
+      .replace(/'/g, "&#39;");
+
     const hydratedProducts = await hydrateProductsForExport(list);
-    const produtosJS = JSON.stringify(hydratedProducts.map(({ product, photoDataUrl }) => ({
-      codigo: product.barcode, sku: product.sku || "", quantidade: product.quantity,
-      removeTag: product.removeTag ?? false, photo: photoDataUrl,
-    })));
-    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>${list.title} — ${list.person}</title><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet"/><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}body{font-family:'DM Sans',sans-serif;background:#f4f3f0;color:#1a1916;padding:32px 24px 60px;}header{max-width:1200px;margin:0 auto 28px;}header h1{font-size:26px;font-weight:900;}header p{font-family:'DM Mono',monospace;font-size:11px;color:#8a8780;margin-top:4px;}.grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px;}.card{background:#fff;border-radius:16px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;position:relative;}.card:hover{transform:translateY(-3px);box-shadow:0 12px 32px rgba(0,0,0,.1);}.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:#e2e0da;}.card.has-tag::before{background:#f0a500;}.card-img{width:100%;aspect-ratio:1;object-fit:cover;display:block;}.card-no-img{width:100%;aspect-ratio:1;background:#f0ede8;display:flex;align-items:center;justify-content:center;font-size:42px;color:#e2e0da;}.card-body{padding:11px 13px 13px;border-top:1.5px solid #e2e0da;}.card-code{font-family:'DM Mono',monospace;font-size:12px;font-weight:500;word-break:break-all;}.card-sku{font-size:11px;color:#8a8780;margin-top:2px;}.card-footer{display:flex;align-items:center;justify-content:space-between;margin-top:8px;}.card-qty strong{font-size:20px;font-weight:900;display:block;line-height:1;}.card-qty span{font-size:10px;color:#8a8780;font-family:'DM Mono',monospace;}.tag{font-size:10px;font-weight:700;padding:3px 7px;border-radius:6px;font-family:'DM Mono',monospace;}.tag-etiqueta{background:#fff3e0;color:#a05c00;}.tag-ok{background:#e8f5ee;color:#1e7d4a;}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1916;color:#fff;padding:12px 24px;border-radius:40px;font-size:13px;font-weight:600;opacity:0;transition:all .25s cubic-bezier(.34,1.56,.64,1);pointer-events:none;white-space:nowrap;z-index:999;}.toast.show{opacity:1;transform:translateX(-50%) translateY(0);}</style></head><body><header><h1>📦 ${list.title}</h1><p>👤 ${list.person} · ${list.createdAt.toLocaleDateString("pt-BR")} · Clique no card para copiar o código</p></header><div class="grid" id="grid"></div><div class="toast" id="toast"></div><script>const produtos=${produtosJS};const grid=document.getElementById("grid");produtos.forEach(p=>{const card=document.createElement("div");card.className="card"+(p.removeTag?" has-tag":"");card.onclick=()=>{navigator.clipboard.writeText(p.codigo).then(()=>{const t=document.getElementById("toast");t.textContent="✅ Copiado: "+p.codigo;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),2000);});};const img=p.photo?\`<img class="card-img" src="\${p.photo}" alt="\${p.codigo}" loading="lazy">\`:\`<div class="card-no-img">📦</div>\`;card.innerHTML=\`\${img}<div class="card-body"><div class="card-code">\${p.codigo}</div><div class="card-sku">SKU: \${p.sku||"—"}</div><div class="card-footer"><div class="card-qty"><strong>\${p.quantidade}</strong><span>unid</span></div>\${p.removeTag?'<span class="tag tag-etiqueta">Tira etiqueta</span>':'<span class="tag tag-ok">OK</span>'}</div></div>\`;grid.appendChild(card);});</script></body></html>`;
+    const cardsHtml = hydratedProducts.map(({ product, photoDataUrl }) => {
+      const codigo = escapeHtml(product.barcode);
+      const sku = escapeHtml(product.sku || "-");
+      const quantidade = escapeHtml(product.quantity);
+      const foto = photoDataUrl
+        ? '<img class="card-img" src="' + escapeHtml(photoDataUrl) + '" alt="' + codigo + '" loading="lazy">'
+        : '<div class="card-no-img">SEM FOTO</div>';
+      const tag = product.removeTag
+        ? '<span class="tag tag-etiqueta">Tira etiqueta</span>'
+        : '<span class="tag tag-ok">OK</span>';
+
+      return '<button class="card' + (product.removeTag ? ' has-tag' : '') + '" data-code="' + codigo + '">' +
+        foto +
+        '<span class="card-body">' +
+          '<span class="card-code">' + codigo + '</span>' +
+          '<span class="card-sku">SKU: ' + sku + '</span>' +
+          '<span class="card-footer">' +
+            '<span class="card-qty"><strong>' + quantidade + '</strong><span>unid</span></span>' +
+            tag +
+          '</span>' +
+        '</span>' +
+      '</button>';
+    }).join("");
+
+    const html = '<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width, initial-scale=1.0"/><title>' + escapeHtml(list.title) + ' - ' + escapeHtml(list.person) + '</title><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}body{font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#f4f3f0;color:#1a1916;padding:24px 14px 56px}header{max-width:1200px;margin:0 auto 18px}h1{font-size:28px;font-weight:900;line-height:1.1;letter-spacing:0}header p{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;color:#77736b;margin-top:8px;line-height:1.45}.grid{max-width:1200px;margin:0 auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:12px}.card{appearance:none;text-align:left;background:#fff;border-radius:12px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;position:relative;color:inherit;font:inherit}.card::before{content:"";position:absolute;left:0;top:0;bottom:0;width:4px;background:#e2e0da}.card.has-tag::before{background:#f0a500}.card-img,.card-no-img{width:100%;aspect-ratio:1;display:block}.card-img{object-fit:cover}.card-no-img{background:#f0ede8;display:flex;align-items:center;justify-content:center;font-size:12px;font-weight:800;color:#aaa49a}.card-body{display:block;padding:11px 13px 13px;border-top:1.5px solid #e2e0da}.card-code{display:block;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;font-weight:700;word-break:break-all}.card-sku{display:block;font-size:11px;color:#77736b;margin-top:3px;min-height:28px;line-height:1.25}.card-footer{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:8px}.card-qty strong{font-size:22px;font-weight:900;display:block;line-height:1}.card-qty span{font-size:10px;color:#77736b;font-family:ui-monospace,SFMono-Regular,Menlo,monospace}.tag{font-size:10px;font-weight:800;padding:3px 7px;border-radius:6px;font-family:ui-monospace,SFMono-Regular,Menlo,monospace;white-space:nowrap}.tag-etiqueta{background:#fff3e0;color:#a05c00}.tag-ok{background:#e8f5ee;color:#1e7d4a}.toast{position:fixed;bottom:22px;left:50%;transform:translateX(-50%) translateY(70px);background:#1a1916;color:#fff;padding:12px 20px;border-radius:30px;font-size:13px;font-weight:700;opacity:0;transition:all .2s;pointer-events:none;white-space:nowrap;z-index:10}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}@media(max-width:430px){body{padding:20px 12px 50px}.grid{grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}h1{font-size:26px}.card-body{padding:10px}}</style></head><body><header><h1>' + escapeHtml(list.title) + '</h1><p>' + escapeHtml(list.person) + ' - ' + list.createdAt.toLocaleDateString("pt-BR") + ' - Toque no card para copiar o codigo</p></header><main class="grid">' + cardsHtml + '</main><div class="toast" id="toast"></div><script>document.querySelectorAll(".card").forEach(function(card){card.addEventListener("click",function(){var code=card.getAttribute("data-code")||"";if(navigator.clipboard){navigator.clipboard.writeText(code)}var toast=document.getElementById("toast");toast.textContent="Copiado: "+code;toast.classList.add("show");setTimeout(function(){toast.classList.remove("show")},1600)})});</script></body></html>';
     const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement("a"); a.href = url; a.download = `lista_${list.person.replace(/\s/g, "_")}.html`;
+    const a = document.createElement("a"); a.href = url; a.download = "lista_" + list.person.replace(/\s/g, "_") + ".html";
     document.body.appendChild(a); a.click(); document.body.removeChild(a);
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     setDownloadOpen(null);
-    toast({ title: "HTML gerado! Abra no navegador do PC." });
+    toast({ title: "HTML gerado!" });
   };
 
   const STORAGE_KEY = "clickup_sent_list_ids";
