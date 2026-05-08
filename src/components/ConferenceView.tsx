@@ -1097,7 +1097,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     const itensBase = relatorio.itens?.length ? relatorio.itens : relatorio.itensCriticos;
 
     const cards = itensBase.map((itemBase) => {
-      const item = { ...itemBase, photo: null as string | null };
+      const item = itemBase as typeof itemBase & { photo?: string | null };
       return `
       <article class="card ${escapeHtml(item.status)}" data-status="${escapeHtml(item.status)}" data-code="${escapeHtml(item.codigo)}">
         ${item.photo

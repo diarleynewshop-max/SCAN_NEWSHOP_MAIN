@@ -648,6 +648,15 @@ function isJsonAttachment(attachment: any): boolean {
   return title.endsWith('.json') || mimetype === 'application/json';
 }
 
+function countJsonPhotos(json: any): number {
+  const items = Array.isArray(json?.items) ? json.items : [];
+  return items.filter((item: any) => typeof item?.photo === 'string' && item.photo.trim()).length;
+}
+
+function countJsonItems(json: any): number {
+  return Array.isArray(json?.items) ? json.items.length : 0;
+}
+
 async function baixarJsonDaTask(taskId: string, token: string): Promise<any | null> {
   const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
     headers: { Authorization: token },
@@ -658,15 +667,50 @@ async function baixarJsonDaTask(taskId: string, token: string): Promise<any | nu
   }
 
   const taskData = await response.json();
-  const attachment = (taskData.attachments ?? []).find(isJsonAttachment);
-  if (!attachment?.url) return null;
+  const attachments = (taskData.attachments ?? []).filter(isJsonAttachment);
+  if (attachments.length === 0) return null;
 
-  const fileResponse = await fetch(attachment.url, { headers: { Authorization: token } });
-  if (!fileResponse.ok) {
-    throw new Error(`ClickUp ${fileResponse.status} ao baixar JSON da task ${taskId}`);
+  const candidates: Array<{ json: any; title: string; photos: number; items: number }> = [];
+
+  for (const attachment of attachments) {
+    if (!attachment?.url) continue;
+
+    const title = String(attachment?.title ?? attachment?.file_name ?? 'arquivo.json');
+    const fileResponse = await fetch(attachment.url, { headers: { Authorization: token } });
+    if (!fileResponse.ok) {
+      console.warn(`[clickup-proxy] JSON ignorado (${fileResponse.status}) task=${taskId} title=${title}`);
+      continue;
+    }
+
+    try {
+      const json = await fileResponse.json();
+      candidates.push({
+        json,
+        title,
+        photos: countJsonPhotos(json),
+        items: countJsonItems(json),
+      });
+    } catch {
+      console.warn(`[clickup-proxy] JSON invalido ignorado task=${taskId} title=${title}`);
+    }
   }
 
-  return await fileResponse.json();
+  if (candidates.length === 0) {
+    throw new Error(`Nenhum JSON valido encontrado na task ${taskId}`);
+  }
+
+  candidates.sort((a, b) => {
+    if (b.photos !== a.photos) return b.photos - a.photos;
+    if (b.items !== a.items) return b.items - a.items;
+    return String(b.title).localeCompare(String(a.title));
+  });
+
+  const selected = candidates[0];
+  console.log(
+    `[clickup-proxy] JSON selecionado task=${taskId} title=${selected.title} items=${selected.items} fotos=${selected.photos}/${attachments.length} anexos_json`
+  );
+
+  return selected.json;
 }
 
 function normalizeCodigo(value: unknown): string {

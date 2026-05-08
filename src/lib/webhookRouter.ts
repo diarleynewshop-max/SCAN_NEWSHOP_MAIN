@@ -9,6 +9,10 @@
 const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
 const MAX_TRIGGER_PAYLOAD_KB = 220;
 const MAX_FOTOS_TRIGGER_RETRY = 3;
+const FOTO_TRIGGER_COMPACTA_MAX_EDGE = 320;
+const FOTO_TRIGGER_COMPACTA_QUALITY = 0.38;
+const FOTO_TRIGGER_MINIMA_MAX_EDGE = 220;
+const FOTO_TRIGGER_MINIMA_QUALITY = 0.30;
 
 type ListFlag = "loja" | "cd";
 type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
@@ -36,6 +40,87 @@ function isFotoBase64(photo: unknown): photo is string {
 
 function getPayloadSizeKb(payload: object): number {
   return Math.round(new Blob([JSON.stringify({ payload })]).size / 1024);
+}
+
+function compactarFotoDataUrl(photo: string, maxEdge: number, quality: number): Promise<string> {
+  return new Promise((resolve) => {
+    if (!isFotoBase64(photo)) {
+      resolve(photo);
+      return;
+    }
+
+    const image = new Image();
+    image.onload = () => {
+      const canvas = document.createElement("canvas");
+      const currentMaxEdge = Math.max(image.width, image.height);
+      const scale = currentMaxEdge > maxEdge ? maxEdge / currentMaxEdge : 1;
+      const width = Math.max(1, Math.round(image.width * scale));
+      const height = Math.max(1, Math.round(image.height * scale));
+
+      canvas.width = width;
+      canvas.height = height;
+
+      const ctx = canvas.getContext("2d", { alpha: false });
+      if (!ctx) {
+        resolve(photo);
+        return;
+      }
+
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(image, 0, 0, width, height);
+      resolve(canvas.toDataURL("image/jpeg", quality));
+      canvas.width = 0;
+      canvas.height = 0;
+    };
+    image.onerror = () => resolve(photo);
+    image.src = photo;
+  });
+}
+
+async function compactarFotosParaTrigger(
+  payload: object,
+  maxEdge: number,
+  quality: number
+): Promise<{ payload: object; changed: boolean }> {
+  const original = payload as Record<string, any>;
+  let changed = false;
+
+  if (Array.isArray(original.itens)) {
+    const itens = await Promise.all(original.itens.map(async (item: Record<string, any>) => {
+      if (!isFotoBase64(item.photo)) return item;
+      const photo = await compactarFotoDataUrl(item.photo, maxEdge, quality);
+      if (photo !== item.photo) changed = true;
+      return { ...item, photo };
+    }));
+
+    return {
+      changed,
+      payload: anexarMetaReducaoFotos({ ...original, itens }, {
+        fotosCompactadasAntesDoEnvio: changed,
+        fotoMaxEdge: maxEdge,
+      }),
+    };
+  }
+
+  if (Array.isArray(original.produtos)) {
+    const produtos = await Promise.all(original.produtos.map(async (produto: Record<string, any>) => {
+      if (!isFotoBase64(produto.photo)) return produto;
+      const photo = await compactarFotoDataUrl(produto.photo, maxEdge, quality);
+      if (photo !== produto.photo) changed = true;
+      return { ...produto, photo };
+    }));
+
+    return {
+      changed,
+      payload: anexarMetaReducaoFotos({ ...original, produtos }, {
+        fotosCompactadasAntesDoEnvio: changed,
+        fotoMaxEdge: maxEdge,
+      }),
+    };
+  }
+
+  return { payload, changed: false };
 }
 
 function anexarMetaReducaoFotos(payload: Record<string, any>, meta: Record<string, any>): Record<string, any> {
@@ -151,10 +236,34 @@ function removerTodasFotosParaTrigger(payload: object): { payload: object; chang
   return { payload, changed: false };
 }
 
-function prepararPayloadParaTrigger(payload: object): { payload: object; changed: boolean; motivo?: string } {
+async function prepararPayloadParaTrigger(payload: object): Promise<{ payload: object; changed: boolean; motivo?: string }> {
   const tamanhoOriginalKb = getPayloadSizeKb(payload);
   if (tamanhoOriginalKb <= MAX_TRIGGER_PAYLOAD_KB) {
     return { payload, changed: false };
+  }
+
+  const compacto = await compactarFotosParaTrigger(payload, FOTO_TRIGGER_COMPACTA_MAX_EDGE, FOTO_TRIGGER_COMPACTA_QUALITY);
+  if (compacto.changed && getPayloadSizeKb(compacto.payload) <= MAX_TRIGGER_PAYLOAD_KB) {
+    return {
+      payload: anexarMetaReducaoFotos(compacto.payload as Record<string, any>, {
+        payloadOriginalKb: tamanhoOriginalKb,
+        payloadCompactadoKb: getPayloadSizeKb(compacto.payload),
+      }),
+      changed: true,
+      motivo: "fotos compactadas",
+    };
+  }
+
+  const minimo = await compactarFotosParaTrigger(compacto.payload, FOTO_TRIGGER_MINIMA_MAX_EDGE, FOTO_TRIGGER_MINIMA_QUALITY);
+  if (minimo.changed && getPayloadSizeKb(minimo.payload) <= MAX_TRIGGER_PAYLOAD_KB) {
+    return {
+      payload: anexarMetaReducaoFotos(minimo.payload as Record<string, any>, {
+        payloadOriginalKb: tamanhoOriginalKb,
+        payloadCompactadoKb: getPayloadSizeKb(minimo.payload),
+      }),
+      changed: true,
+      motivo: "fotos compactadas no limite",
+    };
   }
 
   const reduzido = reduzirFotosParaTrigger(payload);
@@ -205,7 +314,7 @@ async function dispararTrigger(taskId: string, payload: object) {
     body: JSON.stringify({ payload: nextPayload }),
   });
 
-  const payloadPreparado = prepararPayloadParaTrigger(payload);
+  const payloadPreparado = await prepararPayloadParaTrigger(payload);
   let payloadAtual = payloadPreparado.payload;
 
   if (payloadPreparado.changed) {
