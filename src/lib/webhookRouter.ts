@@ -13,6 +13,8 @@ const FOTO_TRIGGER_COMPACTA_MAX_EDGE = 320;
 const FOTO_TRIGGER_COMPACTA_QUALITY = 0.38;
 const FOTO_TRIGGER_MINIMA_MAX_EDGE = 220;
 const FOTO_TRIGGER_MINIMA_QUALITY = 0.30;
+const FOTO_TRIGGER_EMERGENCIA_MAX_EDGE = 120;
+const FOTO_TRIGGER_EMERGENCIA_QUALITY = 0.22;
 
 type ListFlag = "loja" | "cd";
 type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
@@ -263,6 +265,18 @@ async function prepararPayloadParaTrigger(payload: object): Promise<{ payload: o
       }),
       changed: true,
       motivo: "fotos compactadas no limite",
+    };
+  }
+
+  const emergencia = await compactarFotosParaTrigger(minimo.payload, FOTO_TRIGGER_EMERGENCIA_MAX_EDGE, FOTO_TRIGGER_EMERGENCIA_QUALITY);
+  if (emergencia.changed && getPayloadSizeKb(emergencia.payload) <= MAX_TRIGGER_PAYLOAD_KB) {
+    return {
+      payload: anexarMetaReducaoFotos(emergencia.payload as Record<string, any>, {
+        payloadOriginalKb: tamanhoOriginalKb,
+        payloadCompactadoKb: getPayloadSizeKb(emergencia.payload),
+      }),
+      changed: true,
+      motivo: "fotos compactadas emergencia",
     };
   }
 

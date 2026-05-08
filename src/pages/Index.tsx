@@ -299,6 +299,15 @@ const Index = () => {
   }, []);
 
   const handleAdd = async () => {
+    if (!photo) {
+      toast({
+        title: "Foto obrigatoria",
+        description: "Adicione uma foto do produto antes de salvar.",
+        variant: "destructive",
+      });
+      return;
+    }
+
     const ok = await addProduct({
       barcode,
       sku,
@@ -547,7 +556,7 @@ const Index = () => {
               </div>
 
               <div>
-                <label style={S.label}>Foto do Produto</label>
+                <label style={S.label}>Foto do Produto *</label>
                 <div data-tut="scanner-foto">
                   <PhotoCapture
                     photo={photo}

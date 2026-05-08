@@ -329,6 +329,16 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       });
       return;
     }
+
+    const itensSemFoto = list.products.filter((product) => !product.photo && !product.photoBlob && !product.photoAssetId);
+    if (itensSemFoto.length > 0) {
+      toast({
+        title: "Foto obrigatoria",
+        description: `${itensSemFoto.length} item(ns) sem foto. Edite a lista e adicione foto antes de enviar.`,
+        variant: "destructive",
+      });
+      return;
+    }
     
     if (list.sentToClickUp || listaJaFoiEnviada(list.id)) {
       toast({ title: "⚠️ Já enviado!", description: "Esta lista já foi enviada ao ClickUp.", variant: "destructive" });
@@ -341,6 +351,16 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     try {
       const listaParaEnviar = list;
       const hydratedProducts = await hydrateProductsForExport(listaParaEnviar);
+      const fotosNaoResolvidas = hydratedProducts.filter(({ photoDataUrl }) => !photoDataUrl);
+      if (fotosNaoResolvidas.length > 0) {
+        toast({
+          title: "Foto obrigatoria",
+          description: `${fotosNaoResolvidas.length} foto(s) nao carregaram. Abra a lista, remova e tire a foto novamente.`,
+          variant: "destructive",
+        });
+        return;
+      }
+
       const payload: WebhookPayload = {
         flag:        listaParaEnviar.flag ?? "loja",
         empresa:     listaParaEnviar.empresa ?? "",
