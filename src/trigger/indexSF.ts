@@ -194,8 +194,9 @@ async function postClickUpAttachment(
   token: string,
   filename: string,
   mimeType: string,
-  content: string
+  content: BlobPart
 ): Promise<{ status: number; text: string }> {
+  console.log(`[ATTACH_FORMDATA_V2] ${filename} -> ${taskId}`);
   const blob = new Blob([content], { type: mimeType });
   const formData = new FormData();
   formData.append("attachment", blob, filename);
@@ -358,26 +359,16 @@ async function anexarFotoNaTarefa(
     const { data: comprimida, mimeType } = await comprimirImagem(photoBase64);
 
     const imgBuffer = Buffer.from(comprimida, "base64");
-    const blob = new Blob([imgBuffer], { type: mimeType });
 
     console.log(
       `Preparando foto "${filename}" - ${imgBuffer.length} bytes (apos compressao)`
     );
 
-    const formData = new FormData();
-    formData.append("attachment", blob, filename);
-
-    const response = await fetch(
-      `https://api.clickup.com/api/v2/task/${taskId}/attachment`,
-      {
-        method: "POST",
-        headers: { Authorization: CLICKUP_TOKEN_SF },
-        body: formData,
-      }
-    );
+    const response = await postClickUpAttachment(taskId, CLICKUP_TOKEN_SF, filename, mimeType, imgBuffer);
 
     console.log(`Foto "${filename}" - Status: ${response.status}`);
-    return response.ok;
+    if (response.status < 200 || response.status >= 300) console.error(`Foto "${filename}" - Erro:`, response.text);
+    return response.status >= 200 && response.status < 300;
   } catch (err) {
     console.error(`Erro ao anexar foto "${filename}":`, err);
     return false;
