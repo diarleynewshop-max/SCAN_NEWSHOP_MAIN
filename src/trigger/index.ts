@@ -1,5 +1,4 @@
 ﻿import { task } from "@trigger.dev/sdk/v3";
-import { request as httpsRequest } from "node:https";
 import sharp from "sharp";
 
 const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN!;
@@ -80,58 +79,30 @@ function truncarTexto(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n\n... restante anexado no TXT/JSON da task ...`;
 }
 
-function montarMultipartAttachment(filename: string, mimeType: string, content: string) {
-  const boundary = `----scannewshop-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const safeFilename = filename.replace(/"/g, "_");
-  const fileBuffer = Buffer.from(content, "utf8");
-  const header = Buffer.from(
-    `--${boundary}\r\n` +
-      `Content-Disposition: form-data; name="attachment"; filename="${safeFilename}"\r\n` +
-      `Content-Type: ${mimeType}\r\n\r\n`,
-    "utf8"
-  );
-  const footer = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
-
-  return {
-    body: Buffer.concat([header, fileBuffer, footer]),
-    contentType: `multipart/form-data; boundary=${boundary}`,
-  };
-}
-
-function postClickUpAttachment(
+async function postClickUpAttachment(
   taskId: string,
   token: string,
-  body: Buffer,
-  contentType: string
+  filename: string,
+  mimeType: string,
+  content: string
 ): Promise<{ status: number; text: string }> {
-  return new Promise((resolve, reject) => {
-    const req = httpsRequest(
-      {
-        hostname: "api.clickup.com",
-        path: `/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
-        method: "POST",
-        headers: {
-          Authorization: token,
-          "Content-Type": contentType,
-          "Content-Length": body.length,
-        },
-      },
-      (res) => {
-        const chunks: Buffer[] = [];
-        res.on("data", (chunk) => chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)));
-        res.on("end", () => {
-          resolve({
-            status: res.statusCode ?? 0,
-            text: Buffer.concat(chunks).toString("utf8"),
-          });
-        });
-      }
-    );
+  const blob = new Blob([content], { type: mimeType });
+  const formData = new FormData();
+  formData.append("attachment", blob, filename);
 
-    req.on("error", reject);
-    req.write(body);
-    req.end();
-  });
+  const response = await fetch(
+    `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
+    {
+      method: "POST",
+      headers: { Authorization: token },
+      body: formData,
+    }
+  );
+
+  return {
+    status: response.status,
+    text: await response.text(),
+  };
 }
 
 async function anexarArquivoTextoClickUp(
@@ -140,8 +111,7 @@ async function anexarArquivoTextoClickUp(
   mimeType: string,
   content: string
 ): Promise<{ ok: boolean; status: number; text: string }> {
-  const { body, contentType } = montarMultipartAttachment(filename, mimeType, content);
-  const response = await postClickUpAttachment(taskId, CLICKUP_TOKEN, body, contentType);
+  const response = await postClickUpAttachment(taskId, CLICKUP_TOKEN, filename, mimeType, content);
   return { ...response, ok: response.status >= 200 && response.status < 300 };
 }
 
