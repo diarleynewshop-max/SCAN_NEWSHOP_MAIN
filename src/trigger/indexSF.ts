@@ -198,15 +198,27 @@ async function postClickUpAttachment(
 ): Promise<{ status: number; text: string }> {
   console.log(`[ATTACH_FORMDATA_V2] ${filename} -> ${taskId}`);
   const blob = new Blob([content], { type: mimeType });
-  const formData = new FormData();
-  formData.append("attachment", blob, filename);
+  const fileBuffer = Buffer.from(await blob.arrayBuffer());
+  const boundary = `----codex-clickup-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
+  const preamble = Buffer.from(
+    `--${boundary}\r\n` +
+    `Content-Disposition: form-data; name="attachment"; filename="${filename}"\r\n` +
+    `Content-Type: ${mimeType}\r\n\r\n`,
+    "utf-8"
+  );
+  const epilogue = Buffer.from(`\r\n--${boundary}--\r\n`, "utf-8");
+  const body = Buffer.concat([preamble, fileBuffer, epilogue]);
 
   const response = await fetch(
     `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
     {
       method: "POST",
-      headers: { Authorization: token },
-      body: formData,
+      headers: {
+        Authorization: token,
+        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        "Content-Length": String(body.length),
+      },
+      body,
     }
   );
 
