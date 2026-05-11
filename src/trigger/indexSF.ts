@@ -196,18 +196,25 @@ async function postClickUpAttachment(
   mimeType: string,
   content: BlobPart
 ): Promise<{ status: number; text: string }> {
-  console.log(`[ATTACH_FORMDATA_V2] ${filename} -> ${taskId}`);
+  console.log(`[ATTACH] ${filename} -> ${taskId}`);
+
   const blob = new Blob([content], { type: mimeType });
-  const fileBuffer = Buffer.from(await blob.arrayBuffer());
-  const boundary = `----codex-clickup-${Date.now().toString(16)}-${Math.random().toString(16).slice(2)}`;
-  const preamble = Buffer.from(
-    `--${boundary}\r\n` +
-    `Content-Disposition: form-data; name="attachment"; filename="${filename}"\r\n` +
-    `Content-Type: ${mimeType}\r\n\r\n`,
-    "utf-8"
-  );
-  const epilogue = Buffer.from(`\r\n--${boundary}--\r\n`, "utf-8");
-  const body = Buffer.concat([preamble, fileBuffer, epilogue]);
+  const buffer = Buffer.from(await blob.arrayBuffer());
+
+  const boundary = `----${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
+
+  const headers = [
+    `--${boundary}`,
+    `Content-Disposition: form-data; name="attachment"; filename="${filename}"`,
+    `Content-Type: ${mimeType}`,
+    "",
+  ].join("\r\n");
+
+  const footer = `\r\n--${boundary}--`;
+
+  const headerBuf = Buffer.from(headers + "\r\n", "utf-8");
+  const footerBuf = Buffer.from(footer, "utf-8");
+  const body = Buffer.concat([headerBuf, buffer, footerBuf]);
 
   const response = await fetch(
     `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
