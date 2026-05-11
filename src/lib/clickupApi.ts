@@ -33,6 +33,7 @@ export interface RelatorioDiarioItem {
   status: "nao_tem" | "parcial" | string;
   conferente: string;
   taskId: string;
+  photo?: string | null;
 }
 
 export interface RelatorioDiarioConferente {

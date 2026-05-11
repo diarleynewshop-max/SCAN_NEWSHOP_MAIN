@@ -121,6 +121,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [relatorioDatas, setRelatorioDatas] = useState<RelatorioDataOption[]>([]);
   const [loadingRelatorioDatas, setLoadingRelatorioDatas] = useState(false);
   const [relatorioDatasErro, setRelatorioDatasErro] = useState<string | null>(null);
+  const [relatorioAtual, setRelatorioAtual] = useState<RelatorioDiario | null>(null);
+  const [relatorioFiltro, setRelatorioFiltro] = useState<"todos" | "separado" | "nao_tem" | "parcial" | "pendente">("todos");
   const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
   const taskOrigemIdsRef = useRef<string[]>([]);
   const empresaRef = useRef(empresaInicial);
@@ -1097,7 +1099,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     const itensBase = relatorio.itens?.length ? relatorio.itens : relatorio.itensCriticos;
 
     const cards = itensBase.map((itemBase) => {
-      const item = itemBase as typeof itemBase & { photo?: string | null };
+      const item = itemBase;
       return `
       <article class="card ${escapeHtml(item.status)}" data-status="${escapeHtml(item.status)}" data-code="${escapeHtml(item.codigo)}">
         ${item.photo
@@ -1160,11 +1162,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         prev.map((item) => (item.data === data ? { ...item, relatorioGerado: true } : item))
       );
       setRelatorioPopupOpen(false);
+      setRelatorioAtual(relatorio);
+      setRelatorioFiltro("todos");
       toast({
-        title: "Relatorio diario gerado",
-        description: relatorio.clickupTaskId
-          ? `Task de resumo criada e tag RELATORIO GERADO aplicada.`
-          : "Relatorio processado.",
+        title: "Relatorio carregado",
+        description: "Aberto no app com as fotos da conferencia.",
       });
     } catch (e: any) {
       toast({ title: "Erro ao gerar relatorio", description: e.message ?? "Falha no relatorio diario", variant: "destructive" });
@@ -1188,6 +1190,14 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       </div>
     );
   };
+
+  const itensRelatorioVisiveis = (() => {
+    const relatorio = relatorioAtual;
+    if (!relatorio) return [];
+    const base = relatorio.itens?.length ? relatorio.itens : relatorio.itensCriticos;
+    if (relatorioFiltro === "todos") return base;
+    return base.filter((item) => item.status === relatorioFiltro);
+  })();
 
   if (phase === "import") {
     const flagOptions: { value: string; label: string }[] = [
@@ -1386,6 +1396,152 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                     </span>
                   </button>
                 ))}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {relatorioAtual && (
+          <div className="fixed inset-0 z-50 bg-black/55 p-3 md:p-6 overflow-auto">
+            <div className="mx-auto w-full max-w-7xl rounded-2xl border border-border bg-background shadow-2xl">
+              <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border bg-background/95 backdrop-blur px-4 py-4">
+                <div>
+                  <p className="text-lg font-black text-foreground">Relatorio de conferencia</p>
+                  <p className="text-xs text-muted-foreground">
+                    {relatorioAtual.empresa} · {relatorioAtual.flag.toUpperCase()} · {formatarDataRelatorio(relatorioAtual.data)} · {relatorioAtual.totalConferencias} conferencia(s)
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => exportRelatorioDiarioHTML(relatorioAtual)}
+                    className="h-9 px-3 rounded-lg bg-muted text-muted-foreground text-xs font-bold"
+                  >
+                    HTML
+                  </button>
+                  <button
+                    onClick={() => exportRelatorioDiarioPDF(relatorioAtual)}
+                    className="h-9 px-3 rounded-lg bg-muted text-muted-foreground text-xs font-bold"
+                  >
+                    PDF
+                  </button>
+                  <button
+                    onClick={() => setRelatorioAtual(null)}
+                    className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-bold"
+                  >
+                    Fechar
+                  </button>
+                </div>
+              </div>
+
+              <div className="p-4 space-y-4">
+                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+                  <div className="rounded-xl border border-border bg-card p-3">
+                    <p className="text-2xl font-black text-foreground">{relatorioAtual.resumo.totalItens}</p>
+                    <p className="text-[11px] font-mono text-muted-foreground">Total</p>
+                  </div>
+                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                    <p className="text-2xl font-black text-emerald-700">{relatorioAtual.resumo.separado}</p>
+                    <p className="text-[11px] font-mono text-emerald-700/70">Separado</p>
+                  </div>
+                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
+                    <p className="text-2xl font-black text-amber-700">{relatorioAtual.resumo.parcial}</p>
+                    <p className="text-[11px] font-mono text-amber-700/70">Parcial</p>
+                  </div>
+                  <div className="rounded-xl border border-red-200 bg-red-50 p-3">
+                    <p className="text-2xl font-black text-red-700">{relatorioAtual.resumo.naoTem}</p>
+                    <p className="text-[11px] font-mono text-red-700/70">Nao tem</p>
+                  </div>
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <p className="text-2xl font-black text-slate-700">{relatorioAtual.resumo.pendente}</p>
+                    <p className="text-[11px] font-mono text-slate-700/70">Pendente</p>
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { key: "todos", label: "Todos" },
+                    { key: "separado", label: "Separado" },
+                    { key: "nao_tem", label: "Nao tem" },
+                    { key: "parcial", label: "Parcial" },
+                    { key: "pendente", label: "Pendente" },
+                  ].map((item) => (
+                    <button
+                      key={item.key}
+                      onClick={() => setRelatorioFiltro(item.key as typeof relatorioFiltro)}
+                      className={`h-9 px-4 rounded-full text-xs font-black border transition-colors ${
+                        relatorioFiltro === item.key
+                          ? "bg-foreground text-background border-foreground"
+                          : "bg-card text-muted-foreground border-border"
+                      }`}
+                    >
+                      {item.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
+                  {itensRelatorioVisiveis.map((item, index) => (
+                    <button
+                      key={`${item.taskId}-${item.codigo}-${index}`}
+                      onClick={() => navigator.clipboard.writeText(item.codigo).then(() => {
+                        toast({ title: "Codigo copiado", description: item.codigo });
+                      }).catch(() => undefined)}
+                      className={`overflow-hidden rounded-2xl border bg-card text-left transition-all hover:-translate-y-0.5 ${
+                        item.status === "nao_tem"
+                          ? "border-red-200"
+                          : item.status === "parcial"
+                            ? "border-amber-200"
+                            : item.status === "pendente"
+                              ? "border-slate-200"
+                              : "border-emerald-200"
+                      }`}
+                    >
+                      {item.photo ? (
+                        <img src={item.photo} alt={item.codigo} className="block w-full aspect-square object-cover bg-muted" loading="lazy" />
+                      ) : (
+                        <div className="flex w-full aspect-square items-center justify-center bg-muted text-4xl text-muted-foreground/35">
+                          <Package className="w-10 h-10" />
+                        </div>
+                      )}
+                      <div className="space-y-2 p-3">
+                        <div>
+                          <p className="text-xs font-mono font-bold break-all text-foreground">{item.codigo}</p>
+                          <p className="text-[11px] text-muted-foreground line-clamp-2 min-h-8">{item.sku || "-"}</p>
+                        </div>
+                        <p className="text-[11px] text-muted-foreground">{item.secao || "Sem categoria"} · {item.conferente}</p>
+                        <div className="flex items-end justify-between gap-2">
+                          <div className="flex gap-3">
+                            <div>
+                              <p className="text-lg leading-none font-black text-foreground">{item.pedido}</p>
+                              <p className="text-[10px] font-mono text-muted-foreground">pedido</p>
+                            </div>
+                            <div>
+                              <p className="text-lg leading-none font-black text-foreground">{item.real ?? "-"}</p>
+                              <p className="text-[10px] font-mono text-muted-foreground">real</p>
+                            </div>
+                          </div>
+                          <span className={`rounded-md px-2 py-1 text-[10px] font-black ${
+                            item.status === "nao_tem"
+                              ? "bg-red-100 text-red-700"
+                              : item.status === "parcial"
+                                ? "bg-amber-100 text-amber-700"
+                                : item.status === "pendente"
+                                  ? "bg-slate-200 text-slate-700"
+                                  : "bg-emerald-100 text-emerald-700"
+                          }`}>
+                            {statusRelatorioLabel(item.status)}
+                          </span>
+                        </div>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+
+                {itensRelatorioVisiveis.length === 0 && (
+                  <div className="rounded-xl border border-border bg-muted/40 p-6 text-sm text-muted-foreground">
+                    Nenhum item nesse filtro.
+                  </div>
+                )}
               </div>
             </div>
           </div>

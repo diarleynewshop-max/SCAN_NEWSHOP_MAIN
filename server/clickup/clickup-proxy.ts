@@ -13,9 +13,8 @@ type RelatorioItem = {
   status: string;
   conferente: string;
   taskId: string;
+  photo?: string | null;
 };
-
-const RELATORIO_GERADO_TAG = 'RELATORIO GERADO';
 const CONFERENCIA_LOCK_TAG = 'pedido em andamento';
 const RELATORIO_DETAIL_CONCURRENCY = 6;
 
@@ -421,53 +420,12 @@ function parseConferenceItems(description: string, conferente: string, taskId: s
   return items;
 }
 
-function buildRelatorioDescription(report: any): string {
-  const porConferente = report.porConferente
-    .map((item: any) => `- ${item.nome}: ${item.totalItens} itens | Separado ${item.separado} | Parcial ${item.parcial} | Nao tem ${item.naoTem}`)
-    .join('\n') || '- Sem dados';
-
-  const porSecao = report.porSecao
-    .map((item: any) => `- ${item.nome}: ${item.total} faltante/parcial`)
-    .join('\n') || '- Sem faltas/parciais';
-
-  const faltas = report.itensCriticos
-    .slice(0, 80)
-    .map((item: RelatorioItem, index: number) =>
-      `${index + 1}. ${item.codigo} | SKU: ${item.sku || '-'} | ${item.secao} | Pedido: ${item.pedido} | Real: ${item.real ?? '-'} | ${item.status} | ${item.conferente}`
-    )
-    .join('\n') || 'Nenhum item faltante/parcial.';
-
-  return `Relatorio diario de conferencia
-Empresa: ${report.empresa}
-Tipo: ${String(report.flag).toUpperCase()}
-Data: ${formatDatePtBr(report.data)}
-Conferencias: ${report.totalConferencias}
-Tasks ignoradas: ${report.ignoradas.length}
-
-RESUMO GERAL
-Total de itens: ${report.resumo.totalItens}
-Separado: ${report.resumo.separado}
-Nao tem: ${report.resumo.naoTem}
-Parcial: ${report.resumo.parcial}
-Pendente: ${report.resumo.pendente}
-
-POR CONFERENTE
-${porConferente}
-
-POR SECAO
-${porSecao}
-
-ITENS FALTANTES/PARCIAIS
-${faltas}`;
-}
-
 async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: string) {
   const listId = getListId(empresa, flag);
   const rawTasks = await fetchTasksFromList(listId, token, true);
   const concluidas = rawTasks.filter((task) => {
     const status = normalizeStatus(task.status?.status);
-    const name = normalizeText(task.name);
-    return (status === 'concluido' || status === 'complete') && !name.includes('relatorio diario');
+    return status === 'concluido' || status === 'complete';
   });
 
   const dateMap = new Map<string, { data: string; label: string; total: number; relatorioGerado: boolean }>();
@@ -477,10 +435,9 @@ async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: s
       data: dateKey,
       label: formatDatePtBr(dateKey),
       total: 0,
-      relatorioGerado: false,
+      relatorioGerado: true,
     };
     current.total += 1;
-    current.relatorioGerado = current.relatorioGerado || taskHasTag(task, RELATORIO_GERADO_TAG);
     dateMap.set(dateKey, current);
   };
 
@@ -491,24 +448,6 @@ async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: s
 
   return Array.from(dateMap.values()).sort((a, b) => b.data.localeCompare(a.data));
 }
-
-async function criarTarefaClickUp(listId: string, token: string, name: string, description: string, status = 'complete') {
-  const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
-    method: 'POST',
-    headers: {
-      Authorization: token,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({ name, description, status }),
-  });
-
-  if (!response.ok) {
-    throw new Error(`ClickUp ${response.status} ao criar relatorio: ${await response.text()}`);
-  }
-
-  return await response.json();
-}
-
 function sortByTotalDesc<T extends { total?: number; totalItens?: number }>(items: T[]): T[] {
   return items.sort((a, b) => Number(b.total ?? b.totalItens ?? 0) - Number(a.total ?? a.totalItens ?? 0));
 }
@@ -553,6 +492,15 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
         pendente: extractResumoValue(description, 'Pendente'),
       };
       const totalItens = Number(description.match(/^Total:\s*(\d+)/im)?.[1] ?? 0);
+      const json = await baixarJsonDaTask(task.id, token).catch(() => null);
+      const photoMap = new Map<string, string>();
+      if (Array.isArray(json?.items)) {
+        for (const rawItem of json.items) {
+          const codigo = normalizeCodigo(rawItem?.codigo ?? rawItem?.barcode);
+          const photo = typeof rawItem?.photo === 'string' ? rawItem.photo.trim() : '';
+          if (codigo && photo && !photoMap.has(codigo)) photoMap.set(codigo, photo);
+        }
+      }
 
       conferencias.push({
         taskId: task.id,
@@ -561,7 +509,11 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
         totalItens,
         resumo,
       });
-      itens.push(...parseConferenceItems(description, conferente, task.id));
+      const itensTask = parseConferenceItems(description, conferente, task.id).map((item) => ({
+        ...item,
+        photo: photoMap.get(item.codigo) ?? null,
+      }));
+      itens.push(...itensTask);
     } catch (error: any) {
       ignoradas.push({ taskId: task.id, name: task.name, motivo: error?.message ?? 'Erro ao ler task' });
     }
@@ -625,19 +577,6 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
     ignoradas,
     clickupTaskId: null as string | null,
   };
-
-  if (conferencias.length > 0) {
-    const task = await criarTarefaClickUp(
-      listId,
-      token,
-      `Relatorio Diario - ${empresa} - ${formatDatePtBr(dateKey)}`,
-      buildRelatorioDescription(report),
-      'complete'
-    );
-    report.clickupTaskId = task.id ?? null;
-
-    await Promise.allSettled(conferencias.map((item) => addTaskTag(token, item.taskId, RELATORIO_GERADO_TAG)));
-  }
 
   return report;
 }
