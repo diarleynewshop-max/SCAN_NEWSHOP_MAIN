@@ -197,28 +197,6 @@ async function anexarJsonNaTarefa(
   }
 }
 
-async function anexarTxtNaTarefa(
-  taskId: string,
-  nomeArquivo: string,
-  conteudo: string
-) {
-  try {
-    const response = await anexarArquivoTextoClickUp(
-      taskId,
-      `${nomeArquivo}.txt`,
-      "text/plain; charset=utf-8",
-      conteudo
-    );
-
-    console.log("TXT STATUS:", response.status);
-    if (!response.ok) {
-      console.error("TXT ERROR:", response.text);
-    }
-  } catch (err) {
-    console.error("Erro ao anexar TXT:", err);
-  }
-}
-
 async function comprimirImagem(
   base64: string,
   maxWidth = 1200,
@@ -391,33 +369,18 @@ Data: ${dataFormatada}`,
         "to do"
       );
 
-      await Promise.all([
-        anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
-          type: "conference-file",
-          empresa: payload.empresa ?? "NEWSHOP",
-          flag: payload.flag ?? "loja",
-          items: payload.produtos.map((p: any) => ({
-            codigo: p.barcode,
-            sku: p.sku || "",
-            secao: p.secao || null,
-            quantidade: p.quantity ?? p.quantidade,
-            photo: p.photo || null,
-          })),
-        }),
-        anexarTxtNaTarefa(
-          taskId,
-          `lista_${payload.pessoa}`,
-          (() => {
-            const soCodigosBloco = payload.produtos
-              .map((p: any) => p.barcode)
-              .join("\n");
-            const codigoQuantidadeBloco = payload.produtos
-              .map((p: any) => `${p.barcode};${p.quantity ?? p.quantidade}`)
-              .join("\n");
-            return `Codigo\n${soCodigosBloco}\n\n------------------------\n\nCodigo;Quantidade\n${codigoQuantidadeBloco}`;
-          })()
-        ),
-      ]);
+      await anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
+        type: "conference-file",
+        empresa: payload.empresa ?? "NEWSHOP",
+        flag: payload.flag ?? "loja",
+        items: payload.produtos.map((p: any) => ({
+          codigo: p.barcode,
+          sku: p.sku || "",
+          secao: p.secao || null,
+          quantidade: p.quantity ?? p.quantidade,
+          photo: p.photo || null,
+        })),
+      });
 
       const itensSemEstoque = payload.produtos.filter(
         (p: any) => (p.quantidade ?? p.quantity) === 0
@@ -574,10 +537,7 @@ ${truncarTexto(itensTexto, MAX_CLICKUP_DESCRIPTION_PREVIEW_CHARS)}
       console.log(`Tarefa de conferência criada: ${tarefaOriginalId}`);
 
       const nomeAnexo = sanitizarNomeArquivo(`conferencia_${payload.conferente}_${dataFormatada}`);
-      await Promise.all([
-        anexarJsonNaTarefa(tarefaOriginalId, nomeAnexo, montarJsonConferencia(payload, isCD)),
-        anexarTxtNaTarefa(tarefaOriginalId, `${nomeAnexo}_itens`, itensTexto || "Sem itens"),
-      ]);
+      await anexarJsonNaTarefa(tarefaOriginalId, nomeAnexo, montarJsonConferencia(payload, isCD));
 
       if (itensNaoTem.length > 0) {
         todoTaskId = await criarTarefasComprasIndividuais(
