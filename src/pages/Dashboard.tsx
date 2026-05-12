@@ -68,7 +68,7 @@ const COR = {
   pendente: "#9ca3af",
 };
 
-type TipoGrafico = "rosca" | "barra" | "barra100" | "pareto" | "linha";
+type TipoGrafico = "rosca" | "barra" | "barra100" | "pareto" | "linha" | "unidades";
 type ModoSeletor = "dia" | "periodo" | "mes";
 
 interface ItemFrequencia {
@@ -259,6 +259,10 @@ const Dashboard = () => {
 
     const porDia = sorted.map((r) => {
       const total = r.resumo.totalItens || 1;
+      const itens = r.itens ?? r.itensCriticos;
+      const pedidoDia = itens.reduce((s, i) => s + (i.pedido ?? 0), 0);
+      const realDia   = itens.reduce((s, i) => s + (i.real   ?? 0), 0);
+      const pctDifDia = pedidoDia > 0 ? +(((pedidoDia - realDia) / pedidoDia) * 100).toFixed(1) : 0;
       return {
         label: labelDia(r.data),
         "Separado": r.resumo.separado,
@@ -270,6 +274,9 @@ const Dashboard = () => {
         "pctNão tem": +((r.resumo.naoTem / total) * 100).toFixed(1),
         "pctParcial": +((r.resumo.parcial / total) * 100).toFixed(1),
         "pctPendente": +((r.resumo.pendente / total) * 100).toFixed(1),
+        "Pedido": pedidoDia,
+        "Real": realDia,
+        "% Diferença": pctDifDia,
       };
     });
 
@@ -323,7 +330,12 @@ const Dashboard = () => {
       { name: "Pendente", value: resumo.pendente, color: COR.pendente },
     ].filter((d) => d.value > 0);
 
-    return { resumo, porDia, frequencia, pareto, pizza };
+    // totais de unidades do período
+    const totalPedido = frequencia.reduce((s, i) => s + i.totalPedido, 0);
+    const totalReal   = frequencia.reduce((s, i) => s + i.totalReal,   0);
+    const pctDif = totalPedido > 0 ? +(((totalPedido - totalReal) / totalPedido) * 100).toFixed(1) : 0;
+
+    return { resumo, porDia, frequencia, pareto, pizza, totalPedido, totalReal, pctDif };
   }, [relatoriosPeriodo]);
 
   // ── itens filtrados ─────────────────────────────────────────────────────────
@@ -540,13 +552,14 @@ const Dashboard = () => {
             {dados && !carregandoPeriodo && (
               <>
                 {/* Cards resumo */}
+                {/* Cards status */}
                 <div className="grid grid-cols-5 gap-2">
                   {[
-                    { label: "Total", value: dados.resumo.totalItens },
-                    { label: "Separado", value: dados.resumo.separado },
-                    { label: "Não tem", value: dados.resumo.naoTem },
-                    { label: "Parcial", value: dados.resumo.parcial },
-                    { label: "Pendente", value: dados.resumo.pendente },
+                    { label: "Total SKUs", value: dados.resumo.totalItens },
+                    { label: "Separado",   value: dados.resumo.separado },
+                    { label: "Não tem",    value: dados.resumo.naoTem },
+                    { label: "Parcial",    value: dados.resumo.parcial },
+                    { label: "Pendente",   value: dados.resumo.pendente },
                   ].map((c) => (
                     <Card key={c.label}>
                       <CardContent className="p-3 text-center">
@@ -557,14 +570,39 @@ const Dashboard = () => {
                   ))}
                 </div>
 
+                {/* Cards unidades */}
+                <div className="grid grid-cols-3 gap-2">
+                  <Card className="border-blue-200 dark:border-blue-900">
+                    <CardContent className="p-3 text-center">
+                      <p className="text-xl font-bold text-blue-600">{dados.totalPedido.toLocaleString("pt-BR")}</p>
+                      <p className="text-xs text-muted-foreground">Unid. Pedidas</p>
+                    </CardContent>
+                  </Card>
+                  <Card className="border-green-200 dark:border-green-900">
+                    <CardContent className="p-3 text-center">
+                      <p className="text-xl font-bold text-green-600">{dados.totalReal.toLocaleString("pt-BR")}</p>
+                      <p className="text-xs text-muted-foreground">Unid. Enviadas</p>
+                    </CardContent>
+                  </Card>
+                  <Card className={dados.pctDif > 20 ? "border-red-300 dark:border-red-900" : "border-yellow-200 dark:border-yellow-900"}>
+                    <CardContent className="p-3 text-center">
+                      <p className={`text-xl font-bold ${dados.pctDif > 20 ? "text-red-600" : "text-yellow-600"}`}>
+                        {dados.pctDif}%
+                      </p>
+                      <p className="text-xs text-muted-foreground">% Diferença</p>
+                    </CardContent>
+                  </Card>
+                </div>
+
                 {/* Seletor de tipo de gráfico */}
                 <div className="flex gap-1 flex-wrap">
                   {([
-                    { key: "rosca",   label: "Rosca" },
-                    { key: "barra",   label: "Barra" },
-                    { key: "barra100",label: "Barra 100%" },
-                    { key: "pareto",  label: "Pareto" },
-                    { key: "linha",   label: "Linha" },
+                    { key: "rosca",    label: "Rosca" },
+                    { key: "barra",    label: "Barra" },
+                    { key: "barra100", label: "Barra 100%" },
+                    { key: "pareto",   label: "Pareto" },
+                    { key: "linha",    label: "Linha" },
+                    { key: "unidades", label: "Unidades" },
                   ] as { key: TipoGrafico; label: string }[]).map(({ key, label }) => (
                     <Button key={key} size="sm"
                       variant={tipoGrafico === key ? "default" : "outline"}
@@ -639,7 +677,7 @@ const Dashboard = () => {
                           </ComposedChart>
 
                         /* LINHA */
-                        ) : (
+                        ) : tipoGrafico === "linha" ? (
                           <LineChart data={dados.porDia}>
                             <CartesianGrid strokeDasharray="3 3" />
                             <XAxis dataKey="label" tick={{ fontSize: 10 }} />
@@ -651,6 +689,26 @@ const Dashboard = () => {
                             <Line dataKey="Não tem"  stroke={COR.naoTem}   strokeWidth={2} dot={{ r: 3 }} />
                             <Line dataKey="Pendente" stroke={COR.pendente} strokeWidth={2} dot={{ r: 3 }} />
                           </LineChart>
+
+                        /* UNIDADES — pedido vs real + % diferença */
+                        ) : (
+                          <ComposedChart data={dados.porDia}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                            <YAxis yAxisId="esq" tick={{ fontSize: 10 }} />
+                            <YAxis yAxisId="dir" orientation="right" domain={[0, 100]}
+                              tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10 }} />
+                            <Tooltip
+                              formatter={(value: number, name: string) =>
+                                name === "% Diferença" ? [`${value}%`, name] : [value.toLocaleString("pt-BR"), name]
+                              }
+                            />
+                            <Legend iconSize={10} />
+                            <Bar yAxisId="esq" dataKey="Pedido" fill="#3b82f6" radius={[3,3,0,0]} />
+                            <Bar yAxisId="esq" dataKey="Real"   fill="#22c55e" radius={[3,3,0,0]} />
+                            <Line yAxisId="dir" dataKey="% Diferença" stroke="#ef4444"
+                              type="monotone" strokeWidth={2} dot={{ r: 3 }} />
+                          </ComposedChart>
                         )}
                       </ResponsiveContainer>
                     </div>
