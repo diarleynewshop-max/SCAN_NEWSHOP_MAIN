@@ -128,6 +128,8 @@ const Dashboard = () => {
   const [relatoriosSalvos, setRelatoriosSalvos] = useState<RelatorioSalvo[]>([]);
   const [carregandoDatas, setCarregandoDatas] = useState(false);
   const [gerando, setGerando] = useState<string | null>(null);
+  const [gerandoTodos, setGerandoTodos] = useState(false);
+  const [progressoGerar, setProgressoGerar] = useState({ atual: 0, total: 0 });
 
   // seletor de período
   const [modoSeletor, setModoSeletor] = useState<ModoSeletor>("dia");
@@ -193,6 +195,38 @@ const Dashboard = () => {
     } finally {
       setGerando(null);
     }
+  };
+
+  // ── gerar todos os pendentes ────────────────────────────────────────────────
+  const handleGerarTodos = async () => {
+    const salvadosSet = new Set(relatoriosSalvos.map((r) => r.data));
+    const pendentes = datasDisponiveis.filter((d) => !salvadosSet.has(d.data));
+    if (pendentes.length === 0) {
+      toast({ title: "Todos os relatórios já foram gerados" });
+      return;
+    }
+    setGerandoTodos(true);
+    setProgressoGerar({ atual: 0, total: pendentes.length });
+    let sucesso = 0;
+    let falhas = 0;
+    for (const d of pendentes) {
+      setGerando(d.data);
+      try {
+        await salvarRelatorioDashboard(empresa, flag, d.data);
+        sucesso++;
+      } catch {
+        falhas++;
+      }
+      setProgressoGerar((p) => ({ ...p, atual: p.atual + 1 }));
+    }
+    setGerando(null);
+    setGerandoTodos(false);
+    const salvos = await listarRelatoriosSalvos(empresa, flag);
+    setRelatoriosSalvos(salvos);
+    toast({
+      title: "Geração concluída",
+      description: `${sucesso} gerado(s)${falhas > 0 ? `, ${falhas} erro(s)` : ""}`,
+    });
   };
 
   // ── datas do período a carregar ─────────────────────────────────────────────
@@ -501,7 +535,24 @@ const Dashboard = () => {
             {/* Lista de datas disponíveis */}
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Datas com conferências</CardTitle>
+                <CardTitle className="text-sm flex items-center justify-between gap-2">
+                  <span>Datas com conferências</span>
+                  {(() => {
+                    const pendentes = datasDisponiveis.filter((d) => !salvosKeys.has(d.data)).length;
+                    return (
+                      <Button
+                        size="sm" variant="outline"
+                        className="h-6 text-xs px-2 shrink-0"
+                        disabled={gerandoTodos || pendentes === 0}
+                        onClick={handleGerarTodos}
+                      >
+                        {gerandoTodos
+                          ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />{progressoGerar.atual}/{progressoGerar.total}</>
+                          : `Gerar todos (${pendentes})`}
+                      </Button>
+                    );
+                  })()}
+                </CardTitle>
                 <CardDescription className="text-xs">Status Complete no ClickUp</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
