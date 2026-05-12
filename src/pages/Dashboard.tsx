@@ -1,7 +1,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import {
-  ArrowLeft, BarChart3, RefreshCw, Check, AlertTriangle,
+  ArrowLeft, BarChart3, RefreshCw, Check, AlertTriangle, ImageOff,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -17,7 +17,27 @@ import {
   listarDatasRelatorio, listarRelatoriosSalvos,
   salvarRelatorioDashboard, buscarRelatorioSalvo,
 } from "@/lib/clickupApi";
+import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
+import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { useAuth } from "@/hooks/useAuth";
+
+async function fetchErpImageDataUrl(src: string): Promise<string | null> {
+  if (!src) return null;
+  if (isDataPhotoUrl(src)) return src;
+  try {
+    const response = await fetch(src);
+    if (!response.ok) return null;
+    const contentType = response.headers.get("content-type") || "";
+    if (contentType.includes("application/json")) {
+      const data = await response.json();
+      return typeof data?.dataUrl === "string" ? data.dataUrl : null;
+    }
+    if (!contentType.startsWith("image/")) return null;
+    return await blobToDataUrl(await response.blob());
+  } catch {
+    return null;
+  }
+}
 
 const EMPRESAS: EmpresaKey[] = ["NEWSHOP", "SOYE", "FACIL"];
 
@@ -47,6 +67,9 @@ const Dashboard = () => {
   const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
   const [gerando, setGerando] = useState<string | null>(null);
   const [filtroItens, setFiltroItens] = useState<"criticos" | "todos">("criticos");
+  const [fotosErp, setFotosErp] = useState<Record<string, string | null>>({});
+  const [carregandoFotosErp, setCarregandoFotosErp] = useState(false);
+  const [progressoFotos, setProgressoFotos] = useState({ atual: 0, total: 0 });
 
   const carregarDados = useCallback(async () => {
     setCarregandoDatas(true);
@@ -73,6 +96,7 @@ const Dashboard = () => {
   const handleGerarSalvar = async (dateKey: string) => {
     setGerando(dateKey);
     setFiltroItens("criticos");
+    setFotosErp({});
     try {
       const report = await salvarRelatorioDashboard(empresa, flag, dateKey);
       setRelatorioAtivo(report);
@@ -93,6 +117,7 @@ const Dashboard = () => {
     setDataAtiva(dateKey);
     setRelatorioAtivo(null);
     setFiltroItens("criticos");
+    setFotosErp({});
     try {
       const report = await buscarRelatorioSalvo(empresa, flag, dateKey);
       if (!report) throw new Error("Relatório não encontrado no ClickUp");
@@ -104,6 +129,45 @@ const Dashboard = () => {
       setCarregandoRelatorio(false);
     }
   };
+
+  const carregarFotosErp = useCallback(async (report: RelatorioDiario) => {
+    if (carregandoFotosErp) return;
+
+    const todosItens = report.itens ?? report.itensCriticos;
+    const semFoto = [...new Map(
+      todosItens.filter((i) => !i.photo).map((i) => [i.codigo, i])
+    ).values()];
+
+    if (semFoto.length === 0) return;
+
+    setCarregandoFotosErp(true);
+    setProgressoFotos({ atual: 0, total: semFoto.length });
+
+    const CONCURRENCY = 4;
+    let concluidos = 0;
+
+    for (let i = 0; i < semFoto.length; i += CONCURRENCY) {
+      const lote = semFoto.slice(i, i + CONCURRENCY);
+      const batch: Record<string, string | null> = {};
+
+      await Promise.all(lote.map(async (item) => {
+        try {
+          const produto = await buscarProdutoVarejoFacil(item.codigo, { empresa, flag });
+          batch[item.codigo] = produto?.imagem
+            ? await fetchErpImageDataUrl(produto.imagem)
+            : null;
+        } catch {
+          batch[item.codigo] = null;
+        }
+        concluidos += 1;
+        setProgressoFotos({ atual: concluidos, total: semFoto.length });
+      }));
+
+      setFotosErp((prev) => ({ ...prev, ...batch }));
+    }
+
+    setCarregandoFotosErp(false);
+  }, [empresa, flag, carregandoFotosErp]);
 
   const pieData = relatorioAtivo
     ? [
@@ -346,12 +410,12 @@ const Dashboard = () => {
                 {((relatorioAtivo.itens?.length ?? 0) > 0 || relatorioAtivo.itensCriticos.length > 0) && (
                   <Card>
                     <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center justify-between gap-2">
+                      <CardTitle className="text-sm flex items-center justify-between gap-2 flex-wrap">
                         <span className="flex items-center gap-1.5">
                           <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
                           Itens
                         </span>
-                        <div className="flex gap-1">
+                        <div className="flex gap-1 flex-wrap">
                           <Button
                             size="sm"
                             variant={filtroItens === "criticos" ? "default" : "outline"}
@@ -368,6 +432,19 @@ const Dashboard = () => {
                           >
                             Todos ({relatorioAtivo.itens?.length ?? relatorioAtivo.itensCriticos.length})
                           </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="h-6 text-xs px-2 gap-1"
+                            disabled={carregandoFotosErp}
+                            onClick={() => carregarFotosErp(relatorioAtivo)}
+                          >
+                            {carregandoFotosErp ? (
+                              <><RefreshCw className="h-3 w-3 animate-spin" />{progressoFotos.atual}/{progressoFotos.total}</>
+                            ) : (
+                              <><ImageOff className="h-3 w-3" />Fotos ERP</>
+                            )}
+                          </Button>
                         </div>
                       </CardTitle>
                     </CardHeader>
@@ -376,18 +453,20 @@ const Dashboard = () => {
                         {(filtroItens === "todos"
                           ? (relatorioAtivo.itens ?? relatorioAtivo.itensCriticos)
                           : relatorioAtivo.itensCriticos
-                        ).map((item, i) => (
+                        ).map((item, i) => {
+                          const foto = item.photo || fotosErp[item.codigo] || null;
+                          return (
                           <div key={i} className="flex items-center gap-3 px-4 py-3">
                             {/* Foto */}
-                            {item.photo ? (
+                            {foto ? (
                               <img
-                                src={item.photo}
+                                src={foto}
                                 alt={item.codigo}
                                 className="w-14 h-14 object-cover rounded shrink-0"
                               />
                             ) : (
                               <div className="w-14 h-14 bg-muted rounded flex items-center justify-center shrink-0">
-                                <span className="text-muted-foreground text-xs">sem foto</span>
+                                <span className="text-muted-foreground text-xs text-center leading-tight px-1">sem foto</span>
                               </div>
                             )}
 
@@ -422,7 +501,8 @@ const Dashboard = () => {
                               </div>
                             </div>
                           </div>
-                        ))}
+                          );
+                        })}
                       </div>
                     </CardContent>
                   </Card>
