@@ -43,7 +43,7 @@ const comprasMenuItems = [
 
 // Menu para analytics (admin, super)
 const analyticsMenuItems = [
-  { Icon: BarChart3,    label: "Analytics",   description: "Dashboard executivo e métricas",        path: "/analytics", accent: "hsl(var(--violet))" },
+  { Icon: BarChart3,    label: "Dashboard",   description: "Relatórios e gráficos de conferência",  path: "/dashboard", accent: "hsl(var(--violet))" },
 ];
 
 // Componente de card do menu
@@ -446,7 +446,7 @@ const Home = () => {
           )}
           
           {/* Cards para analytics (se tiver acesso) */}
-          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
+          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
             analyticsMenuItems.map(({ Icon, label, description, path, accent }) => (
               <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
                 <MenuCard 

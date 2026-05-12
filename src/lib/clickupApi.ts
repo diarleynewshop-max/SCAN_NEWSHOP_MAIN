@@ -83,6 +83,21 @@ export interface RelatorioDataOption {
   relatorioGerado: boolean;
 }
 
+export interface RelatorioSalvo {
+  taskId: string;
+  data: string;
+  label: string;
+  totalConferencias: number;
+  resumo: {
+    totalItens: number;
+    separado: number;
+    naoTem: number;
+    parcial: number;
+    pendente: number;
+  };
+  geradoEm: string | null;
+}
+
 // ── Configuração por empresa/flag ─────────────────────────────────────────────
 interface EmpresaConfig {
   token:    string; // VITE_CLICKUP_TOKEN_xxx
@@ -213,6 +228,40 @@ export async function listarDatasRelatorio(
   if (!response.ok) throw new Error(`Erro ${response.status} ao buscar datas de relatorio`);
   const data = await response.json();
   return data.datas ?? [];
+}
+
+export async function salvarRelatorioDashboard(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  data: string
+): Promise<RelatorioDiario> {
+  const params = new URLSearchParams({ action: 'salvar-relatorio-dashboard', empresa, flag, data });
+  const response = await fetch(`/api/clickup-proxy?${params}`, { method: 'POST' });
+  if (!response.ok) throw new Error(`Erro ${response.status} ao salvar relatorio dashboard`);
+  return await response.json();
+}
+
+export async function listarRelatoriosSalvos(
+  empresa: EmpresaKey,
+  flag: FlagKey
+): Promise<RelatorioSalvo[]> {
+  const params = new URLSearchParams({ action: 'listar-relatorios-salvos', empresa, flag });
+  const response = await fetch(`/api/clickup-proxy?${params}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao listar relatorios salvos`);
+  const data = await response.json();
+  return data.relatorios ?? [];
+}
+
+export async function buscarRelatorioSalvo(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  data: string
+): Promise<RelatorioDiario | null> {
+  const params = new URLSearchParams({ action: 'buscar-relatorio-salvo', empresa, flag, data });
+  const response = await fetch(`/api/clickup-proxy?${params}`);
+  if (response.status === 404) return null;
+  if (!response.ok) throw new Error(`Erro ${response.status} ao buscar relatorio salvo`);
+  return await response.json();
 }
 
 export async function buscarAttachmentsDaTask(

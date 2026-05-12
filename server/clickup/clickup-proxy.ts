@@ -420,6 +420,120 @@ function parseConferenceItems(description: string, conferente: string, taskId: s
   return items;
 }
 
+function getDashboardListId(empresa: EmpresaKey): string | null {
+  return (
+    getEnv(`CLICKUP_DASHBOARD_LIST_ID_${empresa}`, 'CLICKUP_DASHBOARD_LIST_ID') ?? null
+  );
+}
+
+async function salvarRelatorioDashboard(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  token: string,
+  dateKey: string
+): Promise<any> {
+  const dashboardListId = getDashboardListId(empresa);
+  if (!dashboardListId) throw new Error(`CLICKUP_DASHBOARD_LIST_ID_${empresa} nao configurado`);
+
+  const report = await gerarRelatorioDiario(empresa, flag, token, dateKey);
+
+  const nome = `DASHBOARD - ${empresa} ${flag.toUpperCase()} - ${dateKey}`;
+  const descricao = `Empresa: ${empresa}
+Flag: ${flag.toUpperCase()}
+Data: ${dateKey}
+Total Conferencias: ${report.totalConferencias}
+Total Itens: ${report.resumo.totalItens}
+Separado: ${report.resumo.separado}
+Nao Tem: ${report.resumo.naoTem}
+Parcial: ${report.resumo.parcial}
+Pendente: ${report.resumo.pendente}
+Gerado Em: ${report.geradoEm}`;
+
+  const taskResponse = await fetch(`https://api.clickup.com/api/v2/list/${dashboardListId}/task`, {
+    method: 'POST',
+    headers: { Authorization: token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: nome, description: descricao }),
+  });
+
+  if (!taskResponse.ok) {
+    throw new Error(`ClickUp ${taskResponse.status} ao criar task dashboard: ${await taskResponse.text()}`);
+  }
+
+  const taskData = await taskResponse.json();
+  const taskId = taskData.id as string;
+  const reportWithId = { ...report, clickupTaskId: taskId };
+
+  const formData = new FormData();
+  formData.append(
+    'attachment',
+    new Blob([JSON.stringify(reportWithId)], { type: 'application/json' }),
+    `dashboard_${empresa}_${flag}_${dateKey}.json`
+  );
+
+  const attachResponse = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, {
+    method: 'POST',
+    headers: { Authorization: token },
+    body: formData,
+  });
+
+  if (!attachResponse.ok) {
+    console.warn(`[clickup-proxy] Aviso: erro ao anexar JSON dashboard task=${taskId}: ${attachResponse.status}`);
+  }
+
+  return reportWithId;
+}
+
+async function listarRelatoriosSalvos(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  token: string
+): Promise<any[]> {
+  const dashboardListId = getDashboardListId(empresa);
+  if (!dashboardListId) return [];
+
+  const prefix = `DASHBOARD - ${empresa} ${flag.toUpperCase()} - `;
+  const rawTasks = await fetchTasksFromList(dashboardListId, token, true);
+
+  return rawTasks
+    .filter((task) => String(task.name ?? '').startsWith(prefix))
+    .map((task) => {
+      const dateKey = String(task.name).replace(prefix, '').trim();
+      const desc = String(task.description ?? task.text_content ?? '');
+      return {
+        taskId: task.id,
+        data: dateKey,
+        label: formatDatePtBr(dateKey),
+        totalConferencias: Number(desc.match(/^Total Conferencias:\s*(\d+)/im)?.[1] ?? 0),
+        resumo: {
+          totalItens: Number(desc.match(/^Total Itens:\s*(\d+)/im)?.[1] ?? 0),
+          separado: Number(desc.match(/^Separado:\s*(\d+)/im)?.[1] ?? 0),
+          naoTem: Number(desc.match(/^Nao Tem:\s*(\d+)/im)?.[1] ?? 0),
+          parcial: Number(desc.match(/^Parcial:\s*(\d+)/im)?.[1] ?? 0),
+          pendente: Number(desc.match(/^Pendente:\s*(\d+)/im)?.[1] ?? 0),
+        },
+        geradoEm: desc.match(/^Gerado Em:\s*(.+)$/im)?.[1]?.trim() ?? null,
+      };
+    })
+    .sort((a, b) => b.data.localeCompare(a.data));
+}
+
+async function buscarRelatorioSalvo(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  token: string,
+  dateKey: string
+): Promise<any | null> {
+  const dashboardListId = getDashboardListId(empresa);
+  if (!dashboardListId) return null;
+
+  const nome = `DASHBOARD - ${empresa} ${flag.toUpperCase()} - ${dateKey}`;
+  const rawTasks = await fetchTasksFromList(dashboardListId, token, true);
+  const task = rawTasks.find((t) => String(t.name ?? '') === nome);
+  if (!task) return null;
+
+  return await baixarJsonDaTask(task.id, token).catch(() => null);
+}
+
 async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: string) {
   const listId = getListId(empresa, flag);
   const rawTasks = await fetchTasksFromList(listId, token, true);
@@ -889,6 +1003,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (action === 'listar-datas-relatorio') {
       const datas = await listarDatasRelatorio(empresa, flag, token);
       return res.status(200).json({ datas, empresa, flag });
+    }
+
+    if (action === 'salvar-relatorio-dashboard') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const relatorio = await salvarRelatorioDashboard(empresa, flag, token, dataRelatorio);
+      return res.status(200).json(relatorio);
+    }
+
+    if (action === 'listar-relatorios-salvos') {
+      const relatorios = await listarRelatoriosSalvos(empresa, flag, token);
+      return res.status(200).json({ relatorios, empresa, flag });
+    }
+
+    if (action === 'buscar-relatorio-salvo') {
+      const relatorio = await buscarRelatorioSalvo(empresa, flag, token, dataRelatorio);
+      if (!relatorio) return res.status(404).json({ error: 'Relatorio nao encontrado' });
+      return res.status(200).json(relatorio);
     }
 
     if (action === 'deletar-task') {

@@ -86,25 +86,14 @@ async function postClickUpAttachment(
   mimeType: string,
   content: BlobPart
 ): Promise<{ status: number; text: string }> {
-  console.log(`[ATTACH] ${filename} -> ${taskId}`);
+  console.log(`[ATTACH_FORMDATA] ${filename} -> ${taskId}`);
 
   const blob = new Blob([content], { type: mimeType });
   const buffer = Buffer.from(await blob.arrayBuffer());
 
-  const boundary = `----${Date.now().toString(16)}${Math.random().toString(16).slice(2, 10)}`;
-
-  const headers = [
-    `--${boundary}`,
-    `Content-Disposition: form-data; name="attachment"; filename="${filename}"`,
-    `Content-Type: ${mimeType}`,
-    "",
-  ].join("\r\n");
-
-  const footer = `\r\n--${boundary}--`;
-
-  const headerBuf = Buffer.from(headers + "\r\n", "utf-8");
-  const footerBuf = Buffer.from(footer, "utf-8");
-  const body = Buffer.concat([headerBuf, buffer, footerBuf]);
+  // Usar FormData nativa do Node.js 18+
+  const form = new FormData();
+  form.append("attachment", new Blob([buffer], { type: mimeType }), filename);
 
   const response = await fetch(
     `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
@@ -112,10 +101,8 @@ async function postClickUpAttachment(
       method: "POST",
       headers: {
         Authorization: token,
-        "Content-Type": `multipart/form-data; boundary=${boundary}`,
-        "Content-Length": String(body.length),
       },
-      body,
+      body: form,
     }
   );
 

@@ -15,6 +15,7 @@ const Home = lazy(() => import("./pages/Home"));
 const Index = lazy(() => import("./pages/Index"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Analytics = lazy(() => import("./pages/Analytics"));
+const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Compras = lazy(() => import("./pages/Compras"));
 const ConsultaPreco = lazy(() => import("./pages/ConsultaPreco"));
 
@@ -56,6 +57,12 @@ const App = () => (
             <Route path="/compras" element={
               <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
                 <Compras />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/dashboard" element={
+              <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
+                <Dashboard />
               </ProtectedRoute>
             } />
             

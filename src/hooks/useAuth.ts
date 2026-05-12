@@ -32,7 +32,7 @@ const SENHAS_CD: Record<Empresa, string> = {
 // Senhas especiais para perfis avançados (todas NEWSHOP por enquanto)
 const SENHAS_ESPECIAIS: Record<string, { role: UserRole; empresa: Empresa }> = {
   'Compras1148': { role: 'compras', empresa: 'NEWSHOP' },
-  'Diretoria1148': { role: 'admin', empresa: 'NEWSHOP' },
+  'Ad1148': { role: 'admin', empresa: 'NEWSHOP' },
   'Admin1148': { role: 'super', empresa: 'NEWSHOP' },
   // Adicionar mais senhas especiais conforme necessário
 };
