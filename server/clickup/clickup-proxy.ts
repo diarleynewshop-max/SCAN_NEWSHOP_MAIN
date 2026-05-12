@@ -528,32 +528,41 @@ async function salvarRelatorioDashboard(
 
   const reportWithId = { ...report, clickupTaskId: taskId };
 
-  // Converte para Buffer antes de criar o Blob (mesmo padrão do trigger que funciona)
   const jsonString = JSON.stringify(reportWithId);
-  const buffer = Buffer.from(jsonString, 'utf-8');
   const fileName = `relatorio_dashboard_${empresa}_${flag}_${dateKey}.json`;
 
-  const form = new FormData();
-  form.append('attachment', new Blob([buffer], { type: 'application/json; charset=utf-8' }), fileName);
+  // Multipart manual — funciona em qualquer Node.js sem depender de FormData/Blob
+  const boundary = `ClickUpBound${Date.now()}`;
+  const nl = '\r\n';
+  const bodyBuf = Buffer.concat([
+    Buffer.from(`--${boundary}${nl}`),
+    Buffer.from(`Content-Disposition: form-data; name="attachment"; filename="${fileName}"${nl}`),
+    Buffer.from(`Content-Type: application/json${nl}${nl}`),
+    Buffer.from(jsonString, 'utf-8'),
+    Buffer.from(`${nl}--${boundary}--${nl}`),
+  ]);
 
   const attachResponse = await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`, {
     method: 'POST',
-    headers: { Authorization: token },
-    body: form,
+    headers: {
+      Authorization: token,
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    },
+    body: bodyBuf,
   });
 
   if (!attachResponse.ok) {
     const attachError = await attachResponse.text();
     console.error(`[clickup-proxy] Falha ao anexar JSON task=${taskId}: ${attachResponse.status} ${attachError}`);
-    // Limpa a task vazia para não ficar lixo no ClickUp
+    // Apaga a task vazia para não deixar lixo no ClickUp
     await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}`, {
       method: 'DELETE',
       headers: { Authorization: token },
     }).catch(() => {});
-    throw new Error(`ClickUp ${attachResponse.status} ao anexar JSON: ${attachError}`);
+    throw new Error(`ClickUp ${attachResponse.status} ao anexar JSON do relatorio: ${attachError}`);
   }
 
-  console.log(`[clickup-proxy] Relatorio salvo | task=${taskId} | arquivo=${fileName} | bytes=${buffer.length}`);
+  console.log(`[clickup-proxy] Relatorio salvo | task=${taskId} | arquivo=${fileName} | bytes=${bodyBuf.length}`);
   return reportWithId;
 }
 
