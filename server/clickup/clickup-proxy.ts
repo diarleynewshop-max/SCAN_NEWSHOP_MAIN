@@ -492,6 +492,13 @@ async function salvarRelatorioDashboard(
   token: string,
   dateKey: string
 ): Promise<any> {
+  // Se já existe um relatório salvo para essa data, retorna direto sem regerar
+  const existente = await buscarRelatorioSalvo(empresa, flag, token, dateKey);
+  if (existente) {
+    console.log(`[clickup-proxy] Relatorio ja existe para ${dateKey} — reutilizando`);
+    return existente;
+  }
+
   const listId = getListId(empresa, flag);
   const report = await gerarRelatorioDiario(empresa, flag, token, dateKey);
 
