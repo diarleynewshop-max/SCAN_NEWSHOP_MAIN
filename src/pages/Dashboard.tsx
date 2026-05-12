@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Check, ImageOff, BarChart3 } from "lucide-react";
+import { ArrowLeft, RefreshCw, Check, ImageOff, BarChart3, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -152,6 +152,7 @@ const Dashboard = () => {
   const [fotosErp, setFotosErp] = useState<Record<string, string | null>>({});
   const [carregandoFotosErp, setCarregandoFotosErp] = useState(false);
   const [progressoFotos, setProgressoFotos] = useState({ atual: 0, total: 0 });
+  const [itemModalIdx, setItemModalIdx] = useState<number | null>(null);
 
   // ── carrega datas + salvos ──────────────────────────────────────────────────
   const carregarDados = useCallback(async () => {
@@ -378,6 +379,14 @@ const Dashboard = () => {
       next.has(s) ? next.delete(s) : next.add(s);
       return next;
     });
+
+  // ── modal helpers ───────────────────────────────────────────────────────────
+  const itemModal = itemModalIdx !== null ? itensFiltrados[itemModalIdx] ?? null : null;
+  const fotoModal = itemModal ? (itemModal.photo || fotosErp[itemModal.codigo] || null) : null;
+
+  const irPara = (idx: number) => {
+    if (idx >= 0 && idx < itensFiltrados.length) setItemModalIdx(idx);
+  };
 
   // ── render ──────────────────────────────────────────────────────────────────
   const salvosKeys = new Set(relatoriosSalvos.map((r) => r.data));
@@ -768,7 +777,9 @@ const Dashboard = () => {
                       {itensFiltrados.map((item, i) => {
                         const foto = item.photo || fotosErp[item.codigo] || null;
                         return (
-                          <div key={i} className="flex items-start gap-3 px-4 py-3">
+                          <div key={i}
+                            className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors"
+                            onClick={() => setItemModalIdx(i)}>
                             {/* Foto */}
                             {foto ? (
                               <img src={foto} alt={item.codigo}
@@ -827,6 +838,119 @@ const Dashboard = () => {
           </div>
         </div>
       </div>
+
+      {/* ── MODAL DE ITEM ── */}
+      {itemModal && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setItemModalIdx(null)}
+        >
+          <div
+            className="bg-background rounded-xl shadow-2xl w-full max-w-sm overflow-hidden"
+            onClick={(e) => e.stopPropagation()}
+          >
+            {/* Foto */}
+            <div className="relative bg-muted w-full aspect-square">
+              {fotoModal ? (
+                <img src={fotoModal} alt={itemModal.codigo} className="w-full h-full object-contain" />
+              ) : (
+                <div className="w-full h-full flex items-center justify-center text-muted-foreground text-sm">
+                  sem foto
+                </div>
+              )}
+              {/* Fechar */}
+              <button
+                className="absolute top-2 right-2 bg-background/80 rounded-full p-1 hover:bg-background"
+                onClick={() => setItemModalIdx(null)}
+              >
+                <X className="h-4 w-4" />
+              </button>
+              {/* Contador */}
+              <span className="absolute bottom-2 right-2 bg-background/80 text-xs px-2 py-0.5 rounded-full">
+                {(itemModalIdx ?? 0) + 1} / {itensFiltrados.length}
+              </span>
+            </div>
+
+            {/* Conteúdo */}
+            <div className="p-4 space-y-3">
+              {/* Codigo + status */}
+              <div className="flex items-start justify-between gap-2">
+                <p className="font-mono font-bold text-lg leading-tight break-all">{itemModal.codigo}</p>
+                <Badge
+                  variant={itemModal.statusDominante === "nao_tem" ? "destructive" : itemModal.statusDominante === "separado" ? "secondary" : "outline"}
+                  className="shrink-0 text-xs mt-0.5"
+                >
+                  {statusLabel(itemModal.statusDominante)}
+                </Badge>
+              </div>
+
+              {itemModal.sku && (
+                <p className="text-sm text-muted-foreground">SKU: {itemModal.sku}</p>
+              )}
+              {itemModal.secao && (
+                <p className="text-sm text-indigo-500 font-medium">{itemModal.secao}</p>
+              )}
+
+              {/* Quantidades */}
+              <div className="grid grid-cols-3 gap-2 pt-1">
+                <div className="bg-blue-50 dark:bg-blue-950 rounded-lg p-2 text-center">
+                  <p className="text-xl font-bold text-blue-600">{itemModal.totalPedido}</p>
+                  <p className="text-xs text-muted-foreground">Pedido</p>
+                </div>
+                <div className="bg-green-50 dark:bg-green-950 rounded-lg p-2 text-center">
+                  <p className="text-xl font-bold text-green-600">{itemModal.totalReal}</p>
+                  <p className="text-xs text-muted-foreground">Real</p>
+                </div>
+                <div className="bg-muted rounded-lg p-2 text-center">
+                  <p className="text-xl font-bold">
+                    {itemModal.totalPedido > 0
+                      ? `${(((itemModal.totalPedido - itemModal.totalReal) / itemModal.totalPedido) * 100).toFixed(0)}%`
+                      : "—"}
+                  </p>
+                  <p className="text-xs text-muted-foreground">Dif.</p>
+                </div>
+              </div>
+
+              {/* Ocorrências por dia */}
+              {itemModal.ocorrencias.length > 0 && (
+                <div>
+                  <p className="text-xs text-muted-foreground mb-1 font-medium uppercase tracking-wide">
+                    {itemModal.vezes > 1 ? `${itemModal.vezes}x no período` : "Ocorrência"}
+                  </p>
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {itemModal.ocorrencias.map((oc, j) => (
+                      <div key={j} className="flex items-center justify-between text-xs bg-muted/50 rounded px-2 py-1">
+                        <span className="text-muted-foreground">{dateKeyToPtBr(oc.data)}</span>
+                        <span className="font-medium">{statusLabel(oc.status)}</span>
+                        <span>Ped: {oc.pedido} | Real: {oc.real ?? "—"}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Navegação */}
+            <div className="flex border-t">
+              <button
+                className="flex-1 flex items-center justify-center gap-1 py-3 text-sm font-medium hover:bg-muted/50 transition-colors disabled:opacity-30"
+                disabled={itemModalIdx === 0}
+                onClick={() => irPara((itemModalIdx ?? 0) - 1)}
+              >
+                <ChevronLeft className="h-4 w-4" /> Anterior
+              </button>
+              <div className="w-px bg-border" />
+              <button
+                className="flex-1 flex items-center justify-center gap-1 py-3 text-sm font-medium hover:bg-muted/50 transition-colors disabled:opacity-30"
+                disabled={itemModalIdx === itensFiltrados.length - 1}
+                onClick={() => irPara((itemModalIdx ?? 0) + 1)}
+              >
+                Próximo <ChevronRight className="h-4 w-4" />
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };
