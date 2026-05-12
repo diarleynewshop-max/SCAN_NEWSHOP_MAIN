@@ -86,17 +86,42 @@ interface ItemFrequencia {
 
 // ── componente ─────────────────────────────────────────────────────────────────
 
-const EMPRESAS: EmpresaKey[] = ["NEWSHOP", "SOYE", "FACIL"];
-
 const Dashboard = () => {
   const navigate = useNavigate();
   const { loginSalvo } = useAuth();
   const { toast } = useToast();
 
+  // ── permissões por login ────────────────────────────────────────────────────
+  const empresasPermitidas = useMemo<EmpresaKey[]>(() => {
+    const role = loginSalvo?.role;
+    const userEmpresa = loginSalvo?.empresa as EmpresaKey | undefined;
+    if (role === "admin" || role === "super") return ["NEWSHOP", "SOYE", "FACIL"];
+    // SF = SOYE ou FACIL → vê as duas
+    if (userEmpresa === "SOYE" || userEmpresa === "FACIL") return ["SOYE", "FACIL"];
+    return [userEmpresa ?? "NEWSHOP"];
+  }, [loginSalvo]);
+
+  const flagsPermitidas = useMemo<FlagKey[]>(() => {
+    const role = loginSalvo?.role;
+    if (role === "admin" || role === "super") return ["loja", "cd"];
+    return [(loginSalvo?.flag as FlagKey) ?? "loja"];
+  }, [loginSalvo]);
+
   const [empresa, setEmpresa] = useState<EmpresaKey>(
     () => (loginSalvo?.empresa as EmpresaKey) ?? "NEWSHOP"
   );
-  const [flag, setFlag] = useState<FlagKey>("loja");
+  const [flag, setFlag] = useState<FlagKey>(
+    () => (loginSalvo?.flag as FlagKey) ?? "loja"
+  );
+
+  // Corrige empresa/flag se não estiverem na lista permitida
+  useEffect(() => {
+    if (!empresasPermitidas.includes(empresa)) setEmpresa(empresasPermitidas[0]);
+  }, [empresasPermitidas]);
+
+  useEffect(() => {
+    if (!flagsPermitidas.includes(flag)) setFlag(flagsPermitidas[0]);
+  }, [flagsPermitidas]);
 
   // datas disponíveis e relatórios salvos
   const [datasDisponiveis, setDatasDisponiveis] = useState<RelatorioDataOption[]>([]);
@@ -360,13 +385,13 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* Empresa / flag */}
+        {/* Empresa / flag — filtrados por permissão */}
         <div className="flex gap-2 mb-5 flex-wrap items-center">
-          {EMPRESAS.map((e) => (
+          {empresasPermitidas.map((e) => (
             <Button key={e} size="sm" variant={empresa === e ? "default" : "outline"} onClick={() => setEmpresa(e)}>{e}</Button>
           ))}
-          <div className="w-px h-6 bg-border mx-1" />
-          {(["loja", "cd"] as FlagKey[]).map((f) => (
+          {flagsPermitidas.length > 1 && <div className="w-px h-6 bg-border mx-1" />}
+          {flagsPermitidas.map((f) => (
             <Button key={f} size="sm" variant={flag === f ? "default" : "outline"} onClick={() => setFlag(f)}>{f.toUpperCase()}</Button>
           ))}
           <Button variant="outline" size="sm" onClick={carregarDados} disabled={carregandoDatas} className="ml-auto">

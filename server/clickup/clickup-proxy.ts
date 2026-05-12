@@ -528,23 +528,32 @@ async function salvarRelatorioDashboard(
 
   const reportWithId = { ...report, clickupTaskId: taskId };
 
-  const formData = new FormData();
-  formData.append(
-    'attachment',
-    new Blob([JSON.stringify(reportWithId)], { type: 'application/json' }),
-    `relatorio_dashboard_${empresa}_${flag}_${dateKey}.json`
-  );
+  // Converte para Buffer antes de criar o Blob (mesmo padrão do trigger que funciona)
+  const jsonString = JSON.stringify(reportWithId);
+  const buffer = Buffer.from(jsonString, 'utf-8');
+  const fileName = `relatorio_dashboard_${empresa}_${flag}_${dateKey}.json`;
 
-  const attachResponse = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, {
+  const form = new FormData();
+  form.append('attachment', new Blob([buffer], { type: 'application/json; charset=utf-8' }), fileName);
+
+  const attachResponse = await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`, {
     method: 'POST',
     headers: { Authorization: token },
-    body: formData,
+    body: form,
   });
 
   if (!attachResponse.ok) {
-    console.warn(`[clickup-proxy] Aviso: erro ao anexar JSON relatorio task=${taskId}: ${attachResponse.status}`);
+    const attachError = await attachResponse.text();
+    console.error(`[clickup-proxy] Falha ao anexar JSON task=${taskId}: ${attachResponse.status} ${attachError}`);
+    // Limpa a task vazia para não ficar lixo no ClickUp
+    await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}`, {
+      method: 'DELETE',
+      headers: { Authorization: token },
+    }).catch(() => {});
+    throw new Error(`ClickUp ${attachResponse.status} ao anexar JSON: ${attachError}`);
   }
 
+  console.log(`[clickup-proxy] Relatorio salvo | task=${taskId} | arquivo=${fileName} | bytes=${buffer.length}`);
   return reportWithId;
 }
 

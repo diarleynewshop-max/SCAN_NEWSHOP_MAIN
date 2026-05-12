@@ -29,12 +29,13 @@ const SENHAS_CD: Record<Empresa, string> = {
   "FACIL": "f91"
 };
 
-// Senhas especiais para perfis avançados (todas NEWSHOP por enquanto)
-const SENHAS_ESPECIAIS: Record<string, { role: UserRole; empresa: Empresa }> = {
-  'Compras1148': { role: 'compras', empresa: 'NEWSHOP' },
-  'Ad1148': { role: 'admin', empresa: 'NEWSHOP' },
-  'Admin1148': { role: 'super', empresa: 'NEWSHOP' },
-  // Adicionar mais senhas especiais conforme necessário
+// Senhas especiais para perfis avançados
+// isSF=true → senha válida para SOYE ou FACIL (grupo SF)
+const SENHAS_ESPECIAIS: Record<string, { role: UserRole; empresa: Empresa; isSF?: boolean }> = {
+  'Compras1148':  { role: 'compras', empresa: 'NEWSHOP' },
+  'ComprasSF1090':{ role: 'compras', empresa: 'SOYE', isSF: true }, // válida p/ SOYE ou FACIL
+  'Ad1148':       { role: 'admin',   empresa: 'NEWSHOP' },
+  'Admin1148':    { role: 'super',   empresa: 'NEWSHOP' },
 };
 
 // Validação de senha e detecção de role
@@ -42,11 +43,10 @@ export function validarSenha(empresa: Empresa, senhaDigitada: string, flag: Logi
   // Primeiro verifica se é senha especial
   const senhaEspecial = SENHAS_ESPECIAIS[senhaDigitada];
   if (senhaEspecial) {
-    // Verifica se a empresa selecionada corresponde à empresa da senha especial
-    if (senhaEspecial.empresa === empresa) {
-      return { valido: true, role: senhaEspecial.role };
-    }
-    return { valido: false, role: 'operador' };
+    const match = senhaEspecial.isSF
+      ? (empresa === 'SOYE' || empresa === 'FACIL')
+      : senhaEspecial.empresa === empresa;
+    return match ? { valido: true, role: senhaEspecial.role } : { valido: false, role: 'operador' };
   }
   
   // Depois verifica se é senha de operador normal
