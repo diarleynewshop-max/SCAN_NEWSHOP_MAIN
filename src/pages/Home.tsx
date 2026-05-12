@@ -411,10 +411,19 @@ const Home = () => {
           flexWrap: modoDesktop ? "wrap" : "nowrap",
           gap: modoDesktop ? 20 : 12 
         }}>
-          {/* Cards base (sempre visíveis) */}
-          {baseMenuItems.map(({ Icon, label, description, path, accent }) => (
+          {/* Cards base — filtrados por flag para operadores */}
+          {baseMenuItems
+            .filter(({ label }) => {
+              const isPrivileged = loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']);
+              if (isPrivileged) return true;
+              const userFlag = loginSalvo?.flag ?? 'loja';
+              if (label === 'Escanear' || label === 'Lista') return userFlag === 'loja';
+              if (label === 'Conferência') return userFlag === 'cd';
+              return true; // Consulta Preço, Perfil, Configuração sempre visíveis
+            })
+            .map(({ Icon, label, description, path, accent }) => (
             <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
-              <MenuCard 
+              <MenuCard
                 Icon={Icon}
                 label={label}
                 description={description}
