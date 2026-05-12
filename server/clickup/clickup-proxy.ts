@@ -492,46 +492,69 @@ async function salvarRelatorioDashboard(
   token: string,
   dateKey: string
 ): Promise<any> {
-  // Se já existe um relatório salvo para essa data, retorna direto sem regerar
-  const existente = await buscarRelatorioSalvo(empresa, flag, token, dateKey);
+  const t0 = Date.now();
+  console.log(`[DASH][1] INICIO | empresa=${empresa} flag=${flag} data=${dateKey}`);
+
+  // PASSO 1 — verifica se já existe
+  let existente: any = null;
+  try {
+    existente = await buscarRelatorioSalvo(empresa, flag, token, dateKey);
+  } catch (err: any) {
+    console.warn(`[DASH][1] buscarRelatorioSalvo falhou (ignorando): ${err.message}`);
+  }
   if (existente) {
-    console.log(`[clickup-proxy] Relatorio ja existe para ${dateKey} — reutilizando`);
+    console.log(`[DASH][1] Relatorio existente encontrado (+${Date.now() - t0}ms) — retornando`);
     return existente;
   }
+  console.log(`[DASH][1] Nenhum relatorio existente (+${Date.now() - t0}ms)`);
 
+  // PASSO 2 — gera relatório do zero
+  console.log(`[DASH][2] gerarRelatorioDiario...`);
+  let report: any;
+  try {
+    report = await gerarRelatorioDiario(empresa, flag, token, dateKey);
+    console.log(`[DASH][2] OK (+${Date.now() - t0}ms) | conferencias=${report.totalConferencias} | itens=${report.resumo?.totalItens} | ignoradas=${report.ignoradas?.length ?? 0}`);
+  } catch (err: any) {
+    console.error(`[DASH][2] ERRO gerarRelatorioDiario: ${err.message}`);
+    throw new Error(`Falha ao gerar relatorio: ${err.message}`);
+  }
+
+  // PASSO 3 — cria task no ClickUp
   const listId = getListId(empresa, flag);
-  const report = await gerarRelatorioDiario(empresa, flag, token, dateKey);
-
   const dataPtBr = formatDatePtBr(dateKey);
   const nome = `Relatorio - ${dataPtBr} - ${empresa} ${flag.toUpperCase()}`;
   const descricao = buildRelatorioDescription(report, dataPtBr, empresa, flag).slice(0, 12000);
+  console.log(`[DASH][3] Criando task | lista=${listId} | nome="${nome}" | desc_chars=${descricao.length}`);
 
   let taskId: string | null = null;
   let lastError = '';
-
   for (const status of RELATORIO_DASHBOARD_STATUS_CANDIDATES) {
-    const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
+    const r = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
       method: 'POST',
       headers: { Authorization: token, 'Content-Type': 'application/json' },
       body: JSON.stringify({ name: nome, description: descricao, status }),
     });
-    if (response.ok) {
-      taskId = (await response.json()).id as string;
+    if (r.ok) {
+      taskId = (await r.json()).id as string;
+      console.log(`[DASH][3] OK (+${Date.now() - t0}ms) | task=${taskId} | status="${status}"`);
       break;
     }
-    lastError = await response.text();
+    lastError = await r.text();
+    console.warn(`[DASH][3] status="${status}" recusado: ${lastError.slice(0, 120)}`);
   }
 
   if (!taskId) {
-    throw new Error(`ClickUp nao aceitou status Relatorio na lista ${listId}. Crie o status "Relatorio" na lista. Ultimo erro: ${lastError}`);
+    const msg = `Status "Relatorio" nao existe na lista ${listId}. Crie o status no ClickUp. Ultimo erro: ${lastError}`;
+    console.error(`[DASH][3] ERRO: ${msg}`);
+    throw new Error(msg);
   }
 
+  // PASSO 4 — anexa JSON
   const reportWithId = { ...report, clickupTaskId: taskId };
-
   const jsonString = JSON.stringify(reportWithId);
   const fileName = `relatorio_dashboard_${empresa}_${flag}_${dateKey}.json`;
+  console.log(`[DASH][4] Anexando JSON | task=${taskId} | arquivo=${fileName} | bytes=${Buffer.byteLength(jsonString)}`);
 
-  // Multipart manual — funciona em qualquer Node.js sem depender de FormData/Blob
   const boundary = `ClickUpBound${Date.now()}`;
   const nl = '\r\n';
   const bodyBuf = Buffer.concat([
@@ -542,27 +565,35 @@ async function salvarRelatorioDashboard(
     Buffer.from(`${nl}--${boundary}--${nl}`),
   ]);
 
-  const attachResponse = await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`, {
-    method: 'POST',
-    headers: {
-      Authorization: token,
-      'Content-Type': `multipart/form-data; boundary=${boundary}`,
-    },
-    body: bodyBuf,
-  });
+  let attachResponse: Response;
+  try {
+    attachResponse = await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`, {
+      method: 'POST',
+      headers: {
+        Authorization: token,
+        'Content-Type': `multipart/form-data; boundary=${boundary}`,
+      },
+      body: bodyBuf,
+    });
+  } catch (err: any) {
+    console.error(`[DASH][4] ERRO fetch attachment: ${err.message}`);
+    await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}`, {
+      method: 'DELETE', headers: { Authorization: token },
+    }).catch(() => {});
+    throw new Error(`Erro de rede ao anexar JSON: ${err.message}`);
+  }
 
   if (!attachResponse.ok) {
     const attachError = await attachResponse.text();
-    console.error(`[clickup-proxy] Falha ao anexar JSON task=${taskId}: ${attachResponse.status} ${attachError}`);
-    // Apaga a task vazia para não deixar lixo no ClickUp
+    console.error(`[DASH][4] ERRO HTTP ${attachResponse.status}: ${attachError}`);
     await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}`, {
-      method: 'DELETE',
-      headers: { Authorization: token },
+      method: 'DELETE', headers: { Authorization: token },
     }).catch(() => {});
-    throw new Error(`ClickUp ${attachResponse.status} ao anexar JSON do relatorio: ${attachError}`);
+    throw new Error(`ClickUp ${attachResponse.status} ao anexar JSON: ${attachError}`);
   }
 
-  console.log(`[clickup-proxy] Relatorio salvo | task=${taskId} | arquivo=${fileName} | bytes=${bodyBuf.length}`);
+  console.log(`[DASH][4] OK (+${Date.now() - t0}ms) | JSON anexado`);
+  console.log(`[DASH][FIM] Relatorio salvo com sucesso | task=${taskId} | total=${Date.now() - t0}ms`);
   return reportWithId;
 }
 

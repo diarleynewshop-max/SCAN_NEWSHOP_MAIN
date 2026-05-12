@@ -1,5 +1,11 @@
 {
   "rewrites": [
     { "source": "/((?!api/).*)", "destination": "/index.html" }
-  ]
+  ],
+  "functions": {
+    "api/clickup-proxy.ts": { "maxDuration": 60 },
+    "api/clickup-compras-proxy.ts": { "maxDuration": 30 },
+    "api/erp-proxy.ts": { "maxDuration": 30 },
+    "api/erp-image-proxy.ts": { "maxDuration": 30 }
+  }
 }
