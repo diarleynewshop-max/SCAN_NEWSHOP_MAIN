@@ -420,10 +420,35 @@ function parseConferenceItems(description: string, conferente: string, taskId: s
   return items;
 }
 
-function getDashboardListId(empresa: EmpresaKey): string | null {
-  return (
-    getEnv(`CLICKUP_DASHBOARD_LIST_ID_${empresa}`, 'CLICKUP_DASHBOARD_LIST_ID') ?? null
-  );
+const RELATORIO_DASHBOARD_STATUS_CANDIDATES = ['Relatorio', 'RELATORIO', 'Relatório', 'RELATÓRIO'];
+
+function buildRelatorioDescription(report: any, dataPtBr: string, empresa: EmpresaKey, flag: FlagKey): string {
+  const lines: string[] = [
+    `Relatorio de Conferencia`,
+    `Data: ${dataPtBr}`,
+    `Empresa: ${empresa}`,
+    `Flag: ${flag.toUpperCase()}`,
+    `Total Conferencias: ${report.totalConferencias}`,
+    `Total Itens: ${report.resumo.totalItens}`,
+    `Separado: ${report.resumo.separado}`,
+    `Nao Tem: ${report.resumo.naoTem}`,
+    `Parcial: ${report.resumo.parcial}`,
+    `Pendente: ${report.resumo.pendente}`,
+    `Gerado Em: ${report.geradoEm}`,
+    ``,
+  ];
+
+  for (const conf of Array.isArray(report.conferencias) ? report.conferencias : []) {
+    lines.push(`--- ${conf.conferente ?? 'Sem conferente'} ---`);
+    lines.push(`Task: ${conf.taskId}`);
+    lines.push(`Total: ${conf.totalItens}`);
+    if (conf.resumo) {
+      lines.push(`Separado: ${conf.resumo.separado} | Nao Tem: ${conf.resumo.naoTem} | Parcial: ${conf.resumo.parcial} | Pendente: ${conf.resumo.pendente}`);
+    }
+    lines.push(``);
+  }
+
+  return lines.join('\n');
 }
 
 async function salvarRelatorioDashboard(
@@ -432,42 +457,40 @@ async function salvarRelatorioDashboard(
   token: string,
   dateKey: string
 ): Promise<any> {
-  const dashboardListId = getDashboardListId(empresa);
-  if (!dashboardListId) throw new Error(`CLICKUP_DASHBOARD_LIST_ID_${empresa} nao configurado`);
-
+  const listId = getListId(empresa, flag);
   const report = await gerarRelatorioDiario(empresa, flag, token, dateKey);
 
-  const nome = `DASHBOARD - ${empresa} ${flag.toUpperCase()} - ${dateKey}`;
-  const descricao = `Empresa: ${empresa}
-Flag: ${flag.toUpperCase()}
-Data: ${dateKey}
-Total Conferencias: ${report.totalConferencias}
-Total Itens: ${report.resumo.totalItens}
-Separado: ${report.resumo.separado}
-Nao Tem: ${report.resumo.naoTem}
-Parcial: ${report.resumo.parcial}
-Pendente: ${report.resumo.pendente}
-Gerado Em: ${report.geradoEm}`;
+  const dataPtBr = formatDatePtBr(dateKey);
+  const nome = `Relatorio - ${dataPtBr} - ${empresa} ${flag.toUpperCase()}`;
+  const descricao = buildRelatorioDescription(report, dataPtBr, empresa, flag).slice(0, 12000);
 
-  const taskResponse = await fetch(`https://api.clickup.com/api/v2/list/${dashboardListId}/task`, {
-    method: 'POST',
-    headers: { Authorization: token, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ name: nome, description: descricao }),
-  });
+  let taskId: string | null = null;
+  let lastError = '';
 
-  if (!taskResponse.ok) {
-    throw new Error(`ClickUp ${taskResponse.status} ao criar task dashboard: ${await taskResponse.text()}`);
+  for (const status of RELATORIO_DASHBOARD_STATUS_CANDIDATES) {
+    const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
+      method: 'POST',
+      headers: { Authorization: token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: nome, description: descricao, status }),
+    });
+    if (response.ok) {
+      taskId = (await response.json()).id as string;
+      break;
+    }
+    lastError = await response.text();
   }
 
-  const taskData = await taskResponse.json();
-  const taskId = taskData.id as string;
+  if (!taskId) {
+    throw new Error(`ClickUp nao aceitou status Relatorio na lista ${listId}. Crie o status "Relatorio" na lista. Ultimo erro: ${lastError}`);
+  }
+
   const reportWithId = { ...report, clickupTaskId: taskId };
 
   const formData = new FormData();
   formData.append(
     'attachment',
     new Blob([JSON.stringify(reportWithId)], { type: 'application/json' }),
-    `dashboard_${empresa}_${flag}_${dateKey}.json`
+    `relatorio_dashboard_${empresa}_${flag}_${dateKey}.json`
   );
 
   const attachResponse = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/attachment`, {
@@ -477,7 +500,7 @@ Gerado Em: ${report.geradoEm}`;
   });
 
   if (!attachResponse.ok) {
-    console.warn(`[clickup-proxy] Aviso: erro ao anexar JSON dashboard task=${taskId}: ${attachResponse.status}`);
+    console.warn(`[clickup-proxy] Aviso: erro ao anexar JSON relatorio task=${taskId}: ${attachResponse.status}`);
   }
 
   return reportWithId;
@@ -488,21 +511,32 @@ async function listarRelatoriosSalvos(
   flag: FlagKey,
   token: string
 ): Promise<any[]> {
-  const dashboardListId = getDashboardListId(empresa);
-  if (!dashboardListId) return [];
-
-  const prefix = `DASHBOARD - ${empresa} ${flag.toUpperCase()} - `;
-  const rawTasks = await fetchTasksFromList(dashboardListId, token, true);
+  const listId = getListId(empresa, flag);
+  const rawTasks = await fetchTasksFromList(listId, token, true);
+  const empresaFlag = `${empresa} ${flag.toUpperCase()}`;
 
   return rawTasks
-    .filter((task) => String(task.name ?? '').startsWith(prefix))
+    .filter((task) => {
+      const statusNorm = normalizeStatus(task.status?.status);
+      const name = String(task.name ?? '');
+      return (
+        (statusNorm.includes('relatorio') || statusNorm.includes('relatório')) &&
+        name.startsWith('Relatorio - ') &&
+        name.includes(empresaFlag)
+      );
+    })
     .map((task) => {
-      const dateKey = String(task.name).replace(prefix, '').trim();
+      const name = String(task.name ?? '');
+      const matchDate = name.match(/Relatorio - (\d{2}\/\d{2}\/\d{4})/);
+      const dataPtBr = matchDate?.[1] ?? '';
+      const dateKey = dataPtBr
+        ? `${dataPtBr.slice(6)}-${dataPtBr.slice(3, 5)}-${dataPtBr.slice(0, 2)}`
+        : '';
       const desc = String(task.description ?? task.text_content ?? '');
       return {
         taskId: task.id,
         data: dateKey,
-        label: formatDatePtBr(dateKey),
+        label: dataPtBr,
         totalConferencias: Number(desc.match(/^Total Conferencias:\s*(\d+)/im)?.[1] ?? 0),
         resumo: {
           totalItens: Number(desc.match(/^Total Itens:\s*(\d+)/im)?.[1] ?? 0),
@@ -514,6 +548,7 @@ async function listarRelatoriosSalvos(
         geradoEm: desc.match(/^Gerado Em:\s*(.+)$/im)?.[1]?.trim() ?? null,
       };
     })
+    .filter((r) => r.data)
     .sort((a, b) => b.data.localeCompare(a.data));
 }
 
@@ -523,12 +558,12 @@ async function buscarRelatorioSalvo(
   token: string,
   dateKey: string
 ): Promise<any | null> {
-  const dashboardListId = getDashboardListId(empresa);
-  if (!dashboardListId) return null;
+  const listId = getListId(empresa, flag);
+  const dataPtBr = formatDatePtBr(dateKey);
+  const nomeBuscado = `Relatorio - ${dataPtBr} - ${empresa} ${flag.toUpperCase()}`;
 
-  const nome = `DASHBOARD - ${empresa} ${flag.toUpperCase()} - ${dateKey}`;
-  const rawTasks = await fetchTasksFromList(dashboardListId, token, true);
-  const task = rawTasks.find((t) => String(t.name ?? '') === nome);
+  const rawTasks = await fetchTasksFromList(listId, token, true);
+  const task = rawTasks.find((t) => String(t.name ?? '') === nomeBuscado);
   if (!task) return null;
 
   return await baixarJsonDaTask(task.id, token).catch(() => null);
