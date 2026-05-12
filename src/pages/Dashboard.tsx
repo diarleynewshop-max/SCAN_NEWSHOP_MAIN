@@ -1,15 +1,15 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  ArrowLeft, BarChart3, RefreshCw, Check, AlertTriangle, ImageOff,
-} from "lucide-react";
+import { ArrowLeft, RefreshCw, Check, ImageOff, BarChart3 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
 import {
   BarChart, Bar, PieChart, Pie, Cell,
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
+  LineChart, Line, ComposedChart,
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend,
+  ResponsiveContainer, LabelList,
 } from "recharts";
 import {
   type EmpresaKey, type FlagKey, type RelatorioDiario,
@@ -21,32 +21,72 @@ import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { useAuth } from "@/hooks/useAuth";
 
+// ── helpers ────────────────────────────────────────────────────────────────────
+
 async function fetchErpImageDataUrl(src: string): Promise<string | null> {
   if (!src) return null;
   if (isDataPhotoUrl(src)) return src;
   try {
-    const response = await fetch(src);
-    if (!response.ok) return null;
-    const contentType = response.headers.get("content-type") || "";
-    if (contentType.includes("application/json")) {
-      const data = await response.json();
-      return typeof data?.dataUrl === "string" ? data.dataUrl : null;
+    const res = await fetch(src);
+    if (!res.ok) return null;
+    const ct = res.headers.get("content-type") || "";
+    if (ct.includes("application/json")) {
+      const d = await res.json();
+      return typeof d?.dataUrl === "string" ? d.dataUrl : null;
     }
-    if (!contentType.startsWith("image/")) return null;
-    return await blobToDataUrl(await response.blob());
+    if (!ct.startsWith("image/")) return null;
+    return await blobToDataUrl(await res.blob());
   } catch {
     return null;
   }
 }
 
-const EMPRESAS: EmpresaKey[] = ["NEWSHOP", "SOYE", "FACIL"];
+function ptBrToDateKey(label: string): string {
+  const [d, m, y] = label.split("/");
+  return `${y}-${m}-${d}`;
+}
 
-const STATUS_COLORS = {
+function dateKeyToPtBr(key: string): string {
+  const [y, m, d] = key.split("-");
+  return `${d}/${m}/${y}`;
+}
+
+function labelDia(key: string): string {
+  return key.slice(5).replace("-", "/");
+}
+
+const STATUS_PRIORITY: Record<string, number> = { nao_tem: 4, parcial: 3, pendente: 2, separado: 1 };
+
+function statusLabel(s: string) {
+  return s === "nao_tem" ? "Não tem" : s === "parcial" ? "Parcial" : s === "pendente" ? "Pendente" : "Separado";
+}
+
+const COR = {
   separado: "#22c55e",
   naoTem: "#ef4444",
   parcial: "#eab308",
   pendente: "#9ca3af",
 };
+
+type TipoGrafico = "rosca" | "barra" | "barra100" | "pareto" | "linha";
+type ModoSeletor = "dia" | "periodo" | "mes";
+
+interface ItemFrequencia {
+  codigo: string;
+  sku: string;
+  secao: string;
+  photo?: string | null;
+  vezes: number;
+  diasOcorrencia: string[];
+  totalPedido: number;
+  totalReal: number;
+  statusDominante: string;
+  ocorrencias: Array<{ data: string; status: string; pedido: number; real: number | null }>;
+}
+
+// ── componente ─────────────────────────────────────────────────────────────────
+
+const EMPRESAS: EmpresaKey[] = ["NEWSHOP", "SOYE", "FACIL"];
 
 const Dashboard = () => {
   const navigate = useNavigate();
@@ -58,23 +98,41 @@ const Dashboard = () => {
   );
   const [flag, setFlag] = useState<FlagKey>("loja");
 
+  // datas disponíveis e relatórios salvos
   const [datasDisponiveis, setDatasDisponiveis] = useState<RelatorioDataOption[]>([]);
   const [relatoriosSalvos, setRelatoriosSalvos] = useState<RelatorioSalvo[]>([]);
-  const [relatorioAtivo, setRelatorioAtivo] = useState<RelatorioDiario | null>(null);
-  const [dataAtiva, setDataAtiva] = useState<string | null>(null);
-
   const [carregandoDatas, setCarregandoDatas] = useState(false);
-  const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
   const [gerando, setGerando] = useState<string | null>(null);
+
+  // seletor de período
+  const [modoSeletor, setModoSeletor] = useState<ModoSeletor>("dia");
+  const [diaUnico, setDiaUnico] = useState<string | null>(null);
+  const [periodoInicio, setPeriodoInicio] = useState<string | null>(null);
+  const [periodoFim, setPeriodoFim] = useState<string | null>(null);
+  const [mesSelecionado, setMesSelecionado] = useState(() => new Date().toISOString().slice(0, 7));
+
+  // relatórios carregados para o período
+  const [relatoriosPeriodo, setRelatoriosPeriodo] = useState<RelatorioDiario[]>([]);
+  const [carregandoPeriodo, setCarregandoPeriodo] = useState(false);
+  const [progressoPeriodo, setProgressoPeriodo] = useState({ atual: 0, total: 0 });
+
+  // charts e filtros
+  const [tipoGrafico, setTipoGrafico] = useState<TipoGrafico>("rosca");
+  const [filtroStatus, setFiltroStatus] = useState<Set<string>>(
+    () => new Set(["nao_tem", "parcial", "pendente", "separado"])
+  );
   const [filtroItens, setFiltroItens] = useState<"criticos" | "todos">("criticos");
+
+  // fotos ERP
   const [fotosErp, setFotosErp] = useState<Record<string, string | null>>({});
   const [carregandoFotosErp, setCarregandoFotosErp] = useState(false);
   const [progressoFotos, setProgressoFotos] = useState({ atual: 0, total: 0 });
 
+  // ── carrega datas + salvos ──────────────────────────────────────────────────
   const carregarDados = useCallback(async () => {
     setCarregandoDatas(true);
-    setRelatorioAtivo(null);
-    setDataAtiva(null);
+    setRelatoriosPeriodo([]);
+    setFotosErp({});
     try {
       const [datas, salvos] = await Promise.all([
         listarDatasRelatorio(empresa, flag),
@@ -93,185 +151,335 @@ const Dashboard = () => {
 
   const getSalvo = (dateKey: string) => relatoriosSalvos.find((r) => r.data === dateKey);
 
+  // ── gerar + salvar ──────────────────────────────────────────────────────────
   const handleGerarSalvar = async (dateKey: string) => {
     setGerando(dateKey);
-    setFiltroItens("criticos");
-    setFotosErp({});
     try {
       const report = await salvarRelatorioDashboard(empresa, flag, dateKey);
-      setRelatorioAtivo(report);
-      setDataAtiva(dateKey);
+      setRelatoriosPeriodo([report]);
+      setDiaUnico(dateKey);
+      setFotosErp({});
       const salvos = await listarRelatoriosSalvos(empresa, flag);
       setRelatoriosSalvos(salvos);
       toast({ title: "Relatório gerado", description: `${dateKey} salvo no ClickUp` });
     } catch (err: any) {
-      toast({ title: "Erro ao gerar relatório", description: err.message, variant: "destructive" });
+      toast({ title: "Erro ao gerar", description: err.message, variant: "destructive" });
     } finally {
       setGerando(null);
     }
   };
 
-  const handleAbrirSalvo = async (dateKey: string) => {
-    if (dataAtiva === dateKey) return;
-    setCarregandoRelatorio(true);
-    setDataAtiva(dateKey);
-    setRelatorioAtivo(null);
-    setFiltroItens("criticos");
-    setFotosErp({});
-    try {
-      const report = await buscarRelatorioSalvo(empresa, flag, dateKey);
-      if (!report) throw new Error("Relatório não encontrado no ClickUp");
-      setRelatorioAtivo(report);
-    } catch (err: any) {
-      toast({ title: "Erro ao abrir relatório", description: err.message, variant: "destructive" });
-      setDataAtiva(null);
-    } finally {
-      setCarregandoRelatorio(false);
+  // ── datas do período a carregar ─────────────────────────────────────────────
+  const datesDoPeriodo = useMemo<string[]>(() => {
+    if (modoSeletor === "dia") return diaUnico ? [diaUnico] : [];
+    if (modoSeletor === "periodo") {
+      if (!periodoInicio || !periodoFim) return [];
+      const ini = periodoInicio <= periodoFim ? periodoInicio : periodoFim;
+      const fim = periodoInicio <= periodoFim ? periodoFim : periodoInicio;
+      return relatoriosSalvos.filter((r) => r.data >= ini && r.data <= fim).map((r) => r.data);
     }
-  };
+    // mes
+    return relatoriosSalvos.filter((r) => r.data.startsWith(mesSelecionado)).map((r) => r.data);
+  }, [modoSeletor, diaUnico, periodoInicio, periodoFim, mesSelecionado, relatoriosSalvos]);
 
-  const carregarFotosErp = useCallback(async (report: RelatorioDiario) => {
-    if (carregandoFotosErp) return;
+  // ── carregar período ────────────────────────────────────────────────────────
+  const carregarPeriodo = useCallback(async () => {
+    if (datesDoPeriodo.length === 0) {
+      toast({ title: "Nenhuma data com relatório salvo no período", variant: "destructive" });
+      return;
+    }
+    setCarregandoPeriodo(true);
+    setRelatoriosPeriodo([]);
+    setFotosErp({});
+    setProgressoPeriodo({ atual: 0, total: datesDoPeriodo.length });
 
-    const todosItens = report.itens ?? report.itensCriticos;
-    const semFoto = [...new Map(
-      todosItens.filter((i) => !i.photo).map((i) => [i.codigo, i])
-    ).values()];
-
-    if (semFoto.length === 0) return;
-
-    setCarregandoFotosErp(true);
-    setProgressoFotos({ atual: 0, total: semFoto.length });
-
-    const CONCURRENCY = 4;
+    const reports: RelatorioDiario[] = [];
+    const CONC = 4;
     let concluidos = 0;
 
-    for (let i = 0; i < semFoto.length; i += CONCURRENCY) {
-      const lote = semFoto.slice(i, i + CONCURRENCY);
-      const batch: Record<string, string | null> = {};
-
-      await Promise.all(lote.map(async (item) => {
-        try {
-          const produto = await buscarProdutoVarejoFacil(item.codigo, { empresa, flag });
-          batch[item.codigo] = produto?.imagem
-            ? await fetchErpImageDataUrl(produto.imagem)
-            : null;
-        } catch {
-          batch[item.codigo] = null;
-        }
-        concluidos += 1;
-        setProgressoFotos({ atual: concluidos, total: semFoto.length });
-      }));
-
-      setFotosErp((prev) => ({ ...prev, ...batch }));
+    for (let i = 0; i < datesDoPeriodo.length; i += CONC) {
+      const lote = datesDoPeriodo.slice(i, i + CONC);
+      const results = await Promise.all(
+        lote.map((d) => buscarRelatorioSalvo(empresa, flag, d).catch(() => null))
+      );
+      results.forEach((r) => { if (r) reports.push(r); });
+      concluidos += lote.length;
+      setProgressoPeriodo({ atual: concluidos, total: datesDoPeriodo.length });
     }
 
+    setRelatoriosPeriodo(reports);
+    setCarregandoPeriodo(false);
+  }, [datesDoPeriodo, empresa, flag]);
+
+  // auto-carrega quando dia único muda
+  useEffect(() => {
+    if (modoSeletor === "dia" && diaUnico) carregarPeriodo();
+  }, [diaUnico]);
+
+  // ── dados agregados ─────────────────────────────────────────────────────────
+  const dados = useMemo(() => {
+    if (relatoriosPeriodo.length === 0) return null;
+    const sorted = [...relatoriosPeriodo].sort((a, b) => a.data.localeCompare(b.data));
+
+    const resumo = sorted.reduce(
+      (acc, r) => ({
+        separado: acc.separado + r.resumo.separado,
+        naoTem: acc.naoTem + r.resumo.naoTem,
+        parcial: acc.parcial + r.resumo.parcial,
+        pendente: acc.pendente + r.resumo.pendente,
+        totalItens: acc.totalItens + r.resumo.totalItens,
+      }),
+      { separado: 0, naoTem: 0, parcial: 0, pendente: 0, totalItens: 0 }
+    );
+
+    const porDia = sorted.map((r) => {
+      const total = r.resumo.totalItens || 1;
+      return {
+        label: labelDia(r.data),
+        "Separado": r.resumo.separado,
+        "Não tem": r.resumo.naoTem,
+        "Parcial": r.resumo.parcial,
+        "Pendente": r.resumo.pendente,
+        total: r.resumo.totalItens,
+        "pctSeparado": +((r.resumo.separado / total) * 100).toFixed(1),
+        "pctNão tem": +((r.resumo.naoTem / total) * 100).toFixed(1),
+        "pctParcial": +((r.resumo.parcial / total) * 100).toFixed(1),
+        "pctPendente": +((r.resumo.pendente / total) * 100).toFixed(1),
+      };
+    });
+
+    // frequência de itens
+    const itemMap = new Map<string, ItemFrequencia>();
+    for (const r of sorted) {
+      const itens = r.itens ?? r.itensCriticos;
+      for (const item of itens) {
+        const ex = itemMap.get(item.codigo);
+        if (!ex) {
+          itemMap.set(item.codigo, {
+            codigo: item.codigo, sku: item.sku, secao: item.secao, photo: item.photo,
+            vezes: 1, diasOcorrencia: [r.data],
+            totalPedido: item.pedido, totalReal: item.real ?? 0,
+            statusDominante: item.status,
+            ocorrencias: [{ data: r.data, status: item.status, pedido: item.pedido, real: item.real }],
+          });
+        } else {
+          ex.vezes += 1;
+          if (!ex.diasOcorrencia.includes(r.data)) ex.diasOcorrencia.push(r.data);
+          ex.totalPedido += item.pedido;
+          ex.totalReal += item.real ?? 0;
+          if (!ex.photo && item.photo) ex.photo = item.photo;
+          const np = STATUS_PRIORITY[item.status] ?? 1;
+          const cp = STATUS_PRIORITY[ex.statusDominante] ?? 1;
+          if (np > cp) ex.statusDominante = item.status;
+          ex.ocorrencias.push({ data: r.data, status: item.status, pedido: item.pedido, real: item.real });
+        }
+      }
+    }
+
+    const frequencia = Array.from(itemMap.values()).sort((a, b) => b.vezes - a.vezes);
+
+    // Pareto (top 20)
+    let cum = 0;
+    const totalFreq = frequencia.reduce((s, i) => s + i.vezes, 0);
+    const pareto = frequencia.slice(0, 20).map((i) => {
+      cum += i.vezes;
+      return {
+        codigo: i.codigo.slice(-8),
+        vezes: i.vezes,
+        cumulativo: totalFreq > 0 ? Math.round((cum / totalFreq) * 100) : 0,
+      };
+    });
+
+    // rosca / pie
+    const pizza = [
+      { name: "Separado", value: resumo.separado, color: COR.separado },
+      { name: "Não tem", value: resumo.naoTem, color: COR.naoTem },
+      { name: "Parcial", value: resumo.parcial, color: COR.parcial },
+      { name: "Pendente", value: resumo.pendente, color: COR.pendente },
+    ].filter((d) => d.value > 0);
+
+    return { resumo, porDia, frequencia, pareto, pizza };
+  }, [relatoriosPeriodo]);
+
+  // ── itens filtrados ─────────────────────────────────────────────────────────
+  const itensFiltrados = useMemo(() => {
+    if (!dados) return [];
+    const lista =
+      filtroItens === "criticos"
+        ? dados.frequencia.filter((i) => i.statusDominante === "nao_tem" || i.statusDominante === "parcial")
+        : dados.frequencia;
+    return lista.filter((i) => filtroStatus.has(i.statusDominante));
+  }, [dados, filtroItens, filtroStatus]);
+
+  // ── fotos ERP ───────────────────────────────────────────────────────────────
+  const carregarFotosErp = useCallback(async () => {
+    if (carregandoFotosErp || !dados) return;
+    const semFoto = dados.frequencia.filter((i) => !i.photo && !fotosErp[i.codigo]);
+    if (semFoto.length === 0) return;
+    setCarregandoFotosErp(true);
+    setProgressoFotos({ atual: 0, total: semFoto.length });
+    let done = 0;
+    for (let i = 0; i < semFoto.length; i += 4) {
+      const lote = semFoto.slice(i, i + 4);
+      const batch: Record<string, string | null> = {};
+      await Promise.all(lote.map(async (item) => {
+        try {
+          const prod = await buscarProdutoVarejoFacil(item.codigo, { empresa, flag });
+          batch[item.codigo] = prod?.imagem ? await fetchErpImageDataUrl(prod.imagem) : null;
+        } catch { batch[item.codigo] = null; }
+        done++;
+        setProgressoFotos({ atual: done, total: semFoto.length });
+      }));
+      setFotosErp((p) => ({ ...p, ...batch }));
+    }
     setCarregandoFotosErp(false);
-  }, [empresa, flag, carregandoFotosErp]);
+  }, [carregandoFotosErp, dados, empresa, flag, fotosErp]);
 
-  const pieData = relatorioAtivo
-    ? [
-        { name: "Separado", value: relatorioAtivo.resumo.separado, color: STATUS_COLORS.separado },
-        { name: "Não tem", value: relatorioAtivo.resumo.naoTem, color: STATUS_COLORS.naoTem },
-        { name: "Parcial", value: relatorioAtivo.resumo.parcial, color: STATUS_COLORS.parcial },
-        { name: "Pendente", value: relatorioAtivo.resumo.pendente, color: STATUS_COLORS.pendente },
-      ].filter((d) => d.value > 0)
-    : [];
+  const toggleFiltroStatus = (s: string) =>
+    setFiltroStatus((prev) => {
+      const next = new Set(prev);
+      next.has(s) ? next.delete(s) : next.add(s);
+      return next;
+    });
 
-  const conferenteData = (relatorioAtivo?.porConferente ?? []).slice(0, 8).map((c) => ({
-    nome: c.nome.split(" ")[0],
-    Separado: c.separado,
-    "Não tem": c.naoTem,
-    Parcial: c.parcial,
-  }));
-
-  const secaoData = (relatorioAtivo?.porSecao ?? []).slice(0, 10).map((s) => ({
-    nome: s.nome.length > 14 ? `${s.nome.slice(0, 14)}…` : s.nome,
-    "Não tem": s.naoTem,
-    Parcial: s.parcial,
-  }));
+  // ── render ──────────────────────────────────────────────────────────────────
+  const salvosKeys = new Set(relatoriosSalvos.map((r) => r.data));
 
   return (
     <div className="min-h-screen bg-background p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
+
         {/* Header */}
         <div className="flex items-center gap-3 mb-5">
           <Button variant="ghost" size="sm" onClick={() => navigate("/")}>
-            <ArrowLeft className="h-4 w-4 mr-1" />
-            Voltar
+            <ArrowLeft className="h-4 w-4 mr-1" />Voltar
           </Button>
           <div>
             <h1 className="text-2xl font-bold">Dashboard</h1>
-            <p className="text-sm text-muted-foreground">Relatórios de conferência por dia</p>
+            <p className="text-sm text-muted-foreground">Relatórios de conferência</p>
           </div>
         </div>
 
-        {/* Seletor empresa/flag */}
+        {/* Empresa / flag */}
         <div className="flex gap-2 mb-5 flex-wrap items-center">
           {EMPRESAS.map((e) => (
-            <Button key={e} variant={empresa === e ? "default" : "outline"} size="sm" onClick={() => setEmpresa(e)}>
-              {e}
-            </Button>
+            <Button key={e} size="sm" variant={empresa === e ? "default" : "outline"} onClick={() => setEmpresa(e)}>{e}</Button>
           ))}
           <div className="w-px h-6 bg-border mx-1" />
           {(["loja", "cd"] as FlagKey[]).map((f) => (
-            <Button key={f} variant={flag === f ? "default" : "outline"} size="sm" onClick={() => setFlag(f)}>
-              {f.toUpperCase()}
-            </Button>
+            <Button key={f} size="sm" variant={flag === f ? "default" : "outline"} onClick={() => setFlag(f)}>{f.toUpperCase()}</Button>
           ))}
           <Button variant="outline" size="sm" onClick={carregarDados} disabled={carregandoDatas} className="ml-auto">
-            <RefreshCw className={`h-3 w-3 mr-1 ${carregandoDatas ? "animate-spin" : ""}`} />
-            Atualizar
+            <RefreshCw className={`h-3 w-3 mr-1 ${carregandoDatas ? "animate-spin" : ""}`} />Atualizar
           </Button>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
-          {/* Lista de datas */}
-          <div className="lg:col-span-1">
+
+          {/* ── PAINEL ESQUERDO ── */}
+          <div className="lg:col-span-1 space-y-3">
+
+            {/* Seletor de período */}
+            <Card>
+              <CardHeader className="pb-2">
+                <CardTitle className="text-sm">Período</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {/* Modo */}
+                <div className="flex gap-1">
+                  {(["dia", "periodo", "mes"] as ModoSeletor[]).map((m) => (
+                    <Button key={m} size="sm" variant={modoSeletor === m ? "default" : "outline"}
+                      className="flex-1 text-xs h-7"
+                      onClick={() => { setModoSeletor(m); setRelatoriosPeriodo([]); setFotosErp({}); }}>
+                      {m === "dia" ? "Dia" : m === "periodo" ? "Período" : "Mês"}
+                    </Button>
+                  ))}
+                </div>
+
+                {/* Dia único — select */}
+                {modoSeletor === "dia" && (
+                  <select
+                    className="w-full text-sm border rounded p-1.5 bg-background"
+                    value={diaUnico ?? ""}
+                    onChange={(e) => setDiaUnico(e.target.value || null)}
+                  >
+                    <option value="">— selecione um dia —</option>
+                    {relatoriosSalvos.map((r) => (
+                      <option key={r.data} value={r.data}>{r.label}</option>
+                    ))}
+                  </select>
+                )}
+
+                {/* Período de → até */}
+                {modoSeletor === "periodo" && (
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">De</p>
+                      <select className="w-full text-sm border rounded p-1.5 bg-background"
+                        value={periodoInicio ?? ""}
+                        onChange={(e) => setPeriodoInicio(e.target.value || null)}>
+                        <option value="">— data inicial —</option>
+                        {relatoriosSalvos.map((r) => <option key={r.data} value={r.data}>{r.label}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Até</p>
+                      <select className="w-full text-sm border rounded p-1.5 bg-background"
+                        value={periodoFim ?? ""}
+                        onChange={(e) => setPeriodoFim(e.target.value || null)}>
+                        <option value="">— data final —</option>
+                        {relatoriosSalvos.map((r) => <option key={r.data} value={r.data}>{r.label}</option>)}
+                      </select>
+                    </div>
+                    <Button size="sm" className="w-full" onClick={carregarPeriodo} disabled={carregandoPeriodo || !periodoInicio || !periodoFim}>
+                      {carregandoPeriodo ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />{progressoPeriodo.atual}/{progressoPeriodo.total}</> : "Carregar período"}
+                    </Button>
+                  </div>
+                )}
+
+                {/* Mês */}
+                {modoSeletor === "mes" && (
+                  <div className="space-y-2">
+                    <input type="month" value={mesSelecionado}
+                      onChange={(e) => setMesSelecionado(e.target.value)}
+                      className="w-full text-sm border rounded p-1.5 bg-background" />
+                    <Button size="sm" className="w-full" onClick={carregarPeriodo} disabled={carregandoPeriodo}>
+                      {carregandoPeriodo ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />{progressoPeriodo.atual}/{progressoPeriodo.total}</> : "Carregar mês"}
+                    </Button>
+                    <p className="text-xs text-muted-foreground">{relatoriosSalvos.filter(r => r.data.startsWith(mesSelecionado)).length} relatório(s) disponível(is)</p>
+                  </div>
+                )}
+              </CardContent>
+            </Card>
+
+            {/* Lista de datas disponíveis */}
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm">Datas com conferências</CardTitle>
                 <CardDescription className="text-xs">Status Complete no ClickUp</CardDescription>
               </CardHeader>
               <CardContent className="p-0">
-                {carregandoDatas && (
-                  <p className="p-4 text-sm text-muted-foreground text-center">Carregando...</p>
-                )}
-                {!carregandoDatas && datasDisponiveis.length === 0 && (
-                  <p className="p-4 text-sm text-muted-foreground text-center">Nenhuma data encontrada</p>
-                )}
-                <div className="divide-y">
+                {carregandoDatas && <p className="p-4 text-sm text-center text-muted-foreground">Carregando...</p>}
+                {!carregandoDatas && datasDisponiveis.length === 0 && <p className="p-4 text-sm text-center text-muted-foreground">Nenhuma data</p>}
+                <div className="divide-y max-h-64 overflow-y-auto">
                   {datasDisponiveis.map((d) => {
-                    const salvo = getSalvo(d.data);
-                    const isAtivo = dataAtiva === d.data;
+                    const salvo = salvosKeys.has(d.data);
+                    const ativo = relatoriosPeriodo.some((r) => r.data === d.data);
                     return (
-                      <div
-                        key={d.data}
-                        className={`flex items-center justify-between px-3 py-2.5 transition-colors ${salvo ? "cursor-pointer hover:bg-muted/50" : ""} ${isAtivo ? "bg-muted" : ""}`}
-                        onClick={() => salvo && handleAbrirSalvo(d.data)}
-                      >
+                      <div key={d.data}
+                        className={`flex items-center justify-between px-3 py-2 transition-colors ${salvo ? "cursor-pointer hover:bg-muted/50" : ""} ${ativo ? "bg-muted" : ""}`}
+                        onClick={() => salvo && modoSeletor === "dia" && setDiaUnico(d.data)}>
                         <div>
-                          <p className="font-medium text-sm">{d.label}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {d.total} conferência{d.total !== 1 ? "s" : ""}
-                          </p>
+                          <p className="text-sm font-medium">{d.label}</p>
+                          <p className="text-xs text-muted-foreground">{d.total} conferência(s)</p>
                         </div>
                         {salvo ? (
-                          <Badge variant="secondary" className="text-xs gap-1 shrink-0">
-                            <Check className="h-3 w-3" />
-                            Salvo
-                          </Badge>
+                          <Badge variant="secondary" className="text-xs gap-1 shrink-0"><Check className="h-3 w-3" />Salvo</Badge>
                         ) : (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="text-xs h-7 shrink-0"
+                          <Button size="sm" variant="outline" className="text-xs h-7 shrink-0"
                             disabled={gerando === d.data}
-                            onClick={(e) => { e.stopPropagation(); handleGerarSalvar(d.data); }}
-                          >
-                            {gerando === d.data ? (
-                              <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Gerando</>
-                            ) : "Gerar"}
+                            onClick={(e) => { e.stopPropagation(); handleGerarSalvar(d.data); }}>
+                            {gerando === d.data ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />Gerando</> : "Gerar"}
                           </Button>
                         )}
                       </div>
@@ -282,190 +490,208 @@ const Dashboard = () => {
             </Card>
           </div>
 
-          {/* Área de gráficos */}
+          {/* ── PAINEL DIREITO ── */}
           <div className="lg:col-span-2 space-y-4">
-            {!relatorioAtivo && !carregandoRelatorio && (
+
+            {/* Placeholder */}
+            {relatoriosPeriodo.length === 0 && !carregandoPeriodo && (
               <Card>
                 <CardContent className="p-10 text-center text-muted-foreground">
                   <BarChart3 className="h-10 w-10 mx-auto mb-3 opacity-25" />
-                  <p className="text-sm">Selecione uma data salva para ver os gráficos</p>
-                  <p className="text-xs mt-1 opacity-70">Datas sem relatório precisam ser geradas primeiro</p>
+                  <p className="text-sm">Selecione um dia, período ou mês para visualizar</p>
                 </CardContent>
               </Card>
             )}
 
-            {carregandoRelatorio && (
+            {carregandoPeriodo && (
               <Card>
                 <CardContent className="p-10 text-center text-muted-foreground">
                   <RefreshCw className="h-8 w-8 mx-auto mb-3 animate-spin opacity-40" />
-                  <p className="text-sm">Carregando relatório do ClickUp...</p>
+                  <p className="text-sm">Carregando {progressoPeriodo.atual}/{progressoPeriodo.total} relatório(s)...</p>
                 </CardContent>
               </Card>
             )}
 
-            {relatorioAtivo && !carregandoRelatorio && (
+            {dados && !carregandoPeriodo && (
               <>
-                {/* Cards de resumo */}
+                {/* Cards resumo */}
                 <div className="grid grid-cols-5 gap-2">
                   {[
-                    { label: "Total", value: relatorioAtivo.resumo.totalItens },
-                    { label: "Separado", value: relatorioAtivo.resumo.separado },
-                    { label: "Não tem", value: relatorioAtivo.resumo.naoTem },
-                    { label: "Parcial", value: relatorioAtivo.resumo.parcial },
-                    { label: "Pendente", value: relatorioAtivo.resumo.pendente },
-                  ].map((item) => (
-                    <Card key={item.label}>
+                    { label: "Total", value: dados.resumo.totalItens },
+                    { label: "Separado", value: dados.resumo.separado },
+                    { label: "Não tem", value: dados.resumo.naoTem },
+                    { label: "Parcial", value: dados.resumo.parcial },
+                    { label: "Pendente", value: dados.resumo.pendente },
+                  ].map((c) => (
+                    <Card key={c.label}>
                       <CardContent className="p-3 text-center">
-                        <p className="text-xl font-bold">{item.value}</p>
-                        <p className="text-xs text-muted-foreground leading-tight">{item.label}</p>
+                        <p className="text-xl font-bold">{c.value}</p>
+                        <p className="text-xs text-muted-foreground leading-tight">{c.label}</p>
                       </CardContent>
                     </Card>
                   ))}
                 </div>
 
-                {/* Distribuição de status */}
-                {pieData.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-1">
-                      <CardTitle className="text-sm">Distribuição de status</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-52">
-                        <ResponsiveContainer width="100%" height="100%">
+                {/* Seletor de tipo de gráfico */}
+                <div className="flex gap-1 flex-wrap">
+                  {([
+                    { key: "rosca",   label: "Rosca" },
+                    { key: "barra",   label: "Barra" },
+                    { key: "barra100",label: "Barra 100%" },
+                    { key: "pareto",  label: "Pareto" },
+                    { key: "linha",   label: "Linha" },
+                  ] as { key: TipoGrafico; label: string }[]).map(({ key, label }) => (
+                    <Button key={key} size="sm"
+                      variant={tipoGrafico === key ? "default" : "outline"}
+                      className="h-7 text-xs"
+                      onClick={() => setTipoGrafico(key)}>
+                      {label}
+                    </Button>
+                  ))}
+                </div>
+
+                {/* Área de gráfico */}
+                <Card>
+                  <CardContent className="pt-4">
+                    <div className="h-64">
+                      <ResponsiveContainer width="100%" height="100%">
+
+                        {/* ROSCA */}
+                        {tipoGrafico === "rosca" ? (
                           <PieChart>
-                            <Pie
-                              data={pieData}
-                              cx="50%"
-                              cy="50%"
-                              outerRadius={75}
-                              dataKey="value"
-                              label={({ name, percent }) =>
-                                `${name}: ${(percent * 100).toFixed(0)}%`
-                              }
-                              labelLine={false}
-                            >
-                              {pieData.map((entry, i) => (
-                                <Cell key={i} fill={entry.color} />
-                              ))}
+                            <Pie data={dados.pizza} cx="50%" cy="50%"
+                              innerRadius={55} outerRadius={90}
+                              dataKey="value" paddingAngle={2}
+                              label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}
+                              labelLine={false}>
+                              {dados.pizza.map((e, i) => <Cell key={i} fill={e.color} />)}
                             </Pie>
                             <Tooltip />
                             <Legend />
                           </PieChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
 
-                {/* Por conferente */}
-                {conferenteData.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-1">
-                      <CardTitle className="text-sm">Por conferente</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-52">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={conferenteData}>
+                        /* BARRA simples */
+                        ) : tipoGrafico === "barra" ? (
+                          <BarChart data={dados.porDia} barGap={2}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="nome" tick={{ fontSize: 10 }} />
+                            <XAxis dataKey="label" tick={{ fontSize: 10 }} />
                             <YAxis tick={{ fontSize: 10 }} />
                             <Tooltip />
                             <Legend iconSize={10} />
-                            <Bar dataKey="Separado" fill={STATUS_COLORS.separado} stackId="a" />
-                            <Bar dataKey="Parcial" fill={STATUS_COLORS.parcial} stackId="a" />
-                            <Bar dataKey="Não tem" fill={STATUS_COLORS.naoTem} stackId="a" />
+                            <Bar dataKey="Separado" fill={COR.separado} stackId="a" />
+                            <Bar dataKey="Parcial"  fill={COR.parcial}  stackId="a" />
+                            <Bar dataKey="Não tem"  fill={COR.naoTem}   stackId="a" />
+                            <Bar dataKey="Pendente" fill={COR.pendente} stackId="a" />
                           </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
 
-                {/* Seções com mais faltas */}
-                {secaoData.length > 0 && (
-                  <Card>
-                    <CardHeader className="pb-1">
-                      <CardTitle className="text-sm">Seções com mais faltas (top 10)</CardTitle>
-                    </CardHeader>
-                    <CardContent>
-                      <div className="h-64">
-                        <ResponsiveContainer width="100%" height="100%">
-                          <BarChart data={secaoData} layout="vertical">
+                        /* BARRA 100% */
+                        ) : tipoGrafico === "barra100" ? (
+                          <BarChart data={dados.porDia} stackOffset="expand" barGap={2}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis type="number" tick={{ fontSize: 10 }} />
-                            <YAxis dataKey="nome" type="category" tick={{ fontSize: 10 }} width={100} />
+                            <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                            <YAxis tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} tick={{ fontSize: 10 }} />
+                            <Tooltip formatter={(v: number) => `${(v * 100).toFixed(1)}%`} />
+                            <Legend iconSize={10} />
+                            <Bar dataKey="Separado" fill={COR.separado} stackId="a" />
+                            <Bar dataKey="Parcial"  fill={COR.parcial}  stackId="a" />
+                            <Bar dataKey="Não tem"  fill={COR.naoTem}   stackId="a" />
+                            <Bar dataKey="Pendente" fill={COR.pendente} stackId="a" />
+                          </BarChart>
+
+                        /* PARETO */
+                        ) : tipoGrafico === "pareto" ? (
+                          <ComposedChart data={dados.pareto}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="codigo" tick={{ fontSize: 9 }} angle={-35} textAnchor="end" height={50} />
+                            <YAxis yAxisId="esq" tick={{ fontSize: 10 }} />
+                            <YAxis yAxisId="dir" orientation="right" domain={[0, 100]}
+                              tickFormatter={(v) => `${v}%`} tick={{ fontSize: 10 }} />
                             <Tooltip />
                             <Legend iconSize={10} />
-                            <Bar dataKey="Não tem" fill={STATUS_COLORS.naoTem} stackId="a" />
-                            <Bar dataKey="Parcial" fill={STATUS_COLORS.parcial} stackId="a" />
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
+                            <Bar yAxisId="esq" dataKey="vezes" name="Ocorrências" fill="#8b5cf6" />
+                            <Line yAxisId="dir" dataKey="cumulativo" name="% Acumulado"
+                              stroke="#f97316" type="monotone" dot={false} strokeWidth={2} />
+                          </ComposedChart>
 
-                {/* Lista de itens — todos ou críticos */}
-                {((relatorioAtivo.itens?.length ?? 0) > 0 || relatorioAtivo.itensCriticos.length > 0) && (
-                  <Card>
-                    <CardHeader className="pb-2">
-                      <CardTitle className="text-sm flex items-center justify-between gap-2 flex-wrap">
-                        <span className="flex items-center gap-1.5">
-                          <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
-                          Itens
-                        </span>
-                        <div className="flex gap-1 flex-wrap">
-                          <Button
-                            size="sm"
-                            variant={filtroItens === "criticos" ? "default" : "outline"}
-                            className="h-6 text-xs px-2"
-                            onClick={() => setFiltroItens("criticos")}
-                          >
-                            Críticos ({relatorioAtivo.itensCriticos.length})
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant={filtroItens === "todos" ? "default" : "outline"}
-                            className="h-6 text-xs px-2"
-                            onClick={() => setFiltroItens("todos")}
-                          >
-                            Todos ({relatorioAtivo.itens?.length ?? relatorioAtivo.itensCriticos.length})
-                          </Button>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="h-6 text-xs px-2 gap-1"
-                            disabled={carregandoFotosErp}
-                            onClick={() => carregarFotosErp(relatorioAtivo)}
-                          >
-                            {carregandoFotosErp ? (
-                              <><RefreshCw className="h-3 w-3 animate-spin" />{progressoFotos.atual}/{progressoFotos.total}</>
-                            ) : (
-                              <><ImageOff className="h-3 w-3" />Fotos ERP</>
-                            )}
-                          </Button>
-                        </div>
-                      </CardTitle>
-                    </CardHeader>
-                    <CardContent className="p-0">
-                      <div className="max-h-[560px] overflow-y-auto divide-y">
-                        {(filtroItens === "todos"
-                          ? (relatorioAtivo.itens ?? relatorioAtivo.itensCriticos)
-                          : relatorioAtivo.itensCriticos
-                        ).map((item, i) => {
-                          const foto = item.photo || fotosErp[item.codigo] || null;
-                          return (
-                          <div key={i} className="flex items-center gap-3 px-4 py-3">
+                        /* LINHA */
+                        ) : (
+                          <LineChart data={dados.porDia}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis dataKey="label" tick={{ fontSize: 10 }} />
+                            <YAxis tick={{ fontSize: 10 }} />
+                            <Tooltip />
+                            <Legend iconSize={10} />
+                            <Line dataKey="Separado" stroke={COR.separado} strokeWidth={2} dot={{ r: 3 }} />
+                            <Line dataKey="Parcial"  stroke={COR.parcial}  strokeWidth={2} dot={{ r: 3 }} />
+                            <Line dataKey="Não tem"  stroke={COR.naoTem}   strokeWidth={2} dot={{ r: 3 }} />
+                            <Line dataKey="Pendente" stroke={COR.pendente} strokeWidth={2} dot={{ r: 3 }} />
+                          </LineChart>
+                        )}
+                      </ResponsiveContainer>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Filtros de status */}
+                <div className="flex gap-1 flex-wrap items-center">
+                  <span className="text-xs text-muted-foreground mr-1">Filtro:</span>
+                  {[
+                    { key: "nao_tem",  label: "Não tem",  bg: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" },
+                    { key: "parcial",  label: "Parcial",  bg: "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300" },
+                    { key: "pendente", label: "Pendente", bg: "bg-gray-100 text-gray-700 dark:bg-gray-800 dark:text-gray-300" },
+                    { key: "separado", label: "Separado", bg: "bg-green-100 text-green-800 dark:bg-green-950 dark:text-green-300" },
+                  ].map(({ key, label, bg }) => (
+                    <button key={key}
+                      className={`px-2 py-0.5 rounded text-xs font-medium transition-opacity ${filtroStatus.has(key) ? bg : "bg-muted text-muted-foreground opacity-40"}`}
+                      onClick={() => toggleFiltroStatus(key)}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Lista de itens com frequência */}
+                <Card>
+                  <CardHeader className="pb-2">
+                    <CardTitle className="text-sm flex items-center justify-between flex-wrap gap-2">
+                      <span>
+                        Itens {relatoriosPeriodo.length > 1 ? `(${relatoriosPeriodo.length} dias)` : ""}
+                      </span>
+                      <div className="flex gap-1 flex-wrap">
+                        <Button size="sm" variant={filtroItens === "criticos" ? "default" : "outline"}
+                          className="h-6 text-xs px-2"
+                          onClick={() => setFiltroItens("criticos")}>
+                          Críticos ({dados.frequencia.filter(i => i.statusDominante === "nao_tem" || i.statusDominante === "parcial").length})
+                        </Button>
+                        <Button size="sm" variant={filtroItens === "todos" ? "default" : "outline"}
+                          className="h-6 text-xs px-2"
+                          onClick={() => setFiltroItens("todos")}>
+                          Todos ({dados.frequencia.length})
+                        </Button>
+                        <Button size="sm" variant="outline" className="h-6 text-xs px-2 gap-1"
+                          disabled={carregandoFotosErp}
+                          onClick={carregarFotosErp}>
+                          {carregandoFotosErp
+                            ? <><RefreshCw className="h-3 w-3 animate-spin" />{progressoFotos.atual}/{progressoFotos.total}</>
+                            : <><ImageOff className="h-3 w-3" />Fotos ERP</>}
+                        </Button>
+                      </div>
+                    </CardTitle>
+                  </CardHeader>
+                  <CardContent className="p-0">
+                    {itensFiltrados.length === 0 && (
+                      <p className="p-4 text-sm text-center text-muted-foreground">Nenhum item com o filtro selecionado</p>
+                    )}
+                    <div className="max-h-[600px] overflow-y-auto divide-y">
+                      {itensFiltrados.map((item, i) => {
+                        const foto = item.photo || fotosErp[item.codigo] || null;
+                        return (
+                          <div key={i} className="flex items-start gap-3 px-4 py-3">
                             {/* Foto */}
                             {foto ? (
-                              <img
-                                src={foto}
-                                alt={item.codigo}
-                                className="w-14 h-14 object-cover rounded shrink-0"
-                              />
+                              <img src={foto} alt={item.codigo}
+                                className="w-14 h-14 object-cover rounded shrink-0 mt-0.5" />
                             ) : (
-                              <div className="w-14 h-14 bg-muted rounded flex items-center justify-center shrink-0">
+                              <div className="w-14 h-14 bg-muted rounded flex items-center justify-center shrink-0 mt-0.5">
                                 <span className="text-muted-foreground text-xs text-center leading-tight px-1">sem foto</span>
                               </div>
                             )}
@@ -473,40 +699,46 @@ const Dashboard = () => {
                             {/* Info */}
                             <div className="flex-1 min-w-0">
                               <p className="font-mono font-bold text-sm leading-tight">{item.codigo}</p>
-                              {item.sku && (
-                                <p className="text-xs text-muted-foreground">SKU: {item.sku}</p>
+                              {item.sku && <p className="text-xs text-muted-foreground">SKU: {item.sku}</p>}
+                              {item.secao && <p className="text-xs text-indigo-500">{item.secao}</p>}
+
+                              {/* Dias de ocorrência */}
+                              {relatoriosPeriodo.length > 1 && (
+                                <div className="flex gap-1 flex-wrap mt-1">
+                                  {item.diasOcorrencia.map((d) => (
+                                    <span key={d} className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                                      {dateKeyToPtBr(d)}
+                                    </span>
+                                  ))}
+                                </div>
                               )}
-                              {item.secao && (
-                                <p className="text-xs text-indigo-500">{item.secao}</p>
-                              )}
-                              <p className="text-xs text-muted-foreground mt-0.5">{item.conferente}</p>
                             </div>
 
-                            {/* Quantidades + status */}
-                            <div className="flex flex-col items-end gap-1 shrink-0">
+                            {/* Quantidades + status + frequência */}
+                            <div className="flex flex-col items-end gap-1 shrink-0 text-right">
+                              {relatoriosPeriodo.length > 1 && (
+                                <span className="text-lg font-bold leading-none">{item.vezes}x</span>
+                              )}
                               <Badge
-                                variant={
-                                  item.status === "nao_tem" ? "destructive" :
-                                  item.status === "parcial" ? "outline" : "secondary"
-                                }
-                                className="text-xs"
-                              >
-                                {item.status === "nao_tem" ? "Não tem" :
-                                 item.status === "parcial" ? "Parcial" :
-                                 item.status === "pendente" ? "Pendente" : "Separado"}
+                                variant={item.statusDominante === "nao_tem" ? "destructive" : item.statusDominante === "separado" ? "secondary" : "outline"}
+                                className="text-xs">
+                                {statusLabel(item.statusDominante)}
                               </Badge>
-                              <div className="flex gap-2 text-xs">
-                                <span className="text-muted-foreground">Ped: <strong>{item.pedido}</strong></span>
-                                <span className="text-muted-foreground">Real: <strong>{item.real ?? "-"}</strong></span>
+                              <div className="text-xs flex gap-2">
+                                <span className="text-muted-foreground">
+                                  Ped: <strong>{item.totalPedido}</strong>
+                                </span>
+                                <span className="text-muted-foreground">
+                                  Real: <strong>{item.totalReal}</strong>
+                                </span>
                               </div>
                             </div>
                           </div>
-                          );
-                        })}
-                      </div>
-                    </CardContent>
-                  </Card>
-                )}
+                        );
+                      })}
+                    </div>
+                  </CardContent>
+                </Card>
               </>
             )}
           </div>
