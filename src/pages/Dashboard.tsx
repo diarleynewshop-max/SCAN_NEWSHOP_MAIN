@@ -46,6 +46,7 @@ const Dashboard = () => {
   const [carregandoDatas, setCarregandoDatas] = useState(false);
   const [carregandoRelatorio, setCarregandoRelatorio] = useState(false);
   const [gerando, setGerando] = useState<string | null>(null);
+  const [filtroItens, setFiltroItens] = useState<"criticos" | "todos">("criticos");
 
   const carregarDados = useCallback(async () => {
     setCarregandoDatas(true);
@@ -71,6 +72,7 @@ const Dashboard = () => {
 
   const handleGerarSalvar = async (dateKey: string) => {
     setGerando(dateKey);
+    setFiltroItens("criticos");
     try {
       const report = await salvarRelatorioDashboard(empresa, flag, dateKey);
       setRelatorioAtivo(report);
@@ -90,6 +92,7 @@ const Dashboard = () => {
     setCarregandoRelatorio(true);
     setDataAtiva(dateKey);
     setRelatorioAtivo(null);
+    setFiltroItens("criticos");
     try {
       const report = await buscarRelatorioSalvo(empresa, flag, dateKey);
       if (!report) throw new Error("Relatório não encontrado no ClickUp");
@@ -339,31 +342,85 @@ const Dashboard = () => {
                   </Card>
                 )}
 
-                {/* Itens críticos */}
-                {relatorioAtivo.itensCriticos.length > 0 && (
+                {/* Lista de itens — todos ou críticos */}
+                {((relatorioAtivo.itens?.length ?? 0) > 0 || relatorioAtivo.itensCriticos.length > 0) && (
                   <Card>
-                    <CardHeader className="pb-1">
-                      <CardTitle className="text-sm flex items-center gap-1.5">
-                        <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
-                        Itens críticos ({relatorioAtivo.itensCriticos.length})
+                    <CardHeader className="pb-2">
+                      <CardTitle className="text-sm flex items-center justify-between gap-2">
+                        <span className="flex items-center gap-1.5">
+                          <AlertTriangle className="h-3.5 w-3.5 text-red-500" />
+                          Itens
+                        </span>
+                        <div className="flex gap-1">
+                          <Button
+                            size="sm"
+                            variant={filtroItens === "criticos" ? "default" : "outline"}
+                            className="h-6 text-xs px-2"
+                            onClick={() => setFiltroItens("criticos")}
+                          >
+                            Críticos ({relatorioAtivo.itensCriticos.length})
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant={filtroItens === "todos" ? "default" : "outline"}
+                            className="h-6 text-xs px-2"
+                            onClick={() => setFiltroItens("todos")}
+                          >
+                            Todos ({relatorioAtivo.itens?.length ?? relatorioAtivo.itensCriticos.length})
+                          </Button>
+                        </div>
                       </CardTitle>
                     </CardHeader>
-                    <CardContent>
-                      <div className="max-h-52 overflow-y-auto divide-y text-sm">
-                        {relatorioAtivo.itensCriticos.slice(0, 60).map((item, i) => (
-                          <div key={i} className="flex items-center justify-between py-1.5 gap-2">
-                            <div className="min-w-0">
-                              <span className="font-mono text-xs">{item.codigo}</span>
-                              {item.secao && (
-                                <span className="text-muted-foreground ml-2 text-xs truncate">{item.secao}</span>
+                    <CardContent className="p-0">
+                      <div className="max-h-[560px] overflow-y-auto divide-y">
+                        {(filtroItens === "todos"
+                          ? (relatorioAtivo.itens ?? relatorioAtivo.itensCriticos)
+                          : relatorioAtivo.itensCriticos
+                        ).map((item, i) => (
+                          <div key={i} className="flex items-center gap-3 px-4 py-3">
+                            {/* Foto */}
+                            {item.photo ? (
+                              <img
+                                src={item.photo}
+                                alt={item.codigo}
+                                className="w-14 h-14 object-cover rounded shrink-0"
+                              />
+                            ) : (
+                              <div className="w-14 h-14 bg-muted rounded flex items-center justify-center shrink-0">
+                                <span className="text-muted-foreground text-xs">sem foto</span>
+                              </div>
+                            )}
+
+                            {/* Info */}
+                            <div className="flex-1 min-w-0">
+                              <p className="font-mono font-bold text-sm leading-tight">{item.codigo}</p>
+                              {item.sku && (
+                                <p className="text-xs text-muted-foreground">SKU: {item.sku}</p>
                               )}
+                              {item.secao && (
+                                <p className="text-xs text-indigo-500">{item.secao}</p>
+                              )}
+                              <p className="text-xs text-muted-foreground mt-0.5">{item.conferente}</p>
                             </div>
-                            <Badge
-                              variant={item.status === "nao_tem" ? "destructive" : "secondary"}
-                              className="text-xs shrink-0"
-                            >
-                              {item.status === "nao_tem" ? "Não tem" : "Parcial"}
-                            </Badge>
+
+                            {/* Quantidades + status */}
+                            <div className="flex flex-col items-end gap-1 shrink-0">
+                              <Badge
+                                variant={
+                                  item.status === "nao_tem" ? "destructive" :
+                                  item.status === "parcial" ? "outline" : "secondary"
+                                }
+                                className="text-xs"
+                              >
+                                {item.status === "nao_tem" ? "Não tem" :
+                                 item.status === "parcial" ? "Parcial" :
+                                 item.status === "pendente" ? "Pendente" : "Separado"}
+                              </Badge>
+                              <div className="flex gap-2 text-xs">
+                                <span className="text-muted-foreground">Ped: <strong>{item.pedido}</strong></span>
+                                <span className="text-muted-foreground">Real: <strong>{item.real ?? "-"}</strong></span>
+                              </div>
+                            </div>
                           </div>
                         ))}
                       </div>

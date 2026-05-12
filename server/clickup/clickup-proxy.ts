@@ -448,6 +448,41 @@ function buildRelatorioDescription(report: any, dataPtBr: string, empresa: Empre
     lines.push(``);
   }
 
+  // Itens críticos agrupados por seção
+  const itens: any[] = Array.isArray(report.itens) ? report.itens : [];
+  const criticos = itens.filter((i) => i.status === 'nao_tem' || i.status === 'parcial');
+
+  if (criticos.length > 0) {
+    lines.push(`=== ITENS CRITICOS (${criticos.length}) ===`);
+    let secaoAtual = '';
+    for (const item of criticos) {
+      const secao = String(item.secao ?? 'Sem categoria');
+      if (secao !== secaoAtual) {
+        secaoAtual = secao;
+        lines.push(secao);
+      }
+      const statusLabel = item.status === 'nao_tem' ? 'Nao tem' : 'Parcial';
+      lines.push(`Codigo: ${item.codigo} | SKU: ${item.sku || '-'} | Pedido: ${item.pedido} | Real: ${item.real ?? '-'} | ${statusLabel}`);
+    }
+    lines.push(``);
+  }
+
+  // Todos os itens (separados incluídos)
+  const todos = itens.filter((i) => i.status !== 'nao_tem' && i.status !== 'parcial');
+  if (todos.length > 0) {
+    lines.push(`=== SEPARADOS / PENDENTES (${todos.length}) ===`);
+    let secaoAtual2 = '';
+    for (const item of todos) {
+      const secao = String(item.secao ?? 'Sem categoria');
+      if (secao !== secaoAtual2) {
+        secaoAtual2 = secao;
+        lines.push(secao);
+      }
+      const statusLabel = item.status === 'pendente' ? 'Pendente' : 'Separado';
+      lines.push(`Codigo: ${item.codigo} | SKU: ${item.sku || '-'} | Pedido: ${item.pedido} | Real: ${item.real ?? '-'} | ${statusLabel}`);
+    }
+  }
+
   return lines.join('\n');
 }
 
