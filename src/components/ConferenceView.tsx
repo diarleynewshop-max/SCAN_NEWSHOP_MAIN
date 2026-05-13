@@ -386,6 +386,33 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const processJsonText = (text: string): boolean => {
     try {
       const raw = JSON.parse(text);
+
+      // Formato de lista legado: { produtos: [{ barcode, sku, quantidade, secao, photo }] }
+      if (Array.isArray(raw.produtos) && raw.produtos.length > 0 && raw.produtos[0]?.barcode) {
+        if (raw.empresa) setEmpresa(raw.empresa);
+        if (raw.flag)    setFlag(raw.flag);
+
+        const parsed: ConferenceItem[] = raw.produtos.map((p: any) => ({
+          id: crypto.randomUUID(),
+          codigo: String(p.barcode),
+          sku: p.sku ?? "",
+          secao: p.secao ?? null,
+          quantidadePedida: Number(p.quantidade) || 1,
+          quantidadeReal: null,
+          status: "aguardando" as ConferenceStatus,
+          photo: p.photo ?? null,
+          digito: null,
+        }));
+
+        setItems(parsed);
+        setTaskOrigemIds([]);
+        taskOrigemIdsRef.current = [];
+        setPhase("ready");
+        setCurrentIndex(0);
+        toast({ title: `${parsed.length} itens importados!` });
+        return true;
+      }
+
       const result = ConferenceFileSchema.safeParse(raw);
       if (!result.success) {
         setImportError("Arquivo inválido: " + result.error.issues[0]?.message);
