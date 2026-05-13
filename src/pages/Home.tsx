@@ -338,7 +338,7 @@ const Home = () => {
   };
 
   const SENHAS_NIVEL: Record<string, string[]> = {
-    'compras-newshop': ['Compras1188'],
+    'compras-newshop': ['Compras1148'],
     'compras-sf': ['ComprasSF'],
     'admin': ['Admin1148', 'Admin2461', 'Admin1090', 'Admin1316'],
   };

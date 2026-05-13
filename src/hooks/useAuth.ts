@@ -32,7 +32,7 @@ const SENHAS_CD: Record<Empresa, string> = {
 // Senhas especiais para perfis avançados
 // isSF=true → senha válida para SOYE ou FACIL (grupo SF)
 const SENHAS_ESPECIAIS: Record<string, { role: UserRole; empresa: Empresa; isSF?: boolean }> = {
-  'Compras1188':  { role: 'compras', empresa: 'NEWSHOP' },
+  'Compras1148':  { role: 'compras', empresa: 'NEWSHOP' },
   'ComprasSF':    { role: 'compras', empresa: 'SOYE', isSF: true },
   'Ad1148':       { role: 'admin',   empresa: 'NEWSHOP' },
   'Admin1148':    { role: 'super',   empresa: 'NEWSHOP' },
