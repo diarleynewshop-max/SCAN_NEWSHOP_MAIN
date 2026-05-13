@@ -1,5 +1,5 @@
 ﻿import { useNavigate } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Lock, Shield } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -172,8 +172,13 @@ const Home = () => {
   const [nomePessoa, setNomePessoa] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [erroSenha, setErroSenha] = useState(false);
-  const [roleDetectado, setRoleDetectado] = useState<string | null>(null); // NOVO: para mostrar role detectado
-  
+  const [roleDetectado, setRoleDetectado] = useState<string | null>(null);
+  const [nivelSelecionado, setNivelSelecionado] = useState<string | null>(null);
+  const [mostrarPopupSenhaAcesso, setMostrarPopupSenhaAcesso] = useState(false);
+  const [senhaAcessoInput, setSenhaAcessoInput] = useState('');
+  const [erroSenhaAcesso, setErroSenhaAcesso] = useState(false);
+  const [mostrarSenhaAcesso, setMostrarSenhaAcesso] = useState(false);
+
   // Estados para configurações
   const [modoEscuro, setModoEscuro] = useState(() => {
     return localStorage.getItem('modoEscuro') === 'true';
@@ -330,6 +335,39 @@ const Home = () => {
     }
 
     setRoleDetectado(null);
+  };
+
+  const SENHAS_NIVEL: Record<string, string[]> = {
+    'compras-newshop': ['Compras1188'],
+    'compras-sf': ['ComprasSF'],
+    'admin': ['Admin1148', 'Admin2461', 'Admin1090', 'Admin1316'],
+  };
+
+  const ROLES_NIVEL: Record<string, 'compras' | 'super'> = {
+    'compras-newshop': 'compras',
+    'compras-sf': 'compras',
+    'admin': 'super',
+  };
+
+  const LABELS_NIVEL: Record<string, string> = {
+    'compras-newshop': 'Compras Newshop',
+    'compras-sf': 'Compras Soye e Facil',
+    'admin': 'ADMIN',
+  };
+
+  const handleAplicarPerfil = () => {
+    if (!nivelSelecionado || !loginSalvo) return;
+    if (!SENHAS_NIVEL[nivelSelecionado].includes(senhaAcessoInput)) {
+      setErroSenhaAcesso(true);
+      return;
+    }
+    const novoLogin = { ...loginSalvo, role: ROLES_NIVEL[nivelSelecionado] as 'operador' | 'compras' | 'admin' | 'super' };
+    localStorage.setItem("scan_newshop_login", JSON.stringify(novoLogin));
+    setMostrarPopupSenhaAcesso(false);
+    setNivelSelecionado(null);
+    setSenhaAcessoInput('');
+    setMostrarConfiguracoes(false);
+    setTimeout(() => window.location.reload(), 300);
   };
 
   return (
@@ -1156,69 +1194,52 @@ const Home = () => {
 
                {/* Alterar Perfil */}
                <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
-                 <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 12 }}>Alterar Perfil</p>
-                 <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginBottom: 12 }}>
-                   Digite uma senha especial para alterar seu perfil de acesso:
+                 <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 4 }}>Alterar Perfil de Acesso</p>
+                 <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginBottom: 14 }}>
+                   Selecione o nível de acesso desejado:
                  </p>
-                 <div style={{ display: "flex", gap: 8, marginBottom: 12 }}>
-                   <input
-                     type="password"
-                     placeholder="Digite a senha especial"
-                     style={{
-                       flex: 1,
-                       padding: "12px 14px",
-                       borderRadius: 8,
-                       border: "1px solid hsl(var(--border))",
-                       background: "hsl(var(--background))",
-                       color: "hsl(var(--foreground))",
-                       fontSize: 14,
-                       fontFamily: "var(--font-sans)",
-                     }}
-                     onChange={(e) => {
-                       const senha = e.target.value;
-                       // Verificar se é senha especial
-                       if (senha === 'Compras1148') {
-                         setRoleDetectado('compras');
-                       } else if (senha === 'Diretoria1148') {
-                         setRoleDetectado('admin');
-                       } else if (senha === 'Admin1148') {
-                         setRoleDetectado('super');
-                       } else {
-                         setRoleDetectado(null);
-                       }
-                     }}
-                   />
+                 <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                   {[
+                     { id: 'compras-newshop', label: 'Compras Newshop', desc: 'Módulo de compras da loja Newshop', Icon: ShoppingCart, color: 'hsl(var(--indigo))' },
+                     { id: 'compras-sf', label: 'Compras Soye e Facil', desc: 'Módulo de compras das lojas Soye e Facil', Icon: ShoppingCart, color: 'hsl(var(--success))' },
+                     { id: 'admin', label: 'ADMIN', desc: 'Acesso administrativo completo', Icon: Shield, color: 'hsl(var(--destructive))' },
+                   ].map(({ id, label, desc, Icon, color }) => (
+                     <button
+                       key={id}
+                       onClick={() => {
+                         setNivelSelecionado(id);
+                         setSenhaAcessoInput('');
+                         setErroSenhaAcesso(false);
+                         setMostrarSenhaAcesso(false);
+                         setMostrarPopupSenhaAcesso(true);
+                       }}
+                       style={{
+                         width: "100%",
+                         padding: "14px 16px",
+                         borderRadius: 10,
+                         background: "hsl(var(--background))",
+                         border: "1.5px solid hsl(var(--border))",
+                         cursor: "pointer",
+                         textAlign: "left",
+                         display: "flex",
+                         alignItems: "center",
+                         gap: 12,
+                         transition: "all 0.18s",
+                       }}
+                     >
+                       <div style={{ width: 38, height: 38, borderRadius: 9, background: color + "22", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                         <Icon style={{ width: 17, height: 17, color }} />
+                       </div>
+                       <div style={{ flex: 1 }}>
+                         <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))", marginBottom: 1 }}>{label}</p>
+                         <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>{desc}</p>
+                       </div>
+                       <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="hsl(var(--muted-foreground))" strokeWidth="2">
+                         <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+                       </svg>
+                     </button>
+                   ))}
                  </div>
-                 
-                 {roleDetectado && (
-                   <div style={{ 
-                     background: "hsl(var(--primary) / 0.1)", 
-                     border: "1px solid hsl(var(--primary) / 0.3)",
-                     borderRadius: 8,
-                     padding: "12px",
-                     marginBottom: 12,
-                   }}>
-                     <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--primary))", marginBottom: 4 }}>
-                       Perfil detectado: {roleDetectado.charAt(0).toUpperCase() + roleDetectado.slice(1)}
-                     </p>
-                     <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
-                       Clique em "Salvar Configurações" para aplicar o novo perfil
-                     </p>
-                   </div>
-                 )}
-                 
-                  <div style={{ 
-                    background: "hsl(var(--muted) / 0.1)", 
-                    border: "1px solid hsl(var(--border))",
-                    borderRadius: 8,
-                    padding: "12px",
-                    marginTop: 8,
-                  }}>
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", margin: 0, lineHeight: 1.4 }}>
-                      <strong>Perfis disponíveis:</strong> Operador, Compras, Diretoria e Super Admin.<br/>
-                      Consulte a administração para obter as senhas especiais de cada perfil.
-                    </p>
-                  </div>
                </div>
 
                {/* Informações do Sistema */}
@@ -1246,27 +1267,7 @@ const Home = () => {
 
                {/* Botões de ação */}
                <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 8 }}>
-                 <button onClick={() => { 
-                   // Aplicar novo perfil se detectado
-                   let perfilAlterado = false;
-                    if (roleDetectado && loginSalvo) {
-                      const novoLogin = {
-                        ...loginSalvo,
-                        role: roleDetectado as 'operador' | 'compras' | 'admin' | 'super'
-                      };
-                      localStorage.setItem("scan_newshop_login", JSON.stringify(novoLogin));
-                      // Atualizar estado (já feito no localStorage)
-                      setRoleDetectado(null);
-                      perfilAlterado = true;
-                    }
-                   setMostrarConfiguracoes(false);
-                   // Se o perfil foi alterado, recarregar a página para atualizar abas
-                   if (perfilAlterado) {
-                     setTimeout(() => {
-                       window.location.reload();
-                     }, 300);
-                   }
-                 }}
+                 <button onClick={() => { setMostrarConfiguracoes(false); }}
                    style={{
                      width: "100%", height: 48, background: "hsl(var(--primary))",
                      color: "hsl(var(--primary-foreground))", border: "none",
@@ -1303,6 +1304,87 @@ const Home = () => {
               <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", textAlign: "center", marginTop: 8 }}>
                 As configurações são salvas automaticamente no seu dispositivo.
               </p>
+            </div>
+          </div>
+        </div>
+      )}
+      {/* Popup de senha para alterar perfil */}
+      {mostrarPopupSenhaAcesso && (
+        <div
+          onClick={(e) => { if (e.target === e.currentTarget) { setMostrarPopupSenhaAcesso(false); setNivelSelecionado(null); } }}
+          style={{
+            position: "fixed", inset: 0, background: "rgba(0,0,0,0.75)",
+            backdropFilter: "blur(6px)", display: "flex",
+            alignItems: "center", justifyContent: "center",
+            zIndex: 1100,
+          }}
+        >
+          <div style={{
+            background: "hsl(var(--card))",
+            width: "calc(100% - 40px)",
+            maxWidth: 360,
+            borderRadius: 20,
+            padding: "24px 20px 28px",
+            animation: "fadeIn 0.22s ease",
+          }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 16 }}>
+              <div style={{ width: 44, height: 44, borderRadius: 12, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <Lock style={{ width: 20, height: 20, color: "hsl(var(--primary))" }} />
+              </div>
+              <div>
+                <p style={{ fontFamily: "var(--font-serif)", fontSize: 17, fontWeight: 700, color: "hsl(var(--foreground))" }}>
+                  {nivelSelecionado ? LABELS_NIVEL[nivelSelecionado] : ''}
+                </p>
+                <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 1 }}>
+                  Digite a senha para confirmar
+                </p>
+              </div>
+            </div>
+
+            <div style={{ position: "relative", marginBottom: erroSenhaAcesso ? 8 : 16 }}>
+              <input
+                type={mostrarSenhaAcesso ? "text" : "password"}
+                placeholder="Senha de acesso"
+                value={senhaAcessoInput}
+                autoFocus
+                onChange={(e) => { setSenhaAcessoInput(e.target.value); setErroSenhaAcesso(false); }}
+                onKeyDown={(e) => e.key === "Enter" && handleAplicarPerfil()}
+                style={{
+                  width: "100%", height: 50, padding: "0 48px 0 16px",
+                  borderRadius: 10,
+                  border: `1.5px solid ${erroSenhaAcesso ? "hsl(var(--destructive))" : "hsl(var(--border))"}`,
+                  background: "hsl(var(--secondary))", color: "hsl(var(--foreground))",
+                  fontFamily: "var(--font-sans)", fontSize: 15, fontWeight: 500,
+                  outline: "none", boxSizing: "border-box",
+                }}
+              />
+              <button
+                onClick={() => setMostrarSenhaAcesso(!mostrarSenhaAcesso)}
+                style={{ position: "absolute", right: 14, top: "50%", transform: "translateY(-50%)", background: "none", border: "none", cursor: "pointer", color: "hsl(var(--muted-foreground))", display: "flex" }}
+              >
+                {mostrarSenhaAcesso ? <EyeOff style={{ width: 16, height: 16 }} /> : <Eye style={{ width: 16, height: 16 }} />}
+              </button>
+            </div>
+
+            {erroSenhaAcesso && (
+              <p style={{ fontSize: 12, color: "hsl(var(--destructive))", marginBottom: 14, fontWeight: 600 }}>
+                Senha incorreta. Tente novamente.
+              </p>
+            )}
+
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <button
+                onClick={() => { setMostrarPopupSenhaAcesso(false); setNivelSelecionado(null); setSenhaAcessoInput(''); }}
+                style={{ height: 48, borderRadius: 10, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={handleAplicarPerfil}
+                style={{ height: 48, borderRadius: 10, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", fontWeight: 700, fontSize: 14, cursor: "pointer", boxShadow: "0 4px 12px hsl(var(--primary) / 0.3)" }}
+              >
+                Confirmar
+              </button>
             </div>
           </div>
         </div>
