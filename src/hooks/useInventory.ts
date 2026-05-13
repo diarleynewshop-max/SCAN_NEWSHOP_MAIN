@@ -269,6 +269,7 @@ export function useInventory() {
             }
 
             changed = true;
+            if (isObjectPhotoUrl(product.photo)) revokePhotoUrl(product.photo);
             return {
               ...product,
               photo: URL.createObjectURL(blob),

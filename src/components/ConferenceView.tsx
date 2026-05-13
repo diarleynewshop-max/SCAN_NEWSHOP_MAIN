@@ -79,18 +79,20 @@ function formatTime(seconds: number): string {
 type Phase = "import" | "pickTask" | "ready" | "running" | "finished";
 
 const ConferenceFileSchema = z.object({
-  type: z.literal("conference-file"),
+  type: z.literal("conference-file", {
+    errorMap: () => ({ message: "Arquivo não é do tipo conference-file. Use o export JSON da aba Lista." }),
+  }),
   empresa: z.string().optional(),
   flag: z.string().optional(),
   items: z.array(
     z.object({
-      codigo: z.string().min(1),
+      codigo: z.string().min(1, "Código do produto não pode ser vazio."),
       sku: z.string().optional().default(""),
       secao: z.string().nullable().optional(),
-      quantidade: z.number().int().positive(),
+      quantidade: z.number().int().positive("Quantidade deve ser um número inteiro positivo."),
       photo: z.string().nullable().optional(),
     })
-  ).min(1),
+  ).min(1, "A lista de itens está vazia."),
 });
 
 const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesktop = false }: ConferenceViewProps) => {
@@ -392,12 +394,22 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         if (raw.empresa) setEmpresa(raw.empresa);
         if (raw.flag)    setFlag(raw.flag);
 
-        const parsed: ConferenceItem[] = raw.produtos.map((p: any) => ({
+        const validos = (raw.produtos as any[]).filter(
+          (p) => p?.barcode && String(p.barcode).trim() &&
+                 Number.isFinite(Number(p.quantidade)) && Number(p.quantidade) > 0
+        );
+
+        if (validos.length === 0) {
+          setImportError("Nenhum produto válido no arquivo (barcode ou quantidade inválidos).");
+          return true;
+        }
+
+        const parsed: ConferenceItem[] = validos.map((p) => ({
           id: crypto.randomUUID(),
-          codigo: String(p.barcode),
+          codigo: String(p.barcode).trim(),
           sku: p.sku ?? "",
           secao: p.secao ?? null,
-          quantidadePedida: Number(p.quantidade) || 1,
+          quantidadePedida: Number(p.quantidade),
           quantidadeReal: null,
           status: "aguardando" as ConferenceStatus,
           photo: p.photo ?? null,
@@ -581,11 +593,18 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
         if (jsonFileName && txtFileName) {
           const jsonText = await zip.files[jsonFileName].async("string");
-          const raw = JSON.parse(jsonText);
+          let raw: unknown;
+          try {
+            raw = JSON.parse(jsonText);
+          } catch {
+            setImportError("O JSON dentro do .zip está corrompido ou malformado.");
+            e.target.value = "";
+            return;
+          }
           const result = ConferenceFileSchema.safeParse(raw);
 
           if (!result.success) {
-            setImportError("JSON inválido dentro do ZIP.");
+            setImportError("Arquivo inválido dentro do ZIP: " + (result.error.issues[0]?.message ?? "estrutura incorreta."));
             e.target.value = "";
             return;
           }

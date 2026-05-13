@@ -1,7 +1,8 @@
 ﻿import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 
-const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN!;
+if (!process.env.CLICKUP_TOKEN) throw new Error("CLICKUP_TOKEN não configurado no ambiente do Trigger.");
+const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN;
 const CLICKUP_LIST_ID = process.env.CLICKUP_LIST_ID ?? "901325900510";
 const CLICKUP_CD_LIST_ID = process.env.CLICKUP_CD_LIST_ID ?? "901325900510";
 const CLICKUP_TODO_LIST_ID = process.env.CLICKUP_TODO_LIST_ID ?? "901326684020";

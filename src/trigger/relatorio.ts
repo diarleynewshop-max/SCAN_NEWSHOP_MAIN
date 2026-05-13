@@ -21,6 +21,12 @@ const ERP_HOSTS: Record<EmpresaRelatorio, string> = {
 };
 const erpTokenCache = new Map<string, string>();
 
+function fetchWithTimeout(url: string, init: RequestInit = {}, ms = 15000): Promise<Response> {
+  const ctrl = new AbortController();
+  const id = setTimeout(() => ctrl.abort(), ms);
+  return fetch(url, { ...init, signal: ctrl.signal }).finally(() => clearTimeout(id));
+}
+
 function normalizarEmpresa(value: unknown): EmpresaRelatorio {
   const empresa = String(value ?? "NEWSHOP").trim().toUpperCase();
   if (empresa.includes("SOYE")) return "SOYE";
@@ -86,11 +92,11 @@ async function getErpAccessToken(empresa: EmpresaRelatorio, apiBaseUrl: string):
   const cached = erpTokenCache.get(cacheKey);
   if (cached) return cached;
 
-  const response = await fetch(`${apiBaseUrl}/auth`, {
+  const response = await fetchWithTimeout(`${apiBaseUrl}/auth`, {
     method: "POST",
     headers: { "Content-Type": "application/json", Accept: "application/json" },
     body: JSON.stringify({ username, password }),
-  });
+  }, 15000);
 
   if (!response.ok) throw new Error(`ERP auth ${response.status} para ${empresa}.`);
 
@@ -102,9 +108,9 @@ async function getErpAccessToken(empresa: EmpresaRelatorio, apiBaseUrl: string):
 }
 
 async function fetchErpJson<T>(apiBaseUrl: string, token: string, path: string): Promise<T | null> {
-  const response = await fetch(`${apiBaseUrl}${path}`, {
+  const response = await fetchWithTimeout(`${apiBaseUrl}${path}`, {
     headers: { Authorization: token, Accept: "application/json" },
-  });
+  }, 15000);
 
   if (response.status === 401) erpTokenCache.clear();
   if (response.status === 404) return null;
@@ -183,9 +189,9 @@ async function fetchImageDataUrl(originUrl: string, token: string, src: string, 
   for (const url of buildImageCandidates(originUrl, src, produtoId)) {
     if (url.startsWith("data:image/")) return url;
 
-    const response = await fetch(url, {
+    const response = await fetchWithTimeout(url, {
       headers: { Authorization: token, Accept: "image/*,*/*" },
-    }).catch(() => null);
+    }, 10000).catch(() => null);
 
     const contentType = response?.headers.get("content-type") || "";
     if (!response?.ok || !contentType.startsWith("image/")) continue;

@@ -1,22 +1,12 @@
 import { useState } from "react";
 import { enviarParaClickUp, WebhookPayload } from "@/lib/webhookRouter";
 import { Product, ListData } from "@/components/ProductCard";
-import { MoreVertical, Pencil, Trash2, Download, FileText, FileSpreadsheet, Share2, FileInput, ChevronLeft, ChevronRight, Monitor, Database, CheckCircle2, XCircle, AlertTriangle } from "lucide-react";
+import { MoreVertical, Pencil, Trash2, Download, FileText, FileSpreadsheet, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
-import { supabase } from "@/lib/supabase";
 import { resolvePhotoToDataUrl } from "@/lib/photoUtils";
-
-interface EstoqueResult {
-  codigo: string;
-  sku: string;
-  quantidade_lista: number;
-  quantidade_sistema: number;
-  photo?: string | null;
-  status: "ok" | "parcial" | "zero";
-}
 
 interface ListHistoryProps {
   lists: ListData[];
@@ -59,12 +49,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
   const [editIndex, setEditIndex] = useState(0);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
 
-  // Estados do Supabase
-  const [analisandoId, setAnalisandoId] = useState<string | null>(null);
-  const [estoqueResultados, setEstoqueResultados] = useState<EstoqueResult[]>([]);
-  const [estoqueDialogOpen, setEstoqueDialogOpen] = useState(false);
-  const [estoqueListTitle, setEstoqueListTitle] = useState("");
-  const [estoqueListId, setEstoqueListId] = useState<string | null>(null); // GUARDA O ID PARA ATUALIZAR A LISTA
 
   const [sendingId, setSendingId] = useState<string | null>(null);
 

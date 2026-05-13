@@ -4,7 +4,8 @@ import sharp from "sharp";
 type EmpresaSF = "SOYE" | "FACIL";
 type FlagLista = "loja" | "cd";
 
-const CLICKUP_TOKEN_SF = process.env.CLICKUP_TOKEN_SF!;
+if (!process.env.CLICKUP_TOKEN_SF) throw new Error("CLICKUP_TOKEN_SF não configurado no ambiente do Trigger.");
+const CLICKUP_TOKEN_SF = process.env.CLICKUP_TOKEN_SF;
 
 const DEFAULT_LIST_ID_SOYE = "901326607319";
 const DEFAULT_LIST_ID_FACIL = "901326607320";
