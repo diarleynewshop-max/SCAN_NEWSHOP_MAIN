@@ -339,6 +339,7 @@ export const listaBaixada = task({
   id: "lista-baixada",
   machine: "small-1x",
   maxDuration: 1000,
+  retry: { maxAttempts: 4, factor: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 30_000 },
   run: async (payload: any) => {
     let taskId: string | null = null;
     let comprasTaskId: string | null = null;
@@ -436,6 +437,7 @@ export const conferenciaBaixada = task({
   id: "conferencia-baixada",
   machine: "small-1x",
   maxDuration: 1000,
+  retry: { maxAttempts: 4, factor: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 30_000 },
   run: async (payload: any) => {
     let tarefaOriginalId: string | null = null;
     let todoTaskId: string | null = null;
