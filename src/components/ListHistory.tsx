@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { enviarParaClickUp, WebhookPayload } from "@/lib/webhookRouter";
 import { Product, ListData } from "@/components/ProductCard";
-import { MoreVertical, Pencil, Trash2, Download, FileText, FileSpreadsheet, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
+import { Pencil, Trash2, Download, FileText, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
@@ -35,11 +35,6 @@ const STATUS_LEFT: Record<string, string> = {
   yellow: "hsl(var(--warning))",
 };
 
-function isEmpresaSemConsulta(empresa?: string | null): boolean {
-  const normalizada = (empresa ?? "").toUpperCase();
-  return normalizada.includes("SOYE") || normalizada.includes("FACIL");
-}
-
 const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = false, modoLeve = false }: ListHistoryProps) => {
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -62,92 +57,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     onUpdateList({ ...list, status: "red" });
     setDeleteConfirm(null); setMenuOpen(null);
     toast({ title: "Lista marcada como excluída" });
-  };
-
-  // ✅ Função de Análise do Supabase
-  const analisarEstoque = async (list: ListData) => {
-    if (isEmpresaSemConsulta(list.empresa)) {
-      toast({ title: "Consulta bloqueada", description: "SOYE/FACIL nao consultam Supabase/API." });
-      return;
-    }
-
-    setAnalisandoId(list.id);
-    try {
-      const codigosParaBuscar = list.products.map(p => p.barcode);
-
-      const { data, error } = await supabase
-        .from('estoque')
-        .select('codigo, estoque')
-        .in('codigo', codigosParaBuscar);
-
-         console.log("🔍 Códigos enviados:", codigosParaBuscar);
-         console.log("📦 Resposta do Supabase:", data, "Erro:", error);
-
-      if (error) throw error;
-
-      const mapaEstoque = new Map<string, number>();
-      if (data) {
-        data.forEach((row: any) => {
-          mapaEstoque.set(String(row.codigo), Number(row.estoque));
-        });
-      }
-
-      const resultados: EstoqueResult[] = list.products.map(p => {
-        const qtdSistema = mapaEstoque.has(p.barcode) ? mapaEstoque.get(p.barcode)! : -1;
-
-        let status: "ok" | "parcial" | "zero";
-        if (qtdSistema <= 0) status = "zero";
-        else if (qtdSistema < p.quantity) status = "parcial";
-        else status = "ok";
-
-        return {
-          codigo: p.barcode,
-          sku: p.sku || "",
-          quantidade_lista: p.quantity,
-          quantidade_sistema: qtdSistema === -1 ? 0 : qtdSistema,
-          photo: p.photo || null,
-          status,
-        };
-      });
-
-      setEstoqueResultados(resultados);
-      setEstoqueListTitle(list.title);
-      setEstoqueListId(list.id); // Salva o ID da lista sendo analisada
-      setEstoqueDialogOpen(true);
-      toast({ title: "✅ Análise concluída!" });
-    } catch (error: any) {
-      toast({ title: "❌ Erro na análise", description: "Falha ao conectar com o banco de dados.", variant: "destructive" });
-    } finally {
-      setAnalisandoId(null);
-    }
-  };
-
-  // ✅ Função de Atualizar a Lista (Mantendo Zerados para o ClickUp)
-  const atualizarListaComEstoque = () => {
-    if (!estoqueListId) return;
-
-    const listaAtual = lists.find(l => l.id === estoqueListId);
-    if (!listaAtual) return;
-
-    const produtosAtualizados = listaAtual.products.map(p => {
-      const resultado = estoqueResultados.find(r => r.codigo === p.barcode);
-      if (!resultado) return p;
-
-      // Se sistema tem 0 ou menos, fica 0. Se tem estoque, pega o menor entre o escaneado e o sistema.
-      const novaQuantidade = resultado.quantidade_sistema > 0 
-        ? Math.min(p.quantity, resultado.quantidade_sistema) 
-        : 0;
-
-      // ATENÇÃO: Retornamos o produto mesmo se for zero, para ir pro setor de Compras!
-      return { ...p, quantity: novaQuantidade };
-    });
-
-    onUpdateList({ ...listaAtual, products: produtosAtualizados });
-    setEstoqueDialogOpen(false);
-    toast({ 
-      title: "🔄 Lista Atualizada!", 
-      description: "As quantidades foram ajustadas (itens zerados foram mantidos para o setor de Compras)." 
-    });
   };
 
   const exportPDF = async (list: ListData) => {
@@ -417,10 +326,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     );
   }
 
-  const estoqueOk = estoqueResultados.filter(r => r.status === "ok").length;
-  const estoqueParcial = estoqueResultados.filter(r => r.status === "parcial").length;
-  const estoqueZero = estoqueResultados.filter(r => r.status === "zero").length;
-
   return (
     <div style={{ 
       padding: modoDesktop ? 24 : 20, 
@@ -429,8 +334,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       gap: modoDesktop ? 16 : 12 
     }}>
       {sortedLists.map((list) => {
-        const isAnalisando = analisandoId === list.id;
-        const consultaBloqueadaEmpresa = isEmpresaSemConsulta(list.empresa);
          return (
           <div key={list.id} style={{ 
             background: "hsl(var(--card))", 
@@ -609,77 +512,6 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       >
         <FileInput style={{ width: 17, height: 17 }} /> Importar para Conferência
       </button>
-
-      {/* ── MODAL ANÁLISE DE ESTOQUE ── */}
-      <Dialog open={estoqueDialogOpen} onOpenChange={() => setEstoqueDialogOpen(false)}>
-        <DialogContent aria-describedby={undefined} className="max-w-sm" style={{ ...dialogStyle, maxHeight: "90vh", overflowY: "auto" }}>
-          <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
-          <DialogHeader>
-            <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20, fontWeight: 700 }}>
-              <Database style={{ width: 20, height: 20, display: "inline", marginRight: 8, verticalAlign: "middle" }} />
-              Análise de Estoque
-            </DialogTitle>
-            <DialogDescription style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>
-              {estoqueListTitle} — {estoqueResultados.length} itens verificados
-            </DialogDescription>
-          </DialogHeader>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "hsl(var(--success) / 0.1)", border: "1px solid hsl(var(--success) / 0.2)", textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--success))", fontFamily: "var(--font-serif)" }}>{estoqueOk}</div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--success))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Tem tudo</div>
-            </div>
-            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "hsl(var(--warning) / 0.1)", border: "1px solid hsl(var(--warning) / 0.2)", textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--warning))", fontFamily: "var(--font-serif)" }}>{estoqueParcial}</div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--warning))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Parcial</div>
-            </div>
-            <div style={{ flex: 1, padding: "10px 12px", borderRadius: 10, background: "hsl(var(--destructive) / 0.1)", border: "1px solid hsl(var(--destructive) / 0.2)", textAlign: "center" }}>
-              <div style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--destructive))", fontFamily: "var(--font-serif)" }}>{estoqueZero}</div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: "hsl(var(--destructive))", fontFamily: "var(--font-mono)", textTransform: "uppercase", letterSpacing: "0.1em" }}>Sem estoque</div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", flexDirection: "column", gap: 8, marginTop: 14 }}>
-            {estoqueResultados.map((item, idx) => {
-              const cor = {
-                ok: { border: "hsl(var(--success) / 0.3)", bg: "hsl(var(--success) / 0.05)", left: "hsl(var(--success))", badge: "hsl(var(--success))", label: "✅ Tem tudo", icon: <CheckCircle2 style={{ width: 13, height: 13 }} /> },
-                parcial: { border: "hsl(var(--warning) / 0.3)", bg: "hsl(var(--warning) / 0.05)", left: "hsl(var(--warning))", badge: "hsl(var(--warning))", label: "⚠️ Parcial", icon: <span style={{ fontSize: 11 }}>⚠️</span> },
-                zero: { border: "hsl(var(--destructive) / 0.3)", bg: "hsl(var(--destructive) / 0.05)", left: "hsl(var(--destructive))", badge: "hsl(var(--destructive))", label: "❌ Sem estoque", icon: <XCircle style={{ width: 13, height: 13 }} /> },
-              }[item.status];
-
-              return (
-                <div key={idx} style={{ display: "flex", alignItems: "center", gap: 10, padding: "10px 12px", borderRadius: 12, border: `1px solid ${cor.border}`, background: cor.bg, borderLeftWidth: 4, borderLeftColor: cor.left }}>
-                  {item.photo && <img src={item.photo} alt={item.codigo} style={{ width: 36, height: 36, borderRadius: 8, objectFit: "cover", flexShrink: 0 }} />}
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))", fontFamily: "var(--font-mono)" }}>{item.codigo}</p>
-                    {item.sku && <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))" }}>SKU: {item.sku}</p>}
-                    <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))" }}>Lista: <strong>{item.quantidade_lista}</strong></p>
-                  </div>
-                  <div style={{ textAlign: "right", flexShrink: 0 }}>
-                    <div style={{ display: "inline-flex", alignItems: "center", gap: 4, padding: "4px 10px", borderRadius: 8, fontSize: 12, fontWeight: 800, background: cor.badge, color: "#fff" }}>
-                      {cor.icon} {item.quantidade_sistema}
-                    </div>
-                    <div style={{ fontSize: 9, color: "hsl(var(--muted-foreground))", marginTop: 3, fontFamily: "var(--font-mono)" }}>{cor.label}</div>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-
-          <div style={{ display: "flex", gap: 8, marginTop: 16 }}>
-            <button onClick={() => setEstoqueDialogOpen(false)}
-              style={{ flex: 1, height: 44, borderRadius: 10, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
-            >
-              Cancelar
-            </button>
-            <button onClick={atualizarListaComEstoque}
-              style={{ flex: 1, height: 44, borderRadius: 10, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", fontWeight: 700, fontSize: 13, cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-            >
-              <Database style={{ width: 14, height: 14 }} /> Atualizar Lista
-            </button>
-          </div>
-        </DialogContent>
-      </Dialog>
 
       {/* ── DELETE ── */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>
