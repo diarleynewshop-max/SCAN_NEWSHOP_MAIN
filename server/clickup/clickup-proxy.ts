@@ -657,7 +657,7 @@ async function buscarRelatorioSalvo(
   const task = rawTasks.find((t) => String(t.name ?? '') === nomeBuscado);
   if (!task) return null;
 
-  return await baixarJsonDaTask(task.id, token).catch(() => null);
+  return await baixarJsonRelatorioDaTask(task.id, token).catch(() => null);
 }
 
 async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: string) {
@@ -836,7 +836,7 @@ function countJsonItems(json: any): number {
   return Array.isArray(json?.items) ? json.items.length : 0;
 }
 
-async function baixarJsonDaTask(taskId: string, token: string): Promise<any | null> {
+async function baixarJsonsDeTask(taskId: string, token: string): Promise<any[]> {
   const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
     headers: { Authorization: token },
   });
@@ -847,9 +847,9 @@ async function baixarJsonDaTask(taskId: string, token: string): Promise<any | nu
 
   const taskData = await response.json();
   const attachments = (taskData.attachments ?? []).filter(isJsonAttachment);
-  if (attachments.length === 0) return null;
+  if (attachments.length === 0) return [];
 
-  const candidates: Array<{ json: any; title: string; photos: number; items: number }> = [];
+  const jsons: any[] = [];
 
   for (const attachment of attachments) {
     if (!attachment?.url) continue;
@@ -862,38 +862,41 @@ async function baixarJsonDaTask(taskId: string, token: string): Promise<any | nu
     }
 
     try {
-      const json = await fileResponse.json();
-      if (json?.type !== 'conference-file') {
-        console.warn(`[clickup-proxy] JSON ignorado (tipo: ${json?.type ?? 'sem tipo'}) task=${taskId} title=${title}`);
-        continue;
-      }
-      candidates.push({
-        json,
-        title,
-        photos: countJsonPhotos(json),
-        items: countJsonItems(json),
-      });
+      jsons.push(await fileResponse.json());
     } catch {
       console.warn(`[clickup-proxy] JSON invalido ignorado task=${taskId} title=${title}`);
     }
   }
 
+  return jsons;
+}
+
+// Baixa o JSON de conferência de uma task (type === "conference-file")
+async function baixarJsonDaTask(taskId: string, token: string): Promise<any | null> {
+  const jsons = await baixarJsonsDeTask(taskId, token);
+  const candidates = jsons
+    .filter((json) => json?.type === 'conference-file')
+    .map((json) => ({ json, photos: countJsonPhotos(json), items: countJsonItems(json) }));
+
   if (candidates.length === 0) {
+    if (jsons.length > 0) {
+      console.warn(`[clickup-proxy] Task ${taskId} tem JSON mas nenhum é conference-file (tipos: ${jsons.map(j => j?.type).join(', ')})`);
+    }
     return null;
   }
 
   candidates.sort((a, b) => {
     if (b.photos !== a.photos) return b.photos - a.photos;
-    if (b.items !== a.items) return b.items - a.items;
-    return String(b.title).localeCompare(String(a.title));
+    return b.items - a.items;
   });
 
-  const selected = candidates[0];
-  console.log(
-    `[clickup-proxy] JSON selecionado task=${taskId} title=${selected.title} items=${selected.items} fotos=${selected.photos}/${attachments.length} anexos_json`
-  );
+  return candidates[0].json;
+}
 
-  return selected.json;
+// Baixa o JSON de relatório de uma task (qualquer tipo)
+async function baixarJsonRelatorioDaTask(taskId: string, token: string): Promise<any | null> {
+  const jsons = await baixarJsonsDeTask(taskId, token);
+  return jsons.find((j) => j?.type === 'daily-conference-report') ?? jsons[0] ?? null;
 }
 
 function normalizeCodigo(value: unknown): string {
