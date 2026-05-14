@@ -299,6 +299,10 @@ const Index = () => {
   }, []);
 
   const handleAdd = async () => {
+    if (!activeList) {
+      toast({ title: "Abra uma lista primeiro", variant: "destructive" });
+      return;
+    }
     if (!photo) {
       toast({
         title: "Foto obrigatoria",
@@ -580,7 +584,6 @@ const Index = () => {
                 onClick={() => {
                   void handleAdd();
                 }}
-                disabled={!activeList}
                 data-tut="scanner-add"
                 style={{ ...S.btnPrimary, height: modoDesktop ? 60 : 56, fontSize: modoDesktop ? 16 : 15, opacity: activeList ? 1 : 0.45, cursor: activeList ? "pointer" : "not-allowed" }}
               >
