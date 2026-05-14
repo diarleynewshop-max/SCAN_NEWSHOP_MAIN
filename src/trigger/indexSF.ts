@@ -124,6 +124,7 @@ async function criarTarefaClickUp(
         "Content-Type": "application/json",
       },
       body: buildBody(true, true),
+      signal: AbortSignal.timeout(30_000),
     }
   );
 
@@ -138,6 +139,7 @@ async function criarTarefaClickUp(
           "Content-Type": "application/json",
         },
         body: buildBody(false, true),
+        signal: AbortSignal.timeout(30_000),
       }
     );
   }
@@ -156,6 +158,7 @@ async function criarTarefaClickUp(
           "Content-Type": "application/json",
         },
         body: buildBody(false, false),
+        signal: AbortSignal.timeout(30_000),
       }
     );
   }
@@ -542,6 +545,7 @@ Fotos anexadas abaixo (se houver)`,
       }
     } catch (err) {
       console.error("Erro na TASK 1 (lista-baixada-sf):", err);
+      throw err;
     }
   },
 });
@@ -667,6 +671,7 @@ Lista completa anexada em TXT/JSON.`;
       }
     } catch (err) {
       console.error("Erro na TASK 2 (conferencia-baixada-sf):", err);
+      throw err;
     }
   },
 });

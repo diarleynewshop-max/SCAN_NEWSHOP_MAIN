@@ -32,6 +32,7 @@ async function criarTarefaClickUp(
         "Content-Type": "application/json",
       },
       body: buildBody(true),
+      signal: AbortSignal.timeout(30_000),
     }
   );
 
@@ -46,6 +47,7 @@ async function criarTarefaClickUp(
           "Content-Type": "application/json",
         },
         body: buildBody(false),
+        signal: AbortSignal.timeout(30_000),
       }
     );
   }
@@ -425,6 +427,7 @@ ${listaFaltantesStr}
       }
     } catch (err) {
       console.error("Erro na TASK 1 (lista-baixada):", err);
+      throw err;
     }
   },
 });
@@ -547,6 +550,7 @@ ${truncarTexto(itensTexto, MAX_CLICKUP_DESCRIPTION_PREVIEW_CHARS)}
       }
     } catch (err) {
       console.error("Erro na TASK 2 (conferencia-baixada):", err);
+      throw err;
     }
   },
 });
