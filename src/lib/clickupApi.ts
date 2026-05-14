@@ -170,6 +170,7 @@ export async function baixarJsonDaTask(
 ): Promise<object | null> {
   const taskId = task.id;
   const response = await fetch(`/api/clickup-proxy?action=baixar-json&taskId=${taskId}&empresa=${empresa}`);
+  if (response.status === 404) throw new Error("Esta task não tem lista de conferência anexada. Só tasks enviadas pelo scanner podem ser abertas aqui.");
   if (!response.ok) throw new Error(`Erro ${response.status} ao baixar JSON`);
   const data = await response.json();
   return data;

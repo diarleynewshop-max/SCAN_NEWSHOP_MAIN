@@ -863,6 +863,10 @@ async function baixarJsonDaTask(taskId: string, token: string): Promise<any | nu
 
     try {
       const json = await fileResponse.json();
+      if (json?.type !== 'conference-file') {
+        console.warn(`[clickup-proxy] JSON ignorado (tipo: ${json?.type ?? 'sem tipo'}) task=${taskId} title=${title}`);
+        continue;
+      }
       candidates.push({
         json,
         title,
@@ -875,7 +879,7 @@ async function baixarJsonDaTask(taskId: string, token: string): Promise<any | nu
   }
 
   if (candidates.length === 0) {
-    throw new Error(`Nenhum JSON valido encontrado na task ${taskId}`);
+    return null;
   }
 
   candidates.sort((a, b) => {
