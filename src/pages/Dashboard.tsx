@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, RefreshCw, Check, ImageOff, BarChart3, ChevronLeft, ChevronRight, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -155,6 +155,10 @@ const Dashboard = () => {
   const [carregandoFotosErp, setCarregandoFotosErp] = useState(false);
   const [progressoFotos, setProgressoFotos] = useState({ atual: 0, total: 0 });
   const [itemModalIdx, setItemModalIdx] = useState<number | null>(null);
+
+  // paginação da lista de itens
+  const PAGE_SIZE = 10;
+  const [paginaAtual, setPaginaAtual] = useState(1);
 
   // ── carrega datas + salvos ──────────────────────────────────────────────────
   const carregarDados = useCallback(async () => {
@@ -383,16 +387,29 @@ const Dashboard = () => {
     return lista.filter((i) => filtroStatus.has(i.statusDominante));
   }, [dados, filtroItens, filtroStatus]);
 
-  // ── fotos ERP ───────────────────────────────────────────────────────────────
-  const carregarFotosErp = useCallback(async () => {
+  // ── fotos ERP — carrega página atual primeiro, depois resto em background ────
+  const fotosCancelRef = useRef(false);
+
+  const carregarFotosErp = useCallback(async (itensPrioritarios?: typeof itensFiltrados) => {
     if (carregandoFotosErp || !dados) return;
-    const semFoto = dados.frequencia.filter((i) => !i.photo && !fotosErp[i.codigo]);
-    if (semFoto.length === 0) return;
+
+    // Monta lista: prioritários primeiro (página atual), depois o resto
+    const todos = dados.frequencia.filter((i) => !i.photo && !fotosErp[i.codigo]);
+    const prioCods = new Set((itensPrioritarios ?? []).map((i) => i.codigo));
+    const prio = todos.filter((i) => prioCods.has(i.codigo));
+    const resto = todos.filter((i) => !prioCods.has(i.codigo));
+    const ordem = [...prio, ...resto];
+
+    if (ordem.length === 0) return;
+
+    fotosCancelRef.current = false;
     setCarregandoFotosErp(true);
-    setProgressoFotos({ atual: 0, total: semFoto.length });
+    setProgressoFotos({ atual: 0, total: ordem.length });
     let done = 0;
-    for (let i = 0; i < semFoto.length; i += 4) {
-      const lote = semFoto.slice(i, i + 4);
+
+    for (let i = 0; i < ordem.length; i += 4) {
+      if (fotosCancelRef.current) break;
+      const lote = ordem.slice(i, i + 4);
       const batch: Record<string, string | null> = {};
       await Promise.all(lote.map(async (item) => {
         try {
@@ -400,12 +417,12 @@ const Dashboard = () => {
           batch[item.codigo] = prod?.imagem ? await fetchErpImageDataUrl(prod.imagem) : null;
         } catch { batch[item.codigo] = null; }
         done++;
-        setProgressoFotos({ atual: done, total: semFoto.length });
+        setProgressoFotos({ atual: done, total: ordem.length });
       }));
       setFotosErp((p) => ({ ...p, ...batch }));
     }
     setCarregandoFotosErp(false);
-  }, [carregandoFotosErp, dados, empresa, flag, fotosErp]);
+  }, [carregandoFotosErp, dados, empresa, flag, fotosErp, itensFiltrados]);
 
   const toggleFiltroStatus = (s: string) =>
     setFiltroStatus((prev) => {
@@ -421,6 +438,23 @@ const Dashboard = () => {
   const irPara = (idx: number) => {
     if (idx >= 0 && idx < itensFiltrados.length) setItemModalIdx(idx);
   };
+
+  // reset de página quando filtros ou dados mudam
+  useEffect(() => { setPaginaAtual(1); }, [itensFiltrados]);
+
+  // itens da página atual
+  const totalPaginas = Math.max(1, Math.ceil(itensFiltrados.length / PAGE_SIZE));
+  const itensPagina = itensFiltrados.slice((paginaAtual - 1) * PAGE_SIZE, paginaAtual * PAGE_SIZE);
+
+  // auto-carrega fotos: página atual primeiro, depois resto em background
+  useEffect(() => {
+    if (!dados || carregandoFotosErp) return;
+    const semFotoNaPagina = itensPagina.filter((i) => !i.photo && !fotosErp[i.codigo]);
+    const semFotoTotal = dados.frequencia.filter((i) => !i.photo && !fotosErp[i.codigo]);
+    if (semFotoTotal.length === 0) return;
+    carregarFotosErp(semFotoNaPagina.length > 0 ? itensPagina : undefined);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [dados, paginaAtual]);
 
   // ── render ──────────────────────────────────────────────────────────────────
   const salvosKeys = new Set(relatoriosSalvos.map((r) => r.data));
@@ -824,13 +858,14 @@ const Dashboard = () => {
                     {itensFiltrados.length === 0 && (
                       <p className="p-4 text-sm text-center text-muted-foreground">Nenhum item com o filtro selecionado</p>
                     )}
-                    <div className="max-h-[600px] overflow-y-auto divide-y">
-                      {itensFiltrados.map((item, i) => {
+                    <div className="divide-y">
+                      {itensPagina.map((item, i) => {
+                        const idxGlobal = (paginaAtual - 1) * PAGE_SIZE + i;
                         const foto = item.photo || fotosErp[item.codigo] || null;
                         return (
-                          <div key={i}
+                          <div key={item.codigo}
                             className="flex items-start gap-3 px-4 py-3 cursor-pointer hover:bg-muted/40 transition-colors"
-                            onClick={() => setItemModalIdx(i)}>
+                            onClick={() => setItemModalIdx(idxGlobal)}>
                             {/* Foto */}
                             {foto ? (
                               <img src={foto} alt={item.codigo}
@@ -882,6 +917,46 @@ const Dashboard = () => {
                         );
                       })}
                     </div>
+
+                    {/* Paginação */}
+                    {totalPaginas > 1 && (
+                      <div className="flex items-center justify-between px-4 py-3 border-t">
+                        <span className="text-xs text-muted-foreground">
+                          {(paginaAtual - 1) * PAGE_SIZE + 1}–{Math.min(paginaAtual * PAGE_SIZE, itensFiltrados.length)} de {itensFiltrados.length}
+                        </span>
+                        <div className="flex items-center gap-1">
+                          <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+                            disabled={paginaAtual === 1}
+                            onClick={() => setPaginaAtual((p) => p - 1)}>
+                            <ChevronLeft className="h-3 w-3" />
+                          </Button>
+                          {Array.from({ length: totalPaginas }, (_, i) => i + 1)
+                            .filter((p) => p === 1 || p === totalPaginas || Math.abs(p - paginaAtual) <= 1)
+                            .reduce<(number | "…")[]>((acc, p, idx, arr) => {
+                              if (idx > 0 && (p as number) - (arr[idx - 1] as number) > 1) acc.push("…");
+                              acc.push(p);
+                              return acc;
+                            }, [])
+                            .map((p, idx) =>
+                              p === "…" ? (
+                                <span key={`e${idx}`} className="text-xs text-muted-foreground px-1">…</span>
+                              ) : (
+                                <Button key={p} size="sm"
+                                  variant={p === paginaAtual ? "default" : "outline"}
+                                  className="h-7 w-7 p-0 text-xs"
+                                  onClick={() => setPaginaAtual(p as number)}>
+                                  {p}
+                                </Button>
+                              )
+                            )}
+                          <Button size="sm" variant="outline" className="h-7 w-7 p-0"
+                            disabled={paginaAtual === totalPaginas}
+                            onClick={() => setPaginaAtual((p) => p + 1)}>
+                            <ChevronRight className="h-3 w-3" />
+                          </Button>
+                        </div>
+                      </div>
+                    )}
                   </CardContent>
                 </Card>
               </>
