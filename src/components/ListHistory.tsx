@@ -424,7 +424,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
               <button onClick={() => openEdit(list)}
                 style={{ 
                   flex: 1, 
-                  height: modoDesktop ? 40 : 36, 
+                  height: modoDesktop ? 40 : 44, 
                   borderRadius: modoDesktop ? 10 : 8, 
                   fontSize: modoDesktop ? 13 : 12, 
                   fontWeight: 600, 
@@ -433,6 +433,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
                   justifyContent: "center", 
                   gap: modoDesktop ? 6 : 5, 
                   cursor: "pointer", 
+                  touchAction: "manipulation",
                   background: "hsl(var(--secondary))", 
                   color: "hsl(var(--foreground))", 
                   border: "1px solid hsl(var(--border))" 
@@ -442,7 +443,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
               <button onClick={() => { setDownloadOpen(list.id); setMenuOpen(null); }}
                 style={{ 
                   flex: 1, 
-                  height: modoDesktop ? 40 : 36, 
+                  height: modoDesktop ? 40 : 44, 
                   borderRadius: modoDesktop ? 10 : 8, 
                   fontSize: modoDesktop ? 13 : 12, 
                   fontWeight: 600, 
@@ -451,6 +452,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
                   justifyContent: "center", 
                   gap: modoDesktop ? 6 : 5, 
                   cursor: "pointer", 
+                  touchAction: "manipulation",
                   background: "hsl(var(--secondary))", 
                   color: "hsl(var(--foreground))", 
                   border: "1px solid hsl(var(--border))" 
@@ -466,7 +468,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
                     disabled={enviando || jaEnviado}
                     style={{
                       flex: 1, 
-                      height: modoDesktop ? 40 : 36, 
+                      height: modoDesktop ? 40 : 44, 
                       borderRadius: modoDesktop ? 10 : 8, 
                       fontSize: modoDesktop ? 13 : 12, 
                       fontWeight: 600,
@@ -475,6 +477,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
                       justifyContent: "center", 
                       gap: modoDesktop ? 6 : 5,
                       cursor: (enviando || jaEnviado) ? "not-allowed" : "pointer",
+                      touchAction: "manipulation",
                       opacity: (enviando || jaEnviado) ? 0.75 : 1,
                       transition: "all 0.2s",
                       background: jaEnviado ? "hsl(var(--success))" : enviando ? "hsl(var(--muted))" : "hsl(var(--primary))",
@@ -498,7 +501,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
                 );
               })()}
               <button onClick={() => { setDeleteConfirm(list.id); setMenuOpen(null); }}
-                style={{ flex: 1, height: 36, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", background: "hsl(var(--destructive) / 0.07)", color: "hsl(var(--destructive))", border: "1px solid hsl(var(--destructive) / 0.2)" }}>
+                style={{ flex: 1, height: 44, borderRadius: 8, fontSize: 12, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 5, cursor: "pointer", touchAction: "manipulation", background: "hsl(var(--destructive) / 0.07)", color: "hsl(var(--destructive))", border: "1px solid hsl(var(--destructive) / 0.2)" }}>
                 <Trash2 style={{ width: 13, height: 13 }} /> Excluir
               </button>
             </div>
