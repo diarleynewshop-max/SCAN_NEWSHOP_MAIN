@@ -97,10 +97,9 @@ async function postClickUpAttachment(
     ? Buffer.from(await (content as Blob).arrayBuffer())
     : Buffer.from(content as string);
 
-  // Constrói multipart manualmente para garantir Content-Type + boundary corretos no Node.js
+  // Constrói multipart manualmente: garante Content-Type + boundary corretos no Node.js/Trigger.dev
   const boundary = `----ClickUpBoundary${Date.now().toString(16)}`;
-  const CRLF = "
-";
+  const CRLF = "\r\n";
   const header = Buffer.from(
     `--${boundary}${CRLF}` +
     `Content-Disposition: form-data; name="attachment"; filename="${filename}"${CRLF}` +
