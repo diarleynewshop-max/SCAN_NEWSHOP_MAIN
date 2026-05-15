@@ -455,7 +455,7 @@ const Home = () => {
               const isPrivileged = loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']);
               if (isPrivileged) return true;
               const userFlag = loginSalvo?.flag ?? 'loja';
-              if (label === 'Escanear' || label === 'Lista') return userFlag === 'loja';
+              if (label === 'Escanear' || label === 'Lista') return true;
               if (label === 'Conferência') return userFlag === 'cd';
               return true; // Consulta Preço, Perfil, Configuração sempre visíveis
             })
