@@ -97,17 +97,9 @@ async function postClickUpAttachment(
     ? Buffer.from(await (content as Blob).arrayBuffer())
     : Buffer.from(content as string);
 
-  // Constrói multipart manualmente: garante Content-Type + boundary corretos no Node.js/Trigger.dev
-  const boundary = `----ClickUpBoundary${Date.now().toString(16)}`;
-  const CRLF = "\r\n";
-  const header = Buffer.from(
-    `--${boundary}${CRLF}` +
-    `Content-Disposition: form-data; name="attachment"; filename="${filename}"${CRLF}` +
-    `Content-Type: ${mimeType}${CRLF}` +
-    CRLF
-  );
-  const footer = Buffer.from(`${CRLF}--${boundary}--${CRLF}`);
-  const body = Buffer.concat([header, fileBuffer, footer]);
+  const blob = new Blob([fileBuffer], { type: mimeType });
+  const form = new FormData();
+  form.append("attachment", blob, filename);
 
   const response = await fetch(
     `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
@@ -115,9 +107,9 @@ async function postClickUpAttachment(
       method: "POST",
       headers: {
         Authorization: token,
-        "Content-Type": `multipart/form-data; boundary=${boundary}`,
+        // Content-Type não definido: fetch seta multipart/form-data com boundary correto automaticamente
       },
-      body: body,
+      body: form,
     }
   );
 
