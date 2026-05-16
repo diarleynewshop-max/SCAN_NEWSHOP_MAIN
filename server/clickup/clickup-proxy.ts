@@ -1156,51 +1156,38 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'buscar-meus-pedidos') {
-      const pessoa = getSingle(req.query.pessoa).trim();
-      if (!pessoa) return res.status(400).json({ error: 'pessoa obrigatorio' });
-
-      // includeClosed=true retorna TODAS as tasks (abertas + fechadas) sem duplicata
+      // Retorna TODOS os pedidos da lista; filtro por pessoa é feito no frontend
       const listId = getListId(empresa, flag);
       const todasTasks = await fetchTasksFromList(listId, token, true);
 
-      const pessoaLower = pessoa.toLowerCase().trim();
+      function extrairPessoa(task: any): string {
+        // 1. Tag com nome da pessoa (adicionada a partir da versao atual)
+        const tags: string[] = (task.tags ?? []).map((t: any) => String(t?.name ?? t ?? '').trim());
+        const tagPessoa = tags.find((t) => t && !t.startsWith('SECAO') && t !== 'pedido em andamento');
+        if (tagPessoa) return tagPessoa;
 
-      // Normaliza nome para comparação (remove acentos, lowercase)
-      function normalizarNome(s: string): string {
-        return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
-      }
-
-      const pessoaNorm = normalizarNome(pessoa);
-
-      function pessoaMatchesNome(nomePessoa: string): boolean {
-        const n = normalizarNome(nomePessoa);
-        return n === pessoaNorm || n.startsWith(pessoaNorm) || pessoaNorm.startsWith(n);
-      }
-
-      // Task 1: extrai pessoa do nome "📦 Titulo — PESSOA" ou da descrição "Pessoa: NOME"
-      function extrairPessoaTask1(nome: string, desc: string): string {
-        // Tenta pelo nome da task (separador em-dash, en-dash ou hífen)
-        const partesNome = nome.split(/\s+[—–\-]+\s+/);
-        if (partesNome.length >= 2) {
-          return partesNome[partesNome.length - 1].trim();
-        }
-        // Fallback: descrição "Pessoa: NOME"
+        // 2. Fallback: descricao "Pessoa: NOME"
+        const desc: string = task.description ?? task.text_content ?? '';
         const matchDesc = desc.match(/^pessoa:\s*(.+)/im);
         if (matchDesc) return matchDesc[1].trim();
-        return '';
-      }
 
-      function extrairTituloTask1(nome: string): string {
+        // 3. Fallback: nome da task "📦 Titulo — NOME" ou "EMPRESA FLAG: Titulo - NOME"
+        const nome: string = task.name ?? '';
         const partes = nome.split(/\s+[—–\-]+\s+/);
-        const titulo = partes.length >= 2
-          ? partes.slice(0, -1).join(' — ')
-          : nome;
-        return titulo.replace(/^📦\s*/u, '').trim();
+        if (partes.length >= 2) return partes[partes.length - 1].trim();
+
+        return '';
       }
 
       function extrairListeiro(desc: string): string {
         const match = desc.match(/^listeiro:\s*(.+)/im);
         return match ? match[1].trim() : '';
+      }
+
+      function extrairTitulo(nome: string): string {
+        const partes = nome.split(/\s+[—–\-]+\s+/);
+        const titulo = partes.length >= 2 ? partes.slice(0, -1).join(' — ') : nome;
+        return titulo.replace(/^[📦✅🛒]\s*/u, '').trim();
       }
 
       function extrairResumo(desc: string): { separado: number; naoTem: number; parcial: number; pendente: number } | null {
@@ -1217,55 +1204,57 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       }
 
-      const vistosIds = new Set<string>();
       const pedidos: any[] = [];
+      const pessoasSet = new Set<string>();
 
       for (const task of todasTasks) {
-        if (vistosIds.has(task.id)) continue;
         const statusNorm = normalizeStatus(task.status?.status);
         const nome: string = task.name ?? '';
         const desc: string = task.description ?? task.text_content ?? '';
 
-        // Task 1: to do = "Pedido chegou ao CD" | analisado = "Pronto para Conferência"
+        // Ignora tasks de compras (🛒) e relatórios
+        if (nome.startsWith('🛒') || nome.toLowerCase().includes('relatorio')) continue;
+
         if (statusNorm === 'to do' || statusNorm === 'analisado') {
-          const pessoaExtraida = extrairPessoaTask1(nome, desc);
-          if (pessoaExtraida && pessoaMatchesNome(pessoaExtraida)) {
-            vistosIds.add(task.id);
-            pedidos.push({
-              id: task.id,
-              nome,
-              titulo: extrairTituloTask1(nome),
-              statusClickUp: statusNorm,
-              statusLabel: statusNorm === 'to do' ? 'pedido_no_cd' : 'pronto_conferencia',
-              dataCriacao: task.date_created ?? '',
-              dataAtualizacao: task.date_updated ?? '',
-              resumo: null,
-            });
-          }
+          const pessoa = extrairPessoa(task);
+          if (!pessoa) continue;
+          pessoasSet.add(pessoa);
+          pedidos.push({
+            id: task.id,
+            nome,
+            titulo: extrairTitulo(nome),
+            pessoa,
+            statusClickUp: statusNorm,
+            statusLabel: statusNorm === 'to do' ? 'pedido_no_cd' : 'pronto_conferencia',
+            dataCriacao: task.date_created ?? '',
+            dataAtualizacao: task.date_updated ?? '',
+            resumo: null,
+          });
         }
 
-        // Task 2 (conferencia): complete com Listeiro = pessoa
         if (statusNorm === 'complete' || statusNorm === 'concluido' || statusNorm === 'concluído') {
-          const listeiro = extrairListeiro(desc);
-          if (listeiro && pessoaMatchesNome(listeiro)) {
-            vistosIds.add(task.id);
-            pedidos.push({
-              id: task.id,
-              nome,
-              titulo: nome.replace(/^✅\s*/u, '').trim(),
-              statusClickUp: statusNorm,
-              statusLabel: 'concluido',
-              dataCriacao: task.date_created ?? '',
-              dataAtualizacao: task.date_updated ?? '',
-              resumo: extrairResumo(desc),
-            });
-          }
+          // Task de conferência: usa Listeiro se disponível, senão tenta tag
+          const listeiro = extrairListeiro(desc) || extrairPessoa(task);
+          if (!listeiro) continue;
+          pessoasSet.add(listeiro);
+          pedidos.push({
+            id: task.id,
+            nome,
+            titulo: extrairTitulo(nome),
+            pessoa: listeiro,
+            statusClickUp: statusNorm,
+            statusLabel: 'concluido',
+            dataCriacao: task.date_created ?? '',
+            dataAtualizacao: task.date_updated ?? '',
+            resumo: extrairResumo(desc),
+          });
         }
       }
 
       pedidos.sort((a, b) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
-      console.log(`[meus-pedidos] empresa=${empresa} flag=${flag} listId=${listId} pessoa=${pessoa} total=${todasTasks.length} encontrados=${pedidos.length}`);
-      return res.status(200).json({ pedidos, pessoa, empresa, flag, totalTasks: todasTasks.length });
+      const pessoas = Array.from(pessoasSet).sort();
+      console.log(`[meus-pedidos] empresa=${empresa} flag=${flag} listId=${listId} total=${todasTasks.length} pedidos=${pedidos.length} pessoas=${pessoas.join(',')}`);
+      return res.status(200).json({ pedidos, pessoas, empresa, flag });
     }
 
     if (action === 'deletar-task') {

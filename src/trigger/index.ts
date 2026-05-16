@@ -371,7 +371,8 @@ Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${flagLabel}
 Itens: ${payload.totalItens}
 Data: ${dataFormatada}`,
-        "to do"
+        "to do",
+        payload.pessoa ? [payload.pessoa] : []
       );
 
       await anexarJsonNaTarefa(taskId, `lista_${payload.pessoa}`, {
