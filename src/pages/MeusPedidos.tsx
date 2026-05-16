@@ -62,8 +62,10 @@ export default function MeusPedidos() {
   const [pedidos, setPedidos] = useState<Pedido[]>([]);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
-  const [filtroPessoa, setFiltroPessoa] = useState(loginSalvo?.nomePessoa ?? "");
-  const [inputPessoa, setInputPessoa] = useState(loginSalvo?.nomePessoa ?? "");
+  const [totalTasks, setTotalTasks] = useState<number | null>(null);
+  const nomePadrao = (loginSalvo?.nomePessoa ?? "").trim();
+  const [filtroPessoa, setFiltroPessoa] = useState(nomePadrao);
+  const [inputPessoa, setInputPessoa] = useState(nomePadrao);
 
   const buscarPedidos = useCallback(async (pessoa: string) => {
     if (!pessoa.trim() || !loginSalvo) return;
@@ -86,6 +88,7 @@ export default function MeusPedidos() {
 
       const data = await res.json();
       setPedidos(Array.isArray(data.pedidos) ? data.pedidos : []);
+      setTotalTasks(typeof data.totalTasks === "number" ? data.totalTasks : null);
     } catch (e: any) {
       setErro(e.message ?? "Erro ao buscar pedidos");
       setPedidos([]);
@@ -171,6 +174,15 @@ export default function MeusPedidos() {
       {/* Conteúdo */}
       <div style={{ flex: 1, padding: modoDesktop ? "20px 32px 32px" : "14px 16px 32px", display: "flex", flexDirection: "column", gap: 12 }}>
 
+        {/* Quando nome não está preenchido */}
+        {!loading && !filtroPessoa && (
+          <div style={{ textAlign: "center", padding: "40px 16px", color: "hsl(var(--muted-foreground))" }}>
+            <User style={{ width: 36, height: 36, margin: "0 auto 12px", opacity: 0.4 }} />
+            <p style={{ fontSize: 15, fontWeight: 600 }}>Digite seu nome para buscar</p>
+            <p style={{ fontSize: 13, marginTop: 4 }}>Use o campo acima para filtrar os pedidos pelo seu nome.</p>
+          </div>
+        )}
+
         {loading && (
           <div style={{ textAlign: "center", padding: "40px 16px", color: "hsl(var(--muted-foreground))" }}>
             <RefreshCw style={{ width: 28, height: 28, margin: "0 auto 12px", animation: "spin 1s linear infinite" }} />
@@ -194,6 +206,11 @@ export default function MeusPedidos() {
             <Package style={{ width: 36, height: 36, margin: "0 auto 12px", opacity: 0.4 }} />
             <p style={{ fontSize: 15, fontWeight: 600 }}>Nenhum pedido encontrado</p>
             <p style={{ fontSize: 13, marginTop: 4 }}>Não há pedidos para "{filtroPessoa}" no momento.</p>
+            {totalTasks !== null && (
+              <p style={{ fontSize: 11, marginTop: 8, color: "hsl(var(--muted-foreground))", fontFamily: "var(--font-mono)" }}>
+                {totalTasks} tasks buscadas na lista · nenhuma com este nome
+              </p>
+            )}
           </div>
         )}
 

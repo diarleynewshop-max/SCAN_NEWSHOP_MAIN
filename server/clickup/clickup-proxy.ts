@@ -1159,53 +1159,84 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const pessoa = getSingle(req.query.pessoa).trim();
       if (!pessoa) return res.status(400).json({ error: 'pessoa obrigatorio' });
 
+      // includeClosed=true retorna TODAS as tasks (abertas + fechadas) sem duplicata
       const listId = getListId(empresa, flag);
-      const [abertas, fechadas] = await Promise.all([
-        fetchTasksFromList(listId, token, false),
-        fetchTasksFromList(listId, token, true),
-      ]);
+      const todasTasks = await fetchTasksFromList(listId, token, true);
 
-      const todasTasks = [...abertas, ...fechadas];
-      const pessoaLower = pessoa.toLowerCase();
+      const pessoaLower = pessoa.toLowerCase().trim();
 
-      function extrairListeiroDaDescricao(desc: string): string {
-        const match = desc.match(/listeiro:\s*(.+)/i);
+      // Normaliza nome para comparação (remove acentos, lowercase)
+      function normalizarNome(s: string): string {
+        return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase().trim();
+      }
+
+      const pessoaNorm = normalizarNome(pessoa);
+
+      function pessoaMatchesNome(nomePessoa: string): boolean {
+        const n = normalizarNome(nomePessoa);
+        return n === pessoaNorm || n.startsWith(pessoaNorm) || pessoaNorm.startsWith(n);
+      }
+
+      // Task 1: extrai pessoa do nome "📦 Titulo — PESSOA" ou da descrição "Pessoa: NOME"
+      function extrairPessoaTask1(nome: string, desc: string): string {
+        // Tenta pelo nome da task (separador em-dash, en-dash ou hífen)
+        const partesNome = nome.split(/\s+[—–\-]+\s+/);
+        if (partesNome.length >= 2) {
+          return partesNome[partesNome.length - 1].trim();
+        }
+        // Fallback: descrição "Pessoa: NOME"
+        const matchDesc = desc.match(/^pessoa:\s*(.+)/im);
+        if (matchDesc) return matchDesc[1].trim();
+        return '';
+      }
+
+      function extrairTituloTask1(nome: string): string {
+        const partes = nome.split(/\s+[—–\-]+\s+/);
+        const titulo = partes.length >= 2
+          ? partes.slice(0, -1).join(' — ')
+          : nome;
+        return titulo.replace(/^📦\s*/u, '').trim();
+      }
+
+      function extrairListeiro(desc: string): string {
+        const match = desc.match(/^listeiro:\s*(.+)/im);
         return match ? match[1].trim() : '';
       }
 
-      function extrairResumoDescricao(desc: string): { separado: number; naoTem: number; parcial: number; pendente: number } | null {
-        const sep = desc.match(/separado:\s*(\d+)/i);
-        const naoTem = desc.match(/n[aã]o\s*tem:\s*(\d+)/i);
+      function extrairResumo(desc: string): { separado: number; naoTem: number; parcial: number; pendente: number } | null {
+        const sep     = desc.match(/separado:\s*(\d+)/i);
+        const naoTem  = desc.match(/n[aã]o\s*tem:\s*(\d+)/i);
         const parcial = desc.match(/parcial:\s*(\d+)/i);
         const pendente = desc.match(/pendente:\s*(\d+)/i);
         if (!sep && !naoTem && !parcial && !pendente) return null;
         return {
-          separado: sep ? parseInt(sep[1]) : 0,
-          naoTem: naoTem ? parseInt(naoTem[1]) : 0,
-          parcial: parcial ? parseInt(parcial[1]) : 0,
-          pendente: pendente ? parseInt(pendente[1]) : 0,
+          separado:  sep      ? parseInt(sep[1])      : 0,
+          naoTem:    naoTem   ? parseInt(naoTem[1])   : 0,
+          parcial:   parcial  ? parseInt(parcial[1])  : 0,
+          pendente:  pendente ? parseInt(pendente[1]) : 0,
         };
       }
 
+      const vistosIds = new Set<string>();
       const pedidos: any[] = [];
 
       for (const task of todasTasks) {
+        if (vistosIds.has(task.id)) continue;
         const statusNorm = normalizeStatus(task.status?.status);
         const nome: string = task.name ?? '';
         const desc: string = task.description ?? task.text_content ?? '';
 
-        // Task 1: "📦 Titulo — PESSOA" em to do ou analisado
+        // Task 1: to do = "Pedido chegou ao CD" | analisado = "Pronto para Conferência"
         if (statusNorm === 'to do' || statusNorm === 'analisado') {
-          const partes = nome.split(' — ');
-          const nomePessoa = partes.length >= 2 ? partes[partes.length - 1].trim().toLowerCase() : '';
-          if (nomePessoa === pessoaLower || nomePessoa.startsWith(pessoaLower)) {
-            const statusLabel = statusNorm === 'to do' ? 'pedido_no_cd' : 'pronto_conferencia';
+          const pessoaExtraida = extrairPessoaTask1(nome, desc);
+          if (pessoaExtraida && pessoaMatchesNome(pessoaExtraida)) {
+            vistosIds.add(task.id);
             pedidos.push({
               id: task.id,
-              nome: nome,
-              titulo: partes.length >= 2 ? partes.slice(0, -1).join(' — ').replace(/^📦\s*/, '').trim() : nome,
+              nome,
+              titulo: extrairTituloTask1(nome),
               statusClickUp: statusNorm,
-              statusLabel,
+              statusLabel: statusNorm === 'to do' ? 'pedido_no_cd' : 'pronto_conferencia',
               dataCriacao: task.date_created ?? '',
               dataAtualizacao: task.date_updated ?? '',
               resumo: null,
@@ -1213,27 +1244,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           }
         }
 
-        // Task 2: conferência com listeiro na descrição (status complete/concluido)
+        // Task 2 (conferencia): complete com Listeiro = pessoa
         if (statusNorm === 'complete' || statusNorm === 'concluido' || statusNorm === 'concluído') {
-          const listeiro = extrairListeiroDaDescricao(desc).toLowerCase();
-          if (listeiro && (listeiro === pessoaLower || listeiro.startsWith(pessoaLower))) {
-            const resumo = extrairResumoDescricao(desc);
+          const listeiro = extrairListeiro(desc);
+          if (listeiro && pessoaMatchesNome(listeiro)) {
+            vistosIds.add(task.id);
             pedidos.push({
               id: task.id,
-              nome: nome,
-              titulo: nome.replace(/^✅\s*/, '').trim(),
+              nome,
+              titulo: nome.replace(/^✅\s*/u, '').trim(),
               statusClickUp: statusNorm,
               statusLabel: 'concluido',
               dataCriacao: task.date_created ?? '',
               dataAtualizacao: task.date_updated ?? '',
-              resumo,
+              resumo: extrairResumo(desc),
             });
           }
         }
       }
 
       pedidos.sort((a, b) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
-      return res.status(200).json({ pedidos, pessoa, empresa, flag });
+      console.log(`[meus-pedidos] empresa=${empresa} flag=${flag} listId=${listId} pessoa=${pessoa} total=${todasTasks.length} encontrados=${pedidos.length}`);
+      return res.status(200).json({ pedidos, pessoa, empresa, flag, totalTasks: todasTasks.length });
     }
 
     if (action === 'deletar-task') {
