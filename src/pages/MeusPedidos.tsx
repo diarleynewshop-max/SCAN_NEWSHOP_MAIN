@@ -81,8 +81,34 @@ export default function MeusPedidos() {
   const loginSalvo = obterLoginSalvo();
   const modoDesktop = localStorage.getItem("modoDesktop") === "true";
 
-  const [todosPedidos, setTodosPedidos] = useState<Pedido[]>([]);
-  const [pessoas, setPessoas] = useState<string[]>([]);
+  const CACHE_TTL = 10 * 60 * 1000; // 10 minutos
+  const cacheKey = loginSalvo
+    ? `meus_pedidos_${loginSalvo.empresa}_${loginSalvo.flag ?? "loja"}`
+    : null;
+
+  function lerCache(): { pedidos: Pedido[]; pessoas: string[] } | null {
+    if (!cacheKey) return null;
+    try {
+      const raw = localStorage.getItem(cacheKey);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (Date.now() - parsed.savedAt > CACHE_TTL) {
+        localStorage.removeItem(cacheKey);
+        return null;
+      }
+      return { pedidos: parsed.pedidos, pessoas: parsed.pessoas };
+    } catch { return null; }
+  }
+
+  function salvarCache(pedidos: Pedido[], pessoas: string[]) {
+    if (!cacheKey) return;
+    try {
+      localStorage.setItem(cacheKey, JSON.stringify({ pedidos, pessoas, savedAt: Date.now() }));
+    } catch { /* localStorage cheio — ignora */ }
+  }
+
+  const [todosPedidos, setTodosPedidos] = useState<Pedido[]>(() => lerCache()?.pedidos ?? []);
+  const [pessoas, setPessoas] = useState<string[]>(() => lerCache()?.pessoas ?? []);
   const [loading, setLoading] = useState(false);
   const [erro, setErro] = useState<string | null>(null);
   const [filtroPessoa, setFiltroPessoa] = useState<string>("todos");
@@ -90,8 +116,19 @@ export default function MeusPedidos() {
   const [filtroPeriodo, setFiltroPeriodo] = useState<"dia" | "semana" | "mes">("semana");
   const [expandidoId, setExpandidoId] = useState<string | null>(null);
 
-  const buscarPedidos = useCallback(async () => {
+  const buscarPedidos = useCallback(async (forceFetch = false) => {
     if (!loginSalvo) return;
+
+    // Usa cache se disponível e não forçado
+    if (!forceFetch) {
+      const cache = lerCache();
+      if (cache) {
+        setTodosPedidos(cache.pedidos);
+        setPessoas(cache.pessoas);
+        return;
+      }
+    }
+
     setLoading(true);
     setErro(null);
 
@@ -109,18 +146,21 @@ export default function MeusPedidos() {
       }
 
       const data = await res.json();
-      setTodosPedidos(Array.isArray(data.pedidos) ? data.pedidos : []);
-      setPessoas(Array.isArray(data.pessoas) ? data.pessoas : []);
+      const pedidos: Pedido[] = Array.isArray(data.pedidos) ? data.pedidos : [];
+      const pss: string[] = Array.isArray(data.pessoas) ? data.pessoas : [];
+      setTodosPedidos(pedidos);
+      setPessoas(pss);
+      salvarCache(pedidos, pss);
     } catch (e: any) {
       setErro(e.message ?? "Erro ao buscar pedidos");
-      setTodosPedidos([]);
     } finally {
       setLoading(false);
     }
-  }, [loginSalvo]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loginSalvo, cacheKey]);
 
   useEffect(() => {
-    buscarPedidos();
+    buscarPedidos(false); // usa cache se disponível
   }, [buscarPedidos]);
 
   const toggleExpansao = useCallback((taskId: string) => {
@@ -177,7 +217,7 @@ export default function MeusPedidos() {
             </div>
           </div>
           <button
-            onClick={buscarPedidos}
+            onClick={() => buscarPedidos(true)}
             disabled={loading}
             style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,0.15)", border: "none", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}
           >
