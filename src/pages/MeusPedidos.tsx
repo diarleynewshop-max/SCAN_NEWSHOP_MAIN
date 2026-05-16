@@ -70,6 +70,7 @@ export default function MeusPedidos() {
   const [erro, setErro] = useState<string | null>(null);
   const [filtroPessoa, setFiltroPessoa] = useState<string>("todos");
   const [mostrarSeletor, setMostrarSeletor] = useState(false);
+  const [filtroPeriodo, setFiltroPeriodo] = useState<"dia" | "semana" | "mes">("semana");
 
   const buscarPedidos = useCallback(async () => {
     if (!loginSalvo) return;
@@ -110,7 +111,21 @@ export default function MeusPedidos() {
     : todosPedidos.filter((p) => p.pessoa.toLowerCase() === filtroPessoa.toLowerCase());
 
   const pedidosAbertos = pedidosFiltrados.filter((p) => p.statusLabel !== "concluido");
-  const pedidosConcluidos = pedidosFiltrados.filter((p) => p.statusLabel === "concluido");
+
+  // Filtro de período para concluídos
+  function dentroDoperiodo(ts: string): boolean {
+    const agora = Date.now();
+    const data = Number(ts) || 0;
+    if (!data) return false;
+    const diff = agora - data;
+    if (filtroPeriodo === "dia")    return diff <= 24 * 60 * 60 * 1000;
+    if (filtroPeriodo === "semana") return diff <= 7  * 24 * 60 * 60 * 1000;
+    return diff <= 30 * 24 * 60 * 60 * 1000; // mes
+  }
+
+  const pedidosConcluidos = pedidosFiltrados
+    .filter((p) => p.statusLabel === "concluido")
+    .filter((p) => dentroDoperiodo(p.dataAtualizacao || p.dataCriacao));
 
   const labelFiltro = filtroPessoa === "todos" ? `Todos (${todosPedidos.length})` : `${filtroPessoa} (${pedidosFiltrados.length})`;
 
@@ -267,11 +282,44 @@ export default function MeusPedidos() {
         )}
 
         {/* Pedidos concluídos */}
+        {pedidosFiltrados.some((p) => p.statusLabel === "concluido") && (
+          <>
+            {/* Seletor de período */}
+            <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: pedidosAbertos.length > 0 ? 8 : 4 }}>
+              <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", flexShrink: 0 }}>
+                Concluídos
+              </p>
+              <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
+                {(["dia", "semana", "mes"] as const).map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setFiltroPeriodo(p)}
+                    style={{
+                      height: 28, padding: "0 10px", borderRadius: 8, fontSize: 11, fontWeight: 700,
+                      cursor: "pointer", border: "1.5px solid",
+                      background: filtroPeriodo === p ? "hsl(var(--foreground))" : "transparent",
+                      color: filtroPeriodo === p ? "hsl(var(--background))" : "hsl(var(--muted-foreground))",
+                      borderColor: filtroPeriodo === p ? "hsl(var(--foreground))" : "hsl(var(--border))",
+                      textTransform: "uppercase",
+                      letterSpacing: "0.05em",
+                    }}
+                  >
+                    {p === "dia" ? "Hoje" : p === "semana" ? "7 dias" : "30 dias"}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {pedidosConcluidos.length === 0 && (
+              <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", textAlign: "center", padding: "16px 0" }}>
+                Nenhum concluído no período selecionado.
+              </p>
+            )}
+          </>
+        )}
+
         {pedidosConcluidos.length > 0 && (
           <>
-            <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginTop: pedidosAbertos.length > 0 ? 8 : 4 }}>
-              Concluídos · {pedidosConcluidos.length}
-            </p>
             {pedidosConcluidos.map((pedido) => {
               const cfg = STATUS_CONFIG.concluido;
               return (
