@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { ArrowLeft, RefreshCw, Package, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
@@ -36,6 +36,7 @@ interface Pedido {
   dataCriacao: string;
   dataAtualizacao: string;
   resumo: Resumo | null;
+  itens?: ItemConferencia[];
 }
 
 const PROXY_URL = "/api/clickup-proxy";
@@ -88,9 +89,6 @@ export default function MeusPedidos() {
   const [mostrarSeletor, setMostrarSeletor] = useState(false);
   const [filtroPeriodo, setFiltroPeriodo] = useState<"dia" | "semana" | "mes">("semana");
   const [expandidoId, setExpandidoId] = useState<string | null>(null);
-  const [itensPorTask, setItensPorTask] = useState<Record<string, ItemConferencia[]>>({});
-  const [carregandoItens, setCarregandoItens] = useState<string | null>(null);
-  const cacheRef = useRef<Record<string, ItemConferencia[]>>({});
 
   const buscarPedidos = useCallback(async () => {
     if (!loginSalvo) return;
@@ -125,34 +123,9 @@ export default function MeusPedidos() {
     buscarPedidos();
   }, [buscarPedidos]);
 
-  const abrirItens = useCallback(async (taskId: string) => {
-    if (expandidoId === taskId) { setExpandidoId(null); return; }
-    setExpandidoId(taskId);
-    if (cacheRef.current[taskId]) {
-      setItensPorTask((prev) => ({ ...prev, [taskId]: cacheRef.current[taskId] }));
-      return;
-    }
-    if (!loginSalvo) return;
-    setCarregandoItens(taskId);
-    try {
-      const params = new URLSearchParams({
-        action: "baixar-json",
-        empresa: loginSalvo.empresa,
-        flag: loginSalvo.flag ?? "loja",
-        taskId,
-      });
-      const res = await fetch(`${PROXY_URL}?${params}`);
-      if (!res.ok) throw new Error(`Erro ${res.status}`);
-      const json = await res.json();
-      const itens: ItemConferencia[] = Array.isArray(json?.itens) ? json.itens : [];
-      cacheRef.current[taskId] = itens;
-      setItensPorTask((prev) => ({ ...prev, [taskId]: itens }));
-    } catch {
-      setItensPorTask((prev) => ({ ...prev, [taskId]: [] }));
-    } finally {
-      setCarregandoItens(null);
-    }
-  }, [expandidoId, loginSalvo]);
+  const toggleExpansao = useCallback((taskId: string) => {
+    setExpandidoId((prev) => prev === taskId ? null : taskId);
+  }, []);
 
   // Filtro local — sem nova requisição
   const pedidosFiltrados = filtroPessoa === "todos"
@@ -372,8 +345,7 @@ export default function MeusPedidos() {
             {pedidosConcluidos.map((pedido) => {
               const cfg = STATUS_CONFIG.concluido;
               const expandido = expandidoId === pedido.id;
-              const itens = itensPorTask[pedido.id] ?? [];
-              const carregando = carregandoItens === pedido.id;
+              const itens: ItemConferencia[] = pedido.itens ?? [];
 
               const itensPorStatus = {
                 nao_tem:      itens.filter((i) => i.status === "nao_tem"),
@@ -386,7 +358,7 @@ export default function MeusPedidos() {
                 <div key={pedido.id} style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 14, overflow: "hidden" }}>
                   {/* Cabeçalho clicável */}
                   <button
-                    onClick={() => abrirItens(pedido.id)}
+                    onClick={() => toggleExpansao(pedido.id)}
                     style={{ width: "100%", padding: "14px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}
                   >
                     <div style={{ display: "flex", gap: 12 }}>
@@ -429,20 +401,13 @@ export default function MeusPedidos() {
                   {/* Itens expandidos */}
                   {expandido && (
                     <div style={{ borderTop: "1px solid hsl(var(--border))", padding: "12px 16px 14px" }}>
-                      {carregando && (
-                        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "hsl(var(--muted-foreground))", padding: "8px 0" }}>
-                          <RefreshCw style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} />
-                          <span style={{ fontSize: 13 }}>Carregando itens...</span>
-                        </div>
-                      )}
-
-                      {!carregando && itens.length === 0 && (
+                      {itens.length === 0 && (
                         <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", textAlign: "center", padding: "8px 0" }}>
-                          Itens não disponíveis (JSON não encontrado na task)
+                          Itens não disponíveis na descrição desta task.
                         </p>
                       )}
 
-                      {!carregando && itens.length > 0 && (
+                      {itens.length > 0 && (
                         <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
                           {(["nao_tem", "nao_tem_tudo", "pendente", "separado"] as const)
                             .filter((s) => itensPorStatus[s].length > 0)

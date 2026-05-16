@@ -1204,6 +1204,44 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       }
 
+      // Parseia itens da descrição: "N. Codigo: X | SKU: Y | Pedido: N | Real: N | STATUS"
+      function extrairItens(desc: string): any[] {
+        const STATUS_MAP: Record<string, string> = {
+          'separado': 'separado',
+          'nao tem': 'nao_tem',
+          'não tem': 'nao_tem',
+          'parcial': 'nao_tem_tudo',
+          'pendente': 'pendente',
+        };
+        const itens: any[] = [];
+        const linhas = desc.split('\n');
+        let secaoAtual = '';
+
+        for (const linha of linhas) {
+          // Detectar seção (ex: "{S}", "{M}", "Sem categoria")
+          const secaoMatch = linha.match(/^(\{[SM]\}|sem\s+categoria)/i);
+          if (secaoMatch) { secaoAtual = secaoMatch[1].replace(/[{}]/g, ''); continue; }
+
+          // Linha de item: "N. Codigo: X | SKU: Y | Pedido: N | Real: N | STATUS"
+          const itemMatch = linha.match(/^\d+\.\s+Codigo:\s*(\S+)\s*\|\s*SKU:\s*(\S*)\s*\|\s*Pedido:\s*(\d+)\s*\|\s*Real:\s*(-?\d+)\s*\|\s*(.+)/i);
+          if (!itemMatch) continue;
+
+          const [, codigo, sku, pedidoStr, realStr, statusRaw] = itemMatch;
+          const statusClean = statusRaw.replace(/[✅❌⚠️⏳]/g, '').trim().toLowerCase();
+          const status = STATUS_MAP[statusClean] ?? 'pendente';
+
+          itens.push({
+            codigo: codigo.trim(),
+            sku: sku.trim(),
+            secao: secaoAtual || null,
+            quantidadePedida: parseInt(pedidoStr),
+            quantidadeReal: parseInt(realStr),
+            status,
+          });
+        }
+        return itens;
+      }
+
       const pedidos: any[] = [];
       const pessoasSet = new Set<string>();
 
@@ -1247,6 +1285,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             dataCriacao: task.date_created ?? '',
             dataAtualizacao: task.date_updated ?? '',
             resumo: extrairResumo(desc),
+            itens: extrairItens(desc),
           });
         }
       }
