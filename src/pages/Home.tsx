@@ -1,5 +1,5 @@
 ﻿import { useNavigate } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Lock, Shield } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Lock, Shield, Package } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -32,6 +32,7 @@ const baseMenuItems = [
   { Icon: BadgeDollarSign, label: "Consulta Preço", description: "Consulte varejo, atacado e grupo", path: "/consulta-preco", accent: "hsl(var(--warning))" },
   { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))"     },
   { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
+  { Icon: Package,      label: "Meus Pedidos", description: "Acompanhe o status dos seus pedidos", path: "/meus-pedidos",             accent: "hsl(var(--indigo))"      },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },
   { Icon: Settings,     label: "Configuração", description: "Tema, layout e Modo Leve", path: null, accent: "hsl(var(--indigo))" },
 ];
@@ -457,6 +458,7 @@ const Home = () => {
               const userFlag = loginSalvo?.flag ?? 'loja';
               if (label === 'Escanear' || label === 'Lista') return true;
               if (label === 'Conferência') return userFlag === 'cd';
+              if (label === 'Meus Pedidos') return userFlag === 'loja';
               return true; // Consulta Preço, Perfil, Configuração sempre visíveis
             })
             .map(({ Icon, label, description, path, accent }) => (

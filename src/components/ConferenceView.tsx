@@ -127,6 +127,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [relatorioFiltro, setRelatorioFiltro] = useState<"todos" | "separado" | "nao_tem" | "parcial" | "pendente">("todos");
   const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
   const taskOrigemIdsRef = useRef<string[]>([]);
+  const [listeiro, setListeiro] = useState<string>("");
   const empresaRef = useRef(empresaInicial);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -298,6 +299,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         digito: digitoMap[item.codigo] ?? null,
       }));
 
+      // Extrair listeiro do nome da task: "📦 Titulo — NOME"
+      const partes = task.name.split(" — ");
+      const nomeListeiro = partes.length >= 2 ? partes[partes.length - 1].trim() : "";
+      setListeiro(nomeListeiro);
+
       setItems(parsed);
       setTaskOrigemIds([task.id]);
       taskOrigemIdsRef.current = [task.id];
@@ -364,6 +370,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       const origemIds = Array.isArray(meta?.pedidos)
         ? meta.pedidos.map((pedido: any) => String(pedido?.taskId ?? "")).filter(Boolean)
         : grupo.map((task) => task.id);
+
+      // Extrair listeiro do nome do grupo: "📦 Titulo — NOME"
+      const partesNome = nome.split(" — ");
+      const nomeListeiro = partesNome.length >= 2 ? partesNome[partesNome.length - 1].trim() : "";
+      setListeiro(nomeListeiro);
 
       setItems(parsed);
       setTaskOrigemIds(Array.from(new Set(origemIds)));
@@ -736,6 +747,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
   const getPayloadClickUp = () => ({
     conferente,
+    listeiro: listeiro || undefined,
     tempo: formatTime(elapsedSeconds),
     totalItens: items.length,
     resumo: getResumo(),

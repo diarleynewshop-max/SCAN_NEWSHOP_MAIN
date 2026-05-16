@@ -110,6 +110,7 @@ async function postClickUpAttachment(
         // Content-Type não definido: fetch seta multipart/form-data com boundary correto automaticamente
       },
       body: form,
+      signal: AbortSignal.timeout(60_000),
     }
   );
 
@@ -159,6 +160,7 @@ function montarJsonConferencia(payload: any, isCD: boolean) {
     empresa: payload.empresa ?? "NEWSHOP",
     flag: payload.flag ?? (isCD ? "cd" : "loja"),
     conferente: payload.conferente,
+    listeiro: payload.listeiro ?? null,
     tempo: payload.tempo,
     totalItens: payload.totalItens,
     resumo: payload.resumo,
@@ -300,6 +302,7 @@ async function criarTarefasComprasIndividuais(
 
   for (const item of itens) {
     const tagSecao = normalizarTagSecao(item.secao);
+    const listeiro = payload.listeiro ?? "";
     const taskId = await criarTarefaClickUp(
       CLICKUP_TODO_LIST_ID,
       `🛒 ${item.codigo} — ${payload.conferente} — ${dataFormatada}`,
@@ -309,7 +312,7 @@ async function criarTarefasComprasIndividuais(
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Conferente: ${payload.conferente}
-Data: ${dataFormatada}
+${listeiro ? `Listeiro: ${listeiro}\n` : ""}Data: ${dataFormatada}
 
 🛒 ITEM FALTANTE
 Status: ${statusMap[item.status] ?? item.status}
@@ -496,8 +499,9 @@ export const conferenciaBaixada = task({
         (i: any) => i.status === "nao_tem" || i.status === "nao_tem_tudo"
       );
 
+      const listeiro = payload.listeiro ?? "";
       const descricaoCompleta = `Conferente: ${payload.conferente}
-Empresa: ${payload.empresa ?? "NEWSHOP"}
+${listeiro ? `Listeiro: ${listeiro}\n` : ""}Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Data: ${dataFormatada}
 Tempo: ${payload.tempo}
@@ -513,7 +517,7 @@ Total: ${payload.totalItens ?? itensPayload.length} item(ns)
 ${itensTexto}`;
 
       const descricaoCompacta = `Conferente: ${payload.conferente}
-Empresa: ${payload.empresa ?? "NEWSHOP"}
+${listeiro ? `Listeiro: ${listeiro}\n` : ""}Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${isCD ? "CD" : "LOJA"}
 Data: ${dataFormatada}
 Tempo: ${payload.tempo}

@@ -1155,6 +1155,87 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(relatorio);
     }
 
+    if (action === 'buscar-meus-pedidos') {
+      const pessoa = getSingle(req.query.pessoa).trim();
+      if (!pessoa) return res.status(400).json({ error: 'pessoa obrigatorio' });
+
+      const listId = getListId(empresa, flag);
+      const [abertas, fechadas] = await Promise.all([
+        fetchTasksFromList(listId, token, false),
+        fetchTasksFromList(listId, token, true),
+      ]);
+
+      const todasTasks = [...abertas, ...fechadas];
+      const pessoaLower = pessoa.toLowerCase();
+
+      function extrairListeiroDaDescricao(desc: string): string {
+        const match = desc.match(/listeiro:\s*(.+)/i);
+        return match ? match[1].trim() : '';
+      }
+
+      function extrairResumoDescricao(desc: string): { separado: number; naoTem: number; parcial: number; pendente: number } | null {
+        const sep = desc.match(/separado:\s*(\d+)/i);
+        const naoTem = desc.match(/n[aã]o\s*tem:\s*(\d+)/i);
+        const parcial = desc.match(/parcial:\s*(\d+)/i);
+        const pendente = desc.match(/pendente:\s*(\d+)/i);
+        if (!sep && !naoTem && !parcial && !pendente) return null;
+        return {
+          separado: sep ? parseInt(sep[1]) : 0,
+          naoTem: naoTem ? parseInt(naoTem[1]) : 0,
+          parcial: parcial ? parseInt(parcial[1]) : 0,
+          pendente: pendente ? parseInt(pendente[1]) : 0,
+        };
+      }
+
+      const pedidos: any[] = [];
+
+      for (const task of todasTasks) {
+        const statusNorm = normalizeStatus(task.status?.status);
+        const nome: string = task.name ?? '';
+        const desc: string = task.description ?? task.text_content ?? '';
+
+        // Task 1: "📦 Titulo — PESSOA" em to do ou analisado
+        if (statusNorm === 'to do' || statusNorm === 'analisado') {
+          const partes = nome.split(' — ');
+          const nomePessoa = partes.length >= 2 ? partes[partes.length - 1].trim().toLowerCase() : '';
+          if (nomePessoa === pessoaLower || nomePessoa.startsWith(pessoaLower)) {
+            const statusLabel = statusNorm === 'to do' ? 'pedido_no_cd' : 'pronto_conferencia';
+            pedidos.push({
+              id: task.id,
+              nome: nome,
+              titulo: partes.length >= 2 ? partes.slice(0, -1).join(' — ').replace(/^📦\s*/, '').trim() : nome,
+              statusClickUp: statusNorm,
+              statusLabel,
+              dataCriacao: task.date_created ?? '',
+              dataAtualizacao: task.date_updated ?? '',
+              resumo: null,
+            });
+          }
+        }
+
+        // Task 2: conferência com listeiro na descrição (status complete/concluido)
+        if (statusNorm === 'complete' || statusNorm === 'concluido' || statusNorm === 'concluído') {
+          const listeiro = extrairListeiroDaDescricao(desc).toLowerCase();
+          if (listeiro && (listeiro === pessoaLower || listeiro.startsWith(pessoaLower))) {
+            const resumo = extrairResumoDescricao(desc);
+            pedidos.push({
+              id: task.id,
+              nome: nome,
+              titulo: nome.replace(/^✅\s*/, '').trim(),
+              statusClickUp: statusNorm,
+              statusLabel: 'concluido',
+              dataCriacao: task.date_created ?? '',
+              dataAtualizacao: task.date_updated ?? '',
+              resumo,
+            });
+          }
+        }
+      }
+
+      pedidos.sort((a, b) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
+      return res.status(200).json({ pedidos, pessoa, empresa, flag });
+    }
+
     if (action === 'deletar-task') {
       if (!taskId) return res.status(400).json({ error: 'taskId obrigatorio' });
 
