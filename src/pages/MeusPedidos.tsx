@@ -1,7 +1,23 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Package, CheckCircle2, Clock, AlertTriangle, ChevronDown } from "lucide-react";
+import { ArrowLeft, RefreshCw, Package, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp } from "lucide-react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
+
+interface ItemConferencia {
+  codigo: string;
+  sku: string;
+  secao?: string | null;
+  quantidadePedida: number;
+  quantidadeReal: number | null;
+  status: "separado" | "nao_tem" | "nao_tem_tudo" | "pendente";
+}
+
+const ITEM_STATUS = {
+  separado:     { label: "Separado", color: "hsl(var(--success))",           emoji: "✅" },
+  nao_tem:      { label: "Não tem",  color: "hsl(var(--destructive))",        emoji: "❌" },
+  nao_tem_tudo: { label: "Parcial",  color: "hsl(var(--warning))",            emoji: "⚠️" },
+  pendente:     { label: "Pendente", color: "hsl(var(--muted-foreground))",   emoji: "⏳" },
+} as const;
 
 interface Resumo {
   separado: number;
@@ -71,6 +87,10 @@ export default function MeusPedidos() {
   const [filtroPessoa, setFiltroPessoa] = useState<string>("todos");
   const [mostrarSeletor, setMostrarSeletor] = useState(false);
   const [filtroPeriodo, setFiltroPeriodo] = useState<"dia" | "semana" | "mes">("semana");
+  const [expandidoId, setExpandidoId] = useState<string | null>(null);
+  const [itensPorTask, setItensPorTask] = useState<Record<string, ItemConferencia[]>>({});
+  const [carregandoItens, setCarregandoItens] = useState<string | null>(null);
+  const cacheRef = useRef<Record<string, ItemConferencia[]>>({});
 
   const buscarPedidos = useCallback(async () => {
     if (!loginSalvo) return;
@@ -104,6 +124,35 @@ export default function MeusPedidos() {
   useEffect(() => {
     buscarPedidos();
   }, [buscarPedidos]);
+
+  const abrirItens = useCallback(async (taskId: string) => {
+    if (expandidoId === taskId) { setExpandidoId(null); return; }
+    setExpandidoId(taskId);
+    if (cacheRef.current[taskId]) {
+      setItensPorTask((prev) => ({ ...prev, [taskId]: cacheRef.current[taskId] }));
+      return;
+    }
+    if (!loginSalvo) return;
+    setCarregandoItens(taskId);
+    try {
+      const params = new URLSearchParams({
+        action: "baixar-json",
+        empresa: loginSalvo.empresa,
+        flag: loginSalvo.flag ?? "loja",
+        taskId,
+      });
+      const res = await fetch(`${PROXY_URL}?${params}`);
+      if (!res.ok) throw new Error(`Erro ${res.status}`);
+      const json = await res.json();
+      const itens: ItemConferencia[] = Array.isArray(json?.itens) ? json.itens : [];
+      cacheRef.current[taskId] = itens;
+      setItensPorTask((prev) => ({ ...prev, [taskId]: itens }));
+    } catch {
+      setItensPorTask((prev) => ({ ...prev, [taskId]: [] }));
+    } finally {
+      setCarregandoItens(null);
+    }
+  }, [expandidoId, loginSalvo]);
 
   // Filtro local — sem nova requisição
   const pedidosFiltrados = filtroPessoa === "todos"
@@ -322,37 +371,118 @@ export default function MeusPedidos() {
           <>
             {pedidosConcluidos.map((pedido) => {
               const cfg = STATUS_CONFIG.concluido;
-              return (
-                <div key={pedido.id} style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 14, padding: "14px 16px" }}>
-                  <div style={{ display: "flex", gap: 12, marginBottom: pedido.resumo ? 12 : 0 }}>
-                    <div style={{ width: 42, height: 42, borderRadius: 11, background: cfg.color + "20", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                      <CheckCircle2 style={{ width: 20, height: 20, color: cfg.color }} />
-                    </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 2 }}>
-                        <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pedido.titulo}</p>
-                        <span style={{ fontSize: 11, fontWeight: 700, color: cfg.color, background: cfg.color + "20", borderRadius: 6, padding: "2px 8px", flexShrink: 0 }}>{pedido.pessoa}</span>
-                      </div>
-                      <p style={{ fontSize: 12, fontWeight: 600, color: cfg.color }}>{cfg.label}</p>
-                      <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginTop: 3 }}>
-                        {formatarData(pedido.dataAtualizacao || pedido.dataCriacao)}
-                      </p>
-                    </div>
-                  </div>
+              const expandido = expandidoId === pedido.id;
+              const itens = itensPorTask[pedido.id] ?? [];
+              const carregando = carregandoItens === pedido.id;
 
-                  {pedido.resumo && (
-                    <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, borderTop: "1px solid hsl(var(--border))", paddingTop: 10 }}>
-                      {[
-                        { label: "Separado", value: pedido.resumo.separado, color: "hsl(var(--success))" },
-                        { label: "Não tem", value: pedido.resumo.naoTem, color: "hsl(var(--destructive))" },
-                        { label: "Parcial", value: pedido.resumo.parcial, color: "hsl(var(--warning))" },
-                        { label: "Pendente", value: pedido.resumo.pendente, color: "hsl(var(--muted-foreground))" },
-                      ].map(({ label, value, color }) => (
-                        <div key={label} style={{ background: "hsl(var(--secondary))", borderRadius: 10, padding: "10px 12px" }}>
-                          <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>{label}</p>
-                          <p style={{ fontSize: 22, fontWeight: 900, color, lineHeight: 1 }}>{value}</p>
+              const itensPorStatus = {
+                nao_tem:      itens.filter((i) => i.status === "nao_tem"),
+                nao_tem_tudo: itens.filter((i) => i.status === "nao_tem_tudo"),
+                pendente:     itens.filter((i) => i.status === "pendente"),
+                separado:     itens.filter((i) => i.status === "separado"),
+              };
+
+              return (
+                <div key={pedido.id} style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 14, overflow: "hidden" }}>
+                  {/* Cabeçalho clicável */}
+                  <button
+                    onClick={() => abrirItens(pedido.id)}
+                    style={{ width: "100%", padding: "14px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}
+                  >
+                    <div style={{ display: "flex", gap: 12 }}>
+                      <div style={{ width: 42, height: 42, borderRadius: 11, background: cfg.color + "20", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                        <CheckCircle2 style={{ width: 20, height: 20, color: cfg.color }} />
+                      </div>
+                      <div style={{ flex: 1, minWidth: 0 }}>
+                        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 2 }}>
+                          <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pedido.titulo}</p>
+                          <span style={{ fontSize: 11, fontWeight: 700, color: cfg.color, background: cfg.color + "20", borderRadius: 6, padding: "2px 8px", flexShrink: 0 }}>{pedido.pessoa}</span>
                         </div>
-                      ))}
+                        <p style={{ fontSize: 12, fontWeight: 600, color: cfg.color }}>{cfg.label}</p>
+                        <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginTop: 3 }}>
+                          {formatarData(pedido.dataAtualizacao || pedido.dataCriacao)}
+                        </p>
+                      </div>
+                      <div style={{ alignSelf: "center", flexShrink: 0, color: "hsl(var(--muted-foreground))" }}>
+                        {expandido ? <ChevronUp style={{ width: 16, height: 16 }} /> : <ChevronDown style={{ width: 16, height: 16 }} />}
+                      </div>
+                    </div>
+
+                    {/* Resumo em cards */}
+                    {pedido.resumo && (
+                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginTop: 12 }}>
+                        {[
+                          { label: "Separado", value: pedido.resumo.separado, color: "hsl(var(--success))" },
+                          { label: "Não tem",  value: pedido.resumo.naoTem,   color: "hsl(var(--destructive))" },
+                          { label: "Parcial",  value: pedido.resumo.parcial,  color: "hsl(var(--warning))" },
+                          { label: "Pendente", value: pedido.resumo.pendente, color: "hsl(var(--muted-foreground))" },
+                        ].map(({ label, value, color }) => (
+                          <div key={label} style={{ background: "hsl(var(--secondary))", borderRadius: 8, padding: "8px 6px", textAlign: "center" }}>
+                            <p style={{ fontSize: 9, color: "hsl(var(--muted-foreground))", marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</p>
+                            <p style={{ fontSize: 20, fontWeight: 900, color, lineHeight: 1 }}>{value}</p>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </button>
+
+                  {/* Itens expandidos */}
+                  {expandido && (
+                    <div style={{ borderTop: "1px solid hsl(var(--border))", padding: "12px 16px 14px" }}>
+                      {carregando && (
+                        <div style={{ display: "flex", alignItems: "center", gap: 8, color: "hsl(var(--muted-foreground))", padding: "8px 0" }}>
+                          <RefreshCw style={{ width: 14, height: 14, animation: "spin 1s linear infinite" }} />
+                          <span style={{ fontSize: 13 }}>Carregando itens...</span>
+                        </div>
+                      )}
+
+                      {!carregando && itens.length === 0 && (
+                        <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", textAlign: "center", padding: "8px 0" }}>
+                          Itens não disponíveis (JSON não encontrado na task)
+                        </p>
+                      )}
+
+                      {!carregando && itens.length > 0 && (
+                        <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+                          {(["nao_tem", "nao_tem_tudo", "pendente", "separado"] as const)
+                            .filter((s) => itensPorStatus[s].length > 0)
+                            .map((status) => {
+                              const { label, color, emoji } = ITEM_STATUS[status];
+                              return (
+                                <div key={status}>
+                                  <p style={{ fontSize: 10, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 6 }}>
+                                    {emoji} {label} ({itensPorStatus[status].length})
+                                  </p>
+                                  <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                                    {itensPorStatus[status].map((item) => (
+                                      <div
+                                        key={item.codigo}
+                                        style={{
+                                          display: "flex", alignItems: "center", justifyContent: "space-between",
+                                          padding: "8px 10px", borderRadius: 8,
+                                          background: color + "0D",
+                                          border: `1px solid ${color}22`,
+                                        }}
+                                      >
+                                        <div style={{ minWidth: 0 }}>
+                                          <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))" }}>{item.codigo}</p>
+                                          {item.sku && <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>SKU: {item.sku}</p>}
+                                          {item.secao && <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))" }}>{item.secao}</p>}
+                                        </div>
+                                        <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 8 }}>
+                                          <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>Pedido: <strong>{item.quantidadePedida}</strong></p>
+                                          {item.quantidadeReal !== null && (
+                                            <p style={{ fontSize: 11, color }}>Real: <strong>{item.quantidadeReal}</strong></p>
+                                          )}
+                                        </div>
+                                      </div>
+                                    ))}
+                                  </div>
+                                </div>
+                              );
+                            })}
+                        </div>
+                      )}
                     </div>
                   )}
                 </div>
