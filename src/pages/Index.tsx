@@ -113,6 +113,7 @@ const Index = () => {
   const currentLogin = obterLoginSalvo();
 
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
+  const [semEAN, setSemEAN] = useState(() => (sessionStorage.getItem("scan_barcode") ?? "").startsWith("SEM_EAN_"));
   const [sku, setSku] = useState(() => sessionStorage.getItem("scan_sku") ?? "");
   const [photo, setPhoto] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
@@ -324,6 +325,7 @@ const Index = () => {
     if (!ok) return;
 
     setBarcode("");
+    setSemEAN(false);
     setSku("");
     clearDraftPhoto();
     setQuantity("");
@@ -536,22 +538,49 @@ const Index = () => {
 
               <div>
                 <label style={S.label}>Codigo de Barras</label>
-                <BarcodeInput
-                  value={barcode}
-                  onChange={setBarcode}
-                  onScanPress={() => setShowScanner(true)}
-                  onEnterPress={() => {
-                    if (!barcode.trim()) return;
-                    if (consultaBloqueadaPorFlag) {
+                {semEAN ? (
+                  <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+                    <div style={{ flex: 1, height: 48, borderRadius: 10, border: "1.5px solid hsl(var(--warning) / 0.5)", background: "hsl(var(--warning) / 0.08)", display: "flex", alignItems: "center", padding: "0 14px", gap: 8 }}>
+                      <span style={{ fontSize: 18 }}>📦</span>
+                      <span style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--warning))" }}>PRODUTO SEM EAN</span>
+                    </div>
+                    <button
+                      onClick={() => { setBarcode(""); setSemEAN(false); }}
+                      style={{ width: 48, height: 48, borderRadius: 10, border: "1.5px solid hsl(var(--border))", background: "hsl(var(--card))", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(var(--muted-foreground))", flexShrink: 0 }}
+                      title="Cancelar sem EAN"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                ) : (
+                  <BarcodeInput
+                    value={barcode}
+                    onChange={(v) => { setBarcode(v); setSemEAN(false); }}
+                    onScanPress={() => setShowScanner(true)}
+                    onEnterPress={() => {
+                      if (!barcode.trim()) return;
                       if (consultaBloqueadaPorFlag) {
                         toast({ title: "Consulta bloqueada", description: "Consulta de produto ativa apenas para flag LOJA." });
+                        return;
                       }
-                      return;
-                    }
-                    setShowProductInfo(true);
-                    startProductLookup(barcode);
-                  }}
-                />
+                      setShowProductInfo(true);
+                      startProductLookup(barcode);
+                    }}
+                  />
+                )}
+                {!semEAN && (
+                  <button
+                    onClick={() => {
+                      const id = `SEM_EAN_${Date.now()}`;
+                      setBarcode(id);
+                      setSemEAN(true);
+                      setShowProductInfo(false);
+                    }}
+                    style={{ marginTop: 6, width: "100%", height: 36, borderRadius: 8, border: "1.5px dashed hsl(var(--warning) / 0.5)", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "hsl(var(--warning))", display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                  >
+                    📦 Produto sem EAN
+                  </button>
+                )}
               </div>
 
               <div data-tut="scanner-descricao">
