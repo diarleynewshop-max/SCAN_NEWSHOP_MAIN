@@ -587,7 +587,7 @@ ${itensPendentesTexto}
           empresa: payload.empresa ?? "NEWSHOP",
           flag: payload.flag,
           dataConferencia: payload.dataConferencia,
-          itens: itensPendentes,
+          itens: itensPendentes.map(({ photo: _p, ...rest }: any) => rest),
           resumo: { separado: 0, naoTem: 0, parcial: 0, pendente: itensPendentes.length },
           totalItens: itensPendentes.length,
           isPendentesReprocessamento: true,
