@@ -131,10 +131,75 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [apenasVisualizar, setApenasVisualizar] = useState(false);
   const [modalModoAberturaTask, setModalModoAberturaTask] = useState<ClickUpTask | null>(null);
   const [modalConfirmAndamento, setModalConfirmAndamento] = useState<ClickUpTask | null>(null);
+  const [rascunhoDisponivel, setRascunhoDisponivel] = useState(false);
   const empresaRef = useRef(empresaInicial);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+
+  // ── Rascunho automático ────────────────────────────────────────────────────
+  const DRAFT_KEY = "conferencia_draft_v1";
+  const DRAFT_TTL = 8 * 60 * 60 * 1000; // 8 horas
+
+  function salvarRascunho() {
+    if (phase !== "ready" && phase !== "running") return;
+    try {
+      const draft = {
+        phase, empresa, flag, conferente, listeiro,
+        items: items.map(({ photo: _p, ...rest }) => rest), // sem foto — evita estourar localStorage
+        currentIndex, taskOrigemIds, elapsedSeconds, apenasVisualizar,
+        savedAt: Date.now(),
+      };
+      localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
+    } catch { /* localStorage cheio — ignora */ }
+  }
+
+  function limparRascunho() {
+    localStorage.removeItem(DRAFT_KEY);
+    setRascunhoDisponivel(false);
+  }
+
+  function restaurarRascunho() {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (Date.now() - d.savedAt > DRAFT_TTL) { limparRascunho(); return; }
+      setPhase(d.phase);
+      setEmpresa(d.empresa);
+      setFlag(d.flag);
+      setConferente(d.conferente);
+      setListeiro(d.listeiro ?? "");
+      setItems(d.items ?? []);
+      setCurrentIndex(d.currentIndex ?? 0);
+      setTaskOrigemIds(d.taskOrigemIds ?? []);
+      taskOrigemIdsRef.current = d.taskOrigemIds ?? [];
+      setElapsedSeconds(d.elapsedSeconds ?? 0);
+      setApenasVisualizar(d.apenasVisualizar ?? false);
+      setRascunhoDisponivel(false);
+      toast({ title: "Conferência restaurada!", description: `${(d.items ?? []).length} itens recuperados.` });
+    } catch { limparRascunho(); }
+  }
+
+  // Salva rascunho sempre que items ou fase mudarem (running/ready)
+  useEffect(() => {
+    salvarRascunho();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [items, phase, currentIndex, elapsedSeconds]);
+
+  // Verifica rascunho no mount
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_KEY);
+      if (!raw) return;
+      const d = JSON.parse(raw);
+      if (Date.now() - d.savedAt > DRAFT_TTL) { localStorage.removeItem(DRAFT_KEY); return; }
+      if (d.items?.length > 0 && (d.phase === "ready" || d.phase === "running")) {
+        setRascunhoDisponivel(true);
+      }
+    } catch { localStorage.removeItem(DRAFT_KEY); }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const STORAGE_KEY = "clickup_sent_ids";
 
@@ -169,6 +234,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const liberarPedidoAtual = async () => {
     const ids = taskOrigemIdsRef.current;
     setApenasVisualizar(false);
+    limparRascunho();
     if (ids.length === 0) return;
 
     await liberarTasksConferencia(empresaRef.current as EmpresaKey, ids);
@@ -801,6 +867,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         conferenceId,
       });
       marcarComoEnviado();
+      limparRascunho();
       setSendStatus("sent");
       toast({ title: "✅ Chegou no ClickUp!", description: `Pedido de ${conferente} enviado com sucesso.` });
 
@@ -1285,6 +1352,41 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
+
+        {/* Banner de recuperação de rascunho */}
+        {rascunhoDisponivel && (() => {
+          let info = "";
+          try {
+            const raw = localStorage.getItem(DRAFT_KEY);
+            if (raw) {
+              const d = JSON.parse(raw);
+              const feitos = (d.items ?? []).filter((i: any) => i.status !== "aguardando").length;
+              const total = (d.items ?? []).length;
+              const mins = Math.round((Date.now() - d.savedAt) / 60000);
+              info = `${d.conferente} · ${feitos}/${total} itens · há ${mins < 1 ? "menos de 1 min" : `${mins} min`}`;
+            }
+          } catch { /**/ }
+          return (
+            <div style={{ background: "hsl(var(--warning) / 0.1)", border: "1.5px solid hsl(var(--warning) / 0.35)", borderRadius: 14, padding: "14px 16px" }}>
+              <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))", marginBottom: 4 }}>📋 Conferência não finalizada</p>
+              {info && <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginBottom: 10 }}>{info}</p>}
+              <div style={{ display: "flex", gap: 8 }}>
+                <button
+                  onClick={restaurarRascunho}
+                  style={{ flex: 1, height: 40, borderRadius: 10, border: "none", background: "hsl(var(--warning))", color: "#fff", fontWeight: 700, fontSize: 13, cursor: "pointer" }}
+                >
+                  Continuar
+                </button>
+                <button
+                  onClick={limparRascunho}
+                  style={{ flex: 1, height: 40, borderRadius: 10, border: "1.5px solid hsl(var(--border))", background: "transparent", fontWeight: 600, fontSize: 13, cursor: "pointer", color: "hsl(var(--muted-foreground))" }}
+                >
+                  Descartar
+                </button>
+              </div>
+            </div>
+          );
+        })()}
 
         <div className="space-y-4 pt-2">
           <div>
