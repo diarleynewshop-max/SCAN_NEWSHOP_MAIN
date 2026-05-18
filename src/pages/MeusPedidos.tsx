@@ -5,7 +5,8 @@ import {
   ChevronDown, ChevronUp, User, Calendar, Search, X, ScanBarcode,
 } from "lucide-react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
-import BarcodeScanner from "@/components/BarcodeScanner";
+import { lazy, Suspense } from "react";
+const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
 import KanbanAdmin from "@/components/KanbanAdmin";
 
 interface ItemConferencia {
@@ -135,10 +136,19 @@ export default function MeusPedidos() {
   }
   function matchData(p: Pedido) {
     if (!filtroDataDe && !filtroDataAte) return true;
-    const d = tsParaDate(p.dataCriacao);
+    // usa a data mais relevante: atualização para concluídos, criação para abertos
+    const ts = p.statusLabel === "concluido"
+      ? (p.dataAtualizacao || p.dataCriacao)
+      : p.dataCriacao;
+    const d = tsParaDate(ts);
     if (!d) return true;
-    if (filtroDataDe && d < new Date(filtroDataDe + "T00:00:00")) return false;
-    if (filtroDataAte && d > new Date(filtroDataAte + "T23:59:59")) return false;
+    // comparação por dia sem depender de timezone: extrai YYYY-MM-DD do timestamp
+    const ano  = d.getFullYear();
+    const mes  = String(d.getMonth() + 1).padStart(2, "0");
+    const dia  = String(d.getDate()).padStart(2, "0");
+    const dataStr = `${ano}-${mes}-${dia}`;
+    if (filtroDataDe && dataStr < filtroDataDe) return false;
+    if (filtroDataAte && dataStr > filtroDataAte) return false;
     return true;
   }
   function matchProduto(p: Pedido) {
@@ -188,10 +198,12 @@ export default function MeusPedidos() {
 
       {/* Scanner popup */}
       {mostrarScanner && (
-        <BarcodeScanner
-          onDetected={(code) => { setFiltroProduto(code); setMostrarScanner(false); setFiltroAtivo("produto"); }}
-          onClose={() => setMostrarScanner(false)}
-        />
+        <Suspense fallback={null}>
+          <BarcodeScanner
+            onDetected={(code) => { setFiltroProduto(code); setMostrarScanner(false); setFiltroAtivo("produto"); }}
+            onClose={() => setMostrarScanner(false)}
+          />
+        </Suspense>
       )}
 
       {/* Header */}

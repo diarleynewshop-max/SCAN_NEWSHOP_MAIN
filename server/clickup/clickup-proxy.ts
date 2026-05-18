@@ -1273,6 +1273,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
             dataCriacao: task.date_created ?? '',
             dataAtualizacao: task.date_updated ?? '',
             resumo: null,
+            itens: extrairItens(desc), // permite busca por código/descrição em pedidos abertos
           });
         }
 
