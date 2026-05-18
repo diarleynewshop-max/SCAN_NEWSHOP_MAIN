@@ -53,12 +53,16 @@ Arquivos: `src/trigger/index.ts` e `src/trigger/indexSF.ts`.
 
 ### Upload de anexos para ClickUp (`postClickUpAttachment`)
 
-Ja quebrou em prod com `ATTCH_045` ("Request is not 'multipart/form-data'"). Leia o bloco de comentario acima da funcao ANTES de editar. Regras:
+Ja quebrou em prod multiplas vezes com `ATTCH_045` ("Request is not 'multipart/form-data'"). Leia o bloco de comentario acima da funcao ANTES de editar. Regras:
 
-1. SEMPRE `FormData` + `Blob` nativos. NUNCA construa multipart manualmente com `Buffer.concat` + boundary.
-2. NUNCA defina `Content-Type` manualmente — o fetch nativo gera o boundary e o injeta sozinho.
-3. UNICO header permitido: `Authorization`.
-4. `Blob` precisa ter `type: mimeType` e o `append` precisa do `filename` (3 argumento).
-5. Timeout via `AbortSignal.timeout(...)`. NAO trocar por `Promise.race` + `setTimeout`.
+1. SEMPRE usar `form-data` (npm) + `node-fetch@2` (npm) — sao deps diretas do projeto. NUNCA usar o `FormData`/`Blob` globais do Node 21 com o `fetch` global (undici). NUNCA construir multipart manualmente com `Buffer.concat`.
+2. NUNCA definir `Content-Type` manualmente. Usar `...form.getHeaders()` no header — ele ja inclui o boundary correto.
+3. Headers permitidos: `Authorization` + spread de `form.getHeaders()`. Nada mais.
+4. Passar o `form` direto como body. NAO converter para Buffer/Uint8Array.
+5. Timeout via opcao `timeout: ms` do node-fetch v2.
 
-Se for trocar a lib de upload (axios, got, node-fetch), TESTE em prod antes do merge. O combo `FormData + Blob + fetch nativo sem Content-Type` e o unico que funciona consistentemente no runtime do Trigger.dev v3 com a API do ClickUp.
+Por que: o `fetch` global do Node 21 (undici) serializa `Blob`/`FormData` de um jeito que a API do ClickUp rejeita. Combos ja testados que FALHARAM:
+- Construcao manual de multipart com `Buffer.concat` + Content-Type manual
+- `FormData` + `Blob` globais + `fetch` global sem Content-Type
+
+So funciona com `form-data` + `node-fetch@2`. Se for trocar a lib de upload, TESTE em prod com um run real antes do merge.

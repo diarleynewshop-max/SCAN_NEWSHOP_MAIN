@@ -1,5 +1,7 @@
 import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
+import FormDataNode from "form-data";
+import nodeFetch from "node-fetch";
 
 type EmpresaSF = "SOYE" | "FACIL";
 type FlagLista = "loja" | "cd";
@@ -201,31 +203,29 @@ function truncarTexto(value: string, maxChars: number): string {
 //
 // REGRAS OBRIGATÓRIAS — siga TODAS, na ordem:
 //
-//  1. USE FormData NATIVO + Blob. NÃO construa o body multipart na mão com
-//     Buffer.concat / boundaries / "Content-Disposition" em string. Já tentamos
-//     e o runtime do Trigger.dev (Node fetch / undici) quebra silenciosamente.
+//  1. USE `form-data` (npm) + `node-fetch@2` (npm). NÃO USE o `FormData`/`Blob`
+//     globais do Node 21 com o `fetch` global (undici). Eles geram um body que
+//     a API do ClickUp rejeita com ATTCH_045. Também NÃO construa multipart
+//     manualmente com `Buffer.concat`. Já tentamos as duas coisas.
 //
-//  2. NÃO defina o header "Content-Type" manualmente. O fetch nativo PRECISA
-//     setar sozinho, porque ele gera o boundary do multipart e injeta no header.
-//     Se você setar "Content-Type: multipart/form-data" SEM o boundary correto,
-//     ClickUp responde ATTCH_045. Se setar COM boundary próprio, ele não bate
-//     com o body que o fetch monta. Em ambos os casos: erro.
+//  2. Use `form.getHeaders()` para que o header `Content-Type` venha COM o
+//     boundary correto. NÃO defina `Content-Type` manualmente.
 //
-//  3. O ÚNICO header permitido aqui é "Authorization". Nada mais.
+//  3. Headers permitidos: `Authorization` + spread de `form.getHeaders()`.
 //
-//  4. Use Blob com `type: mimeType` (3º argumento do append com filename) —
-//     o ClickUp precisa do filename para reconhecer o anexo.
+//  4. Passe o `form` direto como body. O `node-fetch@2` aceita o stream.
 //
-//  5. Para timeout, use AbortSignal.timeout — NÃO troque por Promise.race
-//     com setTimeout (o undici tem comportamento diferente).
+//  5. Timeout via `timeout: ms` (node-fetch v2 suporta nativamente).
 //
-// Se for trocar a lib de upload (axios, got, etc.), TESTE em prod antes de
-// remover o FormData + Blob. Esse é o único combo que funciona consistentemente
-// no runtime do Trigger.dev v3 com a API do ClickUp.
+// Por que `form-data` + `node-fetch@2` e não `FormData` + `fetch` global?
+//   O undici (fetch global do Node 21) serializa o `Blob`/`FormData` de um
+//   jeito que a API do ClickUp não aceita. Esse é o único combo que funciona
+//   em prod com o Trigger.dev v3.
 //
 // Histórico de quebras:
-//  - 2026-05-18: construção manual de multipart com Buffer → ATTCH_045
-//                fix em commit a072e3d (substituído por FormData + Blob)
+//   - 2026-05-18: construção manual de multipart com Buffer → ATTCH_045
+//   - 2026-05-18: FormData + Blob globais → ATTCH_045
+//                 (troca definitiva para form-data + node-fetch@2)
 // ============================================================================
 async function postClickUpAttachment(
   taskId: string,
@@ -243,19 +243,19 @@ async function postClickUpAttachment(
     : Buffer.from(content as string);
 
   // PADRÃO CORRETO — não altere sem ler o bloco acima.
-  const formData = new FormData();
-  formData.append("attachment", new Blob([fileBuffer], { type: mimeType }), filename);
+  const form = new FormDataNode();
+  form.append("attachment", fileBuffer, { filename, contentType: mimeType });
 
-  const response = await fetch(
+  const response = await nodeFetch(
     `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
     {
       method: "POST",
       headers: {
         Authorization: token,
-        // NÃO ADICIONE "Content-Type" AQUI. Leia o comentário acima.
+        ...form.getHeaders(),
       },
-      body: formData,
-      signal: AbortSignal.timeout(60_000),
+      body: form,
+      timeout: 60_000,
     }
   );
 
