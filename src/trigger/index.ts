@@ -548,6 +548,48 @@ ${truncarTexto(itensTexto, MAX_CLICKUP_DESCRIPTION_PREVIEW_CHARS)}
       const nomeAnexo = sanitizarNomeArquivo(`conferencia_${payload.conferente}_${dataFormatada}`);
       await anexarJsonNaTarefa(tarefaOriginalId, nomeAnexo, montarJsonConferencia(payload, isCD));
 
+      // Task de pendentes: cria em "analisado" com apenas os itens pendentes
+      const itensPendentes = itensPayload.filter((i: any) => i.status === "pendente");
+      if (itensPendentes.length > 0) {
+        const nomePessoa = listeiro || payload.conferente;
+        const nomePendentes = `⏳ ${nomePessoa} — ${dataFormatada} — PENDENTES`;
+        const itensPendentesTexto = itensPendentes.map(formatarItem).join("\n");
+        const descPendentes = `Conferente: ${payload.conferente}
+${listeiro ? `Listeiro: ${listeiro}\n` : ""}Empresa: ${payload.empresa ?? "NEWSHOP"}
+Tipo: ${isCD ? "CD" : "LOJA"}
+Data: ${dataFormatada}
+Total Pendentes: ${itensPendentes.length}
+
+⏳ ITENS PENDENTES
+${itensPendentesTexto}
+
+📎 JSON com itens pendentes anexado.`;
+
+        const taskPendentesId = await criarTarefaComDescricaoFallback(
+          listId,
+          nomePendentes,
+          descPendentes,
+          descPendentes,
+          "analisado"
+        );
+        console.log(`Task de pendentes criada: ${taskPendentesId} (${itensPendentes.length} itens)`);
+
+        const jsonPendentes = {
+          conferente: payload.conferente,
+          listeiro,
+          empresa: payload.empresa ?? "NEWSHOP",
+          flag: payload.flag,
+          dataConferencia: payload.dataConferencia,
+          itens: itensPendentes,
+          resumo: { separado: 0, naoTem: 0, parcial: 0, pendente: itensPendentes.length },
+          totalItens: itensPendentes.length,
+          isPendentesReprocessamento: true,
+          taskOriginalId: tarefaOriginalId,
+        };
+        const nomeAnexoPendentes = sanitizarNomeArquivo(`pendentes_${nomePessoa}_${dataFormatada}`);
+        await anexarJsonNaTarefa(taskPendentesId, nomeAnexoPendentes, jsonPendentes);
+      }
+
       if (itensNaoTem.length > 0) {
         todoTaskId = await criarTarefasComprasIndividuais(
           itensNaoTem,
