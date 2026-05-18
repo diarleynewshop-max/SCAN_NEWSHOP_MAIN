@@ -445,12 +445,18 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       }
       const taskComAnexos = { ...task, attachments };
 
-      let json = await baixarJsonDaTask(empresa as EmpresaKey, taskComAnexos);
+      let json: any = null;
+      try {
+        json = await baixarJsonDaTask(empresa as EmpresaKey, taskComAnexos);
+      } catch (errDownload) {
+        // baixarJsonDaTask lança quando 404. Captura silenciosa pra tentar o fallback abaixo.
+        console.warn("[abrirTask] baixarJsonDaTask falhou, tentando reconstruir:", errDownload);
+      }
       // Fallback: task de PENDENTES antiga sem JSON → reconstroi a partir da descricao.
       if (!json) {
         const reconstruido = reconstruirJsonPendentesDeDescricao(task.description ?? "", task.name);
         if (reconstruido) {
-          json = reconstruido as any;
+          json = reconstruido;
           toast({ title: "JSON reconstruído da descrição (task antiga sem anexo)" });
         }
       }
