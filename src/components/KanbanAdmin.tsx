@@ -54,14 +54,19 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
 
   useEffect(() => { buscar(); }, [buscar]);
 
+  function proxyPost(action: string, body: object) {
+    const params = new URLSearchParams({ action, empresa, flag });
+    return fetch(`${PROXY_URL}?${params}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+  }
+
   async function moverStatus(taskId: string, novoStatus: string) {
     setMovendo(p => new Set(p).add(taskId));
     try {
-      const res = await fetch(PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "mover-status-pedido", empresa, flag, taskId, novoStatus }),
-      });
+      const res = await proxyPost("mover-status-pedido", { taskId, novoStatus });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error ?? `Erro ${res.status}`); }
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, statusLabel: "pronto_conferencia", statusClickUp: "analisado" } : t));
     } catch (e: any) { alert(`Erro ao mover: ${(e as Error).message}`); }
@@ -74,11 +79,7 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
     if (!confirm(`Mover ${pendentes.length} pedido(s) para Analisado?`)) return;
     setMovendo(new Set(pendentes.map(t => t.id)));
     try {
-      await Promise.all(pendentes.map(t => fetch(PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "mover-status-pedido", empresa, flag, taskId: t.id, novoStatus: "analisado" }),
-      })));
+      await Promise.all(pendentes.map(t => proxyPost("mover-status-pedido", { taskId: t.id, novoStatus: "analisado" })));
       setTasks(prev => prev.map(t => t.statusLabel === "pedido_no_cd" ? { ...t, statusLabel: "pronto_conferencia", statusClickUp: "analisado" } : t));
     } catch (e: any) { alert(`Erro: ${(e as Error).message}`); }
     finally { setMovendo(new Set()); }
@@ -90,18 +91,14 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
     if (!confirm(`Marcar ${semAnexo.length} pedido(s) sem anexo com etiqueta "SEM JSON" no ClickUp?`)) return;
     setMarcando(true);
     try {
-      const res = await fetch(PROXY_URL, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ action: "marcar-sem-json", empresa, flag, taskIds: semAnexo.map(t => t.id) }),
-      });
+      const res = await proxyPost("marcar-sem-json", { taskIds: semAnexo.map(t => t.id) });
       if (!res.ok) throw new Error(`Erro ${res.status}`);
       setTasks(prev => prev.map(t => !t.temAnexo ? { ...t, semJsonTag: true } : t));
     } catch (e: any) { alert(`Erro: ${(e as Error).message}`); }
     finally { setMarcando(false); }
   }
 
-  const cols: Array<"pedido_no_cd" | "pronto_conferencia" | "concluido"> = ["pedido_no_cd", "pronto_conferencia", "concluido"];
+  const cols: Array<"pedido_no_cd" | "pronto_conferencia"> = ["pedido_no_cd", "pronto_conferencia"];
 
   if (loading) return (
     <div style={{ textAlign: "center", padding: "48px 16px", color: "hsl(var(--muted-foreground))" }}>
@@ -145,12 +142,12 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
       </div>
 
       {/* Colunas Kanban */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0, overflowX: "auto", minHeight: 200 }}>
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 0, overflowX: "auto", minHeight: 200 }}>
         {cols.map(col => {
           const cfg = COL_CONFIG[col];
           const colTasks = tasks.filter(t => t.statusLabel === col);
           return (
-            <div key={col} style={{ borderRight: col !== "concluido" ? "1px solid hsl(var(--border))" : "none", display: "flex", flexDirection: "column" }}>
+            <div key={col} style={{ borderRight: col !== "pronto_conferencia" ? "1px solid hsl(var(--border))" : "none", display: "flex", flexDirection: "column" }}>
               {/* Header coluna */}
               <div style={{ padding: "10px 12px", borderBottom: "1px solid hsl(var(--border))", background: cfg.bg, display: "flex", alignItems: "center", gap: 6 }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: cfg.color, flexShrink: 0, display: "inline-block" }} />

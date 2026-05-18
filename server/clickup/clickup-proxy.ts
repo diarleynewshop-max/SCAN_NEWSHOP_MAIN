@@ -1374,9 +1374,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
         .filter((t: any) => t.statusLabel !== undefined);
 
-      kanbanTasks.sort((a: any, b: any) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
-      console.log(`[kanban-admin] empresa=${empresa} total=${kanbanTasks.length}`);
-      return res.status(200).json({ tasks: kanbanTasks });
+      // Somente Pendente (to do) e Analisado — Concluído não entra no kanban
+      const kanbanFiltrado = kanbanTasks.filter((t: any) => t.statusLabel === 'pedido_no_cd' || t.statusLabel === 'pronto_conferencia');
+      kanbanFiltrado.sort((a: any, b: any) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
+      console.log(`[kanban-admin] empresa=${empresa} total=${kanbanFiltrado.length}`);
+      return res.status(200).json({ tasks: kanbanFiltrado });
     }
 
     if (action === 'mover-status-pedido') {
