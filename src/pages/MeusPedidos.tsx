@@ -6,6 +6,7 @@ import {
 } from "lucide-react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import BarcodeScanner from "@/components/BarcodeScanner";
+import KanbanAdmin from "@/components/KanbanAdmin";
 
 interface ItemConferencia {
   codigo: string;
@@ -63,6 +64,7 @@ export default function MeusPedidos() {
   const navigate = useNavigate();
   const loginSalvo = obterLoginSalvo();
   const modoDesktop = localStorage.getItem("modoDesktop") === "true";
+  const isAdmin = loginSalvo?.role === "admin" || loginSalvo?.role === "super";
   const pad = modoDesktop ? "20px 32px" : "12px 16px";
 
   const CACHE_TTL = 10 * 60 * 1000;
@@ -98,6 +100,7 @@ export default function MeusPedidos() {
   const [filtroAtivo,    setFiltroAtivo]    = useState<"pessoa" | "data" | "produto" | null>(null);
   const [mostrarScanner, setMostrarScanner] = useState(false);
   const [filtroPeriodo,  setFiltroPeriodo]  = useState<"dia" | "semana" | "mes">("semana");
+  const [viewMode,       setViewMode]       = useState<"lista" | "kanban">(isAdmin ? "kanban" : "lista");
 
   const buscarPedidos = useCallback(async (forceFetch = false) => {
     if (!loginSalvo) return;
@@ -204,15 +207,32 @@ export default function MeusPedidos() {
               <p style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>{loginSalvo?.empresa} · {(loginSalvo?.flag ?? "loja").toUpperCase()}</p>
             </div>
           </div>
-          <button onClick={() => buscarPedidos(true)} disabled={loading} style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,0.15)", border: "none", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-            <RefreshCw style={{ width: 18, height: 18, animation: loading ? "spin 1s linear infinite" : "none" }} />
-          </button>
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            {isAdmin && (
+              <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "1.5px solid rgba(255,255,255,0.25)" }}>
+                {(["lista", "kanban"] as const).map(m => (
+                  <button key={m} onClick={() => setViewMode(m)} style={{ height: 36, padding: "0 12px", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, background: viewMode === m ? "rgba(255,255,255,0.25)" : "transparent", color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
+                    {m === "lista" ? "Lista" : "Kanban"}
+                  </button>
+                ))}
+              </div>
+            )}
+            <button onClick={() => buscarPedidos(true)} disabled={loading} style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,0.15)", border: "none", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
+              <RefreshCw style={{ width: 18, height: 18, animation: loading ? "spin 1s linear infinite" : "none" }} />
+            </button>
+          </div>
         </div>
       </header>
 
       <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
 
+      {/* Kanban para admin */}
+      {isAdmin && viewMode === "kanban" && (
+        <KanbanAdmin empresa={loginSalvo?.empresa ?? ""} flag={loginSalvo?.flag ?? "loja"} />
+      )}
+
       {/* Chips de filtro */}
+      {(!isAdmin || viewMode === "lista") &&
       {!loading && todosPedidos.length > 0 && (
         <div style={{ padding: `12px ${modoDesktop ? "32px" : "16px"} 0`, display: "flex", flexDirection: "column", gap: 0 }}>
 
@@ -472,6 +492,7 @@ export default function MeusPedidos() {
           );
         })}
       </div>
+      }
     </div>
   );
 }

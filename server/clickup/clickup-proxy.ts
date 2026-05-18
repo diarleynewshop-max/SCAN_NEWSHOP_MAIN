@@ -1302,6 +1302,102 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ pedidos, pessoas, empresa, flag });
     }
 
+    if (action === 'buscar-kanban-admin') {
+      const listId = getListId(empresa, flag ?? 'loja');
+      const allTasks: any[] = [];
+      for (let page = 0; page < 5; page++) {
+        const resp = await fetch(
+          `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&include_attachments=true&page=${page}`,
+          { headers: { Authorization: token } }
+        );
+        if (!resp.ok) throw new Error(`ClickUp ${resp.status}: ${await resp.text()}`);
+        const d = await resp.json();
+        const ts = Array.isArray(d.tasks) ? d.tasks : [];
+        allTasks.push(...ts);
+        if (ts.length < 100) break;
+      }
+
+      function extrairPessoaKanban(task: any, desc: string): string {
+        const listeiro = desc.match(/^listeiro:\s*(.+)/im)?.[1]?.trim();
+        if (listeiro) return listeiro;
+        const tags: string[] = (task.tags ?? []).map((t: any) => String(t?.name ?? t ?? '').trim());
+        const tagPessoa = tags.find((t) => t && !t.startsWith('SECAO') && t !== 'pedido em andamento' && t !== 'SEM JSON');
+        if (tagPessoa) return tagPessoa;
+        const nome: string = (task.name ?? '').replace(/^[\p{Emoji}\s]+/u, '').trim();
+        const partes = nome.split(/\s+[—–\-]+\s+/);
+        if (partes.length >= 2) {
+          const ultimo = partes[partes.length - 1].trim();
+          return /\d{2}\/\d{2}\/\d{4}/.test(ultimo) ? partes[0].trim() : ultimo;
+        }
+        return nome;
+      }
+
+      function extrairTituloKanban(task: any): string {
+        const nome: string = (task.name ?? '').replace(/^[\p{Emoji}\s]+/u, '').trim();
+        const partes = nome.split(/\s+[—–\-]+\s+/);
+        if (partes.length >= 2) {
+          const ultimo = partes[partes.length - 1].trim();
+          if (/\d{2}\/\d{2}\/\d{4}/.test(ultimo)) return nome; // formato "NOME — DATA" — usa tudo
+          return partes.slice(0, -1).join(' — ');
+        }
+        return nome;
+      }
+
+      const kanbanTasks = allTasks
+        .filter((task: any) => {
+          const n: string = task.name ?? '';
+          return !n.startsWith('🛒') && !n.toLowerCase().includes('relatorio');
+        })
+        .map((task: any) => {
+          const statusNorm = normalizeStatus(task.status?.status);
+          const attachments: any[] = task.attachments ?? [];
+          const temAnexo = attachments.some(isJsonAttachment);
+          const tags: string[] = (task.tags ?? []).map((t: any) => String(t?.name ?? t ?? '').trim());
+          const desc: string = task.description ?? task.text_content ?? '';
+          const semJsonTag = tags.some((t) => normalizeText(t) === 'sem json');
+
+          let statusLabel: 'pedido_no_cd' | 'pronto_conferencia' | 'concluido' = 'pedido_no_cd';
+          if (statusNorm === 'analisado') statusLabel = 'pronto_conferencia';
+          else if (statusNorm === 'complete' || statusNorm === 'concluido' || statusNorm === 'concluído') statusLabel = 'concluido';
+
+          return {
+            id: task.id,
+            titulo: extrairTituloKanban(task),
+            pessoa: extrairPessoaKanban(task, desc),
+            statusClickUp: statusNorm,
+            statusLabel,
+            dataCriacao: task.date_created ?? '',
+            dataAtualizacao: task.date_updated ?? '',
+            temAnexo,
+            semJsonTag,
+          };
+        })
+        .filter((t: any) => t.statusLabel !== undefined);
+
+      kanbanTasks.sort((a: any, b: any) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
+      console.log(`[kanban-admin] empresa=${empresa} total=${kanbanTasks.length}`);
+      return res.status(200).json({ tasks: kanbanTasks });
+    }
+
+    if (action === 'mover-status-pedido') {
+      const { taskId: tid, novoStatus } = body;
+      if (!tid || !novoStatus) return res.status(400).json({ error: 'taskId e novoStatus obrigatorios' });
+      const resp = await fetch(`https://api.clickup.com/api/v2/task/${tid}`, {
+        method: 'PUT',
+        headers: { Authorization: token, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: novoStatus }),
+      });
+      if (!resp.ok) throw new Error(`ClickUp ${resp.status}: ${await resp.text()}`);
+      return res.status(200).json({ ok: true });
+    }
+
+    if (action === 'marcar-sem-json') {
+      const { taskIds } = body;
+      if (!Array.isArray(taskIds) || taskIds.length === 0) return res.status(400).json({ error: 'taskIds obrigatorio' });
+      await Promise.all(taskIds.map((tid: string) => addTaskTag(token, tid, 'SEM JSON')));
+      return res.status(200).json({ ok: true, marcados: taskIds.length });
+    }
+
     if (action === 'deletar-task') {
       if (!taskId) return res.status(400).json({ error: 'taskId obrigatorio' });
 
