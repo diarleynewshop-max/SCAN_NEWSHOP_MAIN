@@ -46,3 +46,19 @@ Usar este formato em respostas tecnicas:
 - Evitar refatoracao ampla sem necessidade.
 - Proteger fluxos de `SOYE` e `FACIL` conforme regra atual.
 - Em mudancas de compras, tratar mapeamento de status como ponto critico.
+
+## Regras CRITICAS do Trigger.dev
+
+Arquivos: `src/trigger/index.ts` e `src/trigger/indexSF.ts`.
+
+### Upload de anexos para ClickUp (`postClickUpAttachment`)
+
+Ja quebrou em prod com `ATTCH_045` ("Request is not 'multipart/form-data'"). Leia o bloco de comentario acima da funcao ANTES de editar. Regras:
+
+1. SEMPRE `FormData` + `Blob` nativos. NUNCA construa multipart manualmente com `Buffer.concat` + boundary.
+2. NUNCA defina `Content-Type` manualmente — o fetch nativo gera o boundary e o injeta sozinho.
+3. UNICO header permitido: `Authorization`.
+4. `Blob` precisa ter `type: mimeType` e o `append` precisa do `filename` (3 argumento).
+5. Timeout via `AbortSignal.timeout(...)`. NAO trocar por `Promise.race` + `setTimeout`.
+
+Se for trocar a lib de upload (axios, got, node-fetch), TESTE em prod antes do merge. O combo `FormData + Blob + fetch nativo sem Content-Type` e o unico que funciona consistentemente no runtime do Trigger.dev v3 com a API do ClickUp.

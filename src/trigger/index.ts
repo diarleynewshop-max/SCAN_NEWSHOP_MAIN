@@ -82,6 +82,40 @@ function truncarTexto(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n\n... restante anexado no TXT/JSON da task ...`;
 }
 
+// ============================================================================
+// ATENÇÃO IA / DEV: NÃO MEXA NESTA FUNÇÃO SEM LER ATÉ O FIM
+// ============================================================================
+// Esta função faz upload de anexos pro ClickUp API v2. Já quebrou várias vezes
+// em prod com o erro: 400 {"err":"Request is not 'multipart/form-data'","ECODE":"ATTCH_045"}
+//
+// REGRAS OBRIGATÓRIAS — siga TODAS, na ordem:
+//
+//  1. USE FormData NATIVO + Blob. NÃO construa o body multipart na mão com
+//     Buffer.concat / boundaries / "Content-Disposition" em string. Já tentamos
+//     e o runtime do Trigger.dev (Node fetch / undici) quebra silenciosamente.
+//
+//  2. NÃO defina o header "Content-Type" manualmente. O fetch nativo PRECISA
+//     setar sozinho, porque ele gera o boundary do multipart e injeta no header.
+//     Se você setar "Content-Type: multipart/form-data" SEM o boundary correto,
+//     ClickUp responde ATTCH_045. Se setar COM boundary próprio, ele não bate
+//     com o body que o fetch monta. Em ambos os casos: erro.
+//
+//  3. O ÚNICO header permitido aqui é "Authorization". Nada mais.
+//
+//  4. Use Blob com `type: mimeType` (3º argumento do append com filename) —
+//     o ClickUp precisa do filename para reconhecer o anexo.
+//
+//  5. Para timeout, use AbortSignal.timeout — NÃO troque por Promise.race
+//     com setTimeout (o undici tem comportamento diferente).
+//
+// Se for trocar a lib de upload (axios, got, etc.), TESTE em prod antes de
+// remover o FormData + Blob. Esse é o único combo que funciona consistentemente
+// no runtime do Trigger.dev v3 com a API do ClickUp.
+//
+// Histórico de quebras:
+//  - 2026-05-18: construção manual de multipart com Buffer → ATTCH_045
+//                fix em commit a072e3d (substituído por FormData + Blob)
+// ============================================================================
 async function postClickUpAttachment(
   taskId: string,
   token: string,
@@ -97,6 +131,7 @@ async function postClickUpAttachment(
     ? Buffer.from(await (content as Blob).arrayBuffer())
     : Buffer.from(content as string);
 
+  // PADRÃO CORRETO — não altere sem ler o bloco acima.
   const formData = new FormData();
   formData.append("attachment", new Blob([fileBuffer], { type: mimeType }), filename);
 
@@ -106,6 +141,7 @@ async function postClickUpAttachment(
       method: "POST",
       headers: {
         Authorization: token,
+        // NÃO ADICIONE "Content-Type" AQUI. Leia o comentário acima.
       },
       body: formData,
       signal: AbortSignal.timeout(60_000),
