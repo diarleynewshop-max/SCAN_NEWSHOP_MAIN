@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
 import {
   FileInput,
   ArrowLeft,
@@ -456,6 +457,23 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       if (!json) {
         const reconstruido = reconstruirJsonPendentesDeDescricao(task.description ?? "", task.name);
         if (reconstruido) {
+          // Tenta enriquecer com fotos do ERP em paralelo (timeout curto pra nao travar).
+          try {
+            const empresaCtx = (reconstruido.empresa ?? empresa) as string;
+            const flagCtx = (reconstruido.flag ?? flag) as string;
+            const fotosPromises = reconstruido.itens.map(async (it) => {
+              try {
+                const p = buscarProdutoVarejoFacil(it.codigo, { empresa: empresaCtx, flag: flagCtx });
+                const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000));
+                const produto = await Promise.race([p, timeout]);
+                return produto?.imagem ?? null;
+              } catch { return null; }
+            });
+            const fotos = await Promise.all(fotosPromises);
+            (reconstruido.itens as any[]).forEach((it, i) => { it.photo = fotos[i] ?? null; });
+          } catch (e) {
+            console.warn("[abrirTask] enriquecimento de fotos do ERP falhou:", e);
+          }
           json = reconstruido;
           toast({ title: "JSON reconstruído da descrição (task antiga sem anexo)" });
         }
