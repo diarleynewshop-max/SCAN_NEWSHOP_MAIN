@@ -1166,15 +1166,25 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const tagPessoa = tags.find((t) => t && !t.startsWith('SECAO') && t !== 'pedido em andamento');
         if (tagPessoa) return tagPessoa;
 
-        // 2. Fallback: descricao "Pessoa: NOME"
+        // 2. Fallback: descricao "Listeiro: NOME" ou "Pessoa: NOME"
         const desc: string = task.description ?? task.text_content ?? '';
+        const matchListeiro = desc.match(/^listeiro:\s*(.+)/im);
+        if (matchListeiro) return matchListeiro[1].trim();
         const matchDesc = desc.match(/^pessoa:\s*(.+)/im);
         if (matchDesc) return matchDesc[1].trim();
 
-        // 3. Fallback: nome da task "📦 Titulo — NOME" ou "EMPRESA FLAG: Titulo - NOME"
+        // 3. Fallback: nome da task
+        // Formato "📦 Titulo — NOME": ultimo segmento apos travessao
+        // Formato "NOME — DD/MM/AAAA, HH:MM:SS": primeiro segmento (ultimo e data)
         const nome: string = task.name ?? '';
-        const partes = nome.split(/\s+[—–\-]+\s+/);
-        if (partes.length >= 2) return partes[partes.length - 1].trim();
+        const nomeSemEmoji = nome.replace(/^[\p{Emoji}\s]+/u, '').trim();
+        const partes = nomeSemEmoji.split(/\s+[—–\-]+\s+/);
+        if (partes.length >= 2) {
+          const ultimo = partes[partes.length - 1].trim();
+          // Se o ultimo segmento parece data (contém /), usa o primeiro
+          if (/\d{2}\/\d{2}\/\d{4}/.test(ultimo)) return partes[0].trim();
+          return ultimo;
+        }
 
         return '';
       }
@@ -1204,15 +1214,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         };
       }
 
-      // Parseia itens da descrição: "N. Codigo: X | SKU: Y | Pedido: N | Real: N | STATUS"
+      // Parseia itens da descrição: "N. Codigo: X | SKU: Y desc com espacos | Pedido: N | Real: N | STATUS"
       function extrairItens(desc: string): any[] {
-        const STATUS_MAP: Record<string, string> = {
-          'separado': 'separado',
-          'nao tem': 'nao_tem',
-          'não tem': 'nao_tem',
-          'parcial': 'nao_tem_tudo',
-          'pendente': 'pendente',
-        };
         const itens: any[] = [];
         const linhas = desc.split('\n');
         let secaoAtual = '';
@@ -1222,13 +1225,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           const secaoMatch = linha.match(/^(\{[SM]\}|sem\s+categoria)/i);
           if (secaoMatch) { secaoAtual = secaoMatch[1].replace(/[{}]/g, ''); continue; }
 
-          // Linha de item: "N. Codigo: X | SKU: Y | Pedido: N | Real: N | STATUS"
-          const itemMatch = linha.match(/^\d+\.\s+Codigo:\s*(\S+)\s*\|\s*SKU:\s*(\S*)\s*\|\s*Pedido:\s*(\d+)\s*\|\s*Real:\s*(-?\d+)\s*\|\s*(.+)/i);
+          // SKU pode conter espaços: usa (.*?) lazy antes do próximo "|"
+          const itemMatch = linha.match(/^\d+\.\s+Codigo:\s*(\S+)\s*\|\s*SKU:\s*(.*?)\s*\|\s*Pedido:\s*(\d+)\s*\|\s*Real:\s*(-?\d+)\s*\|\s*(.+)/i);
           if (!itemMatch) continue;
 
           const [, codigo, sku, pedidoStr, realStr, statusRaw] = itemMatch;
-          const statusClean = statusRaw.replace(/[✅❌⚠️⏳]/g, '').trim().toLowerCase();
-          const status = STATUS_MAP[statusClean] ?? 'pendente';
+          const statusLower = statusRaw.toLowerCase();
+          let status = 'pendente';
+          if      (statusLower.includes('separado'))                                   status = 'separado';
+          else if (statusLower.includes('nao tem') || statusLower.includes('não tem')) status = 'nao_tem';
+          else if (statusLower.includes('parcial'))                                    status = 'nao_tem_tudo';
 
           itens.push({
             codigo: codigo.trim(),
