@@ -308,7 +308,7 @@ function getTaskIds(req: VercelRequest, taskId: string): string[] {
   ]);
 }
 
-async function reservarTasksConferencia(taskIds: string[], token: string) {
+async function reservarTasksConferencia(taskIds: string[], token: string, forcar = false) {
   const reservadas: string[] = [];
 
   for (const id of taskIds) {
@@ -328,6 +328,12 @@ async function reservarTasksConferencia(taskIds: string[], token: string) {
     }
 
     if (taskHasTag(task, CONFERENCIA_LOCK_TAG)) {
+      // Quando forcar=true (usuario confirmou "continuar mesmo assim" no modal de andamento),
+      // aceitamos a reserva mesmo com a tag ja presente. A tag fica como esta.
+      if (forcar) {
+        reservadas.push(id);
+        continue;
+      }
       for (const reservada of reservadas) {
         await removeTaskTag(token, reservada, CONFERENCIA_LOCK_TAG).catch(() => undefined);
       }
@@ -1108,7 +1114,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const taskIds = getTaskIds(req, taskId);
       if (taskIds.length === 0) return res.status(400).json({ error: 'taskId/taskIds obrigatorio' });
 
-      const result = await reservarTasksConferencia(taskIds, token);
+      const forcar = req.query.forcar === 'true' || (req.body as any)?.forcar === true;
+      const result = await reservarTasksConferencia(taskIds, token, forcar);
       if (!result.ok) return res.status(409).json(result);
       return res.status(200).json(result);
     }

@@ -78,7 +78,7 @@ function formatTime(seconds: number): string {
 
 type Phase = "import" | "pickTask" | "ready" | "running" | "finished";
 
-const ConferenceFileSchema = z.object({
+const ConferenceFileSchemaPadrao = z.object({
   type: z.literal("conference-file", {
     errorMap: () => ({ message: "Arquivo não é do tipo conference-file. Use o export JSON da aba Lista." }),
   }),
@@ -94,6 +94,54 @@ const ConferenceFileSchema = z.object({
     })
   ).min(1, "A lista de itens está vazia."),
 });
+
+// JSON da task de PENDENTES gerada pelo Trigger.dev (formato diferente do export normal).
+// Estrutura: { isPendentesReprocessamento: true, itens: [{ codigo, sku, secao, quantidadePedida, ... }] }
+const PendentesSchema = z.object({
+  isPendentesReprocessamento: z.literal(true),
+  empresa: z.string().optional(),
+  flag: z.string().optional(),
+  itens: z.array(
+    z.object({
+      codigo: z.string().min(1),
+      sku: z.string().optional().default(""),
+      secao: z.string().nullable().optional(),
+      quantidadePedida: z.number().int().positive(),
+    })
+  ).min(1),
+});
+
+// Parse unificado: aceita tanto o formato padrão (export da Lista) quanto o de Pendentes.
+// Retorna no formato do schema padrão pra não quebrar o consumidor.
+function parseConferenceJson(raw: unknown):
+  | { success: true; data: z.infer<typeof ConferenceFileSchemaPadrao> }
+  | { success: false; error: { issues: { message: string }[] } } {
+  const padrao = ConferenceFileSchemaPadrao.safeParse(raw);
+  if (padrao.success) return { success: true, data: padrao.data };
+
+  const pendentes = PendentesSchema.safeParse(raw);
+  if (pendentes.success) {
+    return {
+      success: true,
+      data: {
+        type: "conference-file",
+        empresa: pendentes.data.empresa,
+        flag: pendentes.data.flag,
+        items: pendentes.data.itens.map((i) => ({
+          codigo: i.codigo,
+          sku: i.sku,
+          secao: i.secao,
+          quantidade: i.quantidadePedida,
+          photo: null,
+        })),
+      },
+    };
+  }
+
+  return { success: false, error: padrao.error };
+}
+
+const ConferenceFileSchema = { safeParse: parseConferenceJson };
 
 const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesktop = false }: ConferenceViewProps) => {
   const loginSalvo = obterLoginSalvo();
@@ -131,6 +179,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [apenasVisualizar, setApenasVisualizar] = useState(false);
   const [modalModoAberturaTask, setModalModoAberturaTask] = useState<ClickUpTask | null>(null);
   const [modalConfirmAndamento, setModalConfirmAndamento] = useState<ClickUpTask | null>(null);
+  // true quando o usuario confirmou "continuar mesmo assim" no modal de andamento.
+  // Faz o backend pular a verificacao de lock e aceitar a reserva.
+  const [forcarReservaAndamento, setForcarReservaAndamento] = useState(false);
   const [rascunhoDisponivel, setRascunhoDisponivel] = useState(false);
   const empresaRef = useRef(empresaInicial);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
@@ -321,19 +372,19 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
   };
 
-  const abrirTaskComModo = async (task: ClickUpTask, modo: "visualizar" | "separacao") => {
+  const abrirTaskComModo = async (task: ClickUpTask, modo: "visualizar" | "separacao", forcar = false) => {
     setModalModoAberturaTask(null);
     setApenasVisualizar(modo === "visualizar");
-    await abrirTask(task, modo === "visualizar");
+    await abrirTask(task, modo === "visualizar", forcar);
   };
 
-  const abrirTask = async (task: ClickUpTask, soVisualizar = false) => {
+  const abrirTask = async (task: ClickUpTask, soVisualizar = false, forcar = false) => {
     setLoadingJson(true);
     setTaskSelecionada(task);
     let reservouPedido = false;
     try {
       if (!soVisualizar) {
-        await reservarTasksConferencia(empresa as EmpresaKey, [task.id]);
+        await reservarTasksConferencia(empresa as EmpresaKey, [task.id], forcar);
         reservouPedido = true;
       }
 
@@ -1776,8 +1827,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                 </div>
               </div>
               <div className="flex gap-3">
-                <button onClick={() => setModalConfirmAndamento(null)} className="flex-1 h-11 rounded-xl border border-border bg-transparent text-sm font-700 cursor-pointer">Não</button>
-                <button onClick={() => { setModalConfirmAndamento(null); setModalModoAberturaTask(modalConfirmAndamento); }} className="flex-1 h-11 rounded-xl bg-destructive text-destructive-foreground border-none text-sm font-bold cursor-pointer">Sim, continuar</button>
+                <button onClick={() => { setModalConfirmAndamento(null); setForcarReservaAndamento(false); }} className="flex-1 h-11 rounded-xl border border-border bg-transparent text-sm font-700 cursor-pointer">Não</button>
+                <button onClick={() => { setForcarReservaAndamento(true); const t = modalConfirmAndamento; setModalConfirmAndamento(null); setModalModoAberturaTask(t); }} className="flex-1 h-11 rounded-xl bg-destructive text-destructive-foreground border-none text-sm font-bold cursor-pointer">Sim, continuar</button>
               </div>
             </div>
           </div>
@@ -1791,21 +1842,21 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               <p className="text-xs text-muted-foreground text-center truncate">{modalModoAberturaTask.name}</p>
               <div className="flex flex-col gap-3 pt-1">
                 <button
-                  onClick={() => abrirTaskComModo(modalModoAberturaTask, "visualizar")}
+                  onClick={() => { const f = forcarReservaAndamento; setForcarReservaAndamento(false); abrirTaskComModo(modalModoAberturaTask, "visualizar", f); }}
                   className="w-full h-14 rounded-xl border-2 border-border bg-card text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
                 >
                   <span className="text-base">👁️ Apenas Visualizar</span>
                   <span className="text-[11px] text-muted-foreground font-normal">Não reserva o pedido no ClickUp</span>
                 </button>
                 <button
-                  onClick={() => abrirTaskComModo(modalModoAberturaTask, "separacao")}
+                  onClick={() => { const f = forcarReservaAndamento; setForcarReservaAndamento(false); abrirTaskComModo(modalModoAberturaTask, "separacao", f); }}
                   className="w-full h-14 rounded-xl border-2 border-primary bg-primary/5 text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
                 >
                   <span className="text-base text-primary">📦 Fazer Separação</span>
                   <span className="text-[11px] text-muted-foreground font-normal">Reserva o pedido para separação</span>
                 </button>
               </div>
-              <button onClick={() => setModalModoAberturaTask(null)} className="w-full text-xs text-muted-foreground underline cursor-pointer bg-transparent border-none pt-1">Cancelar</button>
+              <button onClick={() => { setModalModoAberturaTask(null); setForcarReservaAndamento(false); }} className="w-full text-xs text-muted-foreground underline cursor-pointer bg-transparent border-none pt-1">Cancelar</button>
             </div>
           </div>
         )}

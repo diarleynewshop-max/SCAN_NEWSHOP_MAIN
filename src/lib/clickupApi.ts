@@ -284,12 +284,13 @@ export async function buscarAttachmentsDaTask(
 // ── Deletar uma task ──────────────────────────────────────────────────────────
 export async function reservarTasksConferencia(
   empresa: EmpresaKey,
-  taskIds: string[]
+  taskIds: string[],
+  forcar = false
 ): Promise<void> {
   const response = await fetch(`/api/clickup-proxy?action=reservar-conferencia&empresa=${empresa}`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ taskIds }),
+    body: JSON.stringify({ taskIds, forcar }),
   });
 
   if (!response.ok) {
