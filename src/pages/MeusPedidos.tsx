@@ -153,6 +153,22 @@ export default function MeusPedidos() {
   const pedidosAbertos  = filtrados.filter(p => p.statusLabel !== "concluido");
   const pedidosConcluidos = filtrados.filter(p => p.statusLabel === "concluido").filter(p => dentroDoperiodo(p.dataAtualizacao || p.dataCriacao));
 
+  // Auto-expandir e destacar quando busca por produto está ativa
+  useEffect(() => {
+    const q = filtroProduto.trim();
+    if (!q) return;
+    // Expande o primeiro pedido que tem itens matching
+    const primeiro = filtrados.find(p => p.itens?.some(i => i.codigo.toLowerCase().includes(q.toLowerCase()) || i.sku.toLowerCase().includes(q.toLowerCase())));
+    if (primeiro) setExpandidoId(primeiro.id);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtroProduto]);
+
+  function itemDestacado(item: ItemConferencia): boolean {
+    const q = filtroProduto.trim().toLowerCase();
+    if (!q) return false;
+    return item.codigo.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
+  }
+
   const temFiltroAtivo = filtroPessoa !== "todos" || filtroDataDe || filtroDataAte || filtroProduto;
 
   // chips de filtro
@@ -432,7 +448,7 @@ export default function MeusPedidos() {
                             <p style={{ fontSize: 10, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 6 }}>{emoji} {label} ({itensPorStatus[status].length})</p>
                             <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
                               {itensPorStatus[status].map((item) => (
-                                <div key={item.codigo} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, background: color + "0D", border: `1px solid ${color}22` }}>
+                                <div key={item.codigo} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, background: itemDestacado(item) ? "hsl(var(--warning) / 0.15)" : color + "0D", border: itemDestacado(item) ? "2px solid hsl(var(--warning))" : `1px solid ${color}22` }}>
                                   <div style={{ minWidth: 0 }}>
                                     <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))" }}>{item.codigo}</p>
                                     {item.sku   && <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>SKU: {item.sku}</p>}
