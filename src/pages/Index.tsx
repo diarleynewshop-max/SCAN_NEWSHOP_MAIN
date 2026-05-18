@@ -378,7 +378,7 @@ const Index = () => {
           <button onClick={() => navigate("/")} style={{ color: "rgba(255,255,255,0.5)", background: "none", border: "none", cursor: "pointer", padding: 4, display: "flex" }}>
             <ArrowLeft style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} />
           </button>
-          <img src={logoEmpresa} alt={nomeEmpresaLogo} style={{ height: modoDesktop ? 38 : 34, objectFit: "contain" }} />
+          <img src={logoEmpresa} alt={nomeEmpresaLogo} onClick={() => navigate("/")} style={{ height: modoDesktop ? 38 : 34, objectFit: "contain", cursor: "pointer" }} />
         </div>
         <div style={{ textAlign: "right" }}>
           <p style={{ fontFamily: "var(--font-mono)", fontSize: modoDesktop ? 10 : 9, color: "rgba(255,255,255,0.45)", letterSpacing: "0.15em", textTransform: "uppercase" }}>
