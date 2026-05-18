@@ -128,6 +128,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
   const taskOrigemIdsRef = useRef<string[]>([]);
   const [listeiro, setListeiro] = useState<string>("");
+  const [apenasVisualizar, setApenasVisualizar] = useState(false);
+  const [modalModoAberturaTask, setModalModoAberturaTask] = useState<ClickUpTask | null>(null);
+  const [modalConfirmAndamento, setModalConfirmAndamento] = useState<ClickUpTask | null>(null);
   const empresaRef = useRef(empresaInicial);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -165,6 +168,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
   const liberarPedidoAtual = async () => {
     const ids = taskOrigemIdsRef.current;
+    setApenasVisualizar(false);
     if (ids.length === 0) return;
 
     await liberarTasksConferencia(empresaRef.current as EmpresaKey, ids);
@@ -251,13 +255,21 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
   };
 
-  const abrirTask = async (task: ClickUpTask) => {
+  const abrirTaskComModo = async (task: ClickUpTask, modo: "visualizar" | "separacao") => {
+    setModalModoAberturaTask(null);
+    setApenasVisualizar(modo === "visualizar");
+    await abrirTask(task, modo === "visualizar");
+  };
+
+  const abrirTask = async (task: ClickUpTask, soVisualizar = false) => {
     setLoadingJson(true);
     setTaskSelecionada(task);
     let reservouPedido = false;
     try {
-      await reservarTasksConferencia(empresa as EmpresaKey, [task.id]);
-      reservouPedido = true;
+      if (!soVisualizar) {
+        await reservarTasksConferencia(empresa as EmpresaKey, [task.id]);
+        reservouPedido = true;
+      }
 
       let attachments = task.attachments;
       if (!attachments || attachments.length === 0) {
@@ -268,7 +280,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       const json = await baixarJsonDaTask(empresa as EmpresaKey, taskComAnexos);
       if (!json) {
         toast({ title: "Nenhum JSON encontrado nesta task", variant: "destructive" });
-        await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
+        if (reservouPedido) await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
         setLoadingJson(false);
         setTaskSelecionada(null);
         return;
@@ -276,7 +288,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
       const result = ConferenceFileSchema.safeParse(json);
       if (!result.success) {
-        await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
+        if (reservouPedido) await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
         toast({ title: "JSON inválido na task", description: result.error.issues[0]?.message, variant: "destructive" });
         setLoadingJson(false);
         setTaskSelecionada(null);
@@ -1650,26 +1662,81 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           </div>
         )}
 
+        {/* Modal: confirmar task em andamento */}
+        {modalConfirmAndamento && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+              <div className="flex items-center gap-3">
+                <span className="text-2xl">⚠️</span>
+                <div>
+                  <p className="font-bold text-foreground text-sm">Pedido já em andamento</p>
+                  <p className="text-xs text-muted-foreground mt-0.5">Outra pessoa pode estar separando este pedido. Quer continuar mesmo assim?</p>
+                </div>
+              </div>
+              <div className="flex gap-3">
+                <button onClick={() => setModalConfirmAndamento(null)} className="flex-1 h-11 rounded-xl border border-border bg-transparent text-sm font-700 cursor-pointer">Não</button>
+                <button onClick={() => { setModalConfirmAndamento(null); setModalModoAberturaTask(modalConfirmAndamento); }} className="flex-1 h-11 rounded-xl bg-destructive text-destructive-foreground border-none text-sm font-bold cursor-pointer">Sim, continuar</button>
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: escolher modo de abertura */}
+        {modalModoAberturaTask && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+              <p className="font-bold text-foreground text-base text-center">Como deseja abrir este pedido?</p>
+              <p className="text-xs text-muted-foreground text-center truncate">{modalModoAberturaTask.name}</p>
+              <div className="flex flex-col gap-3 pt-1">
+                <button
+                  onClick={() => abrirTaskComModo(modalModoAberturaTask, "visualizar")}
+                  className="w-full h-14 rounded-xl border-2 border-border bg-card text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
+                >
+                  <span className="text-base">👁️ Apenas Visualizar</span>
+                  <span className="text-[11px] text-muted-foreground font-normal">Não reserva o pedido no ClickUp</span>
+                </button>
+                <button
+                  onClick={() => abrirTaskComModo(modalModoAberturaTask, "separacao")}
+                  className="w-full h-14 rounded-xl border-2 border-primary bg-primary/5 text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
+                >
+                  <span className="text-base text-primary">📦 Fazer Separação</span>
+                  <span className="text-[11px] text-muted-foreground font-normal">Reserva o pedido para separação</span>
+                </button>
+              </div>
+              <button onClick={() => setModalModoAberturaTask(null)} className="w-full text-xs text-muted-foreground underline cursor-pointer bg-transparent border-none pt-1">Cancelar</button>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-2">
           {tasks.map((task) => {
             const isLoading = loadingJson && taskSelecionada?.id === task.id;
+            const emAndamento = task.emAndamento === true;
             const data = task.date_created
               ? new Date(Number(task.date_created)).toLocaleString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
               : "";
             return (
               <button
                 key={task.id}
-                onClick={() => abrirTask(task)}
+                onClick={() => {
+                  if (emAndamento) setModalConfirmAndamento(task);
+                  else setModalModoAberturaTask(task);
+                }}
                 disabled={loadingJson || consolidandoJson}
-                className="w-full text-left rounded-xl border border-border bg-card p-4 flex items-center justify-between gap-3 active:scale-[0.99] transition-all hover:border-primary/40 hover:bg-primary/5 disabled:opacity-60"
+                className={`w-full text-left rounded-xl border p-4 flex items-center justify-between gap-3 active:scale-[0.99] transition-all disabled:opacity-60 ${emAndamento ? "border-warning/40 bg-warning/5 hover:border-warning/60" : "border-border bg-card hover:border-primary/40 hover:bg-primary/5"}`}
               >
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-bold text-foreground truncate">{task.name}</p>
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <p className="text-sm font-bold text-foreground truncate">{task.name}</p>
+                    {emAndamento && (
+                      <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-warning/15 text-warning border border-warning/30 flex-shrink-0">🔒 EM ANDAMENTO</span>
+                    )}
+                  </div>
                   {data && <p className="text-xs text-muted-foreground mt-0.5">{data}</p>}
                 </div>
                 {isLoading
                   ? <span className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                  : <Play className="w-4 h-4 text-primary flex-shrink-0" />}
+                  : <Play className={`w-4 h-4 flex-shrink-0 ${emAndamento ? "text-warning" : "text-primary"}`} />}
               </button>
             );
           })}
@@ -1735,9 +1802,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           <button onClick={exportJSON} className="h-11 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
             <FileJson className="w-4 h-4" /> JSON
           </button>
+          {apenasVisualizar && (
+            <div className="h-11 rounded-xl bg-warning/10 border border-warning/30 flex items-center justify-center gap-2 px-3 text-xs font-bold text-warning">
+              👁️ Modo Visualização
+            </div>
+          )}
           <button
             onClick={enviarClickUp}
-            disabled={sendStatus === "sending" || sendStatus === "sent"}
+            disabled={apenasVisualizar || sendStatus === "sending" || sendStatus === "sent"}
+            title={apenasVisualizar ? "Abra em modo Separação para enviar" : undefined}
             className="h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed"
             style={{
               background:

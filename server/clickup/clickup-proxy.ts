@@ -1024,8 +1024,8 @@ async function buscarTasksAnalisado(
   const primaryListId = getListId(empresa, flag);
   const primaryRawTasks = await fetchTasksFromList(primaryListId, token);
   const primaryTasks = primaryRawTasks
-    .filter((task) => normalizeStatus(task.status?.status) === 'analisado' && !taskHasTag(task, CONFERENCIA_LOCK_TAG))
-    .map((task) => mapClickUpTask(task, primaryListId));
+    .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
+    .map((task) => ({ ...mapClickUpTask(task, primaryListId), emAndamento: taskHasTag(task, CONFERENCIA_LOCK_TAG) }));
 
   console.log(
     '[clickup-proxy] buscar-tasks',
@@ -1054,8 +1054,7 @@ async function buscarTasksAnalisado(
     fallbackTasks.push(
       ...rawTasks
         .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
-        .filter((task) => !taskHasTag(task, CONFERENCIA_LOCK_TAG))
-        .map((task) => mapClickUpTask(task, listId))
+        .map((task) => ({ ...mapClickUpTask(task, listId), emAndamento: taskHasTag(task, CONFERENCIA_LOCK_TAG) }))
     );
   }
 

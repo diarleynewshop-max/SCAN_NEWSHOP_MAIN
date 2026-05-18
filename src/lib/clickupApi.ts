@@ -9,12 +9,13 @@ export type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
 export type FlagKey    = "loja" | "cd";
 
 export interface ClickUpTask {
-  id:          string;
-  name:        string;
-  status:      string;
+  id:           string;
+  name:         string;
+  status:       string;
   date_created: string;
-  tags?:       string[];
-  attachments: ClickUpAttachment[];
+  tags?:        string[];
+  attachments:  ClickUpAttachment[];
+  emAndamento?: boolean;
 }
 
 export interface ClickUpAttachment {
