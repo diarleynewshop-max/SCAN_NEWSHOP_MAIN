@@ -231,8 +231,9 @@ export default function MeusPedidos() {
         <KanbanAdmin empresa={loginSalvo?.empresa ?? ""} flag={loginSalvo?.flag ?? "loja"} />
       )}
 
-      {/* Chips de filtro */}
-      {(!isAdmin || viewMode === "lista") &&
+      {/* Lista view (operador ou admin em modo lista) */}
+      {(!isAdmin || viewMode === "lista") && <>
+
       {!loading && todosPedidos.length > 0 && (
         <div style={{ padding: `12px ${modoDesktop ? "32px" : "16px"} 0`, display: "flex", flexDirection: "column", gap: 0 }}>
 
@@ -492,7 +493,7 @@ export default function MeusPedidos() {
           );
         })}
       </div>
-      }
+      </>}
     </div>
   );
 }
