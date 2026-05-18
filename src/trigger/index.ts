@@ -97,16 +97,8 @@ async function postClickUpAttachment(
     ? Buffer.from(await (content as Blob).arrayBuffer())
     : Buffer.from(content as string);
 
-  const boundary = `----FormBoundary${Date.now()}`;
-  const CRLF = "\r\n";
-  const bodyStart = Buffer.from(
-    `--${boundary}${CRLF}` +
-    `Content-Disposition: form-data; name="attachment"; filename="${filename}"${CRLF}` +
-    `Content-Type: ${mimeType}${CRLF}` +
-    CRLF
-  );
-  const bodyEnd = Buffer.from(`${CRLF}--${boundary}--${CRLF}`);
-  const body = Buffer.concat([bodyStart, fileBuffer, bodyEnd]);
+  const formData = new FormData();
+  formData.append("attachment", new Blob([fileBuffer], { type: mimeType }), filename);
 
   const response = await fetch(
     `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
@@ -114,9 +106,8 @@ async function postClickUpAttachment(
       method: "POST",
       headers: {
         Authorization: token,
-        "Content-Type": `multipart/form-data; boundary=${boundary}`,
       },
-      body,
+      body: formData,
       signal: AbortSignal.timeout(60_000),
     }
   );
