@@ -143,6 +143,57 @@ function parseConferenceJson(raw: unknown):
 
 const ConferenceFileSchema = { safeParse: parseConferenceJson };
 
+// Reconstrucao on-the-fly de JSON de PENDENTES a partir da descricao da task.
+// Usado quando a task de pendentes ficou sem JSON anexado (versoes antigas do
+// trigger, antes do fix do ATTCH_045). A descricao tem todos os dados:
+//   Conferente: X
+//   Listeiro: Y
+//   Empresa: NEWSHOP
+//   Tipo: LOJA
+//   Data: 18/05/2026
+//   ...
+//   1. Codigo: 7898... | SKU: PISO... | Pedido: 360 | Real: - | ⏳ Pendente
+function reconstruirJsonPendentesDeDescricao(
+  description: string,
+  taskName: string
+): { isPendentesReprocessamento: true; empresa?: string; flag?: string; itens: { codigo: string; sku: string; secao: string | null; quantidadePedida: number }[] } | null {
+  if (!description) return null;
+
+  const empresaMatch = description.match(/Empresa:\s*(\S+)/i);
+  const tipoMatch = description.match(/Tipo:\s*(CD|LOJA)/i);
+  const flag = tipoMatch ? (tipoMatch[1].toUpperCase() === "CD" ? "cd" : "loja") : undefined;
+
+  const itens: { codigo: string; sku: string; secao: string | null; quantidadePedida: number }[] = [];
+  let secaoAtual: string | null = null;
+  for (const linha of description.split("\n")) {
+    const t = linha.trim();
+    if (!t) continue;
+    if (t === "{S}") { secaoAtual = "S"; continue; }
+    if (t === "{M}") { secaoAtual = "M"; continue; }
+    if (/^Sem categoria$/i.test(t)) { secaoAtual = null; continue; }
+
+    const m = t.match(/^\d+\.\s*Codigo:\s*(\S+)\s*\|\s*SKU:\s*(.+?)\s*\|\s*Pedido:\s*(\d+)/i);
+    if (m) {
+      itens.push({
+        codigo: m[1],
+        sku: m[2] === "-" ? "" : m[2],
+        secao: secaoAtual,
+        quantidadePedida: parseInt(m[3], 10),
+      });
+    }
+  }
+
+  if (itens.length === 0) return null;
+  if (!taskName.includes("PENDENTES") && !taskName.startsWith("⏳")) return null;
+
+  return {
+    isPendentesReprocessamento: true,
+    empresa: empresaMatch?.[1],
+    flag,
+    itens,
+  };
+}
+
 const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesktop = false }: ConferenceViewProps) => {
   const loginSalvo = obterLoginSalvo();
   const empresaInicial = empresaProp ?? loginSalvo?.empresa ?? "NEWSHOP";
@@ -394,7 +445,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       }
       const taskComAnexos = { ...task, attachments };
 
-      const json = await baixarJsonDaTask(empresa as EmpresaKey, taskComAnexos);
+      let json = await baixarJsonDaTask(empresa as EmpresaKey, taskComAnexos);
+      // Fallback: task de PENDENTES antiga sem JSON → reconstroi a partir da descricao.
+      if (!json) {
+        const reconstruido = reconstruirJsonPendentesDeDescricao(task.description ?? "", task.name);
+        if (reconstruido) {
+          json = reconstruido as any;
+          toast({ title: "JSON reconstruído da descrição (task antiga sem anexo)" });
+        }
+      }
       if (!json) {
         toast({ title: "Nenhum JSON encontrado nesta task", variant: "destructive" });
         if (reservouPedido) await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
