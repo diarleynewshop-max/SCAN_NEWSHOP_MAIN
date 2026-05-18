@@ -55,14 +55,19 @@ Arquivos: `src/trigger/index.ts` e `src/trigger/indexSF.ts`.
 
 Ja quebrou em prod multiplas vezes com `ATTCH_045` ("Request is not 'multipart/form-data'"). Leia o bloco de comentario acima da funcao ANTES de editar. Regras:
 
-1. SEMPRE usar `form-data` (npm) + `node-fetch@2` (npm) — sao deps diretas do projeto. NUNCA usar o `FormData`/`Blob` globais do Node 21 com o `fetch` global (undici). NUNCA construir multipart manualmente com `Buffer.concat`.
-2. NUNCA definir `Content-Type` manualmente. Usar `...form.getHeaders()` no header — ele ja inclui o boundary correto.
-3. Headers permitidos: `Authorization` + spread de `form.getHeaders()`. Nada mais.
-4. Passar o `form` direto como body. NAO converter para Buffer/Uint8Array.
-5. Timeout via opcao `timeout: ms` do node-fetch v2.
+1. SEMPRE usar `axios` + `form-data` (npm) — sao deps diretas. NUNCA usar:
+   - Manual multipart com `Buffer.concat`
+   - `FormData`/`Blob` globais + `fetch` global (undici)
+   - `node-fetch@2` + `form-data`
+   Todos os tres acima ja foram testados e falharam com ATTCH_045.
+2. NUNCA definir `Content-Type` manualmente. Usar `...form.getHeaders()`.
+3. `maxContentLength: Infinity` e `maxBodyLength: Infinity` no axios (fotos grandes em base64).
+4. `validateStatus: () => true` no axios (nao lançar exception em 4xx/5xx).
+5. Timeout via opcao `timeout: ms`.
 
-Por que: o `fetch` global do Node 21 (undici) serializa `Blob`/`FormData` de um jeito que a API do ClickUp rejeita. Combos ja testados que FALHARAM:
-- Construcao manual de multipart com `Buffer.concat` + Content-Type manual
+Combos ja testados que FALHARAM em prod:
+- Manual multipart com `Buffer.concat` + Content-Type manual
 - `FormData` + `Blob` globais + `fetch` global sem Content-Type
+- `form-data` (npm) + `node-fetch@2` (npm) — suspeita: esbuild quebra import CJS
 
-So funciona com `form-data` + `node-fetch@2`. Se for trocar a lib de upload, TESTE em prod com um run real antes do merge.
+So funciona com `axios` + `form-data`. Se for trocar a lib de upload, TESTE em prod com um run real antes do merge.

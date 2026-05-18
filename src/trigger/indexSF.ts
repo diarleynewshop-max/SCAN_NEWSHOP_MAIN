@@ -1,7 +1,7 @@
 import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 import FormDataNode from "form-data";
-import nodeFetch from "node-fetch";
+import axios from "axios";
 
 type EmpresaSF = "SOYE" | "FACIL";
 type FlagLista = "loja" | "cd";
@@ -198,34 +198,14 @@ function truncarTexto(value: string, maxChars: number): string {
 // ============================================================================
 // ATENÇÃO IA / DEV: NÃO MEXA NESTA FUNÇÃO SEM LER ATÉ O FIM
 // ============================================================================
-// Esta função faz upload de anexos pro ClickUp API v2. Já quebrou várias vezes
-// em prod com o erro: 400 {"err":"Request is not 'multipart/form-data'","ECODE":"ATTCH_045"}
-//
-// REGRAS OBRIGATÓRIAS — siga TODAS, na ordem:
-//
-//  1. USE `form-data` (npm) + `node-fetch@2` (npm). NÃO USE o `FormData`/`Blob`
-//     globais do Node 21 com o `fetch` global (undici). Eles geram um body que
-//     a API do ClickUp rejeita com ATTCH_045. Também NÃO construa multipart
-//     manualmente com `Buffer.concat`. Já tentamos as duas coisas.
-//
-//  2. Use `form.getHeaders()` para que o header `Content-Type` venha COM o
-//     boundary correto. NÃO defina `Content-Type` manualmente.
-//
-//  3. Headers permitidos: `Authorization` + spread de `form.getHeaders()`.
-//
-//  4. Passe o `form` direto como body. O `node-fetch@2` aceita o stream.
-//
-//  5. Timeout via `timeout: ms` (node-fetch v2 suporta nativamente).
-//
-// Por que `form-data` + `node-fetch@2` e não `FormData` + `fetch` global?
-//   O undici (fetch global do Node 21) serializa o `Blob`/`FormData` de um
-//   jeito que a API do ClickUp não aceita. Esse é o único combo que funciona
-//   em prod com o Trigger.dev v3.
-//
-// Histórico de quebras:
-//   - 2026-05-18: construção manual de multipart com Buffer → ATTCH_045
-//   - 2026-05-18: FormData + Blob globais → ATTCH_045
-//                 (troca definitiva para form-data + node-fetch@2)
+// Veja o bloco igual em src/trigger/index.ts para o histórico completo.
+// REGRAS:
+//  1. SEMPRE `axios` + `form-data` (npm). NÃO use manual multipart, FormData
+//     global, Blob global, nem node-fetch@2 — todos já falharam com ATTCH_045.
+//  2. `...form.getHeaders()` no headers. NÃO definir Content-Type manualmente.
+//  3. `maxContentLength: Infinity` e `maxBodyLength: Infinity` (fotos grandes).
+//  4. `validateStatus: () => true` para não lançar exception em 4xx/5xx.
+//  5. Timeout via `timeout: ms`.
 // ============================================================================
 async function postClickUpAttachment(
   taskId: string,
@@ -242,27 +222,34 @@ async function postClickUpAttachment(
     ? Buffer.from(await (content as Blob).arrayBuffer())
     : Buffer.from(content as string);
 
-  // PADRÃO CORRETO — não altere sem ler o bloco acima.
   const form = new FormDataNode();
   form.append("attachment", fileBuffer, { filename, contentType: mimeType });
 
-  const response = await nodeFetch(
-    `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: token,
-        ...form.getHeaders(),
-      },
-      body: form,
-      timeout: 60_000,
-    }
-  );
+  try {
+    const response = await axios.post(
+      `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
+      form,
+      {
+        headers: {
+          Authorization: token,
+          ...form.getHeaders(),
+        },
+        maxContentLength: Infinity,
+        maxBodyLength: Infinity,
+        validateStatus: () => true,
+        timeout: 60_000,
+      }
+    );
 
-  return {
-    status: response.status,
-    text: await response.text(),
-  };
+    return {
+      status: response.status,
+      text: typeof response.data === "string" ? response.data : JSON.stringify(response.data),
+    };
+  } catch (err) {
+    const e = err as { message?: string; code?: string };
+    console.error(`[ATTACH_ERR] ${filename}: ${e.code ?? ""} ${e.message ?? ""}`);
+    return { status: 0, text: `axios error: ${e.code ?? ""} ${e.message ?? ""}` };
+  }
 }
 
 async function anexarArquivoTextoClickUp(
