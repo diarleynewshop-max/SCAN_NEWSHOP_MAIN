@@ -103,14 +103,15 @@ export default function MeusPedidos() {
   const [viewMode,       setViewMode]       = useState<"lista" | "kanban">(isAdmin ? "kanban" : "lista");
 
   const buscarPedidos = useCallback(async (forceFetch = false) => {
-    if (!loginSalvo) return;
+    const login = obterLoginSalvo();
+    if (!login) return;
     if (!forceFetch) {
       const cache = lerCache();
       if (cache) { setTodosPedidos(cache.pedidos); setPessoas(cache.pessoas); return; }
     }
     setLoading(true); setErro(null);
     try {
-      const params = new URLSearchParams({ action: "buscar-meus-pedidos", empresa: loginSalvo.empresa, flag: loginSalvo.flag ?? "loja" });
+      const params = new URLSearchParams({ action: "buscar-meus-pedidos", empresa: login.empresa, flag: login.flag ?? "loja" });
       const res = await fetch(`${PROXY_URL}?${params}`);
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error ?? `Erro ${res.status}`); }
       const data = await res.json();
@@ -120,9 +121,10 @@ export default function MeusPedidos() {
     } catch (e: any) { setErro(e.message ?? "Erro ao buscar pedidos"); }
     finally { setLoading(false); }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [loginSalvo, cacheKey]);
+  }, []);
 
-  useEffect(() => { buscarPedidos(false); }, [buscarPedidos]);
+  // roda só uma vez no mount
+  useEffect(() => { buscarPedidos(false); }, []);
 
   const toggleExpansao = useCallback((id: string) => setExpandidoId((p) => p === id ? null : id), []);
   const toggleFiltro   = (f: "pessoa" | "data" | "produto") => setFiltroAtivo((p) => p === f ? null : f);
