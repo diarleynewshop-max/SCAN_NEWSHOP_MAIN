@@ -129,7 +129,8 @@ const Index = () => {
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
-  const [mapaCompras, setMapaCompras] = useState<Record<string, string>>({});
+  const [mapaCompras, setMapaCompras] = useState<Record<string, { status: string; datas: string[] }>>({});
+  const [popupCompras, setPopupCompras] = useState<{ status: string; datas: string[] } | null>(null);
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
   const lookupEmpresa = activeList?.empresa ?? currentLogin?.empresa;
@@ -186,22 +187,43 @@ const Index = () => {
     let cancelled = false;
     buscarTasksCompras(emp).then((tasks) => {
       if (cancelled) return;
-      const mapa: Record<string, string> = {};
+      const mapa: Record<string, { status: string; datas: string[]; updated: number }> = {};
       for (const task of tasks) {
-        const m1 = task.name.match(/🛒\s+(\S+)/);
-        const m2 = task.name.match(/^Compras\s+\w+:\s+(\S+)/i);
+        const m1 = task.name.match(/🛒\s+(\S+)(?:\s+[—-]\s+.+[—-]\s+(\d{2}\/\d{2}\/\d{4}))?/);
+        const m2 = task.name.match(/^Compras\s+\w+:\s+(\S+)(?:\s+-\s+.+\s+-\s+(\d{2}\/\d{2}\/\d{4}))?/i);
         const codigo = m1?.[1] ?? m2?.[1] ?? null;
+        const data = m1?.[2] ?? m2?.[2] ?? null;
         if (!codigo) continue;
         const statusNorm = task.status.toLowerCase().trim();
-        const existing = mapa[codigo];
-        const existingTodo = !existing || existing.toLowerCase().trim() === "to do" || existing.toLowerCase().trim() === "a fazer";
-        const incomingTodo = statusNorm === "to do" || statusNorm === "a fazer";
-        if (!existing || (!incomingTodo && existingTodo)) mapa[codigo] = task.status;
+        const updated = Number(task.date_updated) || 0;
+        const ex = mapa[codigo];
+        if (!ex) {
+          mapa[codigo] = { status: task.status, datas: data ? [data] : [], updated };
+        } else {
+          if (data && !ex.datas.includes(data)) ex.datas.push(data);
+          const exTodo = ex.status.toLowerCase().trim() === "to do" || ex.status.toLowerCase().trim() === "a fazer";
+          const incTodo = statusNorm === "to do" || statusNorm === "a fazer";
+          if ((!incTodo && exTodo) || (incTodo === exTodo && updated > ex.updated)) {
+            ex.status = task.status;
+            ex.updated = updated;
+          }
+        }
       }
-      setMapaCompras(mapa);
+      const resultado: Record<string, { status: string; datas: string[] }> = {};
+      for (const [cod, val] of Object.entries(mapa)) {
+        resultado[cod] = { status: val.status, datas: val.datas.sort() };
+      }
+      setMapaCompras(resultado);
     }).catch(() => { /* silencioso — funcionalidade opcional */ });
     return () => { cancelled = true; };
   }, [currentLogin?.empresa]);
+
+  // Dispara popup quando bipa um produto com histórico de compras
+  useEffect(() => {
+    if (!barcode || !getHistoricoComprasEnabled()) return;
+    const info = mapaCompras[barcode];
+    if (info) setPopupCompras(info);
+  }, [barcode, mapaCompras]);
 
   useEffect(() => {
     if (!consultaBloqueadaPorFlag) return;
@@ -565,24 +587,31 @@ const Index = () => {
               )}
 
               {/* Badge histórico de compras */}
-              {barcode && mapaCompras[barcode] && (
-                <div style={{
-                  display: "flex", alignItems: "center", gap: 8,
-                  background: "hsl(262 80% 50% / 0.10)",
-                  border: "1px solid hsl(262 80% 50% / 0.25)",
-                  borderRadius: 10, padding: "10px 14px",
-                }}>
-                  <ShoppingCart style={{ width: 16, height: 16, color: "hsl(262 80% 50%)", flexShrink: 0 }} />
-                  <div>
-                    <p style={{ fontSize: 11, color: "hsl(262 80% 50%)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Histórico de Compras</p>
-                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>
-                      {["to do", "a fazer"].includes(mapaCompras[barcode].toLowerCase().trim())
-                        ? "Aguardando Análise"
-                        : mapaCompras[barcode]}
-                    </p>
-                  </div>
-                </div>
-              )}
+              {barcode && mapaCompras[barcode] && (() => {
+                const info = mapaCompras[barcode];
+                const statusLabel = ["to do", "a fazer"].includes(info.status.toLowerCase().trim()) ? "Aguardando Análise" : info.status;
+                return (
+                  <button
+                    onClick={() => setPopupCompras(info)}
+                    style={{
+                      width: "100%", display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+                      background: "hsl(262 80% 50% / 0.10)",
+                      border: "1px solid hsl(262 80% 50% / 0.25)",
+                      borderRadius: 10, padding: "10px 14px", cursor: "pointer",
+                    }}>
+                    <ShoppingCart style={{ width: 16, height: 16, color: "hsl(262 80% 50%)", flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 11, color: "hsl(262 80% 50%)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Histórico de Compras</p>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{statusLabel}</p>
+                    </div>
+                    {info.datas.length > 0 && (
+                      <span style={{ fontSize: 11, color: "hsl(262 80% 50%)", fontWeight: 600, flexShrink: 0 }}>
+                        {info.datas.length}x pedido
+                      </span>
+                    )}
+                  </button>
+                );
+              })()}
 
               <div>
                 <label style={S.label}>Codigo de Barras</label>
@@ -761,6 +790,71 @@ const Index = () => {
             }}
           />
         </Suspense>
+      )}
+
+      {/* Popup histórico de compras */}
+      {popupCompras && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 100,
+            background: "rgba(0,0,0,0.55)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
+          }}
+          onClick={() => setPopupCompras(null)}
+        >
+          <div
+            style={{
+              background: "hsl(var(--background))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: 16, padding: 24, width: "100%", maxWidth: 360,
+              boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+              <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(262 80% 50% / 0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                <ShoppingCart style={{ width: 20, height: 20, color: "hsl(262 80% 50%)" }} />
+              </div>
+              <div>
+                <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))" }}>Histórico de Compras</p>
+                <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Este item já foi pedido antes</p>
+              </div>
+            </div>
+
+            {/* Status */}
+            <div style={{ background: "hsl(262 80% 50% / 0.08)", border: "1px solid hsl(262 80% 50% / 0.20)", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "hsl(262 80% 50%)", marginBottom: 2 }}>Status atual</p>
+              <p style={{ fontSize: 15, fontWeight: 700, color: "hsl(var(--foreground))" }}>
+                {["to do", "a fazer"].includes(popupCompras.status.toLowerCase().trim()) ? "Aguardando Análise" : popupCompras.status}
+              </p>
+            </div>
+
+            {/* Datas */}
+            {popupCompras.datas.length > 0 ? (
+              <div>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 8 }}>
+                  Item pedido nas seguintes datas:
+                </p>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                  {popupCompras.datas.map((d) => (
+                    <span key={d} style={{ fontSize: 13, fontWeight: 700, background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 8, padding: "4px 10px", color: "hsl(var(--foreground))" }}>
+                      {d}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Datas não disponíveis nas tasks encontradas.</p>
+            )}
+
+            <button
+              onClick={() => setPopupCompras(null)}
+              style={{ marginTop: 20, width: "100%", height: 44, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
       )}
     </div>
   );
