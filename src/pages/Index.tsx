@@ -129,8 +129,8 @@ const Index = () => {
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
-  const [mapaCompras, setMapaCompras] = useState<Record<string, { status: string; datas: string[] }>>({});
-  const [popupCompras, setPopupCompras] = useState<{ status: string; datas: string[] } | null>(null);
+  const [mapaCompras, setMapaCompras] = useState<Record<string, { status: string; datas: string[]; pedidoTotal: number }>>({});
+  const [popupCompras, setPopupCompras] = useState<{ status: string; datas: string[]; pedidoTotal: number } | null>(null);
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
   const lookupEmpresa = activeList?.empresa ?? currentLogin?.empresa;
@@ -187,20 +187,22 @@ const Index = () => {
     let cancelled = false;
     buscarTasksCompras(emp).then((tasks) => {
       if (cancelled) return;
-      const mapa: Record<string, { status: string; datas: string[]; updated: number }> = {};
+      const mapa: Record<string, { status: string; datas: string[]; pedidoTotal: number; updated: number }> = {};
       for (const task of tasks) {
-        const m1 = task.name.match(/🛒\s+(\S+)(?:\s+[—-]\s+.+[—-]\s+(\d{2}\/\d{2}\/\d{4}))?/);
+        const m1 = task.name.match(/🛒\s+(\S+)(?:\s*—\s*.+—\s*(\d{2}\/\d{2}\/\d{4}))?/);
         const m2 = task.name.match(/^Compras\s+\w+:\s+(\S+)(?:\s+-\s+.+\s+-\s+(\d{2}\/\d{2}\/\d{4}))?/i);
         const codigo = m1?.[1] ?? m2?.[1] ?? null;
         const data = m1?.[2] ?? m2?.[2] ?? null;
         if (!codigo) continue;
         const statusNorm = task.status.toLowerCase().trim();
         const updated = Number(task.date_updated) || 0;
+        const pedido = Number((task.description ?? "").match(/Pedido:\s*(\d+)/)?.[1] ?? 0);
         const ex = mapa[codigo];
         if (!ex) {
-          mapa[codigo] = { status: task.status, datas: data ? [data] : [], updated };
+          mapa[codigo] = { status: task.status, datas: data ? [data] : [], pedidoTotal: pedido, updated };
         } else {
           if (data && !ex.datas.includes(data)) ex.datas.push(data);
+          ex.pedidoTotal += pedido;
           const exTodo = ex.status.toLowerCase().trim() === "to do" || ex.status.toLowerCase().trim() === "a fazer";
           const incTodo = statusNorm === "to do" || statusNorm === "a fazer";
           if ((!incTodo && exTodo) || (incTodo === exTodo && updated > ex.updated)) {
@@ -209,21 +211,22 @@ const Index = () => {
           }
         }
       }
-      const resultado: Record<string, { status: string; datas: string[] }> = {};
+      const resultado: Record<string, { status: string; datas: string[]; pedidoTotal: number }> = {};
       for (const [cod, val] of Object.entries(mapa)) {
-        resultado[cod] = { status: val.status, datas: val.datas.sort() };
+        resultado[cod] = { status: val.status, datas: val.datas.sort(), pedidoTotal: val.pedidoTotal };
       }
       setMapaCompras(resultado);
     }).catch(() => { /* silencioso — funcionalidade opcional */ });
     return () => { cancelled = true; };
   }, [currentLogin?.empresa]);
 
-  // Dispara popup quando bipa um produto com histórico de compras
+  // Dispara popup APÓS VarejoFacil carregar (fluxo: scan → produto → popup)
   useEffect(() => {
-    if (!barcode || !getHistoricoComprasEnabled()) return;
+    if (!productInfo || !barcode || !getHistoricoComprasEnabled()) return;
     const info = mapaCompras[barcode];
     if (info) setPopupCompras(info);
-  }, [barcode, mapaCompras]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [productInfo]);
 
   useEffect(() => {
     if (!consultaBloqueadaPorFlag) return;
@@ -829,11 +832,19 @@ const Index = () => {
               </p>
             </div>
 
+            {/* Quantidade total */}
+            {popupCompras.pedidoTotal > 0 && (
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+                <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Quantidade total pedida</p>
+                <p style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--foreground))" }}>{popupCompras.pedidoTotal} un.</p>
+              </div>
+            )}
+
             {/* Datas */}
             {popupCompras.datas.length > 0 ? (
               <div>
                 <p style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 8 }}>
-                  Item pedido nas seguintes datas:
+                  Item pedido nas seguintes datas ({popupCompras.datas.length}x):
                 </p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {popupCompras.datas.map((d) => (

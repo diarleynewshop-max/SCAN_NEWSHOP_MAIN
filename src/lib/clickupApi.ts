@@ -13,6 +13,8 @@ export interface ClickUpTask {
   name:         string;
   status:       string;
   date_created: string;
+  date_updated?: string;
+  description?: string;
   tags?:        string[];
   attachments:  ClickUpAttachment[];
   emAndamento?: boolean;
