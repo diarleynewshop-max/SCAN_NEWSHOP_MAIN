@@ -73,8 +73,13 @@ type TipoGrafico = "rosca" | "barra" | "barra100" | "pareto" | "linha" | "unidad
 type ModoSeletor = "dia" | "periodo" | "mes";
 
 function extrairCodigoCompras(taskName: string): string | null {
-  const m = taskName.match(/🛒\s+(\S+)/);
-  return m ? m[1] : null;
+  // NEWSHOP: "🛒 7908782215243 — NOME — 19/05/2026"
+  const m1 = taskName.match(/🛒\s+(\S+)/);
+  if (m1) return m1[1];
+  // SF (SOYE/FACIL): "Compras SOYE: 7908782215243 - NOME - 19/05/2026"
+  const m2 = taskName.match(/^Compras\s+\w+:\s+(\S+)/i);
+  if (m2) return m2[1];
+  return null;
 }
 
 interface ItemFrequencia {
@@ -395,13 +400,25 @@ const Dashboard = () => {
     setCarregandoStatusCompras(true);
     try {
       const tasks = await buscarTasksCompras(empresa);
-      const mapa: Record<string, string> = {};
+      // Para cada código, guarda o status mais "avançado" (não-to-do tem prioridade)
+      const mapa: Record<string, { status: string; updated: number }> = {};
       for (const task of tasks) {
         const codigo = extrairCodigoCompras(task.name);
-        if (codigo) mapa[codigo] = task.status;
+        if (!codigo) continue;
+        const updated = Number(task.date_updated) || 0;
+        const statusNorm = task.status.toLowerCase().trim();
+        const existing = mapa[codigo];
+        // Prefere qualquer status diferente de "to do" / "a fazer"; em empate, o mais recente
+        const incumbentIsTodo = !existing || existing.status.toLowerCase().trim() === "to do" || existing.status.toLowerCase().trim() === "a fazer";
+        const incomingIsTodo = statusNorm === "to do" || statusNorm === "a fazer";
+        if (!existing || (!incomingIsTodo && incumbentIsTodo) || (incomingIsTodo === incumbentIsTodo && updated > existing.updated)) {
+          mapa[codigo] = { status: task.status, updated };
+        }
       }
-      setStatusComprasMap(mapa);
-      toast({ title: "Status de compras carregado", description: `${Object.keys(mapa).length} produto(s)` });
+      const resultado: Record<string, string> = {};
+      for (const [cod, val] of Object.entries(mapa)) resultado[cod] = val.status;
+      setStatusComprasMap(resultado);
+      toast({ title: "Status de compras carregado", description: `${Object.keys(resultado).length} produto(s)` });
     } catch (err: any) {
       toast({ title: "Erro ao carregar compras", description: err.message, variant: "destructive" });
     } finally {
