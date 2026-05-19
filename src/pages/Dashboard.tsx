@@ -70,6 +70,7 @@ const COR = {
 
 type TipoGrafico = "rosca" | "barra" | "barra100" | "pareto" | "linha" | "unidades";
 type ModoSeletor = "dia" | "periodo" | "mes";
+type FiltroRapido = null | "analisado" | "pendentes" | "ok" | "duplicadas";
 
 interface ItemFrequencia {
   codigo: string;
@@ -149,6 +150,8 @@ const Dashboard = () => {
     () => new Set(["nao_tem", "parcial", "pendente", "separado"])
   );
   const [filtroItens, setFiltroItens] = useState<"criticos" | "todos">("criticos");
+  const [filtroDia, setFiltroDia] = useState<string | null>(null);
+  const [filtroRapido, setFiltroRapido] = useState<FiltroRapido>(null);
 
   // fotos ERP
   const [fotosErp, setFotosErp] = useState<Record<string, string | null>>({});
@@ -380,12 +383,18 @@ const Dashboard = () => {
   // ── itens filtrados ─────────────────────────────────────────────────────────
   const itensFiltrados = useMemo(() => {
     if (!dados) return [];
-    const lista =
+    let lista =
       filtroItens === "criticos"
         ? dados.frequencia.filter((i) => i.statusDominante === "nao_tem" || i.statusDominante === "parcial")
         : dados.frequencia;
-    return lista.filter((i) => filtroStatus.has(i.statusDominante));
-  }, [dados, filtroItens, filtroStatus]);
+    lista = lista.filter((i) => filtroStatus.has(i.statusDominante));
+    if (filtroDia) lista = lista.filter((i) => i.diasOcorrencia.includes(filtroDia));
+    if (filtroRapido === "analisado") lista = lista.filter((i) => i.statusDominante !== "pendente");
+    if (filtroRapido === "pendentes") lista = lista.filter((i) => i.statusDominante === "pendente");
+    if (filtroRapido === "ok") lista = lista.filter((i) => i.statusDominante === "separado");
+    if (filtroRapido === "duplicadas") lista = lista.filter((i) => i.vezes > 1);
+    return lista;
+  }, [dados, filtroItens, filtroStatus, filtroDia, filtroRapido]);
 
   // ── fotos ERP — carrega página atual primeiro, depois resto em background ────
   const fotosCancelRef = useRef(false);
@@ -438,6 +447,9 @@ const Dashboard = () => {
   const irPara = (idx: number) => {
     if (idx >= 0 && idx < itensFiltrados.length) setItemModalIdx(idx);
   };
+
+  // reset filtros extras quando o período muda
+  useEffect(() => { setFiltroDia(null); setFiltroRapido(null); }, [relatoriosPeriodo]);
 
   // reset de página quando filtros ou dados mudam
   useEffect(() => { setPaginaAtual(1); }, [itensFiltrados]);
@@ -811,7 +823,7 @@ const Dashboard = () => {
 
                 {/* Filtros de status */}
                 <div className="flex gap-1 flex-wrap items-center">
-                  <span className="text-xs text-muted-foreground mr-1">Filtro:</span>
+                  <span className="text-xs text-muted-foreground mr-1">Status:</span>
                   {[
                     { key: "nao_tem",  label: "Não tem",  bg: "bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-300" },
                     { key: "parcial",  label: "Parcial",  bg: "bg-yellow-100 text-yellow-800 dark:bg-yellow-950 dark:text-yellow-300" },
@@ -825,6 +837,54 @@ const Dashboard = () => {
                     </button>
                   ))}
                 </div>
+
+                {/* Filtros rápidos */}
+                <div className="flex gap-1 flex-wrap items-center">
+                  <span className="text-xs text-muted-foreground mr-1">Rápido:</span>
+                  {([
+                    { key: "analisado",  label: "Já analisado" },
+                    { key: "pendentes",  label: "Pendentes" },
+                    { key: "ok",         label: "OK / Separado" },
+                    { key: "duplicadas", label: "Duplicadas" },
+                  ] as { key: FiltroRapido; label: string }[]).map(({ key, label }) => (
+                    <button key={key as string}
+                      className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ${
+                        filtroRapido === key
+                          ? "bg-primary text-primary-foreground border-primary"
+                          : "bg-background text-muted-foreground border-border hover:border-primary/50"
+                      }`}
+                      onClick={() => setFiltroRapido((prev) => (prev === key ? null : key))}>
+                      {label}
+                    </button>
+                  ))}
+                </div>
+
+                {/* Filtro por dia — só exibe quando há mais de 1 dia carregado */}
+                {relatoriosPeriodo.length > 1 && (
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="text-xs text-muted-foreground">Dia:</span>
+                    <select
+                      className="text-xs border rounded px-2 py-0.5 bg-background"
+                      value={filtroDia ?? ""}
+                      onChange={(e) => setFiltroDia(e.target.value || null)}
+                    >
+                      <option value="">Todos os dias</option>
+                      {relatoriosPeriodo
+                        .slice()
+                        .sort((a, b) => a.data.localeCompare(b.data))
+                        .map((r) => (
+                          <option key={r.data} value={r.data}>{dateKeyToPtBr(r.data)}</option>
+                        ))}
+                    </select>
+                    {filtroDia && (
+                      <button
+                        className="text-xs text-muted-foreground underline"
+                        onClick={() => setFiltroDia(null)}>
+                        limpar
+                      </button>
+                    )}
+                  </div>
+                )}
 
                 {/* Lista de itens com frequência */}
                 <Card>
