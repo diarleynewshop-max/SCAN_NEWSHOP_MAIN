@@ -16,6 +16,7 @@ import {
   type RelatorioDataOption, type RelatorioSalvo,
   listarDatasRelatorio, listarRelatoriosSalvos,
   salvarRelatorioDashboard, buscarRelatorioSalvo,
+  buscarTasksCompras,
 } from "@/lib/clickupApi";
 import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
@@ -70,7 +71,11 @@ const COR = {
 
 type TipoGrafico = "rosca" | "barra" | "barra100" | "pareto" | "linha" | "unidades";
 type ModoSeletor = "dia" | "periodo" | "mes";
-type FiltroRapido = null | "analisado" | "pendentes" | "ok" | "duplicadas";
+
+function extrairCodigoCompras(taskName: string): string | null {
+  const m = taskName.match(/🛒\s+(\S+)/);
+  return m ? m[1] : null;
+}
 
 interface ItemFrequencia {
   codigo: string;
@@ -151,7 +156,11 @@ const Dashboard = () => {
   );
   const [filtroItens, setFiltroItens] = useState<"criticos" | "todos">("criticos");
   const [filtroDia, setFiltroDia] = useState<string | null>(null);
-  const [filtroRapido, setFiltroRapido] = useState<FiltroRapido>(null);
+  const [filtroDuplicadas, setFiltroDuplicadas] = useState(false);
+
+  // status de compras
+  const [statusComprasMap, setStatusComprasMap] = useState<Record<string, string>>({});
+  const [carregandoStatusCompras, setCarregandoStatusCompras] = useState(false);
 
   // fotos ERP
   const [fotosErp, setFotosErp] = useState<Record<string, string | null>>({});
@@ -380,6 +389,26 @@ const Dashboard = () => {
     return { resumo, porDia, frequencia, pareto, pizza, totalPedido, totalReal, pctDif };
   }, [relatoriosPeriodo]);
 
+  // ── carregar status de compras do ClickUp ───────────────────────────────────
+  const carregarStatusCompras = useCallback(async () => {
+    if (carregandoStatusCompras) return;
+    setCarregandoStatusCompras(true);
+    try {
+      const tasks = await buscarTasksCompras(empresa);
+      const mapa: Record<string, string> = {};
+      for (const task of tasks) {
+        const codigo = extrairCodigoCompras(task.name);
+        if (codigo) mapa[codigo] = task.status;
+      }
+      setStatusComprasMap(mapa);
+      toast({ title: "Status de compras carregado", description: `${Object.keys(mapa).length} produto(s)` });
+    } catch (err: any) {
+      toast({ title: "Erro ao carregar compras", description: err.message, variant: "destructive" });
+    } finally {
+      setCarregandoStatusCompras(false);
+    }
+  }, [carregandoStatusCompras, empresa]);
+
   // ── itens filtrados ─────────────────────────────────────────────────────────
   const itensFiltrados = useMemo(() => {
     if (!dados) return [];
@@ -389,12 +418,9 @@ const Dashboard = () => {
         : dados.frequencia;
     lista = lista.filter((i) => filtroStatus.has(i.statusDominante));
     if (filtroDia) lista = lista.filter((i) => i.diasOcorrencia.includes(filtroDia));
-    if (filtroRapido === "analisado") lista = lista.filter((i) => i.statusDominante !== "pendente");
-    if (filtroRapido === "pendentes") lista = lista.filter((i) => i.statusDominante === "pendente");
-    if (filtroRapido === "ok") lista = lista.filter((i) => i.statusDominante === "separado");
-    if (filtroRapido === "duplicadas") lista = lista.filter((i) => i.vezes > 1);
+    if (filtroDuplicadas) lista = lista.filter((i) => i.vezes > 1);
     return lista;
-  }, [dados, filtroItens, filtroStatus, filtroDia, filtroRapido]);
+  }, [dados, filtroItens, filtroStatus, filtroDia, filtroDuplicadas]);
 
   // ── fotos ERP — carrega página atual primeiro, depois resto em background ────
   const fotosCancelRef = useRef(false);
@@ -449,7 +475,7 @@ const Dashboard = () => {
   };
 
   // reset filtros extras quando o período muda
-  useEffect(() => { setFiltroDia(null); setFiltroRapido(null); }, [relatoriosPeriodo]);
+  useEffect(() => { setFiltroDia(null); setFiltroDuplicadas(false); }, [relatoriosPeriodo]);
 
   // reset de página quando filtros ou dados mudam
   useEffect(() => { setPaginaAtual(1); }, [itensFiltrados]);
@@ -836,27 +862,15 @@ const Dashboard = () => {
                       {label}
                     </button>
                   ))}
-                </div>
-
-                {/* Filtros rápidos */}
-                <div className="flex gap-1 flex-wrap items-center">
-                  <span className="text-xs text-muted-foreground mr-1">Rápido:</span>
-                  {([
-                    { key: "analisado",  label: "Já analisado" },
-                    { key: "pendentes",  label: "Pendentes" },
-                    { key: "ok",         label: "OK / Separado" },
-                    { key: "duplicadas", label: "Duplicadas" },
-                  ] as { key: FiltroRapido; label: string }[]).map(({ key, label }) => (
-                    <button key={key as string}
-                      className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ${
-                        filtroRapido === key
-                          ? "bg-primary text-primary-foreground border-primary"
-                          : "bg-background text-muted-foreground border-border hover:border-primary/50"
-                      }`}
-                      onClick={() => setFiltroRapido((prev) => (prev === key ? null : key))}>
-                      {label}
-                    </button>
-                  ))}
+                  <button
+                    className={`px-2 py-0.5 rounded text-xs font-medium border transition-colors ml-1 ${
+                      filtroDuplicadas
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-background text-muted-foreground border-border"
+                    }`}
+                    onClick={() => setFiltroDuplicadas((v) => !v)}>
+                    Duplicadas
+                  </button>
                 </div>
 
                 {/* Filtro por dia — só exibe quando há mais de 1 dia carregado */}
@@ -911,6 +925,15 @@ const Dashboard = () => {
                             ? <><RefreshCw className="h-3 w-3 animate-spin" />{progressoFotos.atual}/{progressoFotos.total}</>
                             : <><ImageOff className="h-3 w-3" />Fotos ERP</>}
                         </Button>
+                        <Button size="sm"
+                          variant={Object.keys(statusComprasMap).length > 0 ? "default" : "outline"}
+                          className="h-6 text-xs px-2 gap-1"
+                          disabled={carregandoStatusCompras}
+                          onClick={carregarStatusCompras}>
+                          {carregandoStatusCompras
+                            ? <><RefreshCw className="h-3 w-3 animate-spin" />Compras...</>
+                            : "Status Compras"}
+                        </Button>
                       </div>
                     </CardTitle>
                   </CardHeader>
@@ -964,6 +987,11 @@ const Dashboard = () => {
                                 className="text-xs">
                                 {statusLabel(item.statusDominante)}
                               </Badge>
+                              {statusComprasMap[item.codigo] && (
+                                <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 font-medium capitalize">
+                                  {statusComprasMap[item.codigo]}
+                                </span>
+                              )}
                               <div className="text-xs flex gap-2">
                                 <span className="text-muted-foreground">
                                   Ped: <strong>{item.totalPedido}</strong>
