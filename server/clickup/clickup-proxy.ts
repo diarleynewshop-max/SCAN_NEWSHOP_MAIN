@@ -1098,7 +1098,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'buscar-tasks-compras') {
       const listId = getListId(empresa, 'compras');
-      const rawTasks = await fetchTasksFromList(listId, token, true); // inclui tasks complete/fechadas
+      let rawTasks: any[] = [];
+      try {
+        rawTasks = await fetchTasksFromList(listId, token, true); // tenta com fechadas
+      } catch {
+        rawTasks = await fetchTasksFromList(listId, token, false); // fallback sem fechadas
+      }
       const tasks = rawTasks.map((task) => mapClickUpTask(task, listId));
       return res.status(200).json({ tasks, empresa, listId });
     }

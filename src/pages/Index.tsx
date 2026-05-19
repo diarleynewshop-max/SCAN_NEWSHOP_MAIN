@@ -1,4 +1,4 @@
-﻿import { useState, useCallback, useEffect, lazy, Suspense } from "react";
+﻿import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Loader2, AlertCircle, ShoppingCart, BadgeDollarSign } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
@@ -131,6 +131,7 @@ const Index = () => {
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
   const [mapaCompras, setMapaCompras] = useState<Record<string, { status: string; datas: string[]; pedidoTotal: number }>>({});
   const [popupCompras, setPopupCompras] = useState<{ status: string; datas: string[]; pedidoTotal: number } | null>(null);
+  const popupMostradoParaRef = useRef<string | null>(null);
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
   const lookupEmpresa = activeList?.empresa ?? currentLogin?.empresa;
@@ -220,13 +221,22 @@ const Index = () => {
     return () => { cancelled = true; };
   }, [currentLogin?.empresa]);
 
-  // Dispara popup APÓS VarejoFacil carregar (fluxo: scan → produto → popup)
+  // Reseta o controle de popup quando muda o barcode
   useEffect(() => {
-    if (!productInfo || !barcode || !getHistoricoComprasEnabled()) return;
+    popupMostradoParaRef.current = null;
+    setPopupCompras(null);
+  }, [barcode]);
+
+  // Dispara popup: quando productInfo carrega OU quando mapaCompras chega (resolve race condition)
+  useEffect(() => {
+    if (!barcode || !getHistoricoComprasEnabled()) return;
+    if (popupMostradoParaRef.current === barcode) return; // evita abrir duas vezes
+    if (!productInfo && !consultaBloqueadaPorFlag) return; // aguarda VarejoFacil
     const info = mapaCompras[barcode];
-    if (info) setPopupCompras(info);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [productInfo]);
+    if (!info) return;
+    popupMostradoParaRef.current = barcode;
+    setPopupCompras(info);
+  }, [productInfo, mapaCompras, barcode, consultaBloqueadaPorFlag]);
 
   useEffect(() => {
     if (!consultaBloqueadaPorFlag) return;
