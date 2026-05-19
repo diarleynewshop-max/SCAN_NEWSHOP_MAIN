@@ -1006,7 +1006,9 @@ const Dashboard = () => {
                               </Badge>
                               {statusComprasMap[item.codigo] && (
                                 <span className="text-xs px-1.5 py-0.5 rounded bg-purple-100 text-purple-800 dark:bg-purple-950 dark:text-purple-300 font-medium capitalize">
-                                  {statusComprasMap[item.codigo]}
+                                  {["to do", "a fazer"].includes(statusComprasMap[item.codigo].toLowerCase().trim())
+                                    ? "Aguardando Análise"
+                                    : statusComprasMap[item.codigo]}
                                 </span>
                               )}
                               <div className="text-xs flex gap-2">
