@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
+import { HISTORICO_COMPRAS_KEY, getHistoricoComprasEnabled } from "@/lib/historicoCompras";
 import { useToast } from "@/hooks/use-toast";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 
@@ -188,6 +189,7 @@ const Home = () => {
     return localStorage.getItem('modoDesktop') === 'true';
   });
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
+  const [historicoCompras, setHistoricoCompras] = useState(() => getHistoricoComprasEnabled());
   const [mostrarConfiguracoes, setMostrarConfiguracoes] = useState(false);
   const logoEmpresa = getCompanyLogo(loginSalvo?.empresa ?? empresa);
   const nomeEmpresaLogo = getCompanyName(loginSalvo?.empresa ?? empresa);
@@ -208,6 +210,7 @@ const Home = () => {
       if (event.key === "modoEscuro") setModoEscuro(localStorage.getItem("modoEscuro") === "true");
       if (event.key === "modoDesktop") setModoDesktop(localStorage.getItem("modoDesktop") === "true");
       if (event.key === "scan_newshop_light_mode") setModoLeve(getLightModeEnabled());
+      if (event.key === HISTORICO_COMPRAS_KEY) setHistoricoCompras(getHistoricoComprasEnabled());
     };
 
     window.addEventListener("storage", onStorage);
@@ -251,6 +254,12 @@ const Home = () => {
     const novoModo = !modoLeve;
     setModoLeve(novoModo);
     setLightModeEnabled(novoModo);
+  };
+
+  const toggleHistoricoCompras = () => {
+    const novo = !historicoCompras;
+    setHistoricoCompras(novo);
+    localStorage.setItem(HISTORICO_COMPRAS_KEY, novo.toString());
   };
 
   const baixarAtalhoApp = () => {
@@ -1153,6 +1162,41 @@ const Home = () => {
                   {modoLeve
                     ? "Supabase no scanner e analise de estoque ficam desligados; foto salva comprimida e animacoes reduzidas."
                     : "Quando ativado, corta consultas pesadas e reduz efeitos visuais para melhorar desempenho."}
+                </p>
+              </div>
+
+              {/* Histórico de Compras no Scanner */}
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center" }}>
+                      <ShoppingCart style={{ width: 18, height: 18, color: "hsl(var(--primary))" }} />
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))" }}>Histórico de Compras {historicoCompras ? "Ativo" : "Inativo"}</p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Mostra status do pedido no scanner</p>
+                    </div>
+                  </div>
+                  <button onClick={toggleHistoricoCompras}
+                    style={{
+                      width: 52, height: 28, borderRadius: 14,
+                      background: historicoCompras ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                      border: "none", cursor: "pointer", position: "relative",
+                      transition: "all 0.2s",
+                    }}
+                  >
+                    <div style={{
+                      position: "absolute", top: 2, left: historicoCompras ? 26 : 2,
+                      width: 24, height: 24, borderRadius: "50%",
+                      background: "white", transition: "left 0.2s",
+                      boxShadow: "0 2px 4px rgba(0,0,0,0.1)",
+                    }} />
+                  </button>
+                </div>
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
+                  {historicoCompras
+                    ? "Lista de compras carregada ao abrir o scanner. Cada produto exibe se já foi pedido e qual o status atual."
+                    : "Quando ativado, consulta a lista de compras do ClickUp uma vez e exibe o status por produto. Pode pesar em celular fraco."}
                 </p>
               </div>
 

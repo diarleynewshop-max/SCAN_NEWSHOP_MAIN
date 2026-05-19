@@ -8,6 +8,8 @@ import { useInventory } from "@/hooks/useInventory";
 import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
+import { getHistoricoComprasEnabled } from "@/lib/historicoCompras";
+import { buscarTasksCompras } from "@/lib/clickupApi";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 
@@ -127,6 +129,7 @@ const Index = () => {
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
+  const [mapaCompras, setMapaCompras] = useState<Record<string, string>>({});
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
   const lookupEmpresa = activeList?.empresa ?? currentLogin?.empresa;
@@ -174,6 +177,31 @@ const Index = () => {
     window.addEventListener("storage", handleStorageChange);
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
+
+  // Pré-carrega lista de compras uma única vez (se funcionalidade ativa e empresa disponível)
+  useEffect(() => {
+    if (!getHistoricoComprasEnabled()) return;
+    const emp = currentLogin?.empresa as import("@/lib/clickupApi").EmpresaKey | undefined;
+    if (!emp) return;
+    let cancelled = false;
+    buscarTasksCompras(emp).then((tasks) => {
+      if (cancelled) return;
+      const mapa: Record<string, string> = {};
+      for (const task of tasks) {
+        const m1 = task.name.match(/🛒\s+(\S+)/);
+        const m2 = task.name.match(/^Compras\s+\w+:\s+(\S+)/i);
+        const codigo = m1?.[1] ?? m2?.[1] ?? null;
+        if (!codigo) continue;
+        const statusNorm = task.status.toLowerCase().trim();
+        const existing = mapa[codigo];
+        const existingTodo = !existing || existing.toLowerCase().trim() === "to do" || existing.toLowerCase().trim() === "a fazer";
+        const incomingTodo = statusNorm === "to do" || statusNorm === "a fazer";
+        if (!existing || (!incomingTodo && existingTodo)) mapa[codigo] = task.status;
+      }
+      setMapaCompras(mapa);
+    }).catch(() => { /* silencioso — funcionalidade opcional */ });
+    return () => { cancelled = true; };
+  }, [currentLogin?.empresa]);
 
   useEffect(() => {
     if (!consultaBloqueadaPorFlag) return;
@@ -533,6 +561,26 @@ const Index = () => {
                       </div>
                     </div>
                   ) : null}
+                </div>
+              )}
+
+              {/* Badge histórico de compras */}
+              {barcode && mapaCompras[barcode] && (
+                <div style={{
+                  display: "flex", alignItems: "center", gap: 8,
+                  background: "hsl(262 80% 50% / 0.10)",
+                  border: "1px solid hsl(262 80% 50% / 0.25)",
+                  borderRadius: 10, padding: "10px 14px",
+                }}>
+                  <ShoppingCart style={{ width: 16, height: 16, color: "hsl(262 80% 50%)", flexShrink: 0 }} />
+                  <div>
+                    <p style={{ fontSize: 11, color: "hsl(262 80% 50%)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Histórico de Compras</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>
+                      {["to do", "a fazer"].includes(mapaCompras[barcode].toLowerCase().trim())
+                        ? "Aguardando Análise"
+                        : mapaCompras[barcode]}
+                    </p>
+                  </div>
                 </div>
               )}
 
