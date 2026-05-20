@@ -1444,23 +1444,36 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const listId = getListId(empresa, flag);
-      // Uma unica chamada — descricao ja vem no objeto de task
+      console.log(`[HIST][1] barcode=${barcode} barcodeNorm=${barcodeNorm} lista=${listId} empresa=${empresa} flag=${flag}`);
+
+      const t0 = Date.now();
       const response = await fetch(
         `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0&order_by=date_updated&reverse=true`,
         { headers: { Authorization: token } }
       );
-      if (!response.ok) return res.status(response.status).json({ error: `ClickUp ${response.status}` });
+      console.log(`[HIST][2] ClickUp respondeu status=${response.status} (+${Date.now() - t0}ms)`);
+      if (!response.ok) {
+        const errBody = await response.text().catch(() => '');
+        console.error(`[HIST][ERR] ClickUp falhou: ${errBody}`);
+        return res.status(response.status).json({ error: `ClickUp ${response.status}`, detalhe: errBody });
+      }
+
       const data = await response.json();
       const todas: any[] = Array.isArray(data.tasks) ? data.tasks : [];
+      const relatorios = todas.filter((t) => {
+        const s = (t.status?.status ?? '').toLowerCase().trim();
+        return s === 'relatorio' || s === 'relatório';
+      });
+      console.log(`[HIST][3] total tasks=${todas.length} relatorios=${relatorios.length}`);
 
       const ocorrencias: Array<{ data: string; dataFormatada: string; status: string; listeiro: string }> = [];
 
-      for (const task of todas) {
-        const s = (task.status?.status ?? '').toLowerCase().trim();
-        if (s !== 'relatorio' && s !== 'relatório') continue;
-
+      for (const task of relatorios) {
         const desc: string = task.text_content ?? task.description ?? '';
+        const descLen = desc.length;
+        const temCodigo = desc.includes('Codigo:');
         const status = buscarNaDescricao(desc);
+        console.log(`[HIST][4] task=${task.id} name="${task.name?.slice(0,40)}" descLen=${descLen} temCodigo=${temCodigo} found=${status ?? 'null'}`);
         if (!status) continue;
 
         const dateKey = extrairData(desc);
@@ -1468,10 +1481,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? new Date(`${dateKey}T12:00:00`)
           : new Date(Number(task.date_updated));
         const dataFormatada = dtObj.toLocaleDateString('pt-BR');
+        console.log(`[HIST][5] ENCONTRADO data=${dateKey} status=${status}`);
         ocorrencias.push({ data: dateKey, dataFormatada, status, listeiro: '' });
       }
 
       ocorrencias.sort((a, b) => b.data.localeCompare(a.data));
+      console.log(`[HIST][FIM] ocorrencias=${ocorrencias.length} (+${Date.now() - t0}ms)`);
       return res.status(200).json({ ocorrencias });
     }
 
