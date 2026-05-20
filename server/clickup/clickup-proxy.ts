@@ -1417,7 +1417,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!barcode) return res.status(400).json({ error: 'barcode obrigatorio' });
 
       const listId = getListId(empresa, flag);
-      // Busca 1 pagina de tarefas (100) incluindo fechadas, mais recentes primeiro
+      // Busca tasks com status Relatorio (resumo diario pre-agregado — menos paginas, mais rapido)
       const response = await fetch(
         `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0&order_by=date_updated&reverse=true`,
         { headers: { Authorization: token } }
@@ -1426,37 +1426,43 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const data = await response.json();
       const todas: any[] = Array.isArray(data.tasks) ? data.tasks : [];
 
-      // Filtra apenas concluídas e pega as 40 mais recentes
-      const concluidas = todas
+      // Filtra apenas tasks de Relatorio (uma por dia, JSON pre-agregado com todos os itens)
+      const relatorios = todas
         .filter((t) => {
           const s = (t.status?.status ?? '').toLowerCase().trim();
-          return s === 'complete' || s === 'concluido' || s === 'concluído';
+          return s === 'relatorio' || s === 'relatório';
         })
-        .slice(0, 40);
+        .slice(0, 30); // max 30 relatorios = 30 dias
 
       const ocorrencias: Array<{ data: string; dataFormatada: string; status: string; listeiro: string }> = [];
       const BATCH = 4;
-      for (let i = 0; i < concluidas.length; i += BATCH) {
-        const lote = concluidas.slice(i, i + BATCH);
+      for (let i = 0; i < relatorios.length; i += BATCH) {
+        const lote = relatorios.slice(i, i + BATCH);
         const resultados = await Promise.all(
           lote.map(async (task) => {
             try {
-              const json = await baixarJsonDaTask(task.id, token);
+              const json = await baixarJsonRelatorioDaTask(task.id, token);
               if (!json) return null;
-              const itens: any[] = Array.isArray(json.items) ? json.items :
-                Array.isArray(json.itens) ? json.itens : [];
-              const item = itens.find((it) =>
-                String(it?.codigo ?? '').trim() === barcode ||
-                String(it?.ean ?? '').trim() === barcode
+              // O relatorio tem campo "itens" (array de RelatorioItem)
+              const itens: any[] = Array.isArray(json.itens) ? json.itens :
+                Array.isArray(json.items) ? json.items : [];
+              // Pode haver multiplas ocorrencias do mesmo codigo em dias diferentes dentro do relatorio
+              const encontrados = itens.filter((it) =>
+                String(it?.codigo ?? '').trim() === barcode
               );
-              if (!item) return null;
-              const dateKey: string = json.data ?? task.date_updated ?? '';
+              if (encontrados.length === 0) return null;
+              const dateKey: string = json.data ?? '';
               const dtObj = dateKey.match(/^\d{4}-\d{2}-\d{2}$/)
                 ? new Date(`${dateKey}T12:00:00`)
                 : new Date(Number(task.date_updated));
               const dataFormatada = dtObj.toLocaleDateString('pt-BR');
-              const listeiro = json.listeiro ?? json.nomeListeiro ?? '';
-              return { data: dateKey, dataFormatada, status: String(item.status ?? ''), listeiro };
+              // Retorna a ocorrencia com pior status (nao_tem > parcial > pendente > separado)
+              const prioridade: Record<string, number> = { nao_tem: 4, parcial: 3, pendente: 2, separado: 1 };
+              const melhor = encontrados.sort((a, b) =>
+                (prioridade[b.status] ?? 0) - (prioridade[a.status] ?? 0)
+              )[0];
+              const listeiro = melhor.conferente ?? json.listeiro ?? '';
+              return { data: dateKey, dataFormatada, status: String(melhor.status ?? ''), listeiro };
             } catch { return null; }
           })
         );
