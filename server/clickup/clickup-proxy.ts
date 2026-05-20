@@ -1416,8 +1416,35 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const barcode = getSingle(req.query.barcode).trim();
       if (!barcode) return res.status(400).json({ error: 'barcode obrigatorio' });
 
+      // Normaliza codigo removendo zeros a esquerda para comparacao
+      function normCod(v: string) { return v.replace(/^0+/, '') || v; }
+      const barcodeNorm = normCod(barcode);
+
+      // Parseia descricao do relatorio buscando o barcode
+      // Formato: "Codigo: 7908125214780 | SKU: ... | Pedido: N | Real: N | Separado"
+      function buscarNaDescricao(desc: string): string | null {
+        for (const line of desc.split('\n')) {
+          const mCodigo = line.match(/Codigo:\s*(\S+)/i);
+          if (!mCodigo) continue;
+          if (normCod(mCodigo[1]) !== barcodeNorm) continue;
+          const partes = line.split('|');
+          const statusRaw = partes[partes.length - 1].trim().toLowerCase();
+          if (statusRaw.includes('nao tem') || statusRaw.includes('não tem')) return 'nao_tem';
+          if (statusRaw.includes('parcial')) return 'parcial';
+          if (statusRaw.includes('pendente')) return 'pendente';
+          if (statusRaw.includes('separado')) return 'separado';
+        }
+        return null;
+      }
+
+      // Extrai data "Data: DD/MM/YYYY" da descricao e converte para YYYY-MM-DD
+      function extrairData(desc: string): string {
+        const m = desc.match(/Data:\s*(\d{2})\/(\d{2})\/(\d{4})/i);
+        return m ? `${m[3]}-${m[2]}-${m[1]}` : '';
+      }
+
       const listId = getListId(empresa, flag);
-      // Busca tasks com status Relatorio (resumo diario pre-agregado — menos paginas, mais rapido)
+      // Uma unica chamada — descricao ja vem no objeto de task
       const response = await fetch(
         `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0&order_by=date_updated&reverse=true`,
         { headers: { Authorization: token } }
@@ -1426,50 +1453,24 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const data = await response.json();
       const todas: any[] = Array.isArray(data.tasks) ? data.tasks : [];
 
-      // Filtra apenas tasks de Relatorio (uma por dia, JSON pre-agregado com todos os itens)
-      const relatorios = todas
-        .filter((t) => {
-          const s = (t.status?.status ?? '').toLowerCase().trim();
-          return s === 'relatorio' || s === 'relatório';
-        })
-        .slice(0, 30); // max 30 relatorios = 30 dias
-
       const ocorrencias: Array<{ data: string; dataFormatada: string; status: string; listeiro: string }> = [];
-      const BATCH = 4;
-      for (let i = 0; i < relatorios.length; i += BATCH) {
-        const lote = relatorios.slice(i, i + BATCH);
-        const resultados = await Promise.all(
-          lote.map(async (task) => {
-            try {
-              const json = await baixarJsonRelatorioDaTask(task.id, token);
-              if (!json) return null;
-              // O relatorio tem campo "itens" (array de RelatorioItem)
-              const itens: any[] = Array.isArray(json.itens) ? json.itens :
-                Array.isArray(json.items) ? json.items : [];
-              // Pode haver multiplas ocorrencias do mesmo codigo em dias diferentes dentro do relatorio
-              const encontrados = itens.filter((it) =>
-                String(it?.codigo ?? '').trim() === barcode
-              );
-              if (encontrados.length === 0) return null;
-              const dateKey: string = json.data ?? '';
-              const dtObj = dateKey.match(/^\d{4}-\d{2}-\d{2}$/)
-                ? new Date(`${dateKey}T12:00:00`)
-                : new Date(Number(task.date_updated));
-              const dataFormatada = dtObj.toLocaleDateString('pt-BR');
-              // Retorna a ocorrencia com pior status (nao_tem > parcial > pendente > separado)
-              const prioridade: Record<string, number> = { nao_tem: 4, parcial: 3, pendente: 2, separado: 1 };
-              const melhor = encontrados.sort((a, b) =>
-                (prioridade[b.status] ?? 0) - (prioridade[a.status] ?? 0)
-              )[0];
-              const listeiro = melhor.conferente ?? json.listeiro ?? '';
-              return { data: dateKey, dataFormatada, status: String(melhor.status ?? ''), listeiro };
-            } catch { return null; }
-          })
-        );
-        for (const r of resultados) { if (r) ocorrencias.push(r); }
+
+      for (const task of todas) {
+        const s = (task.status?.status ?? '').toLowerCase().trim();
+        if (s !== 'relatorio' && s !== 'relatório') continue;
+
+        const desc: string = task.text_content ?? task.description ?? '';
+        const status = buscarNaDescricao(desc);
+        if (!status) continue;
+
+        const dateKey = extrairData(desc);
+        const dtObj = dateKey
+          ? new Date(`${dateKey}T12:00:00`)
+          : new Date(Number(task.date_updated));
+        const dataFormatada = dtObj.toLocaleDateString('pt-BR');
+        ocorrencias.push({ data: dateKey, dataFormatada, status, listeiro: '' });
       }
 
-      // Ordena por data mais recente primeiro
       ocorrencias.sort((a, b) => b.data.localeCompare(a.data));
       return res.status(200).json({ ocorrencias });
     }
