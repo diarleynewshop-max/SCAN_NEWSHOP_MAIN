@@ -94,6 +94,36 @@ let cachedAccessToken: string | null = null;
 let cachedAuthKey: string | null = null;
 let tokenPromise: Promise<string> | null = null;
 
+// Cache em memória + localStorage (TTL 24h) para evitar re-consultar seção/grupo a cada reload
+const MERCADOLOGICO_LS_KEY = "vf_mercadologico_v1";
+const MERCADOLOGICO_TTL_MS = 24 * 60 * 60 * 1000;
+
+function _lsLoadMercadologico(): Record<string, { v: string; ts: number }> {
+  try {
+    const raw = localStorage.getItem(MERCADOLOGICO_LS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, { v: string; ts: number }>) : {};
+  } catch {
+    return {};
+  }
+}
+
+let _lsStore = _lsLoadMercadologico();
+
+function _lsGet(key: string): string | null {
+  const entry = _lsStore[key];
+  if (!entry) return null;
+  if (Date.now() - entry.ts > MERCADOLOGICO_TTL_MS) {
+    delete _lsStore[key];
+    return null;
+  }
+  return entry.v;
+}
+
+function _lsSet(key: string, value: string) {
+  _lsStore[key] = { v: value, ts: Date.now() };
+  try { localStorage.setItem(MERCADOLOGICO_LS_KEY, JSON.stringify(_lsStore)); } catch { /* storage cheio */ }
+}
+
 const secaoCache = new Map<string, string>();
 const grupoCache = new Map<string, string>();
 
@@ -297,6 +327,9 @@ const buscarSecao = async (secaoId?: number, contexto: VarejoFacilLookupContext 
   const key = getMercadologicoCacheKey(contexto, secaoId);
   if (secaoCache.has(key)) return secaoCache.get(key)!;
 
+  const cached = _lsGet(key);
+  if (cached !== null) { secaoCache.set(key, cached); return cached; }
+
   let descricao = `Secao ${secaoId}`;
   try {
     const data = await fetchJson<ErpSecao>(`/v1/produto/secoes/${secaoId}`, contexto);
@@ -306,6 +339,7 @@ const buscarSecao = async (secaoId?: number, contexto: VarejoFacilLookupContext 
   }
 
   secaoCache.set(key, descricao);
+  _lsSet(key, descricao);
   return descricao;
 };
 
@@ -314,6 +348,9 @@ const buscarGrupo = async (secaoId?: number, grupoId?: number, contexto: VarejoF
 
   const key = getMercadologicoCacheKey(contexto, secaoId, grupoId);
   if (grupoCache.has(key)) return grupoCache.get(key)!;
+
+  const cached = _lsGet(key);
+  if (cached !== null) { grupoCache.set(key, cached); return cached; }
 
   let descricao = `Grupo ${grupoId}`;
   try {
@@ -324,6 +361,7 @@ const buscarGrupo = async (secaoId?: number, grupoId?: number, contexto: VarejoF
   }
 
   grupoCache.set(key, descricao);
+  _lsSet(key, descricao);
   return descricao;
 };
 

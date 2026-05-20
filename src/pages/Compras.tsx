@@ -572,7 +572,7 @@ const Compras = () => {
               <ArrowLeft className="h-4 w-4 mr-2" />
               Voltar
             </Button>
-            <h1 className="text-3xl font-bold text-gray-900">Gestao de Compras</h1>
+            <h1 className="text-xl sm:text-3xl font-bold text-gray-900">Gestao de Compras</h1>
             <p className="text-gray-600 mt-1">Puxando o ClickUp de Compras ({empresa})</p>
             {ultimaAtualizacao && (
               <p className="text-xs text-gray-500 mt-1">
@@ -580,7 +580,7 @@ const Compras = () => {
               </p>
             )}
           </div>
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-2 flex-wrap">
             <input
               type="file"
               ref={fileInputRef}
@@ -613,81 +613,81 @@ const Compras = () => {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-7 gap-4 mb-6">
+        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Total</CardTitle>
+            <CardHeader className="px-3 pt-3 pb-1">
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Total</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold">{produtos.length}</div>
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold">{produtos.length}</div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Pendente</CardTitle>
+            <CardHeader className="px-3 pt-3 pb-1">
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Pendente</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-blue-600">
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold text-blue-600">
                 {produtos.filter((p) => p.status === "todo").length}
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Galpao</CardTitle>
+            <CardHeader className="px-3 pt-3 pb-1">
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Galpao</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-emerald-600">
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold text-emerald-600">
                 {produtos.filter((p) => p.status === "produto_bom").length}
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Ruim</CardTitle>
+            <CardHeader className="px-3 pt-3 pb-1">
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Ruim</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-rose-600">
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold text-rose-600">
                 {produtos.filter((p) => p.status === "produto_ruim").length}
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Fazer Pedido</CardTitle>
+            <CardHeader className="px-3 pt-3 pb-1">
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Fazer Pedido</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-amber-600">
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold text-amber-600">
                 {produtos.filter((p) => p.status === "fazer_pedido").length}
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Andamento</CardTitle>
+            <CardHeader className="px-3 pt-3 pb-1">
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Andamento</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-orange-600">
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold text-orange-600">
                 {produtos.filter((p) => p.status === "pedido_andamento").length}
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Realizada</CardTitle>
+            <CardHeader className="px-3 pt-3 pb-1">
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Realizada</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-red-600">
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold text-red-600">
                 {produtos.filter((p) => p.status === "compra_realizada").length}
               </div>
             </CardContent>
           </Card>
           <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-lg">Concluido</CardTitle>
+            <CardHeader className="px-3 pt-3 pb-1">
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Concluido</CardTitle>
             </CardHeader>
-            <CardContent>
-              <div className="text-3xl font-bold text-green-600">
+            <CardContent className="px-3 pb-3">
+              <div className="text-2xl font-bold text-green-600">
                 {produtos.filter((p) => p.status === "concluido").length}
               </div>
             </CardContent>
@@ -802,13 +802,13 @@ const Compras = () => {
                   const podeMostrarImagem = Boolean(fotoSelecionada);
 
                   return (
-                    <div key={produto.id} className="flex items-center justify-between p-4 bg-gray-50 rounded-lg gap-4">
-                      <div className="flex items-center gap-4 min-w-0">
+                    <div key={produto.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded-lg gap-3">
+                      <div className="flex items-center gap-3 min-w-0">
                         {podeMostrarImagem ? (
                           <img
                             src={foto as string}
                             alt={produto.codigo}
-                            className="w-16 h-16 object-cover rounded shrink-0"
+                            className="w-14 h-14 object-cover rounded shrink-0"
                             onError={() => {
                               if (!fotoSelecionada) return;
                               setImagemComErro((prev) => ({
@@ -818,18 +818,18 @@ const Compras = () => {
                             }}
                           />
                         ) : (
-                          <div className="w-16 h-16 bg-gray-200 rounded flex items-center justify-center shrink-0">
+                          <div className="w-14 h-14 bg-gray-200 rounded flex items-center justify-center shrink-0">
                             <span className="text-gray-400 text-xs">sem foto</span>
                           </div>
                         )}
                         <div className="min-w-0">
-                          <div className="font-bold">{produto.codigo}</div>
-                          <div className="text-sm text-gray-600 break-words">{descricao}</div>
-                          {produtoErp?.secao && <div className="text-xs text-indigo-600">Secao: {produtoErp.secao}</div>}
-                          {produto.sku && <div className="text-xs text-gray-400">SKU: {produto.sku}</div>}
+                          <div className="font-bold text-sm">{produto.codigo}</div>
+                          <div className="text-sm text-gray-600 break-words leading-tight">{descricao}</div>
+                          {produtoErp?.secao && <div className="text-xs text-indigo-600">{produtoErp.secao}</div>}
+                          {produto.sku && <div className="text-xs text-gray-400">{produto.sku}</div>}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap justify-end">
+                      <div className="flex items-center gap-2 flex-wrap sm:justify-end w-full sm:w-auto">
                         {getStatusBadge(produto.status)}
 
                         {produto.status === "todo" && (
