@@ -162,6 +162,10 @@ const Dashboard = () => {
   const [filtroItens, setFiltroItens] = useState<"criticos" | "todos">("criticos");
   const [filtroDia, setFiltroDia] = useState<string | null>(null);
   const [filtroDuplicadas, setFiltroDuplicadas] = useState(false);
+  const [filtroSecao, setFiltroSecao] = useState<string | null>(null);
+  const [filtroTexto, setFiltroTexto] = useState("");
+  type Ordenacao = "mais-pedido" | "menos-pedido" | "mais-saiu" | "menos-saiu";
+  const [ordenacao, setOrdenacao] = useState<Ordenacao>("mais-pedido");
 
   // status de compras
   const [statusComprasMap, setStatusComprasMap] = useState<Record<string, string>>({});
@@ -427,6 +431,12 @@ const Dashboard = () => {
   }, [carregandoStatusCompras, empresa]);
 
   // ── itens filtrados ─────────────────────────────────────────────────────────
+  const secoesDisponiveis = useMemo(() => {
+    if (!dados) return [];
+    const s = new Set(dados.frequencia.map((i) => i.secao).filter(Boolean));
+    return [...s].sort();
+  }, [dados]);
+
   const itensFiltrados = useMemo(() => {
     if (!dados) return [];
     let lista =
@@ -436,8 +446,21 @@ const Dashboard = () => {
     lista = lista.filter((i) => filtroStatus.has(i.statusDominante));
     if (filtroDia) lista = lista.filter((i) => i.diasOcorrencia.includes(filtroDia));
     if (filtroDuplicadas) lista = lista.filter((i) => i.vezes > 1);
+    if (filtroSecao) lista = lista.filter((i) => i.secao === filtroSecao);
+    if (filtroTexto.trim()) {
+      const t = filtroTexto.toLowerCase();
+      lista = lista.filter((i) =>
+        i.codigo.toLowerCase().includes(t) || (i.sku || "").toLowerCase().includes(t)
+      );
+    }
+    lista = [...lista].sort((a, b) => {
+      if (ordenacao === "menos-pedido") return a.vezes - b.vezes;
+      if (ordenacao === "mais-saiu")    return b.totalReal - a.totalReal;
+      if (ordenacao === "menos-saiu")  return a.totalReal - b.totalReal;
+      return b.vezes - a.vezes; // mais-pedido (default)
+    });
     return lista;
-  }, [dados, filtroItens, filtroStatus, filtroDia, filtroDuplicadas]);
+  }, [dados, filtroItens, filtroStatus, filtroDia, filtroDuplicadas, filtroSecao, filtroTexto, ordenacao]);
 
   // ── fotos ERP — carrega página atual primeiro, depois resto em background ────
   const fotosCancelRef = useRef(false);
@@ -492,7 +515,13 @@ const Dashboard = () => {
   };
 
   // reset filtros extras quando o período muda
-  useEffect(() => { setFiltroDia(null); setFiltroDuplicadas(false); }, [relatoriosPeriodo]);
+  useEffect(() => {
+    setFiltroDia(null);
+    setFiltroDuplicadas(false);
+    setFiltroSecao(null);
+    setFiltroTexto("");
+    setOrdenacao("mais-pedido");
+  }, [relatoriosPeriodo]);
 
   // reset de página quando filtros ou dados mudam
   useEffect(() => { setPaginaAtual(1); }, [itensFiltrados]);
@@ -911,6 +940,47 @@ const Dashboard = () => {
                       <button
                         className="text-xs text-muted-foreground underline"
                         onClick={() => setFiltroDia(null)}>
+                        limpar
+                      </button>
+                    )}
+                  </div>
+                )}
+
+                {/* Filtros: busca por item, seção, ordenação */}
+                {dados && (
+                  <div className="flex gap-2 flex-wrap items-center">
+                    <input
+                      type="text"
+                      placeholder="Buscar código / SKU..."
+                      value={filtroTexto}
+                      onChange={(e) => setFiltroTexto(e.target.value)}
+                      className="text-xs border rounded px-2 py-1 bg-background flex-1 min-w-[140px]"
+                    />
+                    <select
+                      value={filtroSecao ?? ""}
+                      onChange={(e) => setFiltroSecao(e.target.value || null)}
+                      className="text-xs border rounded px-2 py-1 bg-background"
+                    >
+                      <option value="">Todas as seções</option>
+                      {secoesDisponiveis.map((s) => (
+                        <option key={s} value={s}>{s}</option>
+                      ))}
+                    </select>
+                    <select
+                      value={ordenacao}
+                      onChange={(e) => setOrdenacao(e.target.value as Ordenacao)}
+                      className="text-xs border rounded px-2 py-1 bg-background"
+                    >
+                      <option value="mais-pedido">+ Pedido</option>
+                      <option value="menos-pedido">− Pedido</option>
+                      <option value="mais-saiu">+ Saiu</option>
+                      <option value="menos-saiu">− Saiu</option>
+                    </select>
+                    {(filtroTexto || filtroSecao || ordenacao !== "mais-pedido") && (
+                      <button
+                        className="text-xs text-muted-foreground underline"
+                        onClick={() => { setFiltroTexto(""); setFiltroSecao(null); setOrdenacao("mais-pedido"); }}
+                      >
                         limpar
                       </button>
                     )}
