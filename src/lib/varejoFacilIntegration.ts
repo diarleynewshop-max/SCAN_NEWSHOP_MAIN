@@ -90,10 +90,6 @@ const ERP_LOJA_BY_EMPRESA: Record<VarejoFacilEmpresa, number> = {
   SOYE: 1,
 };
 
-let cachedAccessToken: string | null = null;
-let cachedAuthKey: string | null = null;
-let tokenPromise: Promise<string> | null = null;
-
 // Cache em memória + localStorage (TTL 24h) para evitar re-consultar seção/grupo a cada reload
 const MERCADOLOGICO_LS_KEY = "vf_mercadologico_v1";
 const MERCADOLOGICO_TTL_MS = 24 * 60 * 60 * 1000;
@@ -135,113 +131,17 @@ const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpre
   return "NEWSHOP";
 };
 
-const resolveErpApiBase = (contexto: VarejoFacilLookupContext = {}) => {
-  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-
-  if (import.meta.env.DEV) {
-    return `/erp-api-${empresa.toLowerCase()}/api`;
-  }
-
-  const configuredUrl = (
-    import.meta.env[`VITE_ERP_API_URL_${empresa}`] ||
-    import.meta.env.VITE_ERP_API_URL ||
-    `https://${VAREJO_FACIL_HOSTS[empresa]}`
-  ).replace(/\/$/, "");
-
-  return configuredUrl.endsWith("/api") ? configuredUrl : `${configuredUrl}/api`;
-};
-
-const getEnvByEmpresa = (empresa: VarejoFacilEmpresa, key: "USERNAME" | "PASSWORD" | "TOKEN") =>
-  import.meta.env[`VITE_ERP_API_${key}_${empresa}`] || import.meta.env[`VITE_ERP_API_${key}`] || "";
-
-const resolveTokenFromAuth = (data: Record<string, unknown>) =>
-  (typeof data.accessToken === "string" && data.accessToken) ||
-  (typeof data.access_token === "string" && data.access_token) ||
-  (typeof data.token === "string" && data.token) ||
-  (typeof data.jwt === "string" && data.jwt) ||
-  "";
-
-const getErpAccessToken = async (contexto: VarejoFacilLookupContext = {}) => {
-  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-  const baseUrl = resolveErpApiBase(contexto);
-  const username = getEnvByEmpresa(empresa, "USERNAME");
-  const password = getEnvByEmpresa(empresa, "PASSWORD");
-  const configuredToken = getEnvByEmpresa(empresa, "TOKEN");
-  const authKey = `${empresa}:${baseUrl}:${username}`;
-
-  if (cachedAccessToken && cachedAuthKey === authKey) return cachedAccessToken;
-
-  if (username && password) {
-    if (!tokenPromise) {
-      tokenPromise = (async () => {
-        const response = await fetch(`${baseUrl}/auth`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({ username, password }),
-        });
-
-        if (!response.ok) {
-          throw new Error("Nao foi possivel autenticar no ERP. Verifique usuario e senha.");
-        }
-
-        const data = (await response.json()) as Record<string, unknown>;
-        const token = resolveTokenFromAuth(data);
-
-        if (!token) {
-          throw new Error("O ERP nao retornou um access token valido no login.");
-        }
-
-        cachedAccessToken = token;
-        cachedAuthKey = authKey;
-        return token;
-      })().finally(() => {
-        tokenPromise = null;
-      });
-    }
-
-    return tokenPromise;
-  }
-
-  if (configuredToken) {
-    cachedAccessToken = configuredToken;
-    cachedAuthKey = authKey;
-    return configuredToken;
-  }
-
-  throw new Error("Credenciais do ERP nao configuradas. Defina VITE_ERP_API_USERNAME e VITE_ERP_API_PASSWORD.");
-};
-
-const buildHeaders = async (contexto: VarejoFacilLookupContext = {}) => {
-  const token = await getErpAccessToken(contexto);
-  return {
-    Authorization: token,
-    Accept: "application/json",
-  };
-};
-
 const fetchJson = async <T>(path: string, contexto: VarejoFacilLookupContext = {}) => {
   const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-  const url = import.meta.env.DEV
-    ? `${resolveErpApiBase(contexto)}${path}`
-    : `/api/erp-proxy?empresa=${empresa.toLowerCase()}&path=${encodeURIComponent(path)}`;
+  const url = `/api/erp-proxy?empresa=${empresa.toLowerCase()}&path=${encodeURIComponent(path)}`;
 
-  const response = await fetch(url, {
-    headers: import.meta.env.DEV ? await buildHeaders(contexto) : { Accept: "application/json" },
-  });
-
-  if (response.status === 401) {
-    cachedAccessToken = null;
-    cachedAuthKey = null;
-    throw new Error("ERP nao autorizado. Verifique as credenciais configuradas.");
-  }
+  const response = await fetch(url, { headers: { Accept: "application/json" } });
 
   if (response.status === 404) return null;
 
   if (!response.ok) {
-    throw new Error(`Falha ao consultar ERP (${response.status}).`);
+    const body = await response.text().catch(() => "");
+    throw new Error(`Falha ao consultar ERP (${response.status})${body ? `: ${body}` : ""}`);
   }
 
   return (await response.json()) as T;
@@ -395,11 +295,6 @@ const resolverImagemProduto = (imagem: string | undefined, produtoId: number, co
   const imagemOuProduto = imagem || String(produtoId);
 
   if (/^data:image\//i.test(imagemOuProduto)) return imagemOuProduto;
-
-  if (import.meta.env.DEV) {
-    if (/^https?:\/\//i.test(imagemOuProduto)) return imagemOuProduto;
-    return `${resolveErpApiBase(contexto).replace(/\/api$/, "")}${imagemOuProduto.startsWith("/") ? imagemOuProduto : `/${imagemOuProduto}`}`;
-  }
 
   return `/api/erp-image-proxy?empresa=${empresa.toLowerCase()}&produtoId=${produtoId}&src=${encodeURIComponent(imagemOuProduto)}`;
 };
