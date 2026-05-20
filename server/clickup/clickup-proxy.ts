@@ -1412,6 +1412,62 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ok: true, marcados: taskIds.length });
     }
 
+    if (action === 'buscar-historico-item') {
+      const barcode = getSingle(req.query.barcode).trim();
+      if (!barcode) return res.status(400).json({ error: 'barcode obrigatorio' });
+
+      const listId = getListId(empresa, flag);
+      // Busca 1 pagina de tarefas (100) incluindo fechadas, mais recentes primeiro
+      const response = await fetch(
+        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0&order_by=date_updated&reverse=true`,
+        { headers: { Authorization: token } }
+      );
+      if (!response.ok) return res.status(response.status).json({ error: `ClickUp ${response.status}` });
+      const data = await response.json();
+      const todas: any[] = Array.isArray(data.tasks) ? data.tasks : [];
+
+      // Filtra apenas concluídas e pega as 40 mais recentes
+      const concluidas = todas
+        .filter((t) => {
+          const s = (t.status?.status ?? '').toLowerCase().trim();
+          return s === 'complete' || s === 'concluido' || s === 'concluído';
+        })
+        .slice(0, 40);
+
+      const ocorrencias: Array<{ data: string; dataFormatada: string; status: string; listeiro: string }> = [];
+      const BATCH = 4;
+      for (let i = 0; i < concluidas.length; i += BATCH) {
+        const lote = concluidas.slice(i, i + BATCH);
+        const resultados = await Promise.all(
+          lote.map(async (task) => {
+            try {
+              const json = await baixarJsonDaTask(task.id, token);
+              if (!json) return null;
+              const itens: any[] = Array.isArray(json.items) ? json.items :
+                Array.isArray(json.itens) ? json.itens : [];
+              const item = itens.find((it) =>
+                String(it?.codigo ?? '').trim() === barcode ||
+                String(it?.ean ?? '').trim() === barcode
+              );
+              if (!item) return null;
+              const dateKey: string = json.data ?? task.date_updated ?? '';
+              const dtObj = dateKey.match(/^\d{4}-\d{2}-\d{2}$/)
+                ? new Date(`${dateKey}T12:00:00`)
+                : new Date(Number(task.date_updated));
+              const dataFormatada = dtObj.toLocaleDateString('pt-BR');
+              const listeiro = json.listeiro ?? json.nomeListeiro ?? '';
+              return { data: dateKey, dataFormatada, status: String(item.status ?? ''), listeiro };
+            } catch { return null; }
+          })
+        );
+        for (const r of resultados) { if (r) ocorrencias.push(r); }
+      }
+
+      // Ordena por data mais recente primeiro
+      ocorrencias.sort((a, b) => b.data.localeCompare(a.data));
+      return res.status(200).json({ ocorrencias });
+    }
+
     if (action === 'deletar-task') {
       if (!taskId) return res.status(400).json({ error: 'taskId obrigatorio' });
 

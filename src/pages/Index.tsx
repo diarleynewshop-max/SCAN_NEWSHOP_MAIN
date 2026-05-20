@@ -9,7 +9,7 @@ import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
 import { getHistoricoComprasEnabled } from "@/lib/historicoCompras";
-import { buscarTasksCompras } from "@/lib/clickupApi";
+import { buscarHistoricoItem, type HistoricoItemOcorrencia } from "@/lib/clickupApi";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 
@@ -141,8 +141,7 @@ const Index = () => {
 
   const [modoDesktop, setModoDesktop] = useState(() => localStorage.getItem("modoDesktop") === "true");
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
-  const [mapaCompras, setMapaCompras] = useState<Record<string, { status: string; datas: string[]; pedidoTotal: number }>>({});
-  const [popupCompras, setPopupCompras] = useState<{ status: string; datas: string[]; pedidoTotal: number } | null>(null);
+  const [popupCompras, setPopupCompras] = useState<{ ocorrencias: HistoricoItemOcorrencia[]; carregando: boolean } | null>(null);
   const popupMostradoParaRef = useRef<string | null>(null);
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
@@ -192,63 +191,32 @@ const Index = () => {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
-  // Pré-carrega lista de compras uma única vez (se funcionalidade ativa e empresa disponível)
-  useEffect(() => {
-    if (!getHistoricoComprasEnabled()) return;
-    const emp = currentLogin?.empresa as import("@/lib/clickupApi").EmpresaKey | undefined;
-    if (!emp) return;
-    let cancelled = false;
-    buscarTasksCompras(emp).then((tasks) => {
-      if (cancelled) return;
-      const mapa: Record<string, { status: string; datas: string[]; pedidoTotal: number; updated: number }> = {};
-      for (const task of tasks) {
-        const m1 = task.name.match(/🛒\s+(\S+)(?:\s*—\s*.+—\s*(\d{2}\/\d{2}\/\d{4}))?/);
-        const m2 = task.name.match(/^Compras\s+\w+:\s+(\S+)(?:\s+-\s+.+\s+-\s+(\d{2}\/\d{2}\/\d{4}))?/i);
-        const codigo = m1?.[1] ?? m2?.[1] ?? null;
-        const data = m1?.[2] ?? m2?.[2] ?? null;
-        if (!codigo) continue;
-        const statusNorm = task.status.toLowerCase().trim();
-        const updated = Number(task.date_updated) || 0;
-        const pedido = Number((task.description ?? "").match(/Pedido:\s*(\d+)/)?.[1] ?? 0);
-        const ex = mapa[codigo];
-        if (!ex) {
-          mapa[codigo] = { status: task.status, datas: data ? [data] : [], pedidoTotal: pedido, updated };
-        } else {
-          if (data && !ex.datas.includes(data)) ex.datas.push(data);
-          ex.pedidoTotal += pedido;
-          const exTodo = ex.status.toLowerCase().trim() === "to do" || ex.status.toLowerCase().trim() === "a fazer";
-          const incTodo = statusNorm === "to do" || statusNorm === "a fazer";
-          if ((!incTodo && exTodo) || (incTodo === exTodo && updated > ex.updated)) {
-            ex.status = task.status;
-            ex.updated = updated;
-          }
-        }
-      }
-      const resultado: Record<string, { status: string; datas: string[]; pedidoTotal: number }> = {};
-      for (const [cod, val] of Object.entries(mapa)) {
-        resultado[cod] = { status: val.status, datas: val.datas.sort(), pedidoTotal: val.pedidoTotal };
-      }
-      setMapaCompras(resultado);
-    }).catch(() => { /* silencioso — funcionalidade opcional */ });
-    return () => { cancelled = true; };
-  }, [currentLogin?.empresa]);
-
-  // Reseta o controle de popup quando muda o barcode
+  // Reseta popup ao trocar barcode
   useEffect(() => {
     popupMostradoParaRef.current = null;
     setPopupCompras(null);
   }, [barcode]);
 
-  // Dispara popup: quando productInfo carrega OU quando mapaCompras chega (resolve race condition)
+  // Busca histórico nas conferências CONCLUÍDAS do PEDIDOS quando ERP carrega (ou flag bloqueada)
   useEffect(() => {
     if (!barcode || !getHistoricoComprasEnabled()) return;
-    if (popupMostradoParaRef.current === barcode) return; // evita abrir duas vezes
-    if (!productInfo && !consultaBloqueadaPorFlag) return; // aguarda VarejoFacil
-    const info = mapaCompras[barcode];
-    if (!info) return;
+    if (popupMostradoParaRef.current === barcode) return;
+    if (!productInfo && !consultaBloqueadaPorFlag) return; // aguarda ERP antes de abrir
+    const emp = (activeList?.empresa ?? currentLogin?.empresa) as import("@/lib/clickupApi").EmpresaKey | undefined;
+    const flg = (activeList?.flag ?? currentLogin?.flag ?? "loja") as import("@/lib/clickupApi").FlagKey;
+    if (!emp) return;
     popupMostradoParaRef.current = barcode;
-    setPopupCompras(info);
-  }, [productInfo, mapaCompras, barcode, consultaBloqueadaPorFlag]);
+    setPopupCompras({ ocorrencias: [], carregando: true });
+    buscarHistoricoItem(emp, flg, barcode)
+      .then((ocorrencias) => {
+        if (ocorrencias.length === 0) {
+          setPopupCompras(null); // sem histórico: não mostra popup
+        } else {
+          setPopupCompras({ ocorrencias, carregando: false });
+        }
+      })
+      .catch(() => setPopupCompras(null));
+  }, [productInfo, barcode, consultaBloqueadaPorFlag]);
 
   useEffect(() => {
     if (!consultaBloqueadaPorFlag) return;
@@ -611,32 +579,25 @@ const Index = () => {
                 </div>
               )}
 
-              {/* Badge histórico de compras */}
-              {barcode && mapaCompras[barcode] && (() => {
-                const info = mapaCompras[barcode];
-                const statusLabel = ["to do", "a fazer"].includes(info.status.toLowerCase().trim()) ? "Aguardando Análise" : info.status;
-                return (
-                  <button
-                    onClick={() => setPopupCompras(info)}
-                    style={{
-                      width: "100%", display: "flex", alignItems: "center", gap: 8, textAlign: "left",
-                      background: "hsl(262 80% 50% / 0.10)",
-                      border: "1px solid hsl(262 80% 50% / 0.25)",
-                      borderRadius: 10, padding: "10px 14px", cursor: "pointer",
-                    }}>
-                    <ShoppingCart style={{ width: 16, height: 16, color: "hsl(262 80% 50%)", flexShrink: 0 }} />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <p style={{ fontSize: 11, color: "hsl(262 80% 50%)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Histórico de Compras</p>
-                      <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{statusLabel}</p>
-                    </div>
-                    {info.datas.length > 0 && (
-                      <span style={{ fontSize: 11, color: "hsl(262 80% 50%)", fontWeight: 600, flexShrink: 0 }}>
-                        {info.datas.length}x pedido
-                      </span>
-                    )}
-                  </button>
-                );
-              })()}
+              {/* Badge histórico — abre popup manualmente se já carregou */}
+              {barcode && popupCompras && !popupCompras.carregando && popupCompras.ocorrencias.length > 0 && (
+                <button
+                  onClick={() => setPopupCompras(popupCompras)}
+                  style={{
+                    width: "100%", display: "flex", alignItems: "center", gap: 8, textAlign: "left",
+                    background: "hsl(262 80% 50% / 0.10)", border: "1px solid hsl(262 80% 50% / 0.25)",
+                    borderRadius: 10, padding: "10px 14px", cursor: "pointer",
+                  }}>
+                  <ShoppingCart style={{ width: 16, height: 16, color: "hsl(262 80% 50%)", flexShrink: 0 }} />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <p style={{ fontSize: 11, color: "hsl(262 80% 50%)", fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5 }}>Histórico de Pedidos</p>
+                    <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))" }}>{popupCompras.ocorrencias[0] ? `Último: ${popupCompras.ocorrencias[0].dataFormatada}` : ""}</p>
+                  </div>
+                  <span style={{ fontSize: 11, color: "hsl(262 80% 50%)", fontWeight: 600, flexShrink: 0 }}>
+                    {popupCompras.ocorrencias.length}x
+                  </span>
+                </button>
+              )}
 
               <div>
                 <label style={S.label}>Codigo de Barras</label>
@@ -841,44 +802,35 @@ const Index = () => {
                 <ShoppingCart style={{ width: 20, height: 20, color: "hsl(262 80% 50%)" }} />
               </div>
               <div>
-                <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))" }}>Histórico de Compras</p>
-                <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Este item já foi pedido antes</p>
-              </div>
-            </div>
-
-            {/* Status */}
-            <div style={{ background: "hsl(262 80% 50% / 0.08)", border: "1px solid hsl(262 80% 50% / 0.20)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "hsl(262 80% 50%)", marginBottom: 2 }}>Status no pedido</p>
-              <p style={{ fontSize: 15, fontWeight: 700, color: "hsl(var(--foreground))" }}>
-                {labelStatusCompras(popupCompras.status)}
-              </p>
-            </div>
-
-            {/* Quantidade total */}
-            {popupCompras.pedidoTotal > 0 && (
-              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
-                <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Quantidade total pedida</p>
-                <p style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--foreground))" }}>{popupCompras.pedidoTotal} un.</p>
-              </div>
-            )}
-
-            {/* Datas */}
-            {popupCompras.datas.length > 0 ? (
-              <div style={{ marginBottom: 4 }}>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 6 }}>
-                  Pedido {popupCompras.datas.length}x — datas:
+                <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))" }}>Histórico de Pedidos</p>
+                <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>
+                  {popupCompras.carregando ? "Buscando conferências..." : `${popupCompras.ocorrencias.length}x encontrado(s)`}
                 </p>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
-                  {popupCompras.datas.map((d) => (
-                    <span key={d} style={{ fontSize: 13, fontWeight: 700, background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 8, padding: "4px 10px", color: "hsl(var(--foreground))" }}>
-                      {d}
-                    </span>
-                  ))}
-                </div>
               </div>
-            ) : (
-              <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginBottom: 4 }}>Datas não disponíveis nas tasks encontradas.</p>
+            </div>
+
+            {/* Loading */}
+            {popupCompras.carregando && (
+              <div style={{ textAlign: "center", padding: "16px 0", color: "hsl(var(--muted-foreground))", fontSize: 13 }}>
+                <Loader2 style={{ display: "inline", width: 18, height: 18, marginRight: 6, verticalAlign: "middle", animation: "spin 1s linear infinite" }} />
+                Buscando nos pedidos concluídos...
+              </div>
             )}
+
+            {/* Ocorrências */}
+            {!popupCompras.carregando && popupCompras.ocorrencias.map((oc, i) => {
+              const corStatus = oc.status === "separado" ? "#22c55e" : oc.status === "nao_tem" ? "#ef4444" : oc.status === "parcial" ? "#eab308" : "#9ca3af";
+              const labelSt = oc.status === "separado" ? "Separado" : oc.status === "nao_tem" ? "Não tinha" : oc.status === "parcial" ? "Parcial" : oc.status;
+              return (
+                <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "hsl(var(--secondary))", borderRadius: 8, padding: "8px 12px", marginBottom: 6 }}>
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))" }}>{oc.dataFormatada}</p>
+                    {oc.listeiro && <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>{oc.listeiro}</p>}
+                  </div>
+                  <span style={{ fontSize: 12, fontWeight: 700, color: corStatus, background: `${corStatus}22`, borderRadius: 6, padding: "3px 8px" }}>{labelSt}</span>
+                </div>
+              );
+            })}
 
             {/* Pergunta */}
             <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginTop: 16, marginBottom: 10, textAlign: "center" }}>

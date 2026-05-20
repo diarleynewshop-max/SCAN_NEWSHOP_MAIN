@@ -323,3 +323,22 @@ export async function deletarTask(
   const response = await fetch(`/api/clickup-proxy?action=deletar-task&taskId=${taskId}&empresa=${empresa}`);
   if (!response.ok) throw new Error(`Erro ${response.status} ao deletar task`);
 }
+
+export interface HistoricoItemOcorrencia {
+  data: string;
+  dataFormatada: string;
+  status: string;
+  listeiro: string;
+}
+
+export async function buscarHistoricoItem(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  barcode: string
+): Promise<HistoricoItemOcorrencia[]> {
+  const url = `/api/clickup-proxy?action=buscar-historico-item&empresa=${empresa}&flag=${flag}&barcode=${encodeURIComponent(barcode)}`;
+  const response = await fetch(url);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao buscar histórico`);
+  const data = await response.json();
+  return Array.isArray(data.ocorrencias) ? data.ocorrencias : [];
+}
