@@ -2,8 +2,10 @@ export const HISTORICO_COMPRAS_KEY = "scan_newshop_historico_compras";
 
 export function getHistoricoComprasEnabled(): boolean {
   try {
-    return localStorage.getItem(HISTORICO_COMPRAS_KEY) === "true";
+    const val = localStorage.getItem(HISTORICO_COMPRAS_KEY);
+    // habilitado por padrão; desliga só se explicitamente "false"
+    return val !== "false";
   } catch {
-    return false;
+    return true;
   }
 }

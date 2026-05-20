@@ -107,6 +107,18 @@ async function compactImageBlobToDataUrl(blob: Blob): Promise<string> {
   }
 }
 
+function labelStatusCompras(status: string): string {
+  const s = status.toLowerCase().trim();
+  if (s === "to do" || s === "a fazer") return "Aguardando Análise";
+  if (s.includes("produto_bom") || s.includes("produto bom")) return "Tem no Galpão";
+  if (s.includes("produto_ruim") || s.includes("produto ruim")) return "Produto Ruim";
+  if (s.includes("fazer_pedido") || s.includes("fazer pedido")) return "Pedido em Aberto";
+  if (s.includes("pedido_andamento") || s.includes("andamento")) return "Em Andamento";
+  if (s.includes("compra_realizada") || s.includes("compra realizada")) return "Compra Realizada";
+  if (s.includes("conclu")) return "Concluído";
+  return status;
+}
+
 const Index = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
@@ -835,16 +847,16 @@ const Index = () => {
             </div>
 
             {/* Status */}
-            <div style={{ background: "hsl(262 80% 50% / 0.08)", border: "1px solid hsl(262 80% 50% / 0.20)", borderRadius: 10, padding: "10px 14px", marginBottom: 16 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "hsl(262 80% 50%)", marginBottom: 2 }}>Status atual</p>
+            <div style={{ background: "hsl(262 80% 50% / 0.08)", border: "1px solid hsl(262 80% 50% / 0.20)", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+              <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "hsl(262 80% 50%)", marginBottom: 2 }}>Status no pedido</p>
               <p style={{ fontSize: 15, fontWeight: 700, color: "hsl(var(--foreground))" }}>
-                {["to do", "a fazer"].includes(popupCompras.status.toLowerCase().trim()) ? "Aguardando Análise" : popupCompras.status}
+                {labelStatusCompras(popupCompras.status)}
               </p>
             </div>
 
             {/* Quantidade total */}
             {popupCompras.pedidoTotal > 0 && (
-              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "10px 14px", marginBottom: 14 }}>
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "10px 14px", marginBottom: 12 }}>
                 <p style={{ fontSize: 11, fontWeight: 700, textTransform: "uppercase", letterSpacing: 0.5, color: "hsl(var(--muted-foreground))", marginBottom: 2 }}>Quantidade total pedida</p>
                 <p style={{ fontSize: 22, fontWeight: 900, color: "hsl(var(--foreground))" }}>{popupCompras.pedidoTotal} un.</p>
               </div>
@@ -852,9 +864,9 @@ const Index = () => {
 
             {/* Datas */}
             {popupCompras.datas.length > 0 ? (
-              <div>
-                <p style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 8 }}>
-                  Item pedido nas seguintes datas ({popupCompras.datas.length}x):
+              <div style={{ marginBottom: 4 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--muted-foreground))", marginBottom: 6 }}>
+                  Pedido {popupCompras.datas.length}x — datas:
                 </p>
                 <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
                   {popupCompras.datas.map((d) => (
@@ -865,15 +877,39 @@ const Index = () => {
                 </div>
               </div>
             ) : (
-              <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Datas não disponíveis nas tasks encontradas.</p>
+              <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginBottom: 4 }}>Datas não disponíveis nas tasks encontradas.</p>
             )}
 
-            <button
-              onClick={() => setPopupCompras(null)}
-              style={{ marginTop: 20, width: "100%", height: 44, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", borderRadius: 10, fontSize: 14, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
-            >
-              Fechar
-            </button>
+            {/* Pergunta */}
+            <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginTop: 16, marginBottom: 10, textAlign: "center" }}>
+              Deseja pedir mesmo assim?
+            </p>
+
+            {/* Botões Sim / Não */}
+            <div style={{ display: "flex", gap: 10 }}>
+              <button
+                onClick={() => {
+                  setPopupCompras(null);
+                  setBarcode("");
+                  setSemEAN(false);
+                  setSku("");
+                  clearDraftPhoto();
+                  setQuantity("");
+                  sessionStorage.removeItem("scan_barcode");
+                  sessionStorage.removeItem("scan_sku");
+                  sessionStorage.removeItem("scan_quantity");
+                }}
+                style={{ flex: 1, height: 46, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
+              >
+                Não
+              </button>
+              <button
+                onClick={() => setPopupCompras(null)}
+                style={{ flex: 1, height: 46, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
+              >
+                Sim, pedir
+              </button>
+            </div>
           </div>
         </div>
       )}
