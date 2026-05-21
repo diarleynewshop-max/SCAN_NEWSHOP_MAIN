@@ -1090,6 +1090,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Token ClickUp nao configurado', empresa });
   }
 
+  const body: any = req.body ?? {};
+
   try {
     if (action === 'buscar-tasks') {
       const tasks = await buscarTasksAnalisado(empresa, flag, token);
@@ -1366,7 +1368,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const kanbanTasks = allTasks
         .filter((task: any) => {
           const n: string = task.name ?? '';
-          return !n.startsWith('🛒') && !n.toLowerCase().includes('relatorio');
+          // Exclui apenas carrinhos de compras (🛒). Tasks de Relatorio aparecem na sua coluna.
+          return !n.startsWith('🛒');
         })
         .map((task: any) => {
           const statusNorm = normalizeStatus(task.status?.status);

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { RefreshCw, AlertTriangle, FileJson, FileX, ChevronRight } from "lucide-react";
+import { RefreshCw, AlertTriangle, FileJson, FileX, ChevronLeft, ChevronRight } from "lucide-react";
 
 interface KanbanTask {
   id: string;
@@ -40,7 +40,7 @@ function formatarData(ts: string): string {
 }
 
 function hexToRgb(hex: string): string {
-  const h = hex.replace("#", "");
+  const h = (hex || "#808080").replace("#", "");
   const r = parseInt(h.slice(0, 2), 16);
   const g = parseInt(h.slice(2, 4), 16);
   const b = parseInt(h.slice(4, 6), 16);
@@ -70,19 +70,15 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
 
   useEffect(() => { buscar(); }, [buscar]);
 
-  function proxyPost(action: string, body: object) {
-    const params = new URLSearchParams({ action, empresa, flag });
-    return fetch(`${PROXY_URL}?${params}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    });
-  }
-
   async function moverStatus(taskId: string, novoStatus: string) {
     setMovendo(p => new Set(p).add(taskId));
     try {
-      const res = await proxyPost("mover-status-pedido", { taskId, novoStatus });
+      const params = new URLSearchParams({ action: "mover-status-pedido", empresa, flag });
+      const res = await fetch(`${PROXY_URL}?${params}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId, novoStatus }),
+      });
       if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error ?? `Erro ${res.status}`); }
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, statusClickUp: novoStatus, statusLabel: novoStatus } : t));
     } catch (e: any) { alert(`Erro ao mover: ${(e as Error).message}`); }
@@ -94,12 +90,18 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
     if (semAnexo.length === 0) { alert("Nenhum pedido sem JSON nesta coluna."); return; }
     if (!confirm(`Marcar ${semAnexo.length} pedido(s) sem anexo com etiqueta "SEM JSON"?`)) return;
     try {
-      const res = await proxyPost("marcar-sem-json", { taskIds: semAnexo.map(t => t.id) });
+      const params = new URLSearchParams({ action: "marcar-sem-json", empresa, flag });
+      const res = await fetch(`${PROXY_URL}?${params}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskIds: semAnexo.map(t => t.id) }),
+      });
       if (!res.ok) throw new Error(`Erro ${res.status}`);
       setTasks(prev => prev.map(t => !t.temAnexo && t.statusClickUp === colStatus ? { ...t, semJsonTag: true } : t));
     } catch (e: any) { alert(`Erro: ${(e as Error).message}`); }
   }
 
+  // Colunas na ordem do ClickUp (closed sempre no fim)
   const cols = useMemo(() => {
     if (statuses.length === 0) return [];
     return [...statuses].sort((a, b) => {
@@ -109,17 +111,20 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
     });
   }, [statuses]);
 
-  const nextStatusMap = useMemo(() => {
-    const map: Record<string, ClickUpStatus | null> = {};
-    cols.forEach((col, i) => { map[col.status] = i < cols.length - 1 ? cols[i + 1] : null; });
+  // Index do status para saber prev/next
+  const statusIndex = useMemo(() => {
+    const map: Record<string, number> = {};
+    cols.forEach((c, i) => { map[c.status] = i; });
     return map;
   }, [cols]);
 
+  // Tasks agrupadas por coluna
   const tasksPorColuna = useMemo(() => {
     const cutoff = Date.now() - CONCLUIDO_DIAS * 86400000;
     const map: Record<string, KanbanTask[]> = {};
     cols.forEach(col => {
       let colTasks = tasks.filter(t => t.statusClickUp === col.status);
+      // Concluídos: limita aos últimos N dias
       if (col.type === "closed" || col.type === "done") {
         colTasks = colTasks.filter(t => Number(t.dataAtualizacao || t.dataCriacao) >= cutoff);
       }
@@ -165,31 +170,43 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
         </span>
       </div>
 
-      {/* Grade de colunas com scroll horizontal */}
+      {/* Grade de colunas com scroll horizontal — estilo ClickUp */}
       <div style={{ overflowX: "auto", display: "flex", gap: 0, minHeight: 200, alignItems: "stretch" }}>
         {cols.map((col, colIdx) => {
           const rgb = hexToRgb(col.color);
           const colTasks = tasksPorColuna[col.status] ?? [];
           const isClosed = col.type === "closed" || col.type === "done";
           const semAnexoCount = colTasks.filter(t => !t.temAnexo && !t.semJsonTag).length;
-          const nextCol = nextStatusMap[col.status];
+          const idx = statusIndex[col.status];
+          const prevCol = idx > 0 ? cols[idx - 1] : null;
+          const nextCol = idx < cols.length - 1 ? cols[idx + 1] : null;
 
           return (
             <div
               key={col.status}
               style={{
-                minWidth: 220,
-                maxWidth: 260,
-                flex: "0 0 240px",
+                minWidth: 240,
+                maxWidth: 280,
+                flex: "0 0 260px",
                 borderRight: colIdx < cols.length - 1 ? "1px solid hsl(var(--border))" : "none",
                 display: "flex",
                 flexDirection: "column",
               }}
             >
-              {/* Header */}
-              <div style={{ padding: "9px 12px", borderBottom: "1px solid hsl(var(--border))", background: `rgba(${rgb},0.07)`, display: "flex", alignItems: "center", gap: 6 }}>
+              {/* Header coluna */}
+              <div style={{
+                padding: "9px 12px",
+                borderBottom: "1px solid hsl(var(--border))",
+                background: `rgba(${rgb},0.08)`,
+                display: "flex",
+                alignItems: "center",
+                gap: 6,
+                position: "sticky",
+                top: 0,
+                zIndex: 1,
+              }}>
                 <span style={{ width: 8, height: 8, borderRadius: "50%", background: col.color, flexShrink: 0 }} />
-                <span style={{ fontSize: 11, fontWeight: 700, color: col.color, textTransform: "uppercase", letterSpacing: "0.08em", flex: 1 }}>
+                <span style={{ fontSize: 11, fontWeight: 700, color: col.color, textTransform: "uppercase", letterSpacing: "0.08em", flex: 1, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
                   {col.status}
                 </span>
                 <span style={{ fontSize: 11, fontWeight: 700, color: "hsl(var(--muted-foreground))" }}>
@@ -207,7 +224,7 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
               </div>
 
               {/* Cards */}
-              <div style={{ flex: 1, padding: 8, display: "flex", flexDirection: "column", gap: 6, overflowY: "auto", maxHeight: "calc(100vh - 280px)" }}>
+              <div style={{ flex: 1, padding: 8, display: "flex", flexDirection: "column", gap: 6, overflowY: "auto", maxHeight: "calc(100vh - 240px)" }}>
                 {colTasks.length === 0 && (
                   <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", textAlign: "center", padding: "16px 0" }}>
                     {isClosed ? `Vazio (${CONCLUIDO_DIAS}d)` : "Vazio"}
@@ -227,12 +244,14 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
                         transition: "opacity 0.2s",
                       }}
                     >
+                      {/* Título */}
                       <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(var(--foreground))", lineHeight: 1.3, marginBottom: 4, wordBreak: "break-word" }}>
                         {task.titulo || task.pessoa}
                       </p>
 
+                      {/* Pessoa + data */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
-                        <span style={{ fontSize: 10, fontWeight: 700, color: col.color, background: `rgba(${rgb},0.12)`, borderRadius: 5, padding: "1px 6px" }}>
+                        <span style={{ fontSize: 10, fontWeight: 700, color: col.color, background: `rgba(${rgb},0.14)`, borderRadius: 5, padding: "1px 6px" }}>
                           {task.pessoa}
                         </span>
                         <span style={{ fontSize: 10, color: "hsl(var(--muted-foreground))" }}>
@@ -240,7 +259,8 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
                         </span>
                       </div>
 
-                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap" }}>
+                      {/* JSON tag */}
+                      <div style={{ display: "flex", alignItems: "center", gap: 5, flexWrap: "wrap", marginBottom: 8 }}>
                         {task.temAnexo ? (
                           <span style={{ fontSize: 10, fontWeight: 700, color: "hsl(var(--success))", background: "hsl(var(--success) / 0.1)", borderRadius: 5, padding: "2px 7px", display: "flex", alignItems: "center", gap: 3 }}>
                             <FileJson style={{ width: 10, height: 10 }} /> JSON
@@ -250,35 +270,71 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
                             <FileX style={{ width: 10, height: 10 }} /> {task.semJsonTag ? "SEM JSON ✓" : "SEM JSON"}
                           </span>
                         )}
+                      </div>
 
-                        {!isClosed && nextCol && (
-                          <button
-                            onClick={() => moverStatus(task.id, nextCol.status)}
-                            disabled={emMovimento}
-                            style={{
-                              marginLeft: "auto",
-                              height: 24,
-                              padding: "0 8px",
-                              borderRadius: 6,
-                              border: "none",
-                              background: nextCol.color,
-                              color: "#fff",
-                              cursor: "pointer",
-                              fontSize: 10,
-                              fontWeight: 700,
-                              display: "flex",
-                              alignItems: "center",
-                              gap: 3,
-                              opacity: emMovimento ? 0.6 : 1,
-                            }}
-                          >
-                            {emMovimento
-                              ? <RefreshCw style={{ width: 10, height: 10, animation: "spin 1s linear infinite" }} />
-                              : <ChevronRight style={{ width: 10, height: 10 }} />
-                            }
-                            {nextCol.status}
-                          </button>
-                        )}
+                      {/* Setas mover ◀ ▶ */}
+                      <div style={{ display: "flex", gap: 4, alignItems: "stretch" }}>
+                        <button
+                          onClick={() => prevCol && moverStatus(task.id, prevCol.status)}
+                          disabled={!prevCol || emMovimento}
+                          title={prevCol ? `← ${prevCol.status}` : "Sem coluna anterior"}
+                          style={{
+                            flex: 1,
+                            height: 28,
+                            padding: "0 6px",
+                            borderRadius: 6,
+                            border: `1px solid ${prevCol ? `rgba(${hexToRgb(prevCol.color)},0.5)` : "hsl(var(--border))"}`,
+                            background: prevCol ? `rgba(${hexToRgb(prevCol.color)},0.1)` : "transparent",
+                            color: prevCol ? prevCol.color : "hsl(var(--muted-foreground))",
+                            cursor: prevCol && !emMovimento ? "pointer" : "not-allowed",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 3,
+                            opacity: !prevCol || emMovimento ? 0.4 : 1,
+                            overflow: "hidden",
+                          }}
+                        >
+                          <ChevronLeft style={{ width: 12, height: 12, flexShrink: 0 }} />
+                          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                            {prevCol ? prevCol.status : "—"}
+                          </span>
+                        </button>
+                        <button
+                          onClick={() => nextCol && moverStatus(task.id, nextCol.status)}
+                          disabled={!nextCol || emMovimento}
+                          title={nextCol ? `${nextCol.status} →` : "Sem próxima coluna"}
+                          style={{
+                            flex: 1,
+                            height: 28,
+                            padding: "0 6px",
+                            borderRadius: 6,
+                            border: "none",
+                            background: nextCol ? nextCol.color : "hsl(var(--muted))",
+                            color: nextCol ? "#fff" : "hsl(var(--muted-foreground))",
+                            cursor: nextCol && !emMovimento ? "pointer" : "not-allowed",
+                            fontSize: 10,
+                            fontWeight: 700,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center",
+                            gap: 3,
+                            opacity: !nextCol || emMovimento ? 0.4 : 1,
+                            overflow: "hidden",
+                          }}
+                        >
+                          {emMovimento
+                            ? <RefreshCw style={{ width: 12, height: 12, animation: "spin 1s linear infinite", flexShrink: 0 }} />
+                            : <>
+                                <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                                  {nextCol ? nextCol.status : "—"}
+                                </span>
+                                <ChevronRight style={{ width: 12, height: 12, flexShrink: 0 }} />
+                              </>
+                          }
+                        </button>
                       </div>
                     </div>
                   );
