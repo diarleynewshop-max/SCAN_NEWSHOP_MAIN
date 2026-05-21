@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
-import { RefreshCw, AlertTriangle, FileJson, FileX, ChevronLeft, ChevronRight } from "lucide-react";
+import { RefreshCw, AlertTriangle, FileJson, FileX, ChevronLeft, ChevronRight, CheckSquare, Square, X } from "lucide-react";
 
 interface KanbanTask {
   id: string;
@@ -64,6 +64,7 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
   const [loading,  setLoading]  = useState(false);
   const [erro,     setErro]     = useState<string | null>(null);
   const [movendo,  setMovendo]  = useState<Set<string>>(new Set());
+  const [selecionados, setSelecionados] = useState<Set<string>>(new Set());
 
   const buscar = useCallback(async () => {
     setLoading(true); setErro(null);
@@ -93,6 +94,38 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
       setTasks(prev => prev.map(t => t.id === taskId ? { ...t, statusClickUp: novoStatus, statusLabel: novoStatus } : t));
     } catch (e: any) { alert(`Erro ao mover: ${(e as Error).message}`); }
     finally { setMovendo(p => { const s = new Set(p); s.delete(taskId); return s; }); }
+  }
+
+  // Move várias tasks em paralelo (com limite leve para não estourar o ClickUp)
+  async function moverEmLote(items: Array<{ taskId: string; novoStatus: string }>) {
+    if (items.length === 0) return;
+    setMovendo(p => { const s = new Set(p); items.forEach(i => s.add(i.taskId)); return s; });
+    const erros: string[] = [];
+    const CONCORRENCIA = 4;
+    for (let i = 0; i < items.length; i += CONCORRENCIA) {
+      const lote = items.slice(i, i + CONCORRENCIA);
+      await Promise.all(lote.map(async ({ taskId, novoStatus }) => {
+        try {
+          const params = new URLSearchParams({ action: "mover-status-pedido", empresa, flag });
+          const res = await fetch(`${PROXY_URL}?${params}`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ taskId, novoStatus }),
+          });
+          if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error ?? `Erro ${res.status}`); }
+          setTasks(prev => prev.map(t => t.id === taskId ? { ...t, statusClickUp: novoStatus, statusLabel: novoStatus } : t));
+        } catch (e: any) {
+          erros.push(`${taskId}: ${e.message}`);
+        }
+      }));
+    }
+    setMovendo(p => { const s = new Set(p); items.forEach(i => s.delete(i.taskId)); return s; });
+    setSelecionados(new Set());
+    if (erros.length > 0) alert(`Movidos com erro:\n${erros.slice(0, 5).join("\n")}${erros.length > 5 ? `\n+${erros.length - 5} erros` : ""}`);
+  }
+
+  function toggleSelecionado(id: string) {
+    setSelecionados(p => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s; });
   }
 
   async function marcarSemJson(colStatus: string) {
@@ -233,6 +266,18 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
                     <FileX style={{ width: 9, height: 9 }} /> {semAnexoCount}
                   </button>
                 )}
+                {nextCol && colTasks.length > 0 && (
+                  <button
+                    onClick={() => {
+                      if (!confirm(`Mover TODOS os ${colTasks.length} pedidos de "${col.status}" para "${nextCol.status}"?`)) return;
+                      moverEmLote(colTasks.map(t => ({ taskId: t.id, novoStatus: nextCol.status })));
+                    }}
+                    title={`Mover todos os ${colTasks.length} para ${nextCol.status}`}
+                    style={{ height: 20, padding: "0 6px", borderRadius: 5, border: "none", background: nextCol.color, color: "#fff", cursor: "pointer", fontSize: 9, fontWeight: 800, display: "flex", alignItems: "center", gap: 2 }}
+                  >
+                    Todos <ChevronRight style={{ width: 10, height: 10 }} />
+                  </button>
+                )}
               </div>
 
               {/* Cards */}
@@ -256,10 +301,29 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
                         transition: "opacity 0.2s",
                       }}
                     >
-                      {/* Título */}
-                      <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(var(--foreground))", lineHeight: 1.3, marginBottom: 4, wordBreak: "break-word" }}>
-                        {task.titulo || task.pessoa}
-                      </p>
+                      {/* Título + checkbox seleção */}
+                      <div style={{ display: "flex", alignItems: "flex-start", gap: 6, marginBottom: 4 }}>
+                        <button
+                          onClick={() => toggleSelecionado(task.id)}
+                          title={selecionados.has(task.id) ? "Desmarcar" : "Selecionar"}
+                          style={{
+                            flexShrink: 0,
+                            width: 18, height: 18,
+                            border: "none", background: "transparent",
+                            cursor: "pointer",
+                            color: selecionados.has(task.id) ? col.color : "hsl(var(--muted-foreground))",
+                            padding: 0,
+                            display: "flex", alignItems: "center", justifyContent: "center",
+                          }}
+                        >
+                          {selecionados.has(task.id)
+                            ? <CheckSquare style={{ width: 16, height: 16 }} />
+                            : <Square style={{ width: 16, height: 16 }} />}
+                        </button>
+                        <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(var(--foreground))", lineHeight: 1.3, wordBreak: "break-word", flex: 1 }}>
+                          {task.titulo || task.pessoa}
+                        </p>
+                      </div>
 
                       {/* Pessoa + data */}
                       <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
@@ -356,6 +420,89 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
           );
         })}
       </div>
+
+      {/* Barra flutuante de seleção em lote */}
+      {selecionados.size > 0 && (
+        <div style={{
+          position: "fixed",
+          bottom: 16,
+          left: "50%",
+          transform: "translateX(-50%)",
+          zIndex: 60,
+          background: "hsl(var(--card))",
+          border: "1.5px solid hsl(var(--border))",
+          borderRadius: 12,
+          boxShadow: "var(--shadow-md)",
+          padding: "8px 12px",
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          maxWidth: "calc(100vw - 32px)",
+          flexWrap: "wrap",
+        }}>
+          <span style={{ fontSize: 12, fontWeight: 800, color: "hsl(var(--foreground))" }}>
+            {selecionados.size} selecionado{selecionados.size !== 1 ? "s" : ""}
+          </span>
+          <button
+            onClick={() => {
+              const items = tasks
+                .filter(t => selecionados.has(t.id))
+                .map(t => {
+                  const idx = statusIndex[t.statusClickUp];
+                  const next = idx !== undefined && idx < cols.length - 1 ? cols[idx + 1] : null;
+                  return next ? { taskId: t.id, novoStatus: next.status } : null;
+                })
+                .filter((x): x is { taskId: string; novoStatus: string } => x !== null);
+              if (items.length === 0) { alert("Nenhum selecionado pode avançar (já estão na última coluna)."); return; }
+              if (!confirm(`Mover ${items.length} pedido(s) para a PRÓXIMA coluna?`)) return;
+              moverEmLote(items);
+            }}
+            style={{
+              height: 32, padding: "0 12px", borderRadius: 8,
+              border: "none", background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))",
+              cursor: "pointer", fontSize: 12, fontWeight: 800,
+              display: "flex", alignItems: "center", gap: 4,
+            }}
+          >
+            Mover → próxima <ChevronRight style={{ width: 13, height: 13 }} />
+          </button>
+          <button
+            onClick={() => {
+              const items = tasks
+                .filter(t => selecionados.has(t.id))
+                .map(t => {
+                  const idx = statusIndex[t.statusClickUp];
+                  const prev = idx !== undefined && idx > 0 ? cols[idx - 1] : null;
+                  return prev ? { taskId: t.id, novoStatus: prev.status } : null;
+                })
+                .filter((x): x is { taskId: string; novoStatus: string } => x !== null);
+              if (items.length === 0) { alert("Nenhum selecionado pode voltar."); return; }
+              if (!confirm(`Voltar ${items.length} pedido(s) para a coluna anterior?`)) return;
+              moverEmLote(items);
+            }}
+            style={{
+              height: 32, padding: "0 12px", borderRadius: 8,
+              border: "1.5px solid hsl(var(--border))", background: "transparent", color: "hsl(var(--foreground))",
+              cursor: "pointer", fontSize: 12, fontWeight: 700,
+              display: "flex", alignItems: "center", gap: 4,
+            }}
+          >
+            <ChevronLeft style={{ width: 13, height: 13 }} /> Anterior
+          </button>
+          <button
+            onClick={() => setSelecionados(new Set())}
+            title="Limpar seleção"
+            style={{
+              height: 32, width: 32, borderRadius: 8,
+              border: "1.5px solid hsl(var(--border))", background: "transparent", color: "hsl(var(--muted-foreground))",
+              cursor: "pointer",
+              display: "flex", alignItems: "center", justifyContent: "center",
+            }}
+          >
+            <X style={{ width: 14, height: 14 }} />
+          </button>
+        </div>
+      )}
 
       {temConcluido && (
         <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", padding: "4px 16px 8px", textAlign: "right" }}>

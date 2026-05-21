@@ -15,11 +15,12 @@ export function EmpresaToggleSF() {
   }, []);
 
   if (!login) return null;
-  const isSF = login.empresa === "SOYE" || login.empresa === "FACIL";
   const elevado = login.role === "compras" || login.role === "admin" || login.role === "super";
-  if (!isSF || !elevado) return null;
+  if (!elevado) return null;
 
-  const proxima = login.empresa === "SOYE" ? "FACIL" : "SOYE";
+  const CICLO: Array<"NEWSHOP" | "SOYE" | "FACIL"> = ["NEWSHOP", "SOYE", "FACIL"];
+  const atualIdx = CICLO.indexOf(login.empresa as any);
+  const proxima = CICLO[(atualIdx + 1) % CICLO.length];
 
   const trocar = () => {
     try {
