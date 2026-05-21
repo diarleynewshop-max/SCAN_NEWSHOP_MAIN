@@ -28,6 +28,16 @@ interface KanbanAdminProps {
 const PROXY_URL = "/api/clickup-proxy";
 const CONCLUIDO_DIAS = 7;
 
+// Status do ClickUp que não devem aparecer no Kanban (já normalizados: lowercase, sem acento)
+const STATUS_OCULTOS = new Set([
+  "entrada de nf",
+  "conferencia",
+  "saida para loja",
+  "pre analisado",
+  "pre-analisado",
+  "relatorio",
+]);
+
 function formatarData(ts: string): string {
   if (!ts) return "-";
   const d = new Date(Number(ts));
@@ -101,14 +111,16 @@ export default function KanbanAdmin({ empresa, flag }: KanbanAdminProps) {
     } catch (e: any) { alert(`Erro: ${(e as Error).message}`); }
   }
 
-  // Colunas na ordem do ClickUp (closed sempre no fim)
+  // Colunas na ordem do ClickUp (closed sempre no fim), filtrando as ocultas
   const cols = useMemo(() => {
     if (statuses.length === 0) return [];
-    return [...statuses].sort((a, b) => {
-      if (a.type === "closed" && b.type !== "closed") return 1;
-      if (b.type === "closed" && a.type !== "closed") return -1;
-      return a.orderindex - b.orderindex;
-    });
+    return statuses
+      .filter(s => !STATUS_OCULTOS.has(s.status))
+      .sort((a, b) => {
+        if (a.type === "closed" && b.type !== "closed") return 1;
+        if (b.type === "closed" && a.type !== "closed") return -1;
+        return a.orderindex - b.orderindex;
+      });
   }, [statuses]);
 
   // Index do status para saber prev/next
