@@ -83,20 +83,21 @@ const MenuCard: React.FC<MenuCardProps> = ({
       }
     }}
       style={{
-        width: "100%", 
-        display: "flex", 
-        alignItems: isDesktop ? "flex-start" : "center", 
+        width: "100%",
+        display: "flex",
+        alignItems: isDesktop ? "flex-start" : "center",
         gap: isDesktop ? 20 : 16,
-        padding: isDesktop ? "24px" : "16px 18px", 
+        padding: isDesktop ? "24px" : "16px 18px",
         borderRadius: isDesktop ? 20 : 16,
         background: "hsl(var(--card))",
         border: "1px solid hsl(var(--border))",
-        boxShadow: isDesktop ? "var(--shadow-md)" : "var(--shadow-sm)", 
-        cursor: "pointer", 
+        boxShadow: isDesktop ? "var(--shadow-md)" : "var(--shadow-sm)",
+        cursor: "pointer",
         textAlign: "left",
         transition: "all 0.18s",
-        height: isDesktop ? "auto" : "auto",
-        minHeight: isDesktop ? "140px" : "auto",
+        height: isDesktop ? 168 : 80,
+        boxSizing: "border-box",
+        overflow: "hidden",
       }}
     >
       <div style={{ 
@@ -120,11 +121,15 @@ const MenuCard: React.FC<MenuCardProps> = ({
         }}>
           {label}
         </p>
-        <p style={{ 
-          fontSize: isDesktop ? 13 : 12, 
-          color: "hsl(var(--muted-foreground))", 
-          lineHeight: 1.5,
-          marginBottom: isDesktop ? 12 : 0
+        <p style={{
+          fontSize: isDesktop ? 13 : 12,
+          color: "hsl(var(--muted-foreground))",
+          lineHeight: 1.4,
+          marginBottom: isDesktop ? 12 : 0,
+          display: "-webkit-box",
+          WebkitLineClamp: 2,
+          WebkitBoxOrient: "vertical",
+          overflow: "hidden",
         }}>
           {description}
         </p>
@@ -457,12 +462,12 @@ const Home = () => {
 
        {/* â”€â”€ Menu Cards â”€â”€ */}
         <div style={{ 
-          flex: 1, 
-          padding: modoDesktop ? "16px 32px 24px" : "12px 16px 8px", 
-          display: "flex", 
-          flexDirection: modoDesktop ? "row" : "column",
-          flexWrap: modoDesktop ? "wrap" : "nowrap",
-          gap: modoDesktop ? 20 : 12 
+          flex: 1,
+          padding: modoDesktop ? "16px 32px 24px" : "12px 16px 8px",
+          display: "grid",
+          gridTemplateColumns: modoDesktop ? "repeat(3, 1fr)" : "1fr",
+          gap: modoDesktop ? 20 : 12,
+          alignItems: "stretch",
         }}>
           {/* Cards base — filtrados por flag para operadores */}
           {baseMenuItems
@@ -476,7 +481,7 @@ const Home = () => {
               return true; // Consulta Preço, Perfil, Configuração sempre visíveis
             })
             .map(({ Icon, label, description, path, accent }) => (
-            <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
+            <div key={label}>
               <MenuCard
                 Icon={Icon}
                 label={label}
@@ -493,7 +498,7 @@ const Home = () => {
           {/* Cards para compras (se tiver acesso) */}
           {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
             comprasMenuItems.map(({ Icon, label, description, path, accent }) => (
-              <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
+              <div key={label}>
                 <MenuCard 
                   Icon={Icon}
                   label={label}
@@ -511,7 +516,7 @@ const Home = () => {
           {/* Cards para analytics (se tiver acesso) */}
           {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
             analyticsMenuItems.map(({ Icon, label, description, path, accent }) => (
-              <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
+              <div key={label}>
                 <MenuCard
                   Icon={Icon}
                   label={label}
@@ -529,7 +534,7 @@ const Home = () => {
           {/* Cards exclusivos admin */}
           {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
             adminMenuItems.map(({ Icon, label, description, path, accent }) => (
-              <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
+              <div key={label}>
                 <MenuCard
                   Icon={Icon}
                   label={label}
