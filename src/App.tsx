@@ -7,9 +7,10 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 
 // 1. IMPORTAMOS O BOTÃO AQUI
-import { ThemeToggle } from "@/components/ui/theme-toggle"; 
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import TutorialButton from "@/components/TutorialButton";
 import TourGuide from "@/components/TourGuide";
+import { EmpresaToggleSF } from "@/components/EmpresaToggleSF";
 
 const Home = lazy(() => import("./pages/Home"));
 const Index = lazy(() => import("./pages/Index"));
@@ -33,6 +34,9 @@ const App = () => (
       <div className="fixed top-4 right-4 z-50">
         <ThemeToggle />
       </div>
+
+      {/* Botão SOYE ↔ FACIL (apenas para Compras/Admin logado em SOYE ou FACIL) */}
+      <EmpresaToggleSF />
 
 {/* Botão para iniciar o Tutorial (acima do conteúdo) */}
       {/* <div className="fixed top-4 right-20 z-50" style={{ display: 'flex', gap: 8 }}>

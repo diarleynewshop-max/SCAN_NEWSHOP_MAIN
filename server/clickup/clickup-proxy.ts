@@ -1318,10 +1318,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'buscar-kanban-admin') {
       const listId = getListId(empresa, flag ?? 'loja');
+      console.log(`[kanban-admin] empresa=${empresa} flag=${flag} listId=${listId} tokenLen=${token?.length ?? 0}`);
 
       // Busca statuses da lista para construir colunas na ordem correta
       const listResp = await fetch(`https://api.clickup.com/api/v2/list/${listId}`, { headers: { Authorization: token } });
-      if (!listResp.ok) throw new Error(`ClickUp ${listResp.status}: ${await listResp.text()}`);
+      if (!listResp.ok) {
+        const txt = await listResp.text();
+        return res.status(listResp.status).json({
+          error: `ClickUp respondeu ${listResp.status} ao buscar lista ${listId} (empresa=${empresa}, flag=${flag}). Detalhe: ${txt}`,
+          empresa, flag, listId,
+        });
+      }
       const listData = await listResp.json();
       const statuses: Array<{ status: string; color: string; orderindex: number; type: string }> =
         (listData.statuses ?? []).sort((a: any, b: any) => a.orderindex - b.orderindex);
@@ -1332,7 +1339,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&include_attachments=true&page=${page}`,
           { headers: { Authorization: token } }
         );
-        if (!resp.ok) throw new Error(`ClickUp ${resp.status}: ${await resp.text()}`);
+        if (!resp.ok) {
+          const txt = await resp.text();
+          return res.status(resp.status).json({
+            error: `ClickUp respondeu ${resp.status} ao buscar tasks da lista ${listId} (empresa=${empresa}). Detalhe: ${txt}`,
+            empresa, flag, listId,
+          });
+        }
         const d = await resp.json();
         const ts = Array.isArray(d.tasks) ? d.tasks : [];
         allTasks.push(...ts);

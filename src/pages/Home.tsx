@@ -531,8 +531,8 @@ const Home = () => {
             ))
           )}
 
-          {/* Cards exclusivos admin (somente NEWSHOP — ClickUp espelho não suporta SOYE/FACIL) */}
-          {loginSalvo?.role && loginSalvo?.empresa === "NEWSHOP" && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
+          {/* Cards exclusivos admin */}
+          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
             adminMenuItems.map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard
