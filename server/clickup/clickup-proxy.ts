@@ -1316,6 +1316,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'buscar-kanban-admin') {
       const listId = getListId(empresa, flag ?? 'loja');
+
+      // Busca statuses da lista para construir colunas na ordem correta
+      const listResp = await fetch(`https://api.clickup.com/api/v2/list/${listId}`, { headers: { Authorization: token } });
+      if (!listResp.ok) throw new Error(`ClickUp ${listResp.status}: ${await listResp.text()}`);
+      const listData = await listResp.json();
+      const statuses: Array<{ status: string; color: string; orderindex: number; type: string }> =
+        (listData.statuses ?? []).sort((a: any, b: any) => a.orderindex - b.orderindex);
+
       const allTasks: any[] = [];
       for (let page = 0; page < 5; page++) {
         const resp = await fetch(
@@ -1386,11 +1394,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         })
         .filter((t: any) => t.statusLabel !== undefined);
 
-      // Somente Pendente (to do) e Analisado — Concluído não entra no kanban
-      const kanbanFiltrado = kanbanTasks.filter((t: any) => t.statusLabel === 'pedido_no_cd' || t.statusLabel === 'pronto_conferencia');
-      kanbanFiltrado.sort((a: any, b: any) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
-      console.log(`[kanban-admin] empresa=${empresa} total=${kanbanFiltrado.length}`);
-      return res.status(200).json({ tasks: kanbanFiltrado });
+      kanbanTasks.sort((a: any, b: any) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
+      console.log(`[kanban-admin] empresa=${empresa} total=${kanbanTasks.length} statuses=${statuses.length}`);
+      return res.status(200).json({ tasks: kanbanTasks, statuses });
     }
 
     if (action === 'mover-status-pedido') {
