@@ -1,5 +1,5 @@
 ﻿import { useNavigate } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Lock, Shield, Package } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Lock, Shield, Package, Kanban } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -46,6 +46,11 @@ const comprasMenuItems = [
 // Menu para analytics (admin, super)
 const analyticsMenuItems = [
   { Icon: BarChart3,    label: "Dashboard",   description: "Relatórios e gráficos de conferência",  path: "/dashboard", accent: "hsl(var(--violet))" },
+];
+
+// Menu exclusivo admin (admin, super)
+const adminMenuItems = [
+  { Icon: Kanban,       label: "ClickUp",     description: "Quadro espelho da lista no ClickUp",    path: "/clickup",   accent: "hsl(var(--primary))" },
 ];
 
 // Componente de card do menu
@@ -507,7 +512,25 @@ const Home = () => {
           {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
             analyticsMenuItems.map(({ Icon, label, description, path, accent }) => (
               <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
-                <MenuCard 
+                <MenuCard
+                  Icon={Icon}
+                  label={label}
+                  description={description}
+                  path={path}
+                  accent={accent}
+                  navigate={navigate}
+                  setMostrarPerfil={setMostrarPerfil}
+                  setMostrarConfiguracoes={setMostrarConfiguracoes}
+                />
+              </div>
+            ))
+          )}
+
+          {/* Cards exclusivos admin */}
+          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
+            adminMenuItems.map(({ Icon, label, description, path, accent }) => (
+              <div key={label} style={{ flex: modoDesktop ? "1 1 calc(33.333% - 20px)" : "auto", minWidth: modoDesktop ? "300px" : "auto" }}>
+                <MenuCard
                   Icon={Icon}
                   label={label}
                   description={description}

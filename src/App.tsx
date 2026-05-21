@@ -19,6 +19,7 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Compras = lazy(() => import("./pages/Compras"));
 const ConsultaPreco = lazy(() => import("./pages/ConsultaPreco"));
 const MeusPedidos = lazy(() => import("./pages/MeusPedidos"));
+const ClickUp = lazy(() => import("./pages/ClickUp"));
 
 const queryClient = new QueryClient();
 
@@ -65,6 +66,12 @@ const App = () => (
             <Route path="/dashboard" element={
               <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
                 <Dashboard />
+              </ProtectedRoute>
+            } />
+
+            <Route path="/clickup" element={
+              <ProtectedRoute requiredRole={['admin', 'super']}>
+                <ClickUp />
               </ProtectedRoute>
             } />
             
