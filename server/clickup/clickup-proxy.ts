@@ -1400,7 +1400,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'mover-status-pedido') {
-      const { taskId: tid, novoStatus } = body;
+      const { taskId: tid, novoStatus } = req.body ?? {};
       if (!tid || !novoStatus) return res.status(400).json({ error: 'taskId e novoStatus obrigatorios' });
       const resp = await fetch(`https://api.clickup.com/api/v2/task/${tid}`, {
         method: 'PUT',
@@ -1412,7 +1412,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     if (action === 'marcar-sem-json') {
-      const { taskIds } = body;
+      const { taskIds } = req.body ?? {};
       if (!Array.isArray(taskIds) || taskIds.length === 0) return res.status(400).json({ error: 'taskIds obrigatorio' });
       await Promise.all(taskIds.map((tid: string) => addTaskTag(token, tid, 'SEM JSON')));
       return res.status(200).json({ ok: true, marcados: taskIds.length });
