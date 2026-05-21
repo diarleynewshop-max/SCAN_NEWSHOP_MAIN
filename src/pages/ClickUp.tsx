@@ -10,6 +10,37 @@ export default function ClickUp() {
   const empresa = loginSalvo?.empresa ?? "NEWSHOP";
   const flag = loginSalvo?.flag ?? "loja";
 
+  if (empresa !== "NEWSHOP") {
+    return (
+      <div
+        className={`min-h-screen flex flex-col items-center justify-center ${modoDesktop ? "max-w-5xl mx-auto" : "max-w-md mx-auto"}`}
+        style={{ background: "hsl(var(--background))", padding: 24 }}
+      >
+        <h1 style={{ fontSize: 18, fontWeight: 800, color: "hsl(var(--foreground))", marginBottom: 8 }}>
+          ClickUp indisponível
+        </h1>
+        <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", textAlign: "center", marginBottom: 16 }}>
+          O quadro espelho do ClickUp só está disponível para NEWSHOP no momento.
+        </p>
+        <button
+          onClick={() => navigate("/")}
+          style={{
+            height: 40,
+            padding: "0 16px",
+            borderRadius: 10,
+            border: "1.5px solid hsl(var(--border))",
+            background: "transparent",
+            color: "hsl(var(--foreground))",
+            fontWeight: 700,
+            cursor: "pointer",
+          }}
+        >
+          Voltar para o início
+        </button>
+      </div>
+    );
+  }
+
   return (
     <div
       className={`min-h-screen flex flex-col ${modoDesktop ? "max-w-5xl mx-auto" : "max-w-md mx-auto"}`}
