@@ -141,14 +141,15 @@ async function fetchTasksFromList(listId: string, token: string, includeClosed =
   const allTasks: any[] = [];
 
   for (let page = 0; page < 5; page++) {
-    const response = await fetch(
-      `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=${includeClosed ? 'true' : 'false'}&page=${page}`,
-      { headers: { Authorization: token } }
-    );
+    // subtasks=false reduz drasticamente o payload em listas com muitas subtasks
+    // (necessário para evitar ITEMV2_003 nas listas SOYE/FACIL que acumulam relatorios)
+    const url = `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=${includeClosed ? 'true' : 'false'}&page=${page}&subtasks=false`;
+    const response = await fetch(url, { headers: { Authorization: token } });
 
     if (!response.ok) {
-      const errorText = await response.text();
-      throw new Error(`ClickUp ${response.status} na lista ${listId}: ${errorText}`);
+      const errorText = await response.text().catch(() => '');
+      console.error(`[fetchTasksFromList] ClickUp ${response.status} lista=${listId} page=${page} body=${errorText.slice(0, 300)}`);
+      throw new Error(`ClickUp ${response.status} na lista ${listId}: ${errorText.slice(0, 200)}`);
     }
 
     const data = await response.json();
@@ -1028,23 +1029,26 @@ async function buscarTasksAnalisado(
   token: string
 ) {
   const primaryListId = getListId(empresa, flag);
-  const primaryRawTasks = await fetchTasksFromList(primaryListId, token);
-  const primaryTasks = primaryRawTasks
-    .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
-    .map((task) => ({ ...mapClickUpTask(task, primaryListId), emAndamento: taskHasTag(task, CONFERENCIA_LOCK_TAG) }));
+  const errosPorLista: { listId: string; erro: string }[] = [];
 
-  console.log(
-    '[clickup-proxy] buscar-tasks',
-    JSON.stringify({
-      empresa,
-      flag,
-      primaryListId,
+  // Tenta a lista primária — se falhar, segue para fallback ao invés de quebrar tudo
+  let primaryTasks: any[] = [];
+  try {
+    const raw = await fetchTasksFromList(primaryListId, token);
+    primaryTasks = raw
+      .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
+      .map((task) => ({ ...mapClickUpTask(task, primaryListId), emAndamento: taskHasTag(task, CONFERENCIA_LOCK_TAG) }));
+    console.log('[clickup-proxy] buscar-tasks', JSON.stringify({
+      empresa, flag, primaryListId,
       primaryCount: primaryTasks.length,
-      returnedStatuses: primaryRawTasks.map((task) => task.status?.status),
-    })
-  );
+      returnedStatuses: raw.map((task) => task.status?.status),
+    }));
+  } catch (e: any) {
+    console.error(`[clickup-proxy] PRIMARY falhou empresa=${empresa} flag=${flag} listId=${primaryListId}: ${e.message}`);
+    errosPorLista.push({ listId: primaryListId, erro: e.message });
+  }
 
-  if (primaryTasks.length > 0 || empresa === 'NEWSHOP') {
+  if (primaryTasks.length > 0 || (empresa === 'NEWSHOP' && errosPorLista.length === 0)) {
     return primaryTasks;
   }
 
@@ -1056,20 +1060,30 @@ async function buscarTasksAnalisado(
 
   const fallbackTasks: any[] = [];
   for (const listId of fallbackListIds) {
-    const rawTasks = await fetchTasksFromList(listId, token);
-    fallbackTasks.push(
-      ...rawTasks
-        .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
-        .map((task) => ({ ...mapClickUpTask(task, listId), emAndamento: taskHasTag(task, CONFERENCIA_LOCK_TAG) }))
-    );
+    try {
+      const raw = await fetchTasksFromList(listId, token);
+      fallbackTasks.push(
+        ...raw
+          .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
+          .map((task) => ({ ...mapClickUpTask(task, listId), emAndamento: taskHasTag(task, CONFERENCIA_LOCK_TAG) }))
+      );
+    } catch (e: any) {
+      console.error(`[clickup-proxy] FALLBACK falhou empresa=${empresa} listId=${listId}: ${e.message}`);
+      errosPorLista.push({ listId, erro: e.message });
+    }
   }
 
-  console.log(
-    '[clickup-proxy] fallback SOYE/FACIL',
-    JSON.stringify({ empresa, flag, fallbackListIds, fallbackCount: fallbackTasks.length })
-  );
+  console.log('[clickup-proxy] fallback SOYE/FACIL', JSON.stringify({
+    empresa, flag, fallbackListIds, fallbackCount: fallbackTasks.length, errosPorLista,
+  }));
 
-  return fallbackTasks;
+  // Se TODAS as listas falharam (primary + fallback), propaga erro
+  const todasListas = [primaryListId, ...fallbackListIds].length;
+  if (primaryTasks.length === 0 && fallbackTasks.length === 0 && errosPorLista.length === todasListas) {
+    throw new Error(`Todas as listas falharam: ${errosPorLista.map(e => `${e.listId}=${e.erro.slice(0, 80)}`).join(' | ')}`);
+  }
+
+  return [...primaryTasks, ...fallbackTasks];
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -1469,10 +1483,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       console.log(`[HIST][1] barcode=${barcode} barcodeNorm=${barcodeNorm} lista=${listId} empresa=${empresa} flag=${flag}`);
 
       const t0 = Date.now();
-      const response = await fetch(
-        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0`,
-        { headers: { Authorization: token } }
-      );
+      // Filtra Relatorio server-side para reduzir volume (evita ITEMV2_003 em listas grandes)
+      const statusFilter = ['Relatorio', 'RELATORIO', 'Relatório', 'RELATÓRIO']
+        .map(s => `statuses%5B%5D=${encodeURIComponent(s)}`)
+        .join('&');
+      const histUrl = `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0&subtasks=false&${statusFilter}`;
+      const response = await fetch(histUrl, { headers: { Authorization: token } });
       console.log(`[HIST][2] ClickUp respondeu status=${response.status} (+${Date.now() - t0}ms)`);
       if (!response.ok) {
         const errBody = await response.text().catch(() => '');
