@@ -394,7 +394,7 @@ export const listaBaixada = task({
   machine: "small-1x",
   maxDuration: 1000,
   retry: { maxAttempts: 4, factor: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 30_000 },
-  run: async (payload: any) => {
+  run: async (payload: any, { ctx }) => {
     let taskId: string | null = null;
     let comprasTaskId: string | null = null;
 
@@ -417,7 +417,8 @@ Título: ${payload.titulo}
 Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${flagLabel}
 Itens: ${payload.totalItens}
-Data: ${dataFormatada}`,
+Data: ${dataFormatada}
+Trigger Run ID: ${ctx.run.id}`,
         "to do",
         payload.pessoa ? [payload.pessoa] : []
       );
