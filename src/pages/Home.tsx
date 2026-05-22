@@ -7,6 +7,8 @@ import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
 import { HISTORICO_COMPRAS_KEY, getHistoricoComprasEnabled } from "@/lib/historicoCompras";
 import { useToast } from "@/hooks/use-toast";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
+import { ErpLayout } from "@/components/ErpLayout";
+import { ErpDashboard } from "@/components/ErpDashboard";
 
 const STORAGE_KEY = "scan_newshop_lists";
 const ACTIVE_KEY  = "scan_newshop_active_list";
@@ -204,6 +206,13 @@ const Home = () => {
   const logoEmpresa = getCompanyLogo(loginSalvo?.empresa ?? empresa);
   const nomeEmpresaLogo = getCompanyName(loginSalvo?.empresa ?? empresa);
 
+  const [isDesktop, setIsDesktop] = useState(() => window.innerWidth >= 1024);
+  useEffect(() => {
+    const onResize = () => setIsDesktop(window.innerWidth >= 1024);
+    window.addEventListener('resize', onResize);
+    return () => window.removeEventListener('resize', onResize);
+  }, []);
+
   useEffect(() => { setStorage(getStorageSize()); }, []);
 
   // Aplicar tema ao carregar
@@ -391,7 +400,27 @@ const Home = () => {
   };
 
   return (
-    <div className={`min-h-screen flex flex-col ${modoDesktop ? 'max-w-6xl mx-auto' : 'max-w-md mx-auto'}`} style={{ background: "hsl(var(--background))" }}>
+    <div className="min-h-screen flex flex-col max-w-md mx-auto" style={{ background: "hsl(var(--background))" }}>
+
+      {/* Layout ERP Desktop */}
+      {isDesktop && (
+        <div style={{ position: "fixed", inset: 0, zIndex: 50 }}>
+          <ErpLayout
+            loginSalvo={loginSalvo}
+            logoEmpresa={logoEmpresa}
+            nomeEmpresaLogo={nomeEmpresaLogo}
+            setMostrarPerfil={setMostrarPerfil}
+            setMostrarConfiguracoes={setMostrarConfiguracoes}
+            fazerLogout={fazerLogout}
+            pageTitle="Início"
+          >
+            <ErpDashboard loginSalvo={loginSalvo} />
+          </ErpLayout>
+        </div>
+      )}
+
+      {/* Conteúdo mobile (oculto em desktop) */}
+      <div style={{ display: isDesktop ? 'none' : 'contents' }}>
 
       {/* â”€â”€ Header â”€â”€ */}
       <header className={`relative overflow-hidden ${modoDesktop ? 'pt-6 pb-8 px-8' : 'pt-5 pb-7 px-5'} bg-primary text-primary-foreground border-b border-border`}>
@@ -655,6 +684,8 @@ const Home = () => {
       </div>
 
       {/* â”€â”€ Modal Confirmação â”€â”€ */}
+      </div>{/* fim conteúdo mobile */}
+
       {confirmOpen && (
         <div
           onClick={(e) => { if (e.target === e.currentTarget) setConfirmOpen(false); }}
