@@ -1470,7 +1470,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       const t0 = Date.now();
       const response = await fetch(
-        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0&order_by=date_updated&reverse=true`,
+        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0`,
         { headers: { Authorization: token } }
       );
       console.log(`[HIST][2] ClickUp respondeu status=${response.status} (+${Date.now() - t0}ms)`);
