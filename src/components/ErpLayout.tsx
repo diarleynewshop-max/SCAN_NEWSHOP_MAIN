@@ -400,12 +400,15 @@ export function ErpLayout({
         </header>
 
         {/* Content */}
-        <main style={{
-          flex: 1,
-          overflowY: "auto",
-          padding: "28px 32px",
-          background: "hsl(var(--background))",
-        }}>
+        <main
+          className="erp-main"
+          style={{
+            flex: 1,
+            overflowY: "auto",
+            padding: "28px 32px",
+            background: "hsl(var(--background))",
+          }}
+        >
           {children}
         </main>
       </div>

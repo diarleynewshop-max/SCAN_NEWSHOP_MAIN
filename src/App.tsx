@@ -5,6 +5,7 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
+import { DesktopShell } from "@/components/DesktopShell";
 
 // 1. IMPORTAMOS O BOTÃO AQUI
 import { ThemeToggle } from "@/components/ui/theme-toggle";
@@ -49,36 +50,44 @@ const App = () => (
       <BrowserRouter>
         <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Carregando...</div>}>
           <Routes>
+            {/* Home gerencia o próprio DesktopShell (tem dashboard + modais embutidos) */}
             <Route path="/" element={<Home />} />
-            <Route path="/scanner" element={<Index />} />
-            <Route path="/consulta-preco" element={<ConsultaPreco />} />
-            <Route path="/meus-pedidos" element={<MeusPedidos />} />
-            
+
+            <Route path="/scanner" element={
+              <DesktopShell pageTitle="Scanner"><Index /></DesktopShell>
+            } />
+            <Route path="/consulta-preco" element={
+              <DesktopShell pageTitle="Consulta Preço"><ConsultaPreco /></DesktopShell>
+            } />
+            <Route path="/meus-pedidos" element={
+              <DesktopShell pageTitle="Meus Pedidos"><MeusPedidos /></DesktopShell>
+            } />
+
             {/* Rotas protegidas por role */}
             <Route path="/analytics" element={
               <ProtectedRoute requiredRole={['admin', 'super']}>
-                <Analytics />
+                <DesktopShell pageTitle="Analytics"><Analytics /></DesktopShell>
               </ProtectedRoute>
             } />
-            
+
             <Route path="/compras" element={
               <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
-                <Compras />
+                <DesktopShell pageTitle="Compras"><Compras /></DesktopShell>
               </ProtectedRoute>
             } />
 
             <Route path="/dashboard" element={
               <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
-                <Dashboard />
+                <DesktopShell pageTitle="Dashboard"><Dashboard /></DesktopShell>
               </ProtectedRoute>
             } />
 
             <Route path="/clickup" element={
               <ProtectedRoute requiredRole={['admin', 'super']}>
-                <ClickUp />
+                <DesktopShell pageTitle="ClickUp"><ClickUp /></DesktopShell>
               </ProtectedRoute>
             } />
-            
+
             {/* ADD ALL CUSTOM ROUTES ABOVE THE CATCH-ALL "*" ROUTE */}
             <Route path="*" element={<NotFound />} />
           </Routes>

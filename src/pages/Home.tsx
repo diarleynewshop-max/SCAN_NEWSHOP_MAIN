@@ -1,4 +1,4 @@
-﻿import { useNavigate } from "react-router-dom";
+﻿import { useNavigate, useSearchParams } from "react-router-dom";
 import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Lock, Shield, Package, Kanban } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
@@ -212,6 +212,22 @@ const Home = () => {
     window.addEventListener('resize', onResize);
     return () => window.removeEventListener('resize', onResize);
   }, []);
+
+  // Detecta ?modal=perfil ou ?modal=config (vindo do DesktopShell de outras páginas)
+  const [searchParams, setSearchParams] = useSearchParams();
+  useEffect(() => {
+    const modal = searchParams.get('modal');
+    if (modal === 'perfil') {
+      setMostrarPerfil(true);
+      searchParams.delete('modal');
+      setSearchParams(searchParams, { replace: true });
+    } else if (modal === 'config') {
+      setMostrarConfiguracoes(true);
+      searchParams.delete('modal');
+      setSearchParams(searchParams, { replace: true });
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchParams]);
 
   useEffect(() => { setStorage(getStorageSize()); }, []);
 
