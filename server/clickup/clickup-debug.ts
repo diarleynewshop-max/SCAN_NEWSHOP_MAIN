@@ -13,6 +13,13 @@ const TOKEN =
   process.env.VITE_CLICKUP_TOKEN_NEWSHOP ||
   '';
 
+const TOKEN_SF =
+  process.env.CLICKUP_TOKEN_SF ||
+  process.env.CLICKUP_API_TOKEN_SF ||
+  '';
+
+const LIST_SF_SOYE = '901326607319';
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'GET,POST,OPTIONS');
@@ -84,4 +91,65 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     debug.erroCatch = String(error);
     return res.json(debug);
   }
+}
+
+export async function handlerSF(req: VercelRequest, res: VercelResponse) {
+  res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET,OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  if (req.method === 'OPTIONS') return res.status(200).end();
+
+  // Mostra qual env var está sendo usada para SF
+  const tokenSfVar =
+    process.env.CLICKUP_TOKEN_SF ? 'CLICKUP_TOKEN_SF' :
+    process.env.CLICKUP_API_TOKEN_SF ? 'CLICKUP_API_TOKEN_SF' :
+    process.env.CLICKUP_API_TOKEN ? 'CLICKUP_API_TOKEN (FALLBACK NEWSHOP - ERRADO!)' :
+    process.env.VITE_CLICKUP_TOKEN_SF ? 'VITE_CLICKUP_TOKEN_SF' :
+    'NENHUMA';
+
+  const debug: Record<string, unknown> = {
+    tokenSF_existe: !!TOKEN_SF,
+    tokenSF_tamanho: TOKEN_SF.length,
+    tokenSF_prefixo: TOKEN_SF ? TOKEN_SF.slice(0, 15) + '...' : 'NENHUM',
+    tokenSF_var_usada: tokenSfVar,
+    tokenNEWSHOP_existe: !!TOKEN,
+    tokenSF_igual_NEWSHOP: TOKEN_SF && TOKEN ? TOKEN_SF === TOKEN : false,
+  };
+
+  if (!TOKEN_SF) {
+    debug.diagnostico = '❌ CLICKUP_TOKEN_SF não configurado na Vercel';
+    debug.solucao = 'Acesse Vercel → Project → Settings → Environment Variables → Adicione CLICKUP_TOKEN_SF';
+    return res.json(debug);
+  }
+
+  if (TOKEN && TOKEN_SF === TOKEN) {
+    debug.diagnostico = '⚠️ TOKEN_SF é igual ao NEWSHOP — token errado configurado';
+    debug.solucao = 'O token SF deve ser o token da conta ClickUp do SOYE/FACIL, não do NEWSHOP';
+    return res.json(debug);
+  }
+
+  // Testa o token SF contra a lista do SOYE
+  try {
+    const r = await fetch(
+      `https://api.clickup.com/api/v2/list/${LIST_SF_SOYE}/task?page=0&include_closed=false`,
+      { headers: { Authorization: TOKEN_SF } }
+    );
+    debug.apiStatus = r.status;
+    debug.apiOk = r.ok;
+
+    if (!r.ok) {
+      const body = await r.text();
+      debug.diagnostico = `❌ ClickUp retornou ${r.status} — token pode estar errado ou expirado`;
+      debug.apiErro = body.slice(0, 300);
+    } else {
+      const data = await r.json() as { tasks?: unknown[] };
+      debug.diagnostico = '✅ TOKEN_SF funcionando!';
+      debug.totalTasks = data.tasks?.length ?? 0;
+    }
+  } catch (e) {
+    debug.diagnostico = '❌ Erro de rede';
+    debug.erroCatch = String(e);
+  }
+
+  return res.json(debug);
 }
