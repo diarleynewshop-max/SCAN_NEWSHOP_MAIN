@@ -368,6 +368,7 @@ export default function MeusPedidos() {
             <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginTop: 4 }}>
               Em aberto · {pedidosAbertos.length}
             </p>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10, alignItems: "start" }}>
             {pedidosAbertos.map((pedido) => {
               const cfg = STATUS_CONFIG[pedido.statusLabel];
               const { Icon } = cfg;
@@ -387,6 +388,7 @@ export default function MeusPedidos() {
                 </div>
               );
             })}
+            </div>
           </>
         )}
 
@@ -408,6 +410,7 @@ export default function MeusPedidos() {
           <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", textAlign: "center", padding: "16px 0" }}>Nenhum concluído no período selecionado.</p>
         )}
 
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))", gap: 10, alignItems: "start" }}>
         {pedidosConcluidos.map((pedido) => {
           const cfg = STATUS_CONFIG.concluido;
           const expandido = expandidoId === pedido.id;
@@ -488,6 +491,7 @@ export default function MeusPedidos() {
             </div>
           );
         })}
+        </div>
       </div>
       </>
     </div>
