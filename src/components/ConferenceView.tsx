@@ -229,6 +229,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const taskOrigemIdsRef = useRef<string[]>([]);
   const [listeiro, setListeiro] = useState<string>("");
   const [apenasVisualizar, setApenasVisualizar] = useState(false);
+  const [viewMode, setViewMode] = useState<"card" | "lista">("card");
   const [modalModoAberturaTask, setModalModoAberturaTask] = useState<ClickUpTask | null>(null);
   const [modalConfirmAndamento, setModalConfirmAndamento] = useState<ClickUpTask | null>(null);
   // true quando o usuario confirmou "continuar mesmo assim" no modal de andamento.
@@ -1042,7 +1043,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     );
 
   const goNext = () => {
-    if (!isCurrentComplete) {
+    if (!apenasVisualizar && !isCurrentComplete) {
       toast({ title: "Defina o status antes de avançar", variant: "destructive" });
       return;
     }
@@ -2039,8 +2040,24 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <FileJson className="w-4 h-4" /> JSON
           </button>
           {apenasVisualizar && (
-            <div className="h-11 rounded-xl bg-warning/10 border border-warning/30 flex items-center justify-center gap-2 px-3 text-xs font-bold text-warning">
-              👁️ Modo Visualização
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-11 rounded-xl bg-warning/10 border border-warning/30 flex items-center justify-center gap-2 px-3 text-xs font-bold text-warning">
+                👁️ Modo Visualização
+              </div>
+              <div className="flex h-11 rounded-xl border border-border overflow-hidden text-xs font-bold">
+                <button
+                  onClick={() => setViewMode("card")}
+                  className={`px-3 flex items-center gap-1.5 transition-colors ${viewMode === "card" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent"}`}
+                >
+                  <span>1a1</span>
+                </button>
+                <button
+                  onClick={() => setViewMode("lista")}
+                  className={`px-3 flex items-center gap-1.5 border-l border-border transition-colors ${viewMode === "lista" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent"}`}
+                >
+                  <span>Lista</span>
+                </button>
+              </div>
             </div>
           )}
           <button
@@ -2135,7 +2152,34 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         </div>
       </div>
 
-      {currentItem && (
+      {/* Modo Lista (visualizar) */}
+      {apenasVisualizar && viewMode === "lista" && (
+        <div className="space-y-2">
+          {items.map((item, idx) => {
+            const lbl = getStatusLabel(item.status);
+            const LIcon = lbl.icon;
+            return (
+              <div key={item.id}
+                onClick={() => { setViewMode("card"); setCurrentIndex(idx); }}
+                className={`rounded-xl p-3 flex gap-3 items-center cursor-pointer active:scale-[0.99] transition-transform ${getStatusColor(item.status)}`}
+              >
+                {item.photo && <img src={item.photo} alt={item.codigo} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-muted-foreground font-mono">#{idx + 1}</p>
+                  <p className="text-sm font-mono font-bold text-foreground truncate">{item.codigo}</p>
+                  {item.sku && <p className="text-[11px] text-muted-foreground">SKU: {item.sku}</p>}
+                  <p className="text-[11px] text-muted-foreground">Pedido: <strong>{item.quantidadePedida}</strong>{item.quantidadeReal !== null ? ` · Real: ${item.quantidadeReal}` : ""}</p>
+                </div>
+                <div className={`flex items-center gap-1 text-xs font-semibold flex-shrink-0 ${lbl.color}`}>
+                  <LIcon className="w-4 h-4" /> {lbl.text}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {(!apenasVisualizar || viewMode === "card") && currentItem && (
         <div className={`rounded-xl p-4 space-y-4 shadow-md ${getStatusColor(currentItem.status)}`}>
           {currentItem.photo ? (
             <div className="flex justify-center">
@@ -2164,6 +2208,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               )}
             </div>
           )}
+          {!apenasVisualizar && (
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setStatus(currentItem.id, "separado")}
               className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
@@ -2198,7 +2243,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               <Timer className="w-4 h-4" /> Pendente
             </button>
           </div>
-          {currentItem.status === "nao_tem_tudo" && (
+          )}
+          {!apenasVisualizar && currentItem.status === "nao_tem_tudo" && (
             <div className="flex items-center gap-3 bg-card/50 rounded-lg p-3 border border-border">
               <label className="text-sm text-muted-foreground whitespace-nowrap">Qtd disponível:</label>
               <input
@@ -2217,23 +2263,30 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         </div>
       )}
 
-      <div className="flex gap-2">
+      {(!apenasVisualizar || viewMode === "card") && <div className="flex gap-2">
         <button onClick={goPrev} disabled={currentIndex === 0}
           className="h-12 px-4 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-1 active:scale-[0.98] transition-transform disabled:opacity-30">
           <ChevronLeft className="w-5 h-5" /> Anterior
         </button>
         {isLastItem ? (
-          <button onClick={finishConference} disabled={!allDone}
-            className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40">
-            <Flag className="w-5 h-5" /> Finalizar
-          </button>
+          apenasVisualizar ? (
+            <button onClick={voltarLiberandoPedido}
+              className="flex-1 h-12 rounded-xl bg-accent text-accent-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
+              <ArrowLeft className="w-5 h-5" /> Sair
+            </button>
+          ) : (
+            <button onClick={finishConference} disabled={!allDone}
+              className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40">
+              <Flag className="w-5 h-5" /> Finalizar
+            </button>
+          )
         ) : (
-          <button onClick={goNext} disabled={!isCurrentComplete}
+          <button onClick={goNext} disabled={!apenasVisualizar && !isCurrentComplete}
             className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40">
             Próximo <ChevronRight className="w-5 h-5" />
           </button>
         )}
-      </div>
+      </div>}
     </div>
   );
 };
