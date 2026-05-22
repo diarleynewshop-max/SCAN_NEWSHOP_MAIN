@@ -1,10 +1,12 @@
-import { useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ScanBarcode, ClipboardList, GitCompare,
   BadgeDollarSign, Package, CheckCircle2, AlertCircle, TrendingUp,
+  RefreshCw, CheckCheck, XCircle, AlertTriangle, Clock,
 } from "lucide-react";
 import type { LoginData } from "@/hooks/useAuth";
+import { listarRelatoriosSalvos, type RelatorioSalvo, type EmpresaKey, type FlagKey } from "@/lib/clickupApi";
 
 const STORAGE_KEY = "scan_newshop_lists";
 const DAYS = 7;
@@ -42,7 +44,7 @@ function computeStats(): DashStats {
       return t >= corte && (l.sentToClickUp === true || l.status === "green");
     });
 
-    const porDia = buildPorDia(ultimas);
+    const porDia = buildPorDiaLocal(ultimas);
     return { paraConferir, conferidas, totalItens, conferidasUltimos7: ultimas.length, porDia };
   } catch {
     return { paraConferir: 0, conferidas: 0, totalItens: 0, conferidasUltimos7: 0, porDia: emptyDays() };
@@ -60,7 +62,7 @@ function emptyDays() {
   return out;
 }
 
-function buildPorDia(lists: StoredList[]) {
+function buildPorDiaLocal(lists: StoredList[]) {
   const out = emptyDays();
   for (const l of lists) {
     const t = typeof l.createdAt === "string" ? new Date(l.createdAt).getTime() : (l.createdAt ?? 0);
@@ -68,6 +70,20 @@ function buildPorDia(lists: StoredList[]) {
     const label = diaLabel(d);
     const slot = out.find(o => o.dia === label);
     if (slot) slot.valor += 1;
+  }
+  return out;
+}
+
+function buildPorDiaFromRelatorios(relatorios: RelatorioSalvo[]): { dia: string; valor: number }[] {
+  const out = emptyDays();
+  for (const r of relatorios) {
+    // r.data é "YYYY-MM-DD"
+    const parts = r.data.split("-");
+    if (parts.length !== 3) continue;
+    const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
+    const label = diaLabel(d);
+    const slot = out.find(o => o.dia === label);
+    if (slot) slot.valor = r.totalConferencias;
   }
   return out;
 }
@@ -98,7 +114,7 @@ function Kpi({ icon: Icon, label, value, hint, accent = "hsl(var(--foreground))"
   return (
     <div style={{
       flex: 1,
-      minWidth: 200,
+      minWidth: 180,
       background: "hsl(var(--card))",
       border: "1px solid hsl(var(--border))",
       borderRadius: 16,
@@ -133,7 +149,7 @@ function Kpi({ icon: Icon, label, value, hint, accent = "hsl(var(--foreground))"
   );
 }
 
-function BarChart7Dias({ data }: { data: { dia: string; valor: number }[] }) {
+function BarChart7Dias({ data, loading }: { data: { dia: string; valor: number }[]; loading?: boolean }) {
   const max = Math.max(1, ...data.map(d => d.valor));
   return (
     <div style={{
@@ -142,6 +158,8 @@ function BarChart7Dias({ data }: { data: { dia: string; valor: number }[] }) {
       gap: 12,
       height: 160,
       padding: "0 4px",
+      opacity: loading ? 0.4 : 1,
+      transition: "opacity 0.3s",
     }}>
       {data.map((d) => {
         const h = (d.valor / max) * 100;
@@ -209,12 +227,61 @@ const QUICK_ACTIONS = [
   { icon: BadgeDollarSign, label: "Consulta Preço", desc: "Varejo · Atacado · Grupo", path: "/consulta-preco" },
 ];
 
+interface ClickUpSummary {
+  separado: number;
+  naoTem: number;
+  parcial: number;
+  pendente: number;
+  totalItens: number;
+  totalConferencias: number;
+  porDia: { dia: string; valor: number }[];
+}
+
 export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
   const navigate = useNavigate();
   const stats = useMemo(computeStats, []);
   const hora = new Date().getHours();
   const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
   const nome = loginSalvo?.nomePessoa || "usuário";
+
+  const [cuSummary, setCuSummary] = useState<ClickUpSummary | null>(null);
+  const [cuLoading, setCuLoading] = useState(false);
+  const [cuError, setCuError] = useState<string | null>(null);
+  const [lastFetch, setLastFetch] = useState(0);
+
+  const fetchClickUp = () => {
+    if (!loginSalvo?.empresa) return;
+    setCuLoading(true);
+    setCuError(null);
+
+    listarRelatoriosSalvos(loginSalvo.empresa as EmpresaKey, (loginSalvo.flag ?? "loja") as FlagKey)
+      .then(relatorios => {
+        const ultimos7 = relatorios.slice(0, DAYS);
+        const resumo = ultimos7.reduce(
+          (acc, r) => ({
+            separado: acc.separado + (r.resumo?.separado ?? 0),
+            naoTem: acc.naoTem + (r.resumo?.naoTem ?? 0),
+            parcial: acc.parcial + (r.resumo?.parcial ?? 0),
+            pendente: acc.pendente + (r.resumo?.pendente ?? 0),
+            totalItens: acc.totalItens + (r.resumo?.totalItens ?? 0),
+            totalConferencias: acc.totalConferencias + (r.totalConferencias ?? 0),
+          }),
+          { separado: 0, naoTem: 0, parcial: 0, pendente: 0, totalItens: 0, totalConferencias: 0 }
+        );
+        setCuSummary({ ...resumo, porDia: buildPorDiaFromRelatorios(ultimos7) });
+        setLastFetch(Date.now());
+      })
+      .catch(err => setCuError(err.message ?? "Erro ao buscar dados do ClickUp"))
+      .finally(() => setCuLoading(false));
+  };
+
+  useEffect(() => {
+    fetchClickUp();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [loginSalvo?.empresa, loginSalvo?.flag]);
+
+  const porDia = cuSummary ? cuSummary.porDia : stats.porDia;
+  const totalChart = cuSummary ? cuSummary.totalConferencias : stats.conferidasUltimos7;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 28, maxWidth: 1400 }}>
@@ -242,7 +309,7 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
         </p>
       </div>
 
-      {/* KPIs */}
+      {/* KPIs locais */}
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
         <Kpi
           icon={AlertCircle}
@@ -262,7 +329,7 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
           icon={TrendingUp}
           label={`Últimos ${DAYS} dias`}
           value={stats.conferidasUltimos7}
-          hint="conferências no período"
+          hint="conferências locais"
           accent="hsl(var(--foreground))"
         />
         <Kpi
@@ -295,7 +362,9 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
             marginBottom: 22,
           }}>
             <div>
-              <p style={LABEL_MONO}>Atividade — Últimos {DAYS} dias</p>
+              <p style={LABEL_MONO}>
+                {cuSummary ? "ClickUp — " : ""}Atividade — Últimos {DAYS} dias
+              </p>
               <p style={{
                 fontFamily: "var(--font-serif)",
                 fontSize: 20,
@@ -306,21 +375,53 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
                 Conferências por dia
               </p>
             </div>
-            <span style={{
-              fontFamily: "var(--font-mono)",
-              fontSize: 10,
-              letterSpacing: "0.12em",
-              textTransform: "uppercase",
-              color: "hsl(var(--muted-foreground))",
-              padding: "4px 10px",
-              background: "hsl(var(--secondary))",
-              border: "1px solid hsl(var(--border))",
-              borderRadius: 6,
-            }}>
-              {stats.conferidasUltimos7} total
-            </span>
+            <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+              <span style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                letterSpacing: "0.12em",
+                textTransform: "uppercase",
+                color: "hsl(var(--muted-foreground))",
+                padding: "4px 10px",
+                background: "hsl(var(--secondary))",
+                border: "1px solid hsl(var(--border))",
+                borderRadius: 6,
+              }}>
+                {totalChart} total
+              </span>
+              {loginSalvo?.empresa && (
+                <button
+                  onClick={fetchClickUp}
+                  disabled={cuLoading}
+                  title="Atualizar dados do ClickUp"
+                  style={{
+                    width: 28, height: 28, borderRadius: 6,
+                    background: "hsl(var(--secondary))",
+                    border: "1px solid hsl(var(--border))",
+                    display: "flex", alignItems: "center", justifyContent: "center",
+                    cursor: cuLoading ? "default" : "pointer",
+                    opacity: cuLoading ? 0.5 : 1,
+                  }}
+                >
+                  <RefreshCw size={12} style={{
+                    color: "hsl(var(--muted-foreground))",
+                    animation: cuLoading ? "spin 1s linear infinite" : "none",
+                  }} />
+                </button>
+              )}
+            </div>
           </div>
-          <BarChart7Dias data={stats.porDia} />
+          {cuError && (
+            <p style={{ fontSize: 11, color: "hsl(var(--destructive))", marginBottom: 12 }}>
+              ⚠ {cuError}
+            </p>
+          )}
+          <BarChart7Dias data={porDia} loading={cuLoading} />
+          {lastFetch > 0 && (
+            <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginTop: 10, fontFamily: "var(--font-mono)" }}>
+              ClickUp · atualizado {new Date(lastFetch).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
+            </p>
+          )}
         </div>
 
         {/* Ações rápidas */}
@@ -386,6 +487,61 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
           </div>
         </div>
       </div>
+
+      {/* KPIs do ClickUp — últimos 7 relatórios */}
+      {loginSalvo?.empresa && (
+        <div>
+          <p style={{ ...LABEL_MONO, marginBottom: 14 }}>
+            Status ClickUp — últimos {DAYS} dias ({loginSalvo.empresa})
+          </p>
+          {cuLoading && !cuSummary && (
+            <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Carregando dados do ClickUp…</p>
+          )}
+          {cuSummary && (
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+              <Kpi
+                icon={CheckCheck}
+                label="Separado"
+                value={cuSummary.separado}
+                hint="itens separados"
+                accent="hsl(var(--success))"
+              />
+              <Kpi
+                icon={XCircle}
+                label="Não Tem"
+                value={cuSummary.naoTem}
+                hint="sem estoque"
+                accent="hsl(var(--destructive))"
+              />
+              <Kpi
+                icon={AlertTriangle}
+                label="Parcial"
+                value={cuSummary.parcial}
+                hint="quantidade parcial"
+                accent="hsl(var(--warning))"
+              />
+              <Kpi
+                icon={Clock}
+                label="Pendente"
+                value={cuSummary.pendente}
+                hint="aguardando"
+                accent="hsl(var(--muted-foreground))"
+              />
+              <Kpi
+                icon={Package}
+                label="Total Itens"
+                value={cuSummary.totalItens}
+                hint="no período"
+                accent="hsl(var(--foreground))"
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      <style>{`
+        @keyframes spin { from { transform: rotate(0deg); } to { transform: rotate(360deg); } }
+      `}</style>
     </div>
   );
 }
