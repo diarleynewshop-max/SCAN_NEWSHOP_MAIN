@@ -1528,6 +1528,47 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json({ ocorrencias });
     }
 
+    if (action === 'buscar-dashboard-kpis') {
+      const listId = getListId(empresa, flag);
+      const allTasks = await fetchTasksFromList(listId, token, true);
+
+      const hoje = formatDateKey();
+      const hojePtBr = formatDatePtBr(hoje);
+      const corte7d = Date.now() - 7 * 24 * 60 * 60 * 1000;
+
+      const paraConferir = allTasks.filter(
+        (t) => normalizeStatus(t.status?.status) === 'analisado'
+      ).length;
+
+      const conferidas = allTasks.filter((t) => {
+        const st = normalizeStatus(t.status?.status);
+        if (st !== 'complete' && st !== 'concluido' && st !== 'concluído') return false;
+        const desc = String(t.description ?? t.text_content ?? '');
+        const name = String(t.name ?? '');
+        return desc.includes(hojePtBr) || name.includes(hojePtBr);
+      }).length;
+
+      const ultimos7Dias = allTasks.filter((t) => {
+        const st = normalizeStatus(t.status?.status);
+        if (st !== 'complete' && st !== 'concluido' && st !== 'concluído') return false;
+        const ts = Number(t.date_done || t.date_closed || t.date_updated || t.date_created || 0);
+        if (ts >= corte7d) return true;
+        const desc = String(t.description ?? t.text_content ?? '');
+        const dateKey = taskReportDateKey(t, desc);
+        if (!dateKey) return false;
+        return new Date(`${dateKey}T12:00:00`).getTime() >= corte7d;
+      }).length;
+
+      const itensPendentes = allTasks.filter((t) => {
+        const st = normalizeStatus(t.status?.status);
+        if (st !== 'analisado') return false;
+        const desc = String(t.description ?? t.text_content ?? '').toUpperCase();
+        return desc.includes('PENDENTES');
+      }).length;
+
+      return res.status(200).json({ paraConferir, conferidas, ultimos7Dias, itensPendentes, empresa, flag });
+    }
+
     if (action === 'deletar-task') {
       if (!taskId) return res.status(400).json({ error: 'taskId obrigatorio' });
 

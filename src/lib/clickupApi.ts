@@ -331,6 +331,23 @@ export interface HistoricoItemOcorrencia {
   listeiro: string;
 }
 
+export interface DashboardKpis {
+  paraConferir: number;
+  conferidas: number;
+  ultimos7Dias: number;
+  itensPendentes: number;
+}
+
+export async function buscarDashboardKpis(
+  empresa: EmpresaKey,
+  flag: FlagKey
+): Promise<DashboardKpis> {
+  const params = new URLSearchParams({ action: 'buscar-dashboard-kpis', empresa, flag });
+  const response = await fetch(`/api/clickup-proxy?${params}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao buscar KPIs do dashboard`);
+  return await response.json();
+}
+
 export async function buscarHistoricoItem(
   empresa: EmpresaKey,
   flag: FlagKey,

@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import {
   ScanBarcode, ClipboardList, GitCompare,
@@ -6,50 +6,9 @@ import {
   RefreshCw, CheckCheck, XCircle, AlertTriangle, Clock,
 } from "lucide-react";
 import type { LoginData } from "@/hooks/useAuth";
-import { listarRelatoriosSalvos, type RelatorioSalvo, type EmpresaKey, type FlagKey } from "@/lib/clickupApi";
+import { listarRelatoriosSalvos, buscarDashboardKpis, type RelatorioSalvo, type DashboardKpis, type EmpresaKey, type FlagKey } from "@/lib/clickupApi";
 
-const STORAGE_KEY = "scan_newshop_lists";
 const DAYS = 7;
-
-type StoredList = {
-  id?: string;
-  status?: string;
-  sentToClickUp?: boolean;
-  createdAt?: string | number;
-  products?: unknown[];
-};
-
-interface DashStats {
-  paraConferir: number;
-  conferidas: number;
-  totalItens: number;
-  conferidasUltimos7: number;
-  porDia: { dia: string; valor: number }[];
-}
-
-function computeStats(): DashStats {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return { paraConferir: 0, conferidas: 0, totalItens: 0, conferidasUltimos7: 0, porDia: emptyDays() };
-    const lists = JSON.parse(raw) as StoredList[];
-
-    const paraConferir = lists.filter(l => l.status === "open").length;
-    const conferidas = lists.filter(l => l.sentToClickUp === true || l.status === "green").length;
-    const totalItens = lists.reduce((a, l) => a + (l.products?.length ?? 0), 0);
-
-    const agora = Date.now();
-    const corte = agora - DAYS * 24 * 60 * 60 * 1000;
-    const ultimas = lists.filter(l => {
-      const t = typeof l.createdAt === "string" ? new Date(l.createdAt).getTime() : (l.createdAt ?? 0);
-      return t >= corte && (l.sentToClickUp === true || l.status === "green");
-    });
-
-    const porDia = buildPorDiaLocal(ultimas);
-    return { paraConferir, conferidas, totalItens, conferidasUltimos7: ultimas.length, porDia };
-  } catch {
-    return { paraConferir: 0, conferidas: 0, totalItens: 0, conferidasUltimos7: 0, porDia: emptyDays() };
-  }
-}
 
 function emptyDays() {
   const out: { dia: string; valor: number }[] = [];
@@ -62,17 +21,6 @@ function emptyDays() {
   return out;
 }
 
-function buildPorDiaLocal(lists: StoredList[]) {
-  const out = emptyDays();
-  for (const l of lists) {
-    const t = typeof l.createdAt === "string" ? new Date(l.createdAt).getTime() : (l.createdAt ?? 0);
-    const d = new Date(t);
-    const label = diaLabel(d);
-    const slot = out.find(o => o.dia === label);
-    if (slot) slot.valor += 1;
-  }
-  return out;
-}
 
 function buildPorDiaFromRelatorios(relatorios: RelatorioSalvo[]): { dia: string; valor: number }[] {
   const out = emptyDays();
@@ -239,10 +187,12 @@ interface ClickUpSummary {
 
 export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
   const navigate = useNavigate();
-  const stats = useMemo(computeStats, []);
   const hora = new Date().getHours();
   const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
   const nome = loginSalvo?.nomePessoa || "usuário";
+
+  const [kpis, setKpis] = useState<DashboardKpis | null>(null);
+  const [kpisLoading, setKpisLoading] = useState(false);
 
   const [cuSummary, setCuSummary] = useState<ClickUpSummary | null>(null);
   const [cuLoading, setCuLoading] = useState(false);
@@ -251,10 +201,19 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
 
   const fetchClickUp = () => {
     if (!loginSalvo?.empresa) return;
+    const emp = loginSalvo.empresa as EmpresaKey;
+    const flg = (loginSalvo.flag ?? "loja") as FlagKey;
+
     setCuLoading(true);
+    setKpisLoading(true);
     setCuError(null);
 
-    listarRelatoriosSalvos(loginSalvo.empresa as EmpresaKey, (loginSalvo.flag ?? "loja") as FlagKey)
+    buscarDashboardKpis(emp, flg)
+      .then(data => setKpis(data))
+      .catch(() => {/* KPIs mostram 0 silenciosamente */})
+      .finally(() => setKpisLoading(false));
+
+    listarRelatoriosSalvos(emp, flg)
       .then(relatorios => {
         const ultimos7 = relatorios.slice(0, DAYS);
         const resumo = ultimos7.reduce(
@@ -280,8 +239,8 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loginSalvo?.empresa, loginSalvo?.flag]);
 
-  const porDia = cuSummary ? cuSummary.porDia : stats.porDia;
-  const totalChart = cuSummary ? cuSummary.totalConferencias : stats.conferidasUltimos7;
+  const porDia = cuSummary ? cuSummary.porDia : emptyDays();
+  const totalChart = cuSummary ? cuSummary.totalConferencias : 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 28, maxWidth: 1400 }}>
@@ -309,34 +268,34 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
         </p>
       </div>
 
-      {/* KPIs locais */}
-      <div style={{ display: "flex", gap: 18, flexWrap: "wrap" }}>
+      {/* KPIs ClickUp */}
+      <div style={{ display: "flex", gap: 18, flexWrap: "wrap", opacity: kpisLoading ? 0.5 : 1, transition: "opacity 0.3s" }}>
         <Kpi
           icon={AlertCircle}
           label="Para Conferir"
-          value={stats.paraConferir}
-          hint={stats.paraConferir === 1 ? "lista em aberto" : "listas em aberto"}
+          value={kpisLoading ? "…" : (kpis?.paraConferir ?? 0)}
+          hint="pedidos em Analisado"
           accent="hsl(var(--warning))"
         />
         <Kpi
           icon={CheckCircle2}
           label="Conferidas"
-          value={stats.conferidas}
-          hint="enviadas ao ClickUp"
+          value={kpisLoading ? "…" : (kpis?.conferidas ?? 0)}
+          hint="concluídas hoje"
           accent="hsl(var(--success))"
         />
         <Kpi
           icon={TrendingUp}
           label={`Últimos ${DAYS} dias`}
-          value={stats.conferidasUltimos7}
-          hint="conferências locais"
+          value={kpisLoading ? "…" : (kpis?.ultimos7Dias ?? 0)}
+          hint="conferências na semana"
           accent="hsl(var(--foreground))"
         />
         <Kpi
           icon={Package}
-          label="Itens Acumulados"
-          value={stats.totalItens}
-          hint="produtos escaneados"
+          label="Itens Pendentes"
+          value={kpisLoading ? "…" : (kpis?.itensPendentes ?? 0)}
+          hint="pedidos com pendências"
           accent="hsl(var(--muted-foreground))"
         />
       </div>
