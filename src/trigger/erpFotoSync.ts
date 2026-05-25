@@ -157,9 +157,14 @@ async function lerFormularioProduto(
   }
 
   const result = extrairCamposFormulario(html);
+  const campoNomes = result.campos.map((c) => c.name);
+  const amostra = result.campos.slice(0, 20).map((c) => `${c.name}=${c.value.slice(0, 50)}`).join(" | ");
   console.info(`[erp-foto-sync] Formulario: ${result.campos.length} campos, action=${result.formAction}`);
+  console.info(`[erp-foto-sync] Campos (nomes): ${campoNomes.join(", ")}`);
+  console.info(`[erp-foto-sync] Amostra: ${amostra}`);
 
-  if (result.campos.length < 3) {
+  const temProdutoId = campoNomes.some((n) => n === "produto.id" || n === "id");
+  if (!temProdutoId && result.campos.length < 3) {
     throw new Error(`Formulario do ERP muito pequeno (${result.campos.length} campos) — pode ser pagina de erro`);
   }
 
