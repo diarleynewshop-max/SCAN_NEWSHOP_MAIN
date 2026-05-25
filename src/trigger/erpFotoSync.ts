@@ -118,6 +118,46 @@ function extrairCamposFormulario(html: string): { campos: FormField[]; formActio
     campos.push({ name, value: $(el).text() ?? "" });
   });
 
+  // Grids auxiliares podem estar em <script> tags como dados JSON.
+  // Patterns comuns: var gridData = [...]; ou data-grid="..."
+  const gridKeywords = [
+    "produtosAuxiliares", "itensDeImpostoFederal",
+    "referenciaDoFornecedor", "estoquesDoProduto",
+  ];
+
+  const scriptTags: string[] = [];
+  $("script").each((_, el) => {
+    const text = $(el).html() || "";
+    if (gridKeywords.some((kw) => text.includes(kw))) {
+      scriptTags.push(text.slice(0, 500));
+    }
+  });
+
+  if (scriptTags.length > 0) {
+    console.info(`[erp-foto-sync] Scripts com grids: ${scriptTags.length}`);
+    for (const tag of scriptTags.slice(0, 3)) {
+      console.info(`[erp-foto-sync] Script: ${tag.slice(0, 300)}`);
+    }
+  }
+
+  // Também buscar inputs hidden com nomes de array (grid rows)
+  $("input[type='hidden']").each((_, el) => {
+    const name = $(el).attr("name") || "";
+    if (name.includes("[") && !campos.some((c) => c.name === name)) {
+      campos.push({ name, value: $(el).attr("value") ?? "" });
+    }
+  });
+
+  // Buscar rows em tables com data attributes
+  $("tr[data-index], tr[data-row]").each((_, tr) => {
+    $(tr).find("input, select, textarea").each((_, el) => {
+      const name = $(el).attr("name");
+      if (name && !campos.some((c) => c.name === name && c.value === ($(el).attr("value") ?? ""))) {
+        campos.push({ name, value: $(el).attr("value") ?? $(el).text() ?? "" });
+      }
+    });
+  });
+
   return { campos, formAction };
 }
 
@@ -158,9 +198,12 @@ async function lerFormularioProduto(
 
   const result = extrairCamposFormulario(html);
   const campoNomes = result.campos.map((c) => c.name);
-  const amostra = result.campos.slice(0, 20).map((c) => `${c.name}=${c.value.slice(0, 50)}`).join(" | ");
+  const prefixos = [...new Set(campoNomes.map((n) => n.split(".")[0].split("[")[0]))];
+  const arrayFields = campoNomes.filter((n) => n.includes("["));
+  const amostra = result.campos.slice(0, 15).map((c) => `${c.name}=${c.value.slice(0, 40)}`).join(" | ");
   console.info(`[erp-foto-sync] Formulario: ${result.campos.length} campos, action=${result.formAction}`);
-  console.info(`[erp-foto-sync] Campos (nomes): ${campoNomes.join(", ")}`);
+  console.info(`[erp-foto-sync] Prefixos: ${prefixos.join(", ")}`);
+  console.info(`[erp-foto-sync] Campos array (grids): ${arrayFields.length > 0 ? arrayFields.join(", ") : "NENHUM"}`);
   console.info(`[erp-foto-sync] Amostra: ${amostra}`);
 
   const temProdutoId = campoNomes.some((n) => n === "produto.id" || n === "id");
