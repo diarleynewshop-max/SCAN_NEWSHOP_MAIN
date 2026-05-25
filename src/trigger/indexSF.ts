@@ -259,7 +259,8 @@ async function anexarArquivoTextoClickUp(
   mimeType: string,
   content: string
 ): Promise<{ ok: boolean; status: number; text: string }> {
-  const response = await postClickUpAttachment(taskId, CLICKUP_TOKEN_SF, filename, mimeType, content);
+  const buffer = Buffer.from(content, "utf-8");
+  const response = await postClickUpAttachment(taskId, CLICKUP_TOKEN_SF, filename, mimeType, buffer);
   return { ...response, ok: response.status >= 200 && response.status < 300 };
 }
 
@@ -319,7 +320,7 @@ async function anexarJsonNaTarefa(
     const response = await anexarArquivoTextoClickUp(
       taskId,
       `${nomeArquivo}.json`,
-      "application/json; charset=utf-8",
+      "application/json",
       jsonString
     );
 
