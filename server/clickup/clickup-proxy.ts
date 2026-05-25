@@ -756,6 +756,10 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
         pendente: extractResumoValue(description, 'Pendente'),
       };
       const totalItens = Number(description.match(/^Total:\s*(\d+)/im)?.[1] ?? 0);
+      const tempoMatch = description.match(/^Tempo:\s*(\d{1,2}):(\d{2}):(\d{2})/im);
+      const tempoMinutos = tempoMatch
+        ? Number(tempoMatch[1]) * 60 + Number(tempoMatch[2]) + Number(tempoMatch[3]) / 60
+        : null;
       const json = await baixarJsonDaTask(task.id, token).catch(() => null);
       const photoMap = new Map<string, string>();
       if (Array.isArray(json?.items)) {
@@ -772,6 +776,7 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
         conferente,
         totalItens,
         resumo,
+        tempoMinutos,
         dateCreated: task.date_created ?? null,
         dateUpdated: task.date_updated ?? detail.date_updated ?? null,
       });
@@ -807,6 +812,8 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
       naoTem: 0,
       parcial: 0,
       pendente: 0,
+      tempoTotalMinutos: 0,
+      tempoConfs: 0,
     };
     current.conferencias += 1;
     current.totalItens += item.totalItens;
@@ -814,6 +821,10 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
     current.naoTem += item.resumo.naoTem;
     current.parcial += item.resumo.parcial;
     current.pendente += item.resumo.pendente;
+    if (item.tempoMinutos !== null && item.tempoMinutos > 0) {
+      current.tempoTotalMinutos += item.tempoMinutos;
+      current.tempoConfs += 1;
+    }
     conferenteMap.set(item.conferente, current);
   }
 

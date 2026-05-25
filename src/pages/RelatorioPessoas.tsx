@@ -53,14 +53,6 @@ interface PessoaAgregada {
   porDia: Map<string, number>;
 }
 
-function calcularTempoMinutos(dateCreated?: string | null, dateUpdated?: string | null): number | null {
-  if (!dateCreated || !dateUpdated) return null;
-  const inicio = Number(dateCreated);
-  const fim = Number(dateUpdated);
-  if (!inicio || !fim || fim <= inicio) return null;
-  return (fim - inicio) / 60000;
-}
-
 const RelatorioPessoas = () => {
   const navigate = useNavigate();
   const { loginSalvo } = useAuth();
@@ -158,24 +150,11 @@ const RelatorioPessoas = () => {
         ex.naoTem += c.naoTem;
         ex.parcial += c.parcial;
         ex.pendente += c.pendente;
+        ex.tempoTotalMin += c.tempoTotalMinutos ?? 0;
+        ex.tempoConfs += c.tempoConfs ?? 0;
         ex.diasAtivos.add(rel.data);
         ex.porDia.set(rel.data, (ex.porDia.get(rel.data) ?? 0) + c.totalItens);
         map.set(chave, ex);
-      }
-
-      for (const conf of rel.conferencias ?? []) {
-        const chave = normalizarNomePessoa(conf.conferente ?? "");
-        if (!chave) continue;
-        const ex = map.get(chave);
-        if (!ex) continue;
-        const tempo = calcularTempoMinutos(
-          (conf as any).dateCreated,
-          (conf as any).dateUpdated
-        );
-        if (tempo !== null && tempo < 480) {
-          ex.tempoTotalMin += tempo;
-          ex.tempoConfs += 1;
-        }
       }
     }
 

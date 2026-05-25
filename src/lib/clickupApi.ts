@@ -47,6 +47,8 @@ export interface RelatorioDiarioConferente {
   naoTem: number;
   parcial: number;
   pendente: number;
+  tempoTotalMinutos?: number;
+  tempoConfs?: number;
 }
 
 export interface RelatorioDiarioSecao {
