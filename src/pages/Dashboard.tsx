@@ -56,6 +56,11 @@ function labelDia(key: string): string {
   return key.slice(5).replace("-", "/");
 }
 
+function getHojeKey(): string {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
 const STATUS_PRIORITY: Record<string, number> = { nao_tem: 4, parcial: 3, pendente: 2, separado: 1 };
 
 function statusLabel(s: string) {
@@ -247,6 +252,10 @@ const Dashboard = () => {
 
   // ── gerar + salvar ──────────────────────────────────────────────────────────
   const handleGerarSalvar = async (dateKey: string) => {
+    if (dateKey >= getHojeKey()) {
+      toast({ title: "Relatório bloqueado", description: "O relatório do dia só pode ser gerado a partir do dia seguinte (D+1).", variant: "destructive" });
+      return;
+    }
     setGerando(dateKey);
     try {
       const report = await salvarRelatorioDashboard(empresa, flag, dateKey);
@@ -265,8 +274,9 @@ const Dashboard = () => {
 
   // ── gerar todos os pendentes ────────────────────────────────────────────────
   const handleGerarTodos = async () => {
+    const hoje = getHojeKey();
     const salvadosSet = new Set(relatoriosSalvos.map((r) => r.data));
-    const pendentes = datasDisponiveis.filter((d) => !salvadosSet.has(d.data));
+    const pendentes = datasDisponiveis.filter((d) => !salvadosSet.has(d.data) && d.data < hoje);
     if (pendentes.length === 0) {
       toast({ title: "Todos os relatórios já foram gerados" });
       return;
@@ -697,7 +707,7 @@ const Dashboard = () => {
                 <CardTitle className="text-sm flex items-center justify-between gap-2">
                   <span>Datas com conferências</span>
                   {(() => {
-                    const pendentes = datasDisponiveis.filter((d) => !salvosKeys.has(d.data)).length;
+                    const pendentes = datasDisponiveis.filter((d) => !salvosKeys.has(d.data) && d.data < getHojeKey()).length;
                     return (
                       <Button
                         size="sm" variant="outline"
@@ -731,6 +741,8 @@ const Dashboard = () => {
                         </div>
                         {salvo ? (
                           <Badge variant="secondary" className="text-xs gap-1 shrink-0"><Check className="h-3 w-3" />Salvo</Badge>
+                        ) : d.data >= getHojeKey() ? (
+                          <Badge variant="outline" className="text-xs shrink-0 text-muted-foreground">D+1</Badge>
                         ) : (
                           <Button size="sm" variant="outline" className="text-xs h-7 shrink-0"
                             disabled={gerando === d.data}
