@@ -93,6 +93,42 @@ async function comprimirFotoParaErp(base64: string): Promise<Buffer> {
     .toBuffer();
 }
 
+async function loginErpWeb(origin: string, empresa: EmpresaKey): Promise<string> {
+  const username = getEnv(empresa, "USERNAME");
+  const password = getEnv(empresa, "PASSWORD");
+  if (!username || !password) return "";
+
+  try {
+    const loginUrl = `${origin}/j_spring_security_check`;
+    const res = await axios.post(
+      loginUrl,
+      `j_username=${encodeURIComponent(username)}&j_password=${encodeURIComponent(password)}`,
+      {
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        maxRedirects: 0,
+        validateStatus: () => true,
+        timeout: 15_000,
+      }
+    );
+
+    const cookies = res.headers["set-cookie"];
+    if (!cookies) return "";
+
+    const jsessionId = (Array.isArray(cookies) ? cookies : [cookies])
+      .map((c: string) => c.split(";")[0])
+      .find((c: string) => c.startsWith("JSESSIONID="));
+
+    if (jsessionId) {
+      console.info(`[erp-foto-sync] Login web OK — JSESSIONID obtido`);
+      return jsessionId;
+    }
+    return "";
+  } catch (err) {
+    console.warn(`[erp-foto-sync] Login web falhou: ${err instanceof Error ? err.message : err}`);
+    return "";
+  }
+}
+
 interface UploadResult {
   uuid: string | undefined;
   mode: string;
@@ -104,10 +140,16 @@ async function tentarUploadImagem(
   token: string,
   imageBuffer: Buffer,
   barcode: string,
-  webCookie: string
+  webCookie: string,
+  empresa: EmpresaKey
 ): Promise<UploadResult> {
   const origin = baseUrl.replace(/\/api$/, "");
   const filename = `nao_tem_${barcode}.jpg`;
+
+  let sessionCookie = webCookie;
+  if (!sessionCookie) {
+    sessionCookie = await loginErpWeb(origin, empresa);
+  }
 
   const strategies = [
     {
@@ -117,9 +159,21 @@ async function tentarUploadImagem(
       buildBody: () => {
         const form = new FormDataNode();
         form.append("upload", imageBuffer, { filename, contentType: "image/jpeg" });
-        return { body: form, headers: { ...form.getHeaders(), Cookie: webCookie || "" } };
+        return {
+          body: form,
+          headers: {
+            ...form.getHeaders(),
+            Cookie: sessionCookie,
+            Accept: "application/json, text/javascript, */*; q=0.01",
+            Origin: origin,
+            Referer: `${origin}/arquivo/frame`,
+            "X-Requested-With": "XMLHttpRequest",
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
+            "Content-Disposition": `attachment; filename="${filename}"`,
+          },
+        };
       },
-      skip: !webCookie,
+      skip: !sessionCookie,
     },
     {
       mode: "api-multipart-upload",
@@ -188,7 +242,8 @@ async function tentarUploadImagem(
         return { uuid: uuid || undefined, mode: strategy.mode, directUpdate: !uuid };
       }
 
-      console.warn(`[erp-foto-sync] Upload ${strategy.mode} falhou: status=${res.status} ct=${contentType}`);
+      const preview = typeof res.data === "string" ? res.data.slice(0, 300) : JSON.stringify(res.data).slice(0, 300);
+      console.warn(`[erp-foto-sync] Upload ${strategy.mode} falhou: status=${res.status} ct=${contentType} body=${preview}`);
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err);
       console.warn(`[erp-foto-sync] Upload ${strategy.mode} erro: ${msg}`);
@@ -312,7 +367,7 @@ export const erpFotoSync = task({
         const imageBuffer = await comprimirFotoParaErp(item.photoBase64);
         console.info(`[erp-foto-sync] Foto comprimida: ${imageBuffer.length} bytes`);
 
-        const upload = await tentarUploadImagem(baseUrl, token, imageBuffer, item.barcode, webCookie);
+        const upload = await tentarUploadImagem(baseUrl, token, imageBuffer, item.barcode, webCookie, empresa);
         detalhe.uuid = upload.uuid;
         detalhe.mode = upload.mode;
 
