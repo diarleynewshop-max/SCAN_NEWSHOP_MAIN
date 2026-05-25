@@ -33,7 +33,7 @@ const App = () => (
       <Sonner />
       
       {/* 2. COLOCAMOS O BOTÃO FLUTUANTE NO CANTO SUPERIOR DIREITO */}
-      <div className="fixed top-4 right-4 z-50">
+      <div className="fixed top-4 right-4 z-[60]">
         <ThemeToggle />
       </div>
 

@@ -9,7 +9,7 @@ applyLightModeClass(getLightModeEnabled());
 applySavedCompanyTheme();
 
 createRoot(document.getElementById("root")!).render(
-  <ThemeProvider defaultTheme="system" storageKey="newshop-theme">
+  <ThemeProvider defaultTheme="light" storageKey="newshop-theme">
     <App />
   </ThemeProvider>
 );

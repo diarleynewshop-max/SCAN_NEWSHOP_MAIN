@@ -45,7 +45,7 @@ export function EmpresaToggleSF() {
         position: "fixed",
         top: 16,
         right: 64,
-        zIndex: 50,
+        zIndex: 60,
         height: 36,
         padding: "0 12px",
         borderRadius: 10,
