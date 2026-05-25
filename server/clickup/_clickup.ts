@@ -162,6 +162,7 @@ export function mapTaskStatus(
 
   if (
     value === "pode ser que tem no galpao" ||
+    value === "ainda pode ter no cd" ||
     value === "produto bom" ||
     value === "like" ||
     value === "bom" ||
@@ -190,9 +191,10 @@ export function mapTaskStatus(
     return "fazer_pedido";
   }
 
-  if (value === "pedido em andamento" || value === "em andamento") return "pedido_andamento";
+  if (value === "pedido em andamento" || value === "em andamento" || value === "pedido feito") return "pedido_andamento";
   if (value === "compra realizada" || value === "comprado") return "compra_realizada";
-  if (value === "concluido" || value === "done" || value === "completed") return "concluido";
+  if (value === "concluido" || value === "done" || value === "completed" || value === "complete") return "concluido";
+  if (value === "in progress") return "fazer_pedido";
 
   return "todo";
 }
@@ -229,27 +231,27 @@ export function mapAppStatusToClickUp(
 
 function getCompraStatusAliases(status: CompraStatusApp): string[] {
   if (status === "produto_bom") {
-    return ["PODE SER QUE TEM NO GALPAO", "produto bom", "like", "bom", "aprovado", "analisado"];
+    return ["AINDA PODE TER NO CD", "PODE SER QUE TEM NO GALPAO", "produto bom", "like", "bom", "aprovado", "analisado", "in progress"];
   }
 
   if (status === "produto_ruim") {
-    return ["PRODUTOS RUIM", "produto ruim", "dislike", "deslike", "ruim", "reprovado"];
+    return ["PRODUTOS RUIM", "produto ruim", "dislike", "deslike", "ruim", "reprovado", "in progress"];
   }
 
   if (status === "fazer_pedido") {
-    return ["FAZER PEDIDO", "fazer pedido", "pedido", "comprar"];
+    return ["FAZER PEDIDO", "fazer pedido", "pedido", "comprar", "in progress"];
   }
 
   if (status === "pedido_andamento") {
-    return ["PEDIDO EM ANDAMENTO", "pedido em andamento", "em andamento"];
+    return ["PEDIDO FEITO", "PEDIDO EM ANDAMENTO", "pedido em andamento", "em andamento", "in progress"];
   }
 
   if (status === "compra_realizada") {
-    return ["COMPRA REALIZADA", "compra realizada", "comprado"];
+    return ["COMPRA REALIZADA", "compra realizada", "comprado", "in progress"];
   }
 
   if (status === "concluido") {
-    return ["CONCLUIDO", "concluido", "done", "completed"];
+    return ["CONCLUIDO", "concluido", "done", "completed", "complete"];
   }
 
   return ["PENDENTE", "to do", "todo", "open", "aberto"];
