@@ -575,6 +575,12 @@ const Index = () => {
                         <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Estoque disponivel:</span>
                         <span style={{ fontWeight: 700, fontSize: 14 }}>{typeof productInfo.estoque === "number" ? productInfo.estoque : "N/A"}</span>
                       </div>
+                      {productInfo.erpProdutoId && (
+                        <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+                          <span style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>ID Produto ERP:</span>
+                          <span style={{ fontWeight: 700, fontSize: 14, fontFamily: "var(--font-mono)" }}>{productInfo.erpProdutoId}</span>
+                        </div>
+                      )}
                     </div>
                   ) : null}
                 </div>

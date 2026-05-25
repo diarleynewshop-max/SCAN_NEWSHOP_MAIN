@@ -302,6 +302,26 @@ const resolverImagemProduto = (imagem: string | undefined, produtoId: number, co
 const isReferenciaImagemErpValida = (imagem: string | undefined): boolean =>
   Boolean(imagem && !/^data:image\//i.test(imagem));
 
+const buscarProdutoPorCodigoBarras = async (
+  codigo: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<{ produto: ErpProduto; ean: string } | null> => {
+  for (const candidato of normalizarEans(codigo)) {
+    try {
+      const data = await fetchJson<ErpProduto>(
+        `/v1/produto/codigos-auxiliares/${encodeURIComponent(candidato)}`,
+        contexto
+      );
+      const produtoId = (data as any)?.produtoId;
+      if (produtoId) {
+        const prod = await fetchJson<ErpProduto>(`/v1/produto/produtos/${produtoId}`, contexto);
+        if (prod?.id) return { produto: prod, ean: candidato };
+      }
+    } catch { /* continua */ }
+  }
+  return null;
+};
+
 export const buscarProdutoVarejoFacil = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
@@ -316,6 +336,14 @@ export const buscarProdutoVarejoFacil = async (
   if (codigoAuxiliarEncontrado?.codigoAuxiliar.produtoId) {
     produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${codigoAuxiliarEncontrado.codigoAuxiliar.produtoId}`, contexto);
     eanResolvido = codigoAuxiliarEncontrado.eanEncontrado;
+  }
+
+  if (!produto) {
+    const direto = await buscarProdutoPorCodigoBarras(codigo, contexto);
+    if (direto) {
+      produto = direto.produto;
+      eanResolvido = direto.ean;
+    }
   }
 
   if (!produto) {
@@ -399,6 +427,14 @@ export const consultarPrecoProdutoVarejoFacil = async (
   if (codigoAuxiliarEncontrado?.codigoAuxiliar.produtoId) {
     produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${codigoAuxiliarEncontrado.codigoAuxiliar.produtoId}`, contexto);
     eanResolvido = codigoAuxiliarEncontrado.eanEncontrado;
+  }
+
+  if (!produto) {
+    const direto = await buscarProdutoPorCodigoBarras(codigo, contexto);
+    if (direto) {
+      produto = direto.produto;
+      eanResolvido = direto.ean;
+    }
   }
 
   if (!produto) {
