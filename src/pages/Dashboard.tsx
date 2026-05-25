@@ -75,7 +75,7 @@ const COR = {
 };
 
 type TipoGrafico = "rosca" | "barra" | "barra100" | "pareto" | "linha" | "unidades";
-type ModoSeletor = "dia" | "periodo" | "mes";
+type ModoSeletor = "dia" | "periodo" | "mes" | "comparar";
 
 const DASH_CACHE_TTL = 30 * 60 * 1000;
 
@@ -179,6 +179,12 @@ const Dashboard = () => {
   const [periodoInicio, setPeriodoInicio] = useState<string | null>(null);
   const [periodoFim, setPeriodoFim] = useState<string | null>(null);
   const [mesSelecionado, setMesSelecionado] = useState(() => new Date().toISOString().slice(0, 7));
+  const [mesComparar1, setMesComparar1] = useState(() => new Date().toISOString().slice(0, 7));
+  const [mesComparar2, setMesComparar2] = useState(() => {
+    const d = new Date();
+    d.setMonth(d.getMonth() - 1);
+    return d.toISOString().slice(0, 7);
+  });
 
   // relatórios carregados para o período
   const [relatoriosPeriodo, setRelatoriosPeriodo] = useState<RelatorioDiario[]>([]);
@@ -314,9 +320,14 @@ const Dashboard = () => {
       const fim = periodoInicio <= periodoFim ? periodoFim : periodoInicio;
       return relatoriosSalvos.filter((r) => r.data >= ini && r.data <= fim).map((r) => r.data);
     }
+    if (modoSeletor === "comparar") {
+      return relatoriosSalvos
+        .filter((r) => r.data.startsWith(mesComparar1) || r.data.startsWith(mesComparar2))
+        .map((r) => r.data);
+    }
     // mes
     return relatoriosSalvos.filter((r) => r.data.startsWith(mesSelecionado)).map((r) => r.data);
-  }, [modoSeletor, diaUnico, periodoInicio, periodoFim, mesSelecionado, relatoriosSalvos]);
+  }, [modoSeletor, diaUnico, periodoInicio, periodoFim, mesSelecionado, mesComparar1, mesComparar2, relatoriosSalvos]);
 
   // ── carregar período ────────────────────────────────────────────────────────
   const carregarPeriodo = useCallback(async () => {
@@ -448,6 +459,25 @@ const Dashboard = () => {
 
     return { resumo, porDia, frequencia, pareto, pizza, totalPedido, totalReal, pctDif };
   }, [relatoriosPeriodo]);
+
+  // ── comparação mês × mês ───────────────────────────────────────────────────
+  const dadosComparar = useMemo(() => {
+    if (modoSeletor !== "comparar" || relatoriosPeriodo.length === 0) return null;
+    const agg = (rels: RelatorioDiario[]) => rels.reduce(
+      (acc, r) => ({
+        separado: acc.separado + r.resumo.separado,
+        naoTem: acc.naoTem + r.resumo.naoTem,
+        parcial: acc.parcial + r.resumo.parcial,
+        pendente: acc.pendente + r.resumo.pendente,
+        totalItens: acc.totalItens + r.resumo.totalItens,
+        conferencias: acc.conferencias + 1,
+      }),
+      { separado: 0, naoTem: 0, parcial: 0, pendente: 0, totalItens: 0, conferencias: 0 }
+    );
+    const rel1 = relatoriosPeriodo.filter((r) => r.data.startsWith(mesComparar1));
+    const rel2 = relatoriosPeriodo.filter((r) => r.data.startsWith(mesComparar2));
+    return { mes1: agg(rel1), mes2: agg(rel2) };
+  }, [relatoriosPeriodo, mesComparar1, mesComparar2, modoSeletor]);
 
   // ── carregar status de compras do ClickUp ───────────────────────────────────
   const carregarStatusCompras = useCallback(async () => {
@@ -635,12 +665,12 @@ const Dashboard = () => {
               </CardHeader>
               <CardContent className="space-y-3">
                 {/* Modo */}
-                <div className="flex gap-1">
-                  {(["dia", "periodo", "mes"] as ModoSeletor[]).map((m) => (
+                <div className="flex gap-1 flex-wrap">
+                  {(["dia", "periodo", "mes", "comparar"] as ModoSeletor[]).map((m) => (
                     <Button key={m} size="sm" variant={modoSeletor === m ? "default" : "outline"}
-                      className="flex-1 text-xs h-7"
+                      className="flex-1 text-xs h-7 min-w-[48px]"
                       onClick={() => { setModoSeletor(m); setRelatoriosPeriodo([]); setFotosErp({}); }}>
-                      {m === "dia" ? "Dia" : m === "periodo" ? "Período" : "Mês"}
+                      {m === "dia" ? "Dia" : m === "periodo" ? "Período" : m === "mes" ? "Mês" : "Comparar"}
                     </Button>
                   ))}
                 </div>
@@ -696,6 +726,29 @@ const Dashboard = () => {
                       {carregandoPeriodo ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />{progressoPeriodo.atual}/{progressoPeriodo.total}</> : "Carregar mês"}
                     </Button>
                     <p className="text-xs text-muted-foreground">{relatoriosSalvos.filter(r => r.data.startsWith(mesSelecionado)).length} relatório(s) disponível(is)</p>
+                  </div>
+                )}
+
+                {/* Comparar mês × mês */}
+                {modoSeletor === "comparar" && (
+                  <div className="space-y-2">
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Mês A</p>
+                      <input type="month" value={mesComparar1}
+                        onChange={(e) => setMesComparar1(e.target.value)}
+                        className="w-full text-sm border rounded p-1.5 bg-background" />
+                      <p className="text-xs text-muted-foreground mt-1">{relatoriosSalvos.filter(r => r.data.startsWith(mesComparar1)).length} relatório(s)</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Mês B</p>
+                      <input type="month" value={mesComparar2}
+                        onChange={(e) => setMesComparar2(e.target.value)}
+                        className="w-full text-sm border rounded p-1.5 bg-background" />
+                      <p className="text-xs text-muted-foreground mt-1">{relatoriosSalvos.filter(r => r.data.startsWith(mesComparar2)).length} relatório(s)</p>
+                    </div>
+                    <Button size="sm" className="w-full" onClick={carregarPeriodo} disabled={carregandoPeriodo}>
+                      {carregandoPeriodo ? <><RefreshCw className="h-3 w-3 mr-1 animate-spin" />{progressoPeriodo.atual}/{progressoPeriodo.total}</> : "Comparar"}
+                    </Button>
                   </div>
                 )}
               </CardContent>
@@ -760,6 +813,59 @@ const Dashboard = () => {
 
           {/* ── PAINEL DIREITO ── */}
           <div className="lg:col-span-2 space-y-4">
+
+            {/* ── Comparação Mês × Mês ── */}
+            {modoSeletor === "comparar" && dadosComparar && !carregandoPeriodo && (
+              <Card>
+                <CardHeader className="pb-2">
+                  <CardTitle className="text-sm">
+                    Comparativo — {mesComparar1.slice(0, 7)} × {mesComparar2.slice(0, 7)}
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    Mês A: {relatoriosPeriodo.filter(r => r.data.startsWith(mesComparar1)).length} dia(s) · Mês B: {relatoriosPeriodo.filter(r => r.data.startsWith(mesComparar2)).length} dia(s)
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  {(() => {
+                    const { mes1, mes2 } = dadosComparar;
+                    const delta = (a: number, b: number) => b === 0 ? null : +(((a - b) / b) * 100).toFixed(1);
+                    const rows: Array<{ label: string; a: number; b: number; inverso?: boolean }> = [
+                      { label: "Conferências", a: mes1.conferencias, b: mes2.conferencias },
+                      { label: "Total SKUs",   a: mes1.totalItens,   b: mes2.totalItens },
+                      { label: "Separado",     a: mes1.separado,     b: mes2.separado },
+                      { label: "Não tem",      a: mes1.naoTem,       b: mes2.naoTem,    inverso: true },
+                      { label: "Parcial",      a: mes1.parcial,      b: mes2.parcial,   inverso: true },
+                      { label: "Pendente",     a: mes1.pendente,     b: mes2.pendente,  inverso: true },
+                    ];
+                    return (
+                      <div className="space-y-2">
+                        <div className="grid grid-cols-4 gap-2 text-xs font-medium text-muted-foreground border-b pb-1">
+                          <span>Métrica</span>
+                          <span className="text-center">Mês A</span>
+                          <span className="text-center">Mês B</span>
+                          <span className="text-center">Δ%</span>
+                        </div>
+                        {rows.map(({ label, a, b, inverso }) => {
+                          const d = delta(a, b);
+                          const positivo = inverso ? (d !== null && d < 0) : (d !== null && d > 0);
+                          const negativo = inverso ? (d !== null && d > 0) : (d !== null && d < 0);
+                          return (
+                            <div key={label} className="grid grid-cols-4 gap-2 text-sm items-center">
+                              <span className="text-xs text-muted-foreground">{label}</span>
+                              <span className="text-center font-semibold">{a.toLocaleString("pt-BR")}</span>
+                              <span className="text-center font-semibold">{b.toLocaleString("pt-BR")}</span>
+                              <span className={`text-center text-xs font-bold ${positivo ? "text-green-600" : negativo ? "text-red-500" : "text-muted-foreground"}`}>
+                                {d === null ? "—" : `${d > 0 ? "+" : ""}${d}%`}
+                              </span>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    );
+                  })()}
+                </CardContent>
+              </Card>
+            )}
 
             {/* Placeholder */}
             {relatoriosPeriodo.length === 0 && !carregandoPeriodo && (
@@ -1202,11 +1308,12 @@ const Dashboard = () => {
           onClick={() => setItemModalIdx(null)}
         >
           <div
-            className="bg-background rounded-xl shadow-2xl w-full max-w-sm overflow-hidden"
+            className="bg-background rounded-xl shadow-2xl overflow-hidden flex flex-col"
+            style={{ width: "100%", maxWidth: 400, maxHeight: "90vh" }}
             onClick={(e) => e.stopPropagation()}
           >
             {/* Foto */}
-            <div className="relative bg-muted w-full aspect-square">
+            <div className="relative bg-muted w-full flex-shrink-0" style={{ height: 280 }}>
               {fotoModal ? (
                 <img src={fotoModal} alt={itemModal.codigo} className="w-full h-full object-contain" />
               ) : (
