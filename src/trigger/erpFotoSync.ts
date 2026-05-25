@@ -316,6 +316,73 @@ async function salvarProdutoErp(
   }
 }
 
+async function getApiToken(empresa: EmpresaKey): Promise<string> {
+  const configuredToken = getEnv(empresa, "TOKEN");
+  if (configuredToken) return configuredToken;
+
+  const username = getEnv(empresa, "USERNAME");
+  const password = getEnv(empresa, "PASSWORD");
+  const baseUrl = resolveOrigin(empresa) + "/api";
+
+  const res = await axios.post(`${baseUrl}/auth`, { username, password }, {
+    headers: { "Content-Type": "application/json", Accept: "application/json" },
+    validateStatus: () => true,
+    timeout: 15_000,
+  });
+
+  if (res.status >= 400) throw new Error(`API auth falhou (${res.status})`);
+
+  const data = res.data as Record<string, unknown>;
+  return (
+    (typeof data.accessToken === "string" && data.accessToken) ||
+    (typeof data.access_token === "string" && data.access_token) ||
+    (typeof data.token === "string" && data.token) ||
+    (typeof data.jwt === "string" && data.jwt) ||
+    ""
+  );
+}
+
+async function salvarProdutoViaApi(
+  empresa: EmpresaKey,
+  produtoId: string,
+  imageId: string
+): Promise<void> {
+  const baseUrl = resolveOrigin(empresa) + "/api";
+  const token = await getApiToken(empresa);
+  if (!token) throw new Error("API token nao obtido");
+
+  console.info(`[erp-foto-sync] REST API: GET /v1/produto/produtos/${produtoId}`);
+  const getRes = await axios.get(`${baseUrl}/v1/produto/produtos/${produtoId}`, {
+    headers: { Authorization: token, Accept: "application/json" },
+    validateStatus: () => true,
+    timeout: 15_000,
+  });
+
+  if (getRes.status >= 400) {
+    throw new Error(`REST GET produto falhou: status=${getRes.status}`);
+  }
+
+  const produto = getRes.data as Record<string, unknown>;
+  produto.imagem = imageId;
+
+  console.info(`[erp-foto-sync] REST API: PUT /v1/produto/produtos/${produtoId} (imagem=${imageId})`);
+  const putRes = await axios.put(
+    `${baseUrl}/v1/produto/produtos/${encodeURIComponent(produtoId)}`,
+    JSON.stringify(produto),
+    {
+      headers: { Authorization: token, "Content-Type": "application/json", Accept: "application/json" },
+      validateStatus: () => true,
+      timeout: 20_000,
+    }
+  );
+
+  console.info(`[erp-foto-sync] REST PUT status=${putRes.status}`);
+  if (putRes.status >= 400) {
+    const preview = typeof putRes.data === "string" ? putRes.data.slice(0, 300) : JSON.stringify(putRes.data).slice(0, 300);
+    throw new Error(`REST PUT produto falhou: status=${putRes.status} body=${preview}`);
+  }
+}
+
 async function validarImagemSalva(
   origin: string,
   cookie: string,
@@ -412,8 +479,28 @@ export const erpFotoSync = task({
         console.info(`[erp-foto-sync] imageId=${imageId}`);
         detalhe.imageId = imageId;
 
-        const formBody = montarFormComImagem(campos, imageId);
-        await salvarProdutoErp(origin, cookie, item.erpProdutoId, formAction, formBody);
+        let saved = false;
+
+        // Tentativa 1: form web (preferido, preserva todos os campos)
+        try {
+          const formBody = montarFormComImagem(campos, imageId);
+          await salvarProdutoErp(origin, cookie, item.erpProdutoId, formAction, formBody);
+          saved = true;
+          console.info(`[erp-foto-sync] Save via form web OK`);
+        } catch (formErr) {
+          console.warn(`[erp-foto-sync] Form web falhou: ${formErr instanceof Error ? formErr.message : formErr}`);
+        }
+
+        // Tentativa 2: REST API PUT (fallback)
+        if (!saved) {
+          try {
+            await salvarProdutoViaApi(empresa, item.erpProdutoId, imageId);
+            saved = true;
+            console.info(`[erp-foto-sync] Save via REST API OK`);
+          } catch (apiErr) {
+            throw new Error(`Ambas tentativas de save falharam. Form: 500. API: ${apiErr instanceof Error ? apiErr.message : apiErr}`);
+          }
+        }
 
         const validado = await validarImagemSalva(origin, cookie, item.erpProdutoId, imageId);
         detalhe.validado = validado;
