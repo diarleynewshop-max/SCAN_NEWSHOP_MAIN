@@ -344,8 +344,11 @@ async function uploadArquivoImagem(
 function normalizarEans(codigo: string): string[] {
   const limpo = codigo.replace(/\s+/g, "");
   const candidatos = [limpo];
+  if (/^\d+$/.test(limpo) && limpo.length < 14) {
+    candidatos.push(limpo.padStart(14, "0"));
+  }
   if (/^\d{13}$/.test(limpo)) candidatos.push(`0${limpo}`);
-  if (/^0\d{13}$/.test(limpo)) candidatos.push(limpo.slice(1));
+  if (/^0+\d+$/.test(limpo)) candidatos.push(limpo.replace(/^0+/, ""));
   return [...new Set(candidatos.filter(Boolean))];
 }
 
