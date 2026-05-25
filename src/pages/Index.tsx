@@ -362,8 +362,9 @@ const Index = () => {
       photo,
       quantity: Number(quantity),
       secao: productInfo?.secao,
-      erpPhotoMissing: false,
-      appPhotoWithoutErp: false,
+      erpProdutoId: productInfo?.erpProdutoId,
+      erpPhotoMissing: !(productInfo?.hasErpImage),
+      appPhotoWithoutErp: !(productInfo?.hasErpImage) && !!photo,
     });
     if (!ok) return;
 

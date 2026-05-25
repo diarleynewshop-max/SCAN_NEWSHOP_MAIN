@@ -26,6 +26,7 @@ interface AddProductParams {
   removeTag?: boolean;
   description?: string;
   secao?: string;
+  erpProdutoId?: string;
   erpPhotoMissing?: boolean;
   appPhotoWithoutErp?: boolean;
   importedFromSpreadsheet?: boolean;
@@ -381,8 +382,9 @@ export function useInventory() {
               quantity: existing.quantity + quantity,
               ...(params.photo ? preparedPhoto : {}),
               ...(params.secao?.trim() ? { secao: params.secao.trim() } : {}),
-              erpPhotoMissing: false,
-              appPhotoWithoutErp: false,
+              ...(params.erpProdutoId ? { erpProdutoId: params.erpProdutoId } : {}),
+              erpPhotoMissing: params.erpPhotoMissing ?? false,
+              appPhotoWithoutErp: params.appPhotoWithoutErp ?? false,
             };
 
             return { ...list, products: updatedProducts };
@@ -395,8 +397,9 @@ export function useInventory() {
             description: params.description?.trim() || undefined,
             secao: params.secao?.trim() || undefined,
             ...preparedPhoto,
-            erpPhotoMissing: false,
-            appPhotoWithoutErp: false,
+            erpProdutoId: params.erpProdutoId,
+            erpPhotoMissing: params.erpPhotoMissing ?? false,
+            appPhotoWithoutErp: params.appPhotoWithoutErp ?? false,
             quantity,
             removeTag: params.removeTag ?? false,
             createdAt: new Date(),

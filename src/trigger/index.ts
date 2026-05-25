@@ -2,6 +2,7 @@
 import sharp from "sharp";
 import FormDataNode from "form-data";
 import axios from "axios";
+import { erpFotoSync } from "./erpFotoSync";
 
 if (!process.env.CLICKUP_TOKEN) throw new Error("CLICKUP_TOKEN não configurado no ambiente do Trigger.");
 const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN;
@@ -480,6 +481,25 @@ ${listaFaltantesStr}
             10,
             () => "sem_estoque"
           );
+        }
+      }
+      const itensParaErp = (payload.produtos ?? []).filter(
+        (p: any) => p.appPhotoWithoutErp && p.erpProdutoId && p.photo
+      );
+
+      if (itensParaErp.length > 0) {
+        try {
+          await erpFotoSync.trigger({
+            empresa: payload.empresa ?? "NEWSHOP",
+            itens: itensParaErp.map((p: any) => ({
+              erpProdutoId: p.erpProdutoId,
+              photoBase64: p.photo,
+              barcode: p.barcode,
+            })),
+          });
+          console.info(`[lista-baixada] erp-foto-sync disparado para ${itensParaErp.length} item(ns)`);
+        } catch (erpErr) {
+          console.error("[lista-baixada] Falha ao disparar erp-foto-sync (nao bloqueia ClickUp):", erpErr);
         }
       }
     } catch (err) {

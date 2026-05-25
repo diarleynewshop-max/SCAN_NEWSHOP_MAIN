@@ -33,6 +33,8 @@ export interface WebhookPayload {
     removeTag: boolean;
     secao?: string | null;
     photo: string | null;
+    erpProdutoId?: string;
+    appPhotoWithoutErp?: boolean;
   }>;
 }
 

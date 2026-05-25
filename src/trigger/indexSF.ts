@@ -2,6 +2,7 @@ import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 import FormDataNode from "form-data";
 import axios from "axios";
+import { erpFotoSync } from "./erpFotoSync";
 
 type EmpresaSF = "SOYE" | "FACIL";
 type FlagLista = "loja" | "cd";
@@ -569,6 +570,25 @@ Fotos anexadas abaixo (se houver)`,
             10,
             () => "sem_estoque"
           );
+        }
+      }
+      const itensParaErp = (payload.produtos ?? []).filter(
+        (p: any) => p.appPhotoWithoutErp && p.erpProdutoId && p.photo
+      );
+
+      if (itensParaErp.length > 0) {
+        try {
+          await erpFotoSync.trigger({
+            empresa: payload.empresa ?? "SOYE",
+            itens: itensParaErp.map((p: any) => ({
+              erpProdutoId: p.erpProdutoId,
+              photoBase64: p.photo,
+              barcode: p.barcode,
+            })),
+          });
+          console.info(`[lista-baixada-sf] erp-foto-sync disparado para ${itensParaErp.length} item(ns)`);
+        } catch (erpErr) {
+          console.error("[lista-baixada-sf] Falha ao disparar erp-foto-sync (nao bloqueia ClickUp):", erpErr);
         }
       }
     } catch (err) {

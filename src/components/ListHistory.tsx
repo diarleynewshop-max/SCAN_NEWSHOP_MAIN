@@ -268,6 +268,8 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           removeTag:  product.removeTag ?? false,
           secao:      product.secao || null,
           photo:      photoDataUrl,
+          erpProdutoId: product.erpProdutoId,
+          appPhotoWithoutErp: product.appPhotoWithoutErp,
         })),
       };
 

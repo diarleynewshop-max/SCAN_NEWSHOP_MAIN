@@ -9,6 +9,7 @@ export interface Product {
   photo: string | null;
   photoBlob?: Blob | null;
   photoAssetId?: string | null;
+  erpProdutoId?: string;
   erpPhotoMissing?: boolean;
   appPhotoWithoutErp?: boolean;
   quantity: number;
