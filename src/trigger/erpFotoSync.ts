@@ -53,7 +53,7 @@ async function loginErpWeb(origin: string, empresa: EmpresaKey): Promise<string>
       Referer: `${origin}/app/`,
       "X-Requested-With": "XMLHttpRequest",
     },
-    maxRedirects: 5,
+    maxRedirects: 0,
     validateStatus: () => true,
     timeout: 15_000,
   });
