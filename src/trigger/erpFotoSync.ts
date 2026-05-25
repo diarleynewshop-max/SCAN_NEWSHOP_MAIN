@@ -2,6 +2,7 @@ import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 import FormDataNode from "form-data";
 import axios from "axios";
+import * as cheerio from "cheerio";
 
 type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
 
@@ -19,13 +20,9 @@ function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOK
   );
 }
 
-function getWebCookie(empresa: EmpresaKey): string {
-  return process.env[`ERP_WEB_COOKIE_${empresa}`] || process.env.ERP_WEB_COOKIE || "";
-}
-
-function resolveBaseUrl(empresa: EmpresaKey): string {
-  const configuredUrl = (getEnv(empresa, "URL") || `https://${HOSTS[empresa]}`).replace(/\/$/, "");
-  return configuredUrl.endsWith("/api") ? configuredUrl : `${configuredUrl}/api`;
+function resolveOrigin(empresa: EmpresaKey): string {
+  const url = (getEnv(empresa, "URL") || `https://${HOSTS[empresa]}`).replace(/\/$/, "");
+  return url.replace(/\/api$/, "");
 }
 
 function normalizeEmpresa(value: string): EmpresaKey {
@@ -35,53 +32,251 @@ function normalizeEmpresa(value: string): EmpresaKey {
   return "NEWSHOP";
 }
 
-async function getAccessToken(empresa: EmpresaKey, baseUrl: string): Promise<string> {
-  const configuredToken = getEnv(empresa, "TOKEN");
-  if (configuredToken) return configuredToken;
+// --- Web session auth (JSESSIONID) ---
 
+async function loginErpWeb(origin: string, empresa: EmpresaKey): Promise<string> {
   const username = getEnv(empresa, "USERNAME");
   const password = getEnv(empresa, "PASSWORD");
   if (!username || !password) {
-    throw new Error(`Credenciais do ERP nao configuradas para ${empresa}`);
+    throw new Error(`ERP_API_USERNAME ou ERP_API_PASSWORD nao configurados para ${empresa}. O upload de foto exige credenciais web.`);
   }
 
-  const res = await axios.post(`${baseUrl}/auth`, { username, password }, {
-    headers: { "Content-Type": "application/json", Accept: "application/json" },
+  const loginUrl = `${origin}/j_spring_security_check?j_username=${encodeURIComponent(username)}&j_password=${encodeURIComponent(password)}`;
+
+  console.info(`[erp-foto-sync] Login web: ${origin}/j_spring_security_check`);
+
+  const res = await axios.post(loginUrl, undefined, {
+    headers: {
+      Accept: "*/*",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Origin: origin,
+      Referer: `${origin}/app/`,
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    maxRedirects: 5,
     validateStatus: () => true,
     timeout: 15_000,
   });
 
-  if (res.status >= 400) {
-    throw new Error(`Login ERP falhou (${res.status}): ${JSON.stringify(res.data)}`);
+  console.info(`[erp-foto-sync] Login web status=${res.status}`);
+
+  const raw = res.headers["set-cookie"];
+  const cookies = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
+  const jsessionId = cookies
+    .map((c: string) => c.split(";")[0])
+    .find((c: string) => c.startsWith("JSESSIONID="));
+
+  if (!jsessionId) {
+    console.error(`[erp-foto-sync] Cookies recebidos: ${cookies.map((c: string) => c.split(";")[0]).join(", ") || "(nenhum)"}`);
+    throw new Error("Login web: JSESSIONID nao encontrado na resposta");
   }
 
-  const data = res.data as Record<string, unknown>;
-  const token =
-    (typeof data.accessToken === "string" && data.accessToken) ||
-    (typeof data.access_token === "string" && data.access_token) ||
-    (typeof data.token === "string" && data.token) ||
-    (typeof data.jwt === "string" && data.jwt) ||
-    "";
-
-  if (!token) throw new Error("ERP nao retornou access token no login");
-  return token;
+  console.info(`[erp-foto-sync] Login web OK — ${jsessionId.slice(0, 30)}...`);
+  return jsessionId;
 }
 
-function findUuid(value: unknown): string {
-  if (typeof value === "string") {
-    return value.match(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/i)?.[0] || "";
+// --- Form parsing ---
+
+interface FormField {
+  name: string;
+  value: string;
+}
+
+function extrairCamposFormulario(html: string): { campos: FormField[]; formAction: string } {
+  const $ = cheerio.load(html);
+  const campos: FormField[] = [];
+
+  const form = $("form").first();
+  const formAction = form.attr("action") || "/produto/cadastro/edita";
+
+  $("input").each((_, el) => {
+    const name = $(el).attr("name");
+    if (!name) return;
+    const type = ($(el).attr("type") || "text").toLowerCase();
+    if (type === "file" || type === "button" || type === "submit" || type === "reset") return;
+
+    if (type === "checkbox" || type === "radio") {
+      if ($(el).is(":checked")) {
+        campos.push({ name, value: $(el).attr("value") ?? "on" });
+      }
+      return;
+    }
+
+    campos.push({ name, value: $(el).attr("value") ?? "" });
+  });
+
+  $("select").each((_, el) => {
+    const name = $(el).attr("name");
+    if (!name) return;
+    const selected = $(el).find("option:selected");
+    campos.push({ name, value: selected.attr("value") ?? selected.text() ?? "" });
+  });
+
+  $("textarea").each((_, el) => {
+    const name = $(el).attr("name");
+    if (!name) return;
+    campos.push({ name, value: $(el).text() ?? "" });
+  });
+
+  return { campos, formAction };
+}
+
+// --- Steps ---
+
+async function lerFormularioProduto(
+  origin: string,
+  cookie: string,
+  produtoId: string
+): Promise<{ campos: FormField[]; formAction: string }> {
+  const url = `${origin}/produto/cadastro/edita/${produtoId}`;
+  console.info(`[erp-foto-sync] GET ${url}`);
+
+  const res = await axios.get(url, {
+    headers: {
+      Cookie: cookie,
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+      Referer: `${origin}/produto/cadastro/`,
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    validateStatus: () => true,
+    timeout: 20_000,
+    maxRedirects: 5,
+  });
+
+  console.info(`[erp-foto-sync] GET edita status=${res.status} ct=${res.headers["content-type"] || ""} len=${String(res.data).length}`);
+
+  if (res.status !== 200) {
+    const preview = String(res.data).slice(0, 200);
+    throw new Error(`Ler formulario ERP: status ${res.status} para produtoId=${produtoId}. Preview: ${preview}`);
   }
-  if (!value || typeof value !== "object") return "";
-  const record = value as Record<string, unknown>;
-  for (const v of [record.uuid, record.uid, record.id, record.nome, record.name]) {
-    const found = findUuid(v);
-    if (found) return found;
+
+  const html = String(res.data);
+  if (html.includes("j_spring_security_check") || html.includes("login")) {
+    throw new Error(`Ler formulario ERP: sessao expirada (ERP redirecionou para login). produtoId=${produtoId}`);
   }
-  for (const v of Object.values(record)) {
-    const found = findUuid(v);
-    if (found) return found;
+
+  const result = extrairCamposFormulario(html);
+  console.info(`[erp-foto-sync] Formulario: ${result.campos.length} campos, action=${result.formAction}`);
+
+  if (result.campos.length < 3) {
+    throw new Error(`Formulario do ERP muito pequeno (${result.campos.length} campos) — pode ser pagina de erro`);
   }
-  return "";
+
+  return result;
+}
+
+async function uploadImagemErp(
+  origin: string,
+  cookie: string,
+  imageBuffer: Buffer,
+  filename: string
+): Promise<string> {
+  const form = new FormDataNode();
+  form.append("upload", imageBuffer, { filename, contentType: "image/jpeg" });
+
+  console.info(`[erp-foto-sync] POST ${origin}/arquivo/upload (${imageBuffer.length} bytes)`);
+
+  const res = await axios.post(`${origin}/arquivo/upload`, form, {
+    headers: {
+      ...form.getHeaders(),
+      Cookie: cookie,
+      Accept: "application/json, text/javascript, */*; q=0.01",
+      Origin: origin,
+      Referer: `${origin}/arquivo/frame`,
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    maxContentLength: Infinity,
+    maxBodyLength: Infinity,
+    validateStatus: () => true,
+    timeout: 30_000,
+  });
+
+  const contentType = res.headers["content-type"] || "";
+  console.info(`[erp-foto-sync] Upload status=${res.status} ct=${contentType}`);
+
+  if (contentType.includes("text/html")) {
+    throw new Error(`Upload retornou HTML (sessao expirada ou endpoint errado). status=${res.status}`);
+  }
+
+  if (res.status < 200 || res.status >= 300) {
+    const preview = typeof res.data === "string" ? res.data.slice(0, 300) : JSON.stringify(res.data).slice(0, 300);
+    throw new Error(`Upload falhou: status=${res.status} body=${preview}`);
+  }
+
+  const data = typeof res.data === "string" ? JSON.parse(res.data) : res.data;
+  console.info(`[erp-foto-sync] Upload response: ${JSON.stringify(data).slice(0, 500)}`);
+
+  const filesUrl = data?.files?.[0]?.url;
+  if (filesUrl) return filesUrl;
+
+  const uuid = data?.uuid ?? data?.id ?? data?.name;
+  if (uuid) return String(uuid);
+
+  throw new Error(`Upload aceito mas sem identificador de imagem. Response: ${JSON.stringify(data).slice(0, 300)}`);
+}
+
+function montarFormComImagem(campos: FormField[], imageId: string): string {
+  const params = new URLSearchParams();
+
+  let foundImagem = false;
+  for (const campo of campos) {
+    if (campo.name === "produto.imagem") {
+      params.append(campo.name, imageId);
+      foundImagem = true;
+    } else {
+      params.append(campo.name, campo.value);
+    }
+  }
+
+  if (!foundImagem) {
+    params.append("produto.imagem", imageId);
+  }
+
+  return params.toString();
+}
+
+async function salvarProdutoErp(
+  origin: string,
+  cookie: string,
+  produtoId: string,
+  formAction: string,
+  formBody: string
+): Promise<void> {
+  const saveUrl = formAction.startsWith("http") ? formAction : `${origin}${formAction}`;
+  console.info(`[erp-foto-sync] POST save ${saveUrl} (${formBody.length} chars)`);
+
+  const res = await axios.post(saveUrl, formBody, {
+    headers: {
+      Cookie: cookie,
+      Accept: "*/*",
+      "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+      Origin: origin,
+      Referer: `${origin}/produto/cadastro/edita/${produtoId}`,
+      "X-Requested-With": "XMLHttpRequest",
+    },
+    maxRedirects: 0,
+    validateStatus: () => true,
+    timeout: 20_000,
+  });
+
+  console.info(`[erp-foto-sync] Save status=${res.status}`);
+
+  if (res.status >= 400) {
+    const preview = String(res.data).slice(0, 300);
+    throw new Error(`Salvar produto ERP: status ${res.status}. Preview: ${preview}`);
+  }
+}
+
+async function validarImagemSalva(
+  origin: string,
+  cookie: string,
+  produtoId: string,
+  imageIdEsperado: string
+): Promise<boolean> {
+  const { campos } = await lerFormularioProduto(origin, cookie, produtoId);
+  const imagemSalva = campos.find((c) => c.name === "produto.imagem")?.value;
+  console.info(`[erp-foto-sync] Validacao: produto.imagem="${imagemSalva}" esperado="${imageIdEsperado}"`);
+  return imagemSalva === imageIdEsperado;
 }
 
 async function comprimirFotoParaErp(base64: string): Promise<Buffer> {
@@ -93,263 +288,7 @@ async function comprimirFotoParaErp(base64: string): Promise<Buffer> {
     .toBuffer();
 }
 
-async function loginErpWeb(origin: string, empresa: EmpresaKey): Promise<string> {
-  const username = getEnv(empresa, "USERNAME");
-  const password = getEnv(empresa, "PASSWORD");
-  if (!username || !password) {
-    console.warn("[erp-foto-sync] Login web: sem credenciais");
-    return "";
-  }
-
-  const extractJsessionId = (res: { headers: Record<string, unknown> }): string => {
-    const raw = res.headers["set-cookie"];
-    const cookies = Array.isArray(raw) ? raw : typeof raw === "string" ? [raw] : [];
-    const found = cookies
-      .map((c: string) => c.split(";")[0])
-      .find((c: string) => c.startsWith("JSESSIONID="));
-    return found || "";
-  };
-
-  const attempts = [
-    `${origin}/j_spring_security_check?j_username=${encodeURIComponent(username)}&j_password=${encodeURIComponent(password)}`,
-    `${origin}/j_spring_security_check`,
-  ];
-
-  for (const url of attempts) {
-    try {
-      const isQueryParam = url.includes("j_username=");
-      const res = await axios.post(
-        url,
-        isQueryParam ? undefined : `j_username=${encodeURIComponent(username)}&j_password=${encodeURIComponent(password)}`,
-        {
-          headers: { "Content-Type": "application/x-www-form-urlencoded" },
-          maxRedirects: 5,
-          validateStatus: () => true,
-          timeout: 15_000,
-        }
-      );
-
-      const jsessionId = extractJsessionId(res);
-      if (jsessionId) {
-        console.info(`[erp-foto-sync] Login web OK — ${jsessionId.slice(0, 25)}...`);
-        return jsessionId;
-      }
-
-      console.warn(`[erp-foto-sync] Login web ${isQueryParam ? "query" : "body"}: status=${res.status}, sem JSESSIONID nos cookies`);
-    } catch (err) {
-      console.warn(`[erp-foto-sync] Login web erro: ${err instanceof Error ? err.message : err}`);
-    }
-  }
-
-  return "";
-}
-
-interface UploadResult {
-  uuid: string | undefined;
-  mode: string;
-  directUpdate?: boolean;
-}
-
-async function tentarUploadImagem(
-  baseUrl: string,
-  token: string,
-  imageBuffer: Buffer,
-  barcode: string,
-  webCookie: string,
-  empresa: EmpresaKey,
-  produtoId?: string
-): Promise<UploadResult> {
-  const origin = baseUrl.replace(/\/api$/, "");
-  const filename = `nao_tem_${barcode}.jpg`;
-
-  const freshCookie = await loginErpWeb(origin, empresa);
-  const sessionCookie = freshCookie || webCookie;
-
-  const strategies = [
-    {
-      mode: "erp-frame-multipart-upload",
-      url: `${origin}/arquivo/upload`,
-      useToken: false,
-      buildBody: () => {
-        const form = new FormDataNode();
-        form.append("upload", imageBuffer, { filename, contentType: "image/jpeg" });
-        return {
-          body: form,
-          headers: {
-            ...form.getHeaders(),
-            Cookie: sessionCookie,
-            Accept: "application/json, text/javascript, */*; q=0.01",
-            Origin: origin,
-            Referer: `${origin}/arquivo/frame`,
-            "X-Requested-With": "XMLHttpRequest",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/147.0.0.0 Safari/537.36",
-            "Content-Disposition": `attachment; filename="${filename}"`,
-          },
-        };
-      },
-      skip: !sessionCookie,
-    },
-    {
-      mode: "api-multipart-upload",
-      url: `${baseUrl}/v1/arquivo/upload`,
-      useToken: true,
-      buildBody: () => {
-        const form = new FormDataNode();
-        form.append("upload", imageBuffer, { filename, contentType: "image/jpeg" });
-        return { body: form, headers: form.getHeaders() };
-      },
-      skip: false,
-    },
-    {
-      mode: "json-arquivo-base64",
-      url: `${baseUrl}/v1/arquivo/upload`,
-      useToken: true,
-      buildBody: () => ({
-        body: JSON.stringify({
-          nome: filename,
-          descricao: barcode,
-          mimeType: "image/jpeg",
-          arquivo: imageBuffer.toString("base64"),
-        }),
-        headers: { "Content-Type": "application/json" },
-      }),
-      skip: false,
-    },
-    {
-      mode: "json-file-base64",
-      url: `${baseUrl}/v1/arquivo/upload`,
-      useToken: true,
-      buildBody: () => ({
-        body: JSON.stringify({
-          filename,
-          codigo: barcode,
-          contentType: "image/jpeg",
-          file: imageBuffer.toString("base64"),
-        }),
-        headers: { "Content-Type": "application/json" },
-      }),
-      skip: false,
-    },
-    {
-      mode: "totvs-produto-imagem",
-      url: `${origin}/CadastrosEstruturaisAPI/api/v1/Produto/produto-imagem`,
-      useToken: true,
-      buildBody: () => ({
-        body: JSON.stringify({
-          idProduto: produtoId ? Number(produtoId) : undefined,
-          descricao: barcode.slice(0, 40),
-          imagem: imageBuffer.toString("base64"),
-          indPrincipal: "S",
-          dispImagem: "F",
-          statusEcomm: "A",
-        }),
-        headers: { "Content-Type": "application/json" },
-      }),
-      skip: false,
-    },
-    {
-      mode: "frame-multipart-with-token",
-      url: `${origin}/arquivo/upload`,
-      useToken: false,
-      buildBody: () => {
-        const form = new FormDataNode();
-        form.append("upload", imageBuffer, { filename, contentType: "image/jpeg" });
-        return {
-          body: form,
-          headers: {
-            ...form.getHeaders(),
-            Authorization: token,
-            Accept: "application/json, text/javascript, */*; q=0.01",
-            Origin: origin,
-            Referer: `${origin}/arquivo/frame`,
-            "X-Requested-With": "XMLHttpRequest",
-          },
-        };
-      },
-      skip: false,
-    },
-  ];
-
-  for (const strategy of strategies) {
-    if (strategy.skip) continue;
-
-    try {
-      const { body, headers } = strategy.buildBody();
-      const res = await axios.post(strategy.url, body, {
-        headers: {
-          ...(strategy.useToken ? { Authorization: token } : {}),
-          Accept: "application/json",
-          ...headers,
-        },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        validateStatus: () => true,
-        timeout: 30_000,
-      });
-
-      const contentType = res.headers["content-type"] || "";
-      if (res.status >= 200 && res.status < 300 && !contentType.includes("text/html")) {
-        const uuid = findUuid(res.data);
-        console.info(`[erp-foto-sync] Upload OK via ${strategy.mode} — uuid=${uuid || "(sem uuid, directUpdate)"}`);
-        return { uuid: uuid || undefined, mode: strategy.mode, directUpdate: !uuid };
-      }
-
-      const preview = typeof res.data === "string" ? res.data.slice(0, 300) : JSON.stringify(res.data).slice(0, 300);
-      console.warn(`[erp-foto-sync] Upload ${strategy.mode} falhou: status=${res.status} ct=${contentType} body=${preview}`);
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
-      console.warn(`[erp-foto-sync] Upload ${strategy.mode} erro: ${msg}`);
-    }
-  }
-
-  throw new Error("Nenhuma estrategia de upload funcionou no ERP");
-}
-
-async function lerProdutoCompleto(
-  baseUrl: string,
-  token: string,
-  produtoId: string
-): Promise<Record<string, unknown>> {
-  const res = await axios.get(`${baseUrl}/v1/produto/produtos/${produtoId}`, {
-    headers: { Authorization: token, Accept: "application/json" },
-    validateStatus: () => true,
-    timeout: 15_000,
-  });
-
-  if (res.status >= 400) {
-    throw new Error(`Ler produto ERP: status ${res.status} para produtoId=${produtoId}`);
-  }
-
-  return res.data as Record<string, unknown>;
-}
-
-async function salvarProdutoComImagem(
-  baseUrl: string,
-  token: string,
-  produtoId: string,
-  produto: Record<string, unknown>,
-  imagemUuid: string
-): Promise<void> {
-  const payload = { ...produto, imagem: imagemUuid };
-
-  const res = await axios.put(
-    `${baseUrl}/v1/produto/produtos/${encodeURIComponent(produtoId)}`,
-    JSON.stringify(payload),
-    {
-      headers: {
-        Authorization: token,
-        "Content-Type": "application/json",
-        Accept: "application/json",
-      },
-      validateStatus: () => true,
-      timeout: 20_000,
-    }
-  );
-
-  if (res.status >= 400) {
-    throw new Error(`Salvar produto ERP: status ${res.status} — ${JSON.stringify(res.data).slice(0, 500)}`);
-  }
-}
+// --- Task definition ---
 
 interface ErpFotoSyncItem {
   erpProdutoId: string;
@@ -371,8 +310,8 @@ interface ErpFotoSyncResult {
     erpProdutoId: string;
     barcode: string;
     ok: boolean;
-    uuid?: string;
-    mode?: string;
+    imageId?: string;
+    validado?: boolean;
     erro?: string;
   }>;
 }
@@ -390,13 +329,11 @@ export const erpFotoSync = task({
     }
 
     const empresa = normalizeEmpresa(payload.empresa);
-    const baseUrl = resolveBaseUrl(empresa);
-    const webCookie = getWebCookie(empresa);
+    const origin = resolveOrigin(empresa);
 
-    console.info(`[erp-foto-sync] Iniciando sync de ${payload.itens.length} foto(s) para ${empresa} — baseUrl=${baseUrl}`);
+    console.info(`[erp-foto-sync] Iniciando sync de ${payload.itens.length} foto(s) para ${empresa} — origin=${origin}`);
 
-    const token = await getAccessToken(empresa, baseUrl);
-    console.info("[erp-foto-sync] Auth OK — token obtido");
+    const cookie = await loginErpWeb(origin, empresa);
 
     const result: ErpFotoSyncResult = {
       empresa,
@@ -414,32 +351,30 @@ export const erpFotoSync = task({
       };
 
       try {
-        console.info(`[erp-foto-sync] Processando produtoId=${item.erpProdutoId} (${item.barcode})`);
+        console.info(`[erp-foto-sync] === Produto ${item.erpProdutoId} (${item.barcode}) ===`);
+
+        const { campos, formAction } = await lerFormularioProduto(origin, cookie, item.erpProdutoId);
 
         const imageBuffer = await comprimirFotoParaErp(item.photoBase64);
         console.info(`[erp-foto-sync] Foto comprimida: ${imageBuffer.length} bytes`);
 
-        const upload = await tentarUploadImagem(baseUrl, token, imageBuffer, item.barcode, webCookie, empresa, item.erpProdutoId);
-        detalhe.uuid = upload.uuid;
-        detalhe.mode = upload.mode;
+        const filename = `produto_${item.barcode}.jpg`;
+        const imageId = await uploadImagemErp(origin, cookie, imageBuffer, filename);
+        console.info(`[erp-foto-sync] imageId=${imageId}`);
+        detalhe.imageId = imageId;
 
-        if (upload.directUpdate) {
-          console.info(`[erp-foto-sync] Upload directUpdate — sem necessidade de PUT`);
-          detalhe.ok = true;
-          result.sucesso += 1;
-        } else if (upload.uuid) {
-          const produto = await lerProdutoCompleto(baseUrl, token, item.erpProdutoId);
-          console.info(`[erp-foto-sync] Produto lido — ${Object.keys(produto).length} campos`);
+        const formBody = montarFormComImagem(campos, imageId);
+        await salvarProdutoErp(origin, cookie, item.erpProdutoId, formAction, formBody);
 
-          await salvarProdutoComImagem(baseUrl, token, item.erpProdutoId, produto, upload.uuid);
-          console.info(`[erp-foto-sync] PUT OK — imagem=${upload.uuid}`);
+        const validado = await validarImagemSalva(origin, cookie, item.erpProdutoId, imageId);
+        detalhe.validado = validado;
 
-          detalhe.ok = true;
-          result.sucesso += 1;
-        } else {
-          detalhe.erro = "Upload aceito mas sem UUID — nao foi possivel vincular ao produto";
-          result.falha += 1;
+        if (!validado) {
+          console.warn(`[erp-foto-sync] AVISO: validacao falhou para produtoId=${item.erpProdutoId}`);
         }
+
+        detalhe.ok = true;
+        result.sucesso += 1;
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);
         console.error(`[erp-foto-sync] ERRO produtoId=${item.erpProdutoId}: ${msg}`);
