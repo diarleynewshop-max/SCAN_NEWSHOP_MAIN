@@ -420,7 +420,7 @@ Empresa: ${payload.empresa ?? "NEWSHOP"}
 Tipo: ${flagLabel}
 Itens: ${payload.totalItens}
 Data: ${dataFormatada}
-Trigger Run ID: ${ctx.run.id}`,
+Trigger: ...${ctx.run.id.slice(-8)}`,
         "to do",
         payload.pessoa ? [payload.pessoa] : []
       );
