@@ -151,7 +151,8 @@ async function lerFormularioProduto(
   }
 
   const html = String(res.data);
-  if (html.includes("j_spring_security_check") || html.includes("login")) {
+  const isLoginPage = html.includes("j_spring_security_check") && !html.includes("produto.id");
+  if (isLoginPage) {
     throw new Error(`Ler formulario ERP: sessao expirada (ERP redirecionou para login). produtoId=${produtoId}`);
   }
 
