@@ -772,6 +772,8 @@ async function gerarRelatorioDiario(empresa: EmpresaKey, flag: FlagKey, token: s
         conferente,
         totalItens,
         resumo,
+        dateCreated: task.date_created ?? null,
+        dateUpdated: task.date_updated ?? detail.date_updated ?? null,
       });
       const itensTask = parseConferenceItems(description, conferente, task.id).map((item) => ({
         ...item,

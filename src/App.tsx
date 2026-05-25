@@ -22,6 +22,7 @@ const Compras = lazy(() => import("./pages/Compras"));
 const ConsultaPreco = lazy(() => import("./pages/ConsultaPreco"));
 const MeusPedidos = lazy(() => import("./pages/MeusPedidos"));
 const ClickUp = lazy(() => import("./pages/ClickUp"));
+const RelatorioPessoas = lazy(() => import("./pages/RelatorioPessoas"));
 
 const queryClient = new QueryClient();
 
@@ -85,6 +86,12 @@ const App = () => (
             <Route path="/clickup" element={
               <ProtectedRoute requiredRole={['admin', 'super']}>
                 <DesktopShell pageTitle="ClickUp"><ClickUp /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/relatorio-pessoas" element={
+              <ProtectedRoute requiredRole={['admin', 'super']}>
+                <DesktopShell pageTitle="Relatorio Pessoas"><RelatorioPessoas /></DesktopShell>
               </ProtectedRoute>
             } />
 
