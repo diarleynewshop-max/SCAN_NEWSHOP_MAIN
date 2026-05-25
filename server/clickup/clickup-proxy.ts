@@ -137,6 +137,27 @@ function normalizeStatus(status: unknown): string {
     .toLowerCase();
 }
 
+async function fetchConcluidasFromList(listId: string, token: string): Promise<any[]> {
+  const allTasks: any[] = [];
+  for (let page = 0; page < 15; page++) {
+    const url =
+      `https://api.clickup.com/api/v2/list/${listId}/task` +
+      `?include_closed=true&page=${page}&subtasks=false` +
+      `&statuses%5B%5D=complete&statuses%5B%5D=concluido`;
+    const response = await fetch(url, { headers: { Authorization: token } });
+    if (!response.ok) {
+      const errorText = await response.text().catch(() => '');
+      console.error(`[fetchConcluidasFromList] ClickUp ${response.status} lista=${listId} page=${page} body=${errorText.slice(0, 300)}`);
+      break;
+    }
+    const data = await response.json();
+    const tasks = Array.isArray(data.tasks) ? data.tasks : [];
+    allTasks.push(...tasks);
+    if (tasks.length < 100) break;
+  }
+  return allTasks;
+}
+
 async function fetchTasksFromList(listId: string, token: string, includeClosed = false): Promise<any[]> {
   const allTasks: any[] = [];
 
@@ -669,11 +690,7 @@ async function buscarRelatorioSalvo(
 
 async function listarDatasRelatorio(empresa: EmpresaKey, flag: FlagKey, token: string) {
   const listId = getListId(empresa, flag);
-  const rawTasks = await fetchTasksFromList(listId, token, true);
-  const concluidas = rawTasks.filter((task) => {
-    const status = normalizeStatus(task.status?.status);
-    return status === 'concluido' || status === 'complete';
-  });
+  const concluidas = await fetchConcluidasFromList(listId, token);
 
   const dateMap = new Map<string, { data: string; label: string; total: number; relatorioGerado: boolean }>();
 

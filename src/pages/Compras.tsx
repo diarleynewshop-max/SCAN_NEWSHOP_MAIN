@@ -11,7 +11,7 @@ import { useToast } from "@/hooks/use-toast";
 import { buscarProdutoVarejoFacil, type VarejoFacilProduct } from "@/lib/varejoFacilIntegration";
 
 const PAGE_SIZE = 10;
-const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
+const CACHE_TTL_MS = 30 * 60 * 1000;
 
 type FotoFonte = "ERP" | "CLICKUP_TASK" | "CLICKUP_LIST";
 
@@ -67,7 +67,14 @@ function getComprasCacheKey(empresa: string, tipo: "erp" | "fotos"): string {
   return `compras:${tipo}:${empresa}`;
 }
 
+function isComprasDesktop(): boolean {
+  try {
+    return localStorage.getItem('modoDesktop') === 'true' || window.innerWidth >= 1024;
+  } catch { return false; }
+}
+
 function lerCacheLocal<T>(key: string): T | null {
+  if (!isComprasDesktop()) return null;
   try {
     const raw = window.localStorage.getItem(key);
     if (!raw) return null;
@@ -83,6 +90,7 @@ function lerCacheLocal<T>(key: string): T | null {
 }
 
 function salvarCacheLocal<T>(key: string, data: T) {
+  if (!isComprasDesktop()) return;
   try {
     window.localStorage.setItem(key, JSON.stringify({ data, updatedAt: Date.now() }));
   } catch {

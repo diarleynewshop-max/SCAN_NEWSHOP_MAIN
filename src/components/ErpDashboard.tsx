@@ -9,6 +9,31 @@ import type { LoginData } from "@/hooks/useAuth";
 import { listarRelatoriosSalvos, buscarDashboardKpis, type RelatorioSalvo, type DashboardKpis, type EmpresaKey, type FlagKey } from "@/lib/clickupApi";
 
 const DAYS = 7;
+const DASH_CACHE_TTL = 30 * 60 * 1000;
+
+function isDesktopMode(): boolean {
+  try {
+    return localStorage.getItem('modoDesktop') === 'true' || window.innerWidth >= 1024;
+  } catch { return false; }
+}
+
+function lerCacheDash<T>(key: string): T | null {
+  if (!isDesktopMode()) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const { data, updatedAt } = JSON.parse(raw);
+    if (Date.now() - updatedAt > DASH_CACHE_TTL) return null;
+    return data as T;
+  } catch { return null; }
+}
+
+function salvarCacheDash<T>(key: string, data: T): void {
+  if (!isDesktopMode()) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({ data, updatedAt: Date.now() }));
+  } catch {}
+}
 
 function emptyDays() {
   const out: { dia: string; valor: number }[] = [];
@@ -199,17 +224,27 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
   const [cuError, setCuError] = useState<string | null>(null);
   const [lastFetch, setLastFetch] = useState(0);
 
-  const fetchClickUp = () => {
+  const fetchClickUp = (forceRefresh = false) => {
     if (!loginSalvo?.empresa) return;
     const emp = loginSalvo.empresa as EmpresaKey;
     const flg = (loginSalvo.flag ?? "loja") as FlagKey;
+    const kpiKey = `erpdash:kpis:${emp}:${flg}`;
+    const summaryKey = `erpdash:summary:${emp}:${flg}`;
+
+    if (!forceRefresh) {
+      const cachedKpis = lerCacheDash<DashboardKpis>(kpiKey);
+      const cachedSummary = lerCacheDash<ClickUpSummary>(summaryKey);
+      if (cachedKpis) setKpis(cachedKpis);
+      if (cachedSummary) { setCuSummary(cachedSummary); setLastFetch(Date.now()); }
+      if (cachedKpis && cachedSummary) return;
+    }
 
     setCuLoading(true);
     setKpisLoading(true);
     setCuError(null);
 
     buscarDashboardKpis(emp, flg)
-      .then(data => setKpis(data))
+      .then(data => { setKpis(data); salvarCacheDash(kpiKey, data); })
       .catch(() => {/* KPIs mostram 0 silenciosamente */})
       .finally(() => setKpisLoading(false));
 
@@ -227,12 +262,16 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
           }),
           { separado: 0, naoTem: 0, parcial: 0, pendente: 0, totalItens: 0, totalConferencias: 0 }
         );
-        setCuSummary({ ...resumo, porDia: buildPorDiaFromRelatorios(ultimos7) });
+        const summary: ClickUpSummary = { ...resumo, porDia: buildPorDiaFromRelatorios(ultimos7) };
+        setCuSummary(summary);
+        salvarCacheDash(summaryKey, summary);
         setLastFetch(Date.now());
       })
       .catch(err => setCuError(err.message ?? "Erro ao buscar dados do ClickUp"))
       .finally(() => setCuLoading(false));
   };
+
+  const handleRefreshClickUp = () => fetchClickUp(true);
 
   useEffect(() => {
     fetchClickUp();
@@ -350,7 +389,7 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
               </span>
               {loginSalvo?.empresa && (
                 <button
-                  onClick={fetchClickUp}
+                  onClick={handleRefreshClickUp}
                   disabled={cuLoading}
                   title="Atualizar dados do ClickUp"
                   style={{

@@ -72,6 +72,32 @@ const COR = {
 type TipoGrafico = "rosca" | "barra" | "barra100" | "pareto" | "linha" | "unidades";
 type ModoSeletor = "dia" | "periodo" | "mes";
 
+const DASH_CACHE_TTL = 30 * 60 * 1000;
+
+function isDashDesktop(): boolean {
+  try {
+    return localStorage.getItem('modoDesktop') === 'true' || window.innerWidth >= 1024;
+  } catch { return false; }
+}
+
+function lerCacheDashboard<T>(key: string): T | null {
+  if (!isDashDesktop()) return null;
+  try {
+    const raw = localStorage.getItem(key);
+    if (!raw) return null;
+    const { data, updatedAt } = JSON.parse(raw);
+    if (Date.now() - updatedAt > DASH_CACHE_TTL) return null;
+    return data as T;
+  } catch { return null; }
+}
+
+function salvarCacheDashboard<T>(key: string, data: T): void {
+  if (!isDashDesktop()) return;
+  try {
+    localStorage.setItem(key, JSON.stringify({ data, updatedAt: Date.now() }));
+  } catch {}
+}
+
 function extrairCodigoCompras(taskName: string): string | null {
   // NEWSHOP: "🛒 7908782215243 — NOME — 19/05/2026"
   const m1 = taskName.match(/🛒\s+(\S+)/);
@@ -182,7 +208,20 @@ const Dashboard = () => {
   const [paginaAtual, setPaginaAtual] = useState(1);
 
   // ── carrega datas + salvos ──────────────────────────────────────────────────
-  const carregarDados = useCallback(async () => {
+  const carregarDados = useCallback(async (forceRefresh = false) => {
+    const datasKey = `dash:datas:${empresa}:${flag}`;
+    const salvosKey = `dash:salvos:${empresa}:${flag}`;
+
+    if (!forceRefresh) {
+      const cachedDatas = lerCacheDashboard<RelatorioDataOption[]>(datasKey);
+      const cachedSalvos = lerCacheDashboard<RelatorioSalvo[]>(salvosKey);
+      if (cachedDatas && cachedSalvos) {
+        setDatasDisponiveis(cachedDatas);
+        setRelatoriosSalvos(cachedSalvos);
+        return;
+      }
+    }
+
     setCarregandoDatas(true);
     setRelatoriosPeriodo([]);
     setFotosErp({});
@@ -193,6 +232,8 @@ const Dashboard = () => {
       ]);
       setDatasDisponiveis(datas);
       setRelatoriosSalvos(salvos);
+      salvarCacheDashboard(datasKey, datas);
+      salvarCacheDashboard(salvosKey, salvos);
     } catch (err: any) {
       toast({ title: "Erro ao carregar datas", description: err.message, variant: "destructive" });
     } finally {
@@ -567,7 +608,7 @@ const Dashboard = () => {
           {flagsPermitidas.map((f) => (
             <Button key={f} size="sm" variant={flag === f ? "default" : "outline"} onClick={() => setFlag(f)}>{f.toUpperCase()}</Button>
           ))}
-          <Button variant="outline" size="sm" onClick={carregarDados} disabled={carregandoDatas} className="ml-auto">
+          <Button variant="outline" size="sm" onClick={() => carregarDados(true)} disabled={carregandoDatas} className="ml-auto">
             <RefreshCw className={`h-3 w-3 mr-1 ${carregandoDatas ? "animate-spin" : ""}`} />Atualizar
           </Button>
         </div>
