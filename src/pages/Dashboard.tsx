@@ -1,6 +1,6 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Check, ImageOff, BarChart3, ChevronLeft, ChevronRight, X } from "lucide-react";
+import { ArrowLeft, RefreshCw, Check, ImageOff, BarChart3, ChevronLeft, ChevronRight, X, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
@@ -648,9 +648,14 @@ const Dashboard = () => {
           {flagsPermitidas.map((f) => (
             <Button key={f} size="sm" variant={flag === f ? "default" : "outline"} onClick={() => setFlag(f)}>{f.toUpperCase()}</Button>
           ))}
-          <Button variant="outline" size="sm" onClick={() => carregarDados(true)} disabled={carregandoDatas} className="ml-auto">
-            <RefreshCw className={`h-3 w-3 mr-1 ${carregandoDatas ? "animate-spin" : ""}`} />Atualizar
-          </Button>
+          <div className="ml-auto flex gap-2">
+            <Button variant="outline" size="sm" onClick={() => navigate("/relatorio-pessoas")}>
+              <Users className="h-3 w-3 mr-1" />Pessoas
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => carregarDados(true)} disabled={carregandoDatas}>
+              <RefreshCw className={`h-3 w-3 mr-1 ${carregandoDatas ? "animate-spin" : ""}`} />Atualizar
+            </Button>
+          </div>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-5">
