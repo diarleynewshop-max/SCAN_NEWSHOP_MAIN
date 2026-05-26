@@ -1,7 +1,6 @@
 import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 import FormDataNode from "form-data";
-import axios from "axios";
 import { erpFotoSync } from "./erpFotoSync";
 
 type EmpresaSF = "SOYE" | "FACIL";
@@ -199,15 +198,9 @@ function truncarTexto(value: string, maxChars: number): string {
 // ============================================================================
 // ATENÇÃO IA / DEV: NÃO MEXA NESTA FUNÇÃO SEM LER ATÉ O FIM
 // ============================================================================
-// Veja o bloco igual em src/trigger/index.ts para o histórico completo.
-// ATENÇÃO: "form-data" e "axios" DEVEM estar no external do trigger.config.ts.
-// REGRAS:
-//  1. SEMPRE `axios` + `form-data` (npm). NÃO use manual multipart, FormData
-//     global, Blob global, nem node-fetch@2 — todos já falharam com ATTCH_045.
-//  2. `...form.getHeaders()` no headers. NÃO definir Content-Type manualmente.
-//  3. `maxContentLength: Infinity` e `maxBodyLength: Infinity` (fotos grandes).
-//  4. `validateStatus: () => true` para não lançar exception em 4xx/5xx.
-//  5. Timeout via `timeout: ms`.
+// Veja src/trigger/index.ts para o histórico completo de quebras.
+// PADRÃO ATUAL: form-data.getBuffer() + fetch nativo (NÃO axios.post(form)).
+// axios@1.x interfere no Content-Type → ATTCH_045. Buffer + fetch = seguro.
 // ============================================================================
 async function postClickUpAttachment(
   taskId: string,
@@ -227,30 +220,33 @@ async function postClickUpAttachment(
   const form = new FormDataNode();
   form.append("attachment", fileBuffer, { filename, contentType: mimeType });
 
+  const formBuffer = form.getBuffer();
+  const formHeaders = form.getHeaders();
+
   try {
-    const response = await axios.post(
+    const response = await fetch(
       `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
-      form,
       {
+        method: "POST",
         headers: {
           Authorization: token,
-          ...form.getHeaders(),
+          ...formHeaders,
         },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        validateStatus: () => true,
-        timeout: 60_000,
+        body: formBuffer,
+        signal: AbortSignal.timeout(60_000),
       }
     );
 
-    return {
-      status: response.status,
-      text: typeof response.data === "string" ? response.data : JSON.stringify(response.data),
-    };
+    const ct = response.headers.get("content-type") ?? "";
+    const text = ct.includes("application/json")
+      ? JSON.stringify(await response.json())
+      : await response.text();
+
+    return { status: response.status, text };
   } catch (err) {
     const e = err as { message?: string; code?: string };
     console.error(`[ATTACH_ERR] ${filename}: ${e.code ?? ""} ${e.message ?? ""}`);
-    return { status: 0, text: `axios error: ${e.code ?? ""} ${e.message ?? ""}` };
+    return { status: 0, text: `fetch error: ${e.code ?? ""} ${e.message ?? ""}` };
   }
 }
 

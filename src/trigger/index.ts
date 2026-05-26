@@ -1,7 +1,6 @@
 ﻿import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 import FormDataNode from "form-data";
-import axios from "axios";
 import { erpFotoSync } from "./erpFotoSync";
 
 if (!process.env.CLICKUP_TOKEN) throw new Error("CLICKUP_TOKEN não configurado no ambiente do Trigger.");
@@ -91,40 +90,28 @@ function truncarTexto(value: string, maxChars: number): string {
 // Esta função faz upload de anexos pro ClickUp API v2. Já quebrou MUITAS vezes
 // em prod com: 400 {"err":"Request is not 'multipart/form-data'","ECODE":"ATTCH_045"}
 //
-// REGRAS OBRIGATÓRIAS — siga TODAS, na ordem:
+// PADRÃO ATUAL (2026-05-26):
+//   form-data.getBuffer() → Buffer materializado → fetch nativo com headers explícitos
 //
-//  1. USE `axios` + `form-data` (npm). NUNCA USE:
-//     - Construção manual de multipart com `Buffer.concat`
-//     - `FormData`/`Blob` globais com `fetch` global (undici do Node 21)
-//     - `node-fetch@2` com `form-data`
-//     Todos os três acima JÁ FORAM TESTADOS e geram ATTCH_045 no runtime do
-//     Trigger.dev v3 (provavelmente por causa do esbuild transformando CJS).
+//   Por que getBuffer() + fetch e NÃO axios.post(form):
+//   - axios@1.x detecta form-data como stream e pode sobrescrever/perder o
+//     Content-Type durante o transformRequest interno.
+//   - fetch com Buffer cru + Content-Type explícito = sem transformação mágica.
+//   - getBuffer() é síncrono e garante que boundary no body == boundary no header.
 //
-//  2. Use `form.getHeaders()` no `headers` da request — esses headers incluem
-//     `Content-Type: multipart/form-data; boundary=...` corretamente formado.
-//     NUNCA defina `Content-Type` manualmente.
-//
-//  3. Use `maxContentLength: Infinity` e `maxBodyLength: Infinity` no axios
-//     para evitar truncamento de arquivos grandes (fotos base64).
-//
-//  4. Use `validateStatus: () => true` para que o axios NÃO lance exception
-//     em status 4xx/5xx — queremos tratar a resposta manualmente.
-//
-//  5. Timeout via `timeout: ms` (axios suporta nativamente).
-//
-// Por que `axios`?
-//   `axios` tem suporte nativo a `form-data` e é a única combinação que
-//   sobrevive ao bundle do esbuild + runtime do Trigger.dev v3 + API do ClickUp.
+// NUNCA USE:
+//   - axios.post(form, ...) — axios@1.x interfere no Content-Type (ATTCH_045)
+//   - FormData/Blob global + fetch — undici trata diferente (ATTCH_045)
+//   - Buffer.concat manual — boundary incorreta (ATTCH_045)
+//   - node-fetch@2 + form-data sem external — esbuild CJS (ATTCH_045)
 //
 // Histórico de quebras:
-//   - 2026-05-18: manual multipart com Buffer.concat → ATTCH_045
+//   - 2026-05-18: manual multipart Buffer.concat → ATTCH_045
 //   - 2026-05-18: FormData + Blob globais + fetch global → ATTCH_045
-//   - 2026-05-18: form-data + node-fetch@2 → ATTCH_045 (esbuild CJS issue?)
-//   - 2026-05-18: axios + form-data → padrão ATUAL
-//   - 2026-05-26: axios + form-data voltou a falhar → causa: form-data e axios
-//     não estavam em "external" no trigger.config.ts, esbuild bundlava CJS como
-//     ESM e o body multipart perdia a boundary. Fix: adicionar "form-data" e
-//     "axios" ao external.
+//   - 2026-05-18: form-data + node-fetch@2 → ATTCH_045
+//   - 2026-05-18: axios + form-data → funcionou
+//   - 2026-05-26: axios + form-data → ATTCH_045 (axios@1.x sobrescreve Content-Type)
+//   - 2026-05-26: form-data.getBuffer() + fetch nativo → PADRÃO ATUAL ✅
 // ============================================================================
 async function postClickUpAttachment(
   taskId: string,
@@ -141,34 +128,37 @@ async function postClickUpAttachment(
     ? Buffer.from(await (content as Blob).arrayBuffer())
     : Buffer.from(content as string);
 
-  // PADRÃO CORRETO — não altere sem ler o bloco acima.
   const form = new FormDataNode();
   form.append("attachment", fileBuffer, { filename, contentType: mimeType });
 
+  // Materializa o body multipart como Buffer — boundary do body == boundary do header
+  const formBuffer = form.getBuffer();
+  const formHeaders = form.getHeaders(); // { 'content-type': 'multipart/form-data; boundary=...' }
+
   try {
-    const response = await axios.post(
+    const response = await fetch(
       `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
-      form,
       {
+        method: "POST",
         headers: {
           Authorization: token,
-          ...form.getHeaders(),
+          ...formHeaders,
         },
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        validateStatus: () => true,
-        timeout: 60_000,
+        body: formBuffer,
+        signal: AbortSignal.timeout(60_000),
       }
     );
 
-    return {
-      status: response.status,
-      text: typeof response.data === "string" ? response.data : JSON.stringify(response.data),
-    };
+    const ct = response.headers.get("content-type") ?? "";
+    const text = ct.includes("application/json")
+      ? JSON.stringify(await response.json())
+      : await response.text();
+
+    return { status: response.status, text };
   } catch (err) {
     const e = err as { message?: string; code?: string };
     console.error(`[ATTACH_ERR] ${filename}: ${e.code ?? ""} ${e.message ?? ""}`);
-    return { status: 0, text: `axios error: ${e.code ?? ""} ${e.message ?? ""}` };
+    return { status: 0, text: `fetch error: ${e.code ?? ""} ${e.message ?? ""}` };
   }
 }
 
