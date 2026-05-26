@@ -200,6 +200,7 @@ function truncarTexto(value: string, maxChars: number): string {
 // ATENÇÃO IA / DEV: NÃO MEXA NESTA FUNÇÃO SEM LER ATÉ O FIM
 // ============================================================================
 // Veja o bloco igual em src/trigger/index.ts para o histórico completo.
+// ATENÇÃO: "form-data" e "axios" DEVEM estar no external do trigger.config.ts.
 // REGRAS:
 //  1. SEMPRE `axios` + `form-data` (npm). NÃO use manual multipart, FormData
 //     global, Blob global, nem node-fetch@2 — todos já falharam com ATTCH_045.

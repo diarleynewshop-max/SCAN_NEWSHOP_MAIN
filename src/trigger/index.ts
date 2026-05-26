@@ -121,6 +121,10 @@ function truncarTexto(value: string, maxChars: number): string {
 //   - 2026-05-18: FormData + Blob globais + fetch global → ATTCH_045
 //   - 2026-05-18: form-data + node-fetch@2 → ATTCH_045 (esbuild CJS issue?)
 //   - 2026-05-18: axios + form-data → padrão ATUAL
+//   - 2026-05-26: axios + form-data voltou a falhar → causa: form-data e axios
+//     não estavam em "external" no trigger.config.ts, esbuild bundlava CJS como
+//     ESM e o body multipart perdia a boundary. Fix: adicionar "form-data" e
+//     "axios" ao external.
 // ============================================================================
 async function postClickUpAttachment(
   taskId: string,
