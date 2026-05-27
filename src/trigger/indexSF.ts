@@ -1,6 +1,7 @@
 import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 import FormDataNode from "form-data";
+import https from "https";
 import { erpFotoSync } from "./erpFotoSync";
 
 type EmpresaSF = "SOYE" | "FACIL";
@@ -224,31 +225,36 @@ async function postClickUpAttachment(
   const formBuffer = form.getBuffer();
   const formHeaders = form.getHeaders();
 
-  try {
-    const response = await fetch(
-      `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
+  return new Promise((resolve) => {
+    const req = https.request(
       {
+        hostname: "api.clickup.com",
+        path: `/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
         method: "POST",
         headers: {
           Authorization: token,
           ...formHeaders,
+          "Content-Length": formBuffer.length,
         },
-        body: formBuffer,
-        signal: AbortSignal.timeout(60_000),
+        timeout: 60_000,
+      },
+      (res) => {
+        let data = "";
+        res.on("data", (chunk: Buffer) => { data += chunk.toString(); });
+        res.on("end", () => resolve({ status: res.statusCode ?? 0, text: data }));
       }
     );
-
-    const ct = response.headers.get("content-type") ?? "";
-    const text = ct.includes("application/json")
-      ? JSON.stringify(await response.json())
-      : await response.text();
-
-    return { status: response.status, text };
-  } catch (err) {
-    const e = err as { message?: string; code?: string };
-    console.error(`[ATTACH_ERR] ${filename}: ${e.code ?? ""} ${e.message ?? ""}`);
-    return { status: 0, text: `fetch error: ${e.code ?? ""} ${e.message ?? ""}` };
-  }
+    req.on("error", (e: Error) => {
+      console.error(`[ATTACH_ERR] ${filename}: ${e.message}`);
+      resolve({ status: 0, text: `request error: ${e.message}` });
+    });
+    req.on("timeout", () => {
+      req.destroy();
+      resolve({ status: 0, text: "request timeout" });
+    });
+    req.write(formBuffer);
+    req.end();
+  });
 }
 
 async function anexarArquivoTextoClickUp(
