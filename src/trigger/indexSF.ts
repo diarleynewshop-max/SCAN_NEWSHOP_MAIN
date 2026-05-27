@@ -117,6 +117,7 @@ async function criarTarefaClickUp(
     ...(withTags && tags.length > 0 ? { tags } : {}),
   });
 
+  console.log(`[CRIAR-TASK-SF] listId=${listId} nome=${nome}`);
   let response = await fetch(
     `https://api.clickup.com/api/v2/list/${listId}/task`,
     {
@@ -618,6 +619,7 @@ export const conferenciaBaixadaSF = task({
       const flag = normalizarFlag(payload.flag);
       const isCD = flag === "cd";
       const listId = getListId(empresa, flag);
+      console.log(`[CONF-SF] empresa=${empresa} flag=${flag} listId=${listId} payload.empresa=${payload.empresa} payload.flag=${payload.flag}`);
 
       const statusMap: Record<string, string> = {
         separado: "Separado",
