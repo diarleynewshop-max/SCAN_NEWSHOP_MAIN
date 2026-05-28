@@ -883,51 +883,67 @@ async function baixarJsonsDeTask(taskId: string, token: string): Promise<any[]> 
   }
 
   const taskData = await response.json();
-  const attachments = (taskData.attachments ?? []).filter(isJsonAttachment);
-  if (attachments.length === 0) return [];
+  const allAttachments: any[] = taskData.attachments ?? [];
+  const jsonAttachments = allAttachments.filter(isJsonAttachment);
+  console.log(`[baixarJsonsDeTask] task=${taskId} attachments_total=${allAttachments.length} json_attachments=${jsonAttachments.length}`);
+
+  if (jsonAttachments.length === 0) return [];
 
   const jsons: any[] = [];
 
-  for (const attachment of attachments) {
+  for (const attachment of jsonAttachments) {
     if (!attachment?.url) continue;
 
     const title = String(attachment?.title ?? attachment?.file_name ?? 'arquivo.json');
-    const fileResponse = await fetch(attachment.url);
+    // ClickUp attachment URLs são CDN pre-signed; tentamos com auth primeiro, fallback sem auth
+    let fileResponse = await fetch(attachment.url, { headers: { Authorization: token } });
     if (!fileResponse.ok) {
-      console.warn(`[clickup-proxy] JSON ignorado (${fileResponse.status}) task=${taskId} title=${title}`);
+      fileResponse = await fetch(attachment.url);
+    }
+    if (!fileResponse.ok) {
+      console.warn(`[baixarJsonsDeTask] JSON ignorado (${fileResponse.status}) task=${taskId} title=${title}`);
       continue;
     }
 
     try {
-      jsons.push(await fileResponse.json());
+      const parsed = await fileResponse.json();
+      console.log(`[baixarJsonsDeTask] JSON ok title=${title} type=${parsed?.type} items=${Array.isArray(parsed?.items) ? parsed.items.length : 'n/a'}`);
+      jsons.push(parsed);
     } catch {
-      console.warn(`[clickup-proxy] JSON invalido ignorado task=${taskId} title=${title}`);
+      console.warn(`[baixarJsonsDeTask] JSON invalido ignorado task=${taskId} title=${title}`);
     }
   }
 
   return jsons;
 }
 
-// Baixa o JSON de conferência de uma task (type === "conference-file")
+// Baixa o JSON de conferência de uma task.
+// Aceita type="conference-file" ou qualquer JSON com items[] como fallback.
 async function baixarJsonDaTask(taskId: string, token: string): Promise<any | null> {
   const jsons = await baixarJsonsDeTask(taskId, token);
-  const candidates = jsons
-    .filter((json) => json?.type === 'conference-file')
-    .map((json) => ({ json, photos: countJsonPhotos(json), items: countJsonItems(json) }));
 
-  if (candidates.length === 0) {
-    if (jsons.length > 0) {
-      console.warn(`[clickup-proxy] Task ${taskId} tem JSON mas nenhum é conference-file (tipos: ${jsons.map(j => j?.type).join(', ')})`);
-    }
-    return null;
+  // 1) preferência: type === 'conference-file'
+  const typed = jsons.filter((json) => json?.type === 'conference-file');
+  if (typed.length > 0) {
+    const candidates = typed.map((json) => ({ json, photos: countJsonPhotos(json), items: countJsonItems(json) }));
+    candidates.sort((a, b) => (b.photos !== a.photos ? b.photos - a.photos : b.items - a.items));
+    return candidates[0].json;
   }
 
-  candidates.sort((a, b) => {
-    if (b.photos !== a.photos) return b.photos - a.photos;
-    return b.items - a.items;
-  });
+  // 2) fallback: qualquer JSON com items[] (upload manual sem campo type)
+  const withItems = jsons.filter((json) => Array.isArray(json?.items) && json.items.length > 0);
+  if (withItems.length > 0) {
+    console.warn(`[baixarJsonDaTask] task=${taskId} usando fallback items[] (tipos: ${jsons.map(j => j?.type ?? 'sem-type').join(', ')})`);
+    withItems.sort((a, b) => b.items.length - a.items.length);
+    return { type: 'conference-file', ...withItems[0] };
+  }
 
-  return candidates[0].json;
+  if (jsons.length > 0) {
+    console.warn(`[baixarJsonDaTask] task=${taskId} tem JSON mas sem conference-file nem items[] (tipos: ${jsons.map(j => j?.type).join(', ')})`);
+  } else {
+    console.warn(`[baixarJsonDaTask] task=${taskId} sem nenhum attachment JSON`);
+  }
+  return null;
 }
 
 // Baixa o JSON de relatório de uma task (qualquer tipo)
