@@ -43,7 +43,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Metodo nao permitido' });
   }
 
-  const { base64, empresa } = req.body ?? {};
+  const { base64, items, empresa } = req.body ?? {};
   const empresaKey = normalizeEmpresa(empresa);
   const token = getClickUpToken(empresaKey);
   const listId = getComprasListId(empresaKey);
@@ -53,15 +53,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    if (!base64) {
+    let dados: ItemPlanilha[];
+
+    if (Array.isArray(items)) {
+      dados = items as ItemPlanilha[];
+    } else if (base64) {
+      const buffer = Buffer.from(base64, 'base64');
+      const workbook = XLSX.read(buffer, { type: 'buffer' });
+      const sheetName = workbook.SheetNames[0];
+      const sheet = workbook.Sheets[sheetName];
+      dados = XLSX.utils.sheet_to_json<ItemPlanilha>(sheet);
+    } else {
       return res.status(400).json({ error: 'Arquivo nao enviado' });
     }
-
-    const buffer = Buffer.from(base64, 'base64');
-    const workbook = XLSX.read(buffer, { type: 'buffer' });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const dados = XLSX.utils.sheet_to_json<ItemPlanilha>(sheet);
 
     if (dados.length === 0) {
       return res.status(400).json({ error: 'Planilha vazia' });

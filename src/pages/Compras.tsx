@@ -234,20 +234,35 @@ const Compras = () => {
     setImportando(true);
 
     try {
-      const base64 = await new Promise<string>((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => {
-          const result = reader.result as string;
-          resolve(result.split(",")[1]);
-        };
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      const isJson = file.name.toLowerCase().endsWith(".json");
+
+      let body: Record<string, unknown>;
+
+      if (isJson) {
+        const text = await file.text();
+        const parsed = JSON.parse(text) as Array<{ descricao?: string; qtdPedir?: number; qtd?: number }>;
+        const items = parsed.map((item) => ({
+          descricao: item.descricao ?? "",
+          qtd: item.qtdPedir ?? item.qtd ?? 0,
+        }));
+        body = { items, empresa };
+      } else {
+        const base64 = await new Promise<string>((resolve, reject) => {
+          const reader = new FileReader();
+          reader.onload = () => {
+            const result = reader.result as string;
+            resolve(result.split(",")[1]);
+          };
+          reader.onerror = reject;
+          reader.readAsDataURL(file);
+        });
+        body = { base64, empresa };
+      }
 
       const response = await fetch("/api/clickup-importar", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ base64, empresa }),
+        body: JSON.stringify(body),
       });
 
       const data = await response.json();
@@ -592,7 +607,7 @@ const Compras = () => {
             <input
               type="file"
               ref={fileInputRef}
-              accept=".xlsx,.xls,.csv"
+              accept=".xlsx,.xls,.csv,.json"
               onChange={handleImportarPlanilha}
               className="hidden"
             />
