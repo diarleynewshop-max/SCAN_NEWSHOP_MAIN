@@ -1,7 +1,5 @@
 ﻿import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
-import FormDataNode from "form-data";
-import https from "https";
 import { erpFotoSync } from "./erpFotoSync";
 
 if (!process.env.CLICKUP_TOKEN) throw new Error("CLICKUP_TOKEN não configurado no ambiente do Trigger.");
@@ -91,28 +89,30 @@ function truncarTexto(value: string, maxChars: number): string {
 // Esta função faz upload de anexos pro ClickUp API v2. Já quebrou MUITAS vezes
 // em prod com: 400 {"err":"Request is not 'multipart/form-data'","ECODE":"ATTCH_045"}
 //
-// PADRÃO ATUAL (2026-05-26):
-//   form-data.getBuffer() → Buffer materializado → fetch nativo com headers explícitos
+// PADRÃO ATUAL (2026-05-27):
+//   Buffer multipart manual + fetch nativo com body=Buffer (Uint8Array)
 //
-//   Por que getBuffer() + fetch e NÃO axios.post(form):
-//   - axios@1.x detecta form-data como stream e pode sobrescrever/perder o
-//     Content-Type durante o transformRequest interno.
-//   - fetch com Buffer cru + Content-Type explícito = sem transformação mágica.
-//   - getBuffer() é síncrono e garante que boundary no body == boundary no header.
+//   Por que buffer manual + fetch com body bruto:
+//   - fetch(body=FormData global) → undici altera/perde boundary (ATTCH_045)
+//   - axios.post(form) → axios@1.x sobrescreve Content-Type (ATTCH_045)
+//   - form-data.getBuffer() + https.request → ainda retorna ATTCH_045 (2026-05-27)
+//   - Buffer manual + fetch(body=Buffer) → undici não toca no Content-Type,
+//     boundary no header é exatamente igual ao boundary no body. ✅
 //
 // NUNCA USE:
 //   - axios.post(form, ...) — axios@1.x interfere no Content-Type (ATTCH_045)
-//   - FormData/Blob global + fetch — undici trata diferente (ATTCH_045)
-//   - Buffer.concat manual — boundary incorreta (ATTCH_045)
+//   - fetch(body=FormData global) — undici reescreve boundary (ATTCH_045)
+//   - form-data.getBuffer() + https.request — https.request falhou em prod (ATTCH_045)
 //   - node-fetch@2 + form-data sem external — esbuild CJS (ATTCH_045)
 //
 // Histórico de quebras:
-//   - 2026-05-18: manual multipart Buffer.concat → ATTCH_045
+//   - 2026-05-18: manual multipart Buffer.concat (sem external) → ATTCH_045
 //   - 2026-05-18: FormData + Blob globais + fetch global → ATTCH_045
-//   - 2026-05-18: form-data + node-fetch@2 → ATTCH_045
+//   - 2026-05-18: form-data + node-fetch@2 (sem external) → ATTCH_045
 //   - 2026-05-18: axios + form-data → funcionou
 //   - 2026-05-26: axios + form-data → ATTCH_045 (axios@1.x sobrescreve Content-Type)
-//   - 2026-05-26: form-data.getBuffer() + fetch nativo → PADRÃO ATUAL ✅
+//   - 2026-05-26: form-data.getBuffer() + https.request → ATTCH_045 (2026-05-27 prod)
+//   - 2026-05-27: Buffer manual + fetch(body=Buffer) → PADRÃO ATUAL ✅
 // ============================================================================
 async function postClickUpAttachment(
   taskId: string,
@@ -121,50 +121,42 @@ async function postClickUpAttachment(
   mimeType: string,
   content: Buffer | string | BlobPart
 ): Promise<{ status: number; text: string }> {
-  console.log(`[ATTACH_BUF] ${filename} -> ${taskId}`);
-
   const fileBuffer = Buffer.isBuffer(content)
     ? content
     : content instanceof Blob
     ? Buffer.from(await (content as Blob).arrayBuffer())
     : Buffer.from(content as string);
 
-  const form = new FormDataNode();
-  form.append("attachment", fileBuffer, { filename, contentType: mimeType });
+  const boundary = `FormBoundary${Date.now()}${Math.random().toString(36).slice(2)}`;
+  const CRLF = "\r\n";
+  const preamble = Buffer.from(
+    `--${boundary}${CRLF}` +
+    `Content-Disposition: form-data; name="attachment"; filename="${filename}"${CRLF}` +
+    `Content-Type: ${mimeType}${CRLF}${CRLF}`,
+    "utf-8"
+  );
+  const epilogue = Buffer.from(`${CRLF}--${boundary}--${CRLF}`, "utf-8");
+  const body = Buffer.concat([preamble, fileBuffer, epilogue]);
+  const contentType = `multipart/form-data; boundary=${boundary}`;
 
-  const formBuffer = form.getBuffer();
-  const formHeaders = form.getHeaders();
+  console.log(`[ATTACH] ${filename} -> ${taskId} | ${body.length}b`);
 
-  return new Promise((resolve) => {
-    const req = https.request(
-      {
-        hostname: "api.clickup.com",
-        path: `/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
-        method: "POST",
-        headers: {
-          Authorization: token,
-          ...formHeaders,
-          "Content-Length": formBuffer.length,
-        },
-        timeout: 60_000,
+  const response = await fetch(
+    `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: token,
+        "Content-Type": contentType,
       },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk: Buffer) => { data += chunk.toString(); });
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, text: data }));
-      }
-    );
-    req.on("error", (e: Error) => {
-      console.error(`[ATTACH_ERR] ${filename}: ${e.message}`);
-      resolve({ status: 0, text: `request error: ${e.message}` });
-    });
-    req.on("timeout", () => {
-      req.destroy();
-      resolve({ status: 0, text: "request timeout" });
-    });
-    req.write(formBuffer);
-    req.end();
-  });
+      body: body as unknown as BodyInit,
+      signal: AbortSignal.timeout(60_000),
+    }
+  );
+
+  const text = await response.text();
+  console.log(`[ATTACH] status=${response.status}`);
+  return { status: response.status, text };
 }
 
 async function anexarArquivoTextoClickUp(

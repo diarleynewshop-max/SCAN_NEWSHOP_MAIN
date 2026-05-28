@@ -1,7 +1,5 @@
 import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
-import FormDataNode from "form-data";
-import https from "https";
 import { erpFotoSync } from "./erpFotoSync";
 
 type EmpresaSF = "SOYE" | "FACIL";
@@ -197,13 +195,8 @@ function truncarTexto(value: string, maxChars: number): string {
   return `${value.slice(0, maxChars)}\n\n... restante anexado no TXT/JSON da task ...`;
 }
 
-// ============================================================================
-// ATENÇÃO IA / DEV: NÃO MEXA NESTA FUNÇÃO SEM LER ATÉ O FIM
-// ============================================================================
-// Veja src/trigger/index.ts para o histórico completo de quebras.
-// PADRÃO ATUAL: form-data.getBuffer() + fetch nativo (NÃO axios.post(form)).
-// axios@1.x interfere no Content-Type → ATTCH_045. Buffer + fetch = seguro.
-// ============================================================================
+// Veja src/trigger/index.ts para histórico completo de quebras e NUNCA USE.
+// PADRÃO ATUAL (2026-05-27): Buffer manual + fetch(body=Buffer). Ver index.ts.
 async function postClickUpAttachment(
   taskId: string,
   token: string,
@@ -211,50 +204,42 @@ async function postClickUpAttachment(
   mimeType: string,
   content: Buffer | string | BlobPart
 ): Promise<{ status: number; text: string }> {
-  console.log(`[ATTACH_BUF] ${filename} -> ${taskId}`);
-
   const fileBuffer = Buffer.isBuffer(content)
     ? content
     : content instanceof Blob
     ? Buffer.from(await (content as Blob).arrayBuffer())
     : Buffer.from(content as string);
 
-  const form = new FormDataNode();
-  form.append("attachment", fileBuffer, { filename, contentType: mimeType });
+  const boundary = `FormBoundary${Date.now()}${Math.random().toString(36).slice(2)}`;
+  const CRLF = "\r\n";
+  const preamble = Buffer.from(
+    `--${boundary}${CRLF}` +
+    `Content-Disposition: form-data; name="attachment"; filename="${filename}"${CRLF}` +
+    `Content-Type: ${mimeType}${CRLF}${CRLF}`,
+    "utf-8"
+  );
+  const epilogue = Buffer.from(`${CRLF}--${boundary}--${CRLF}`, "utf-8");
+  const body = Buffer.concat([preamble, fileBuffer, epilogue]);
+  const contentType = `multipart/form-data; boundary=${boundary}`;
 
-  const formBuffer = form.getBuffer();
-  const formHeaders = form.getHeaders();
+  console.log(`[ATTACH] ${filename} -> ${taskId} | ${body.length}b`);
 
-  return new Promise((resolve) => {
-    const req = https.request(
-      {
-        hostname: "api.clickup.com",
-        path: `/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
-        method: "POST",
-        headers: {
-          Authorization: token,
-          ...formHeaders,
-          "Content-Length": formBuffer.length,
-        },
-        timeout: 60_000,
+  const response = await fetch(
+    `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: token,
+        "Content-Type": contentType,
       },
-      (res) => {
-        let data = "";
-        res.on("data", (chunk: Buffer) => { data += chunk.toString(); });
-        res.on("end", () => resolve({ status: res.statusCode ?? 0, text: data }));
-      }
-    );
-    req.on("error", (e: Error) => {
-      console.error(`[ATTACH_ERR] ${filename}: ${e.message}`);
-      resolve({ status: 0, text: `request error: ${e.message}` });
-    });
-    req.on("timeout", () => {
-      req.destroy();
-      resolve({ status: 0, text: "request timeout" });
-    });
-    req.write(formBuffer);
-    req.end();
-  });
+      body: body as unknown as BodyInit,
+      signal: AbortSignal.timeout(60_000),
+    }
+  );
+
+  const text = await response.text();
+  console.log(`[ATTACH] status=${response.status}`);
+  return { status: response.status, text };
 }
 
 async function anexarArquivoTextoClickUp(

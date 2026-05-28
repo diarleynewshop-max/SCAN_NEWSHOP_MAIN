@@ -6,6 +6,6 @@ export default defineConfig({
   dirs: ["./src/trigger"],
   maxDuration: 5,
   build: {
-    external: ["sharp", "@anthropic-ai/claude-agent-sdk", "form-data"],
+    external: ["sharp", "@anthropic-ai/claude-agent-sdk"],
   },
 });
