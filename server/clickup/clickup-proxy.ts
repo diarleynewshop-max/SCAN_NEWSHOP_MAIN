@@ -874,7 +874,7 @@ function countJsonItems(json: any): number {
 }
 
 async function baixarJsonsDeTask(taskId: string, token: string): Promise<any[]> {
-  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}?include_attachments=true`, {
     headers: { Authorization: token },
   });
 
@@ -892,7 +892,7 @@ async function baixarJsonsDeTask(taskId: string, token: string): Promise<any[]> 
     if (!attachment?.url) continue;
 
     const title = String(attachment?.title ?? attachment?.file_name ?? 'arquivo.json');
-    const fileResponse = await fetch(attachment.url, { headers: { Authorization: token } });
+    const fileResponse = await fetch(attachment.url);
     if (!fileResponse.ok) {
       console.warn(`[clickup-proxy] JSON ignorado (${fileResponse.status}) task=${taskId} title=${title}`);
       continue;
