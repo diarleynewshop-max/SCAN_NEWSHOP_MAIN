@@ -30,6 +30,13 @@ interface ItemFrequencia {
   totalReal: number;
 }
 
+export interface GraficoCapturado {
+  label: string;
+  dataUrl: string;
+  largura: number;
+  altura: number;
+}
+
 export interface DadosExport {
   empresa: string;
   flag: string;
@@ -40,6 +47,7 @@ export interface DadosExport {
   totalPedido: number;
   totalReal: number;
   pctDif: number;
+  graficos?: GraficoCapturado[];
 }
 
 function statusLabel(s: string) {
@@ -113,7 +121,6 @@ export function exportarCSV(dados: DadosExport) {
 export function exportarExcel(dados: DadosExport) {
   const wb = XLSX.utils.book_new();
 
-  // Aba: Resumo
   const resumoWs = XLSX.utils.aoa_to_sheet([
     [`Relatório Dashboard — ${dados.empresa} ${dados.flag.toUpperCase()}`],
     [`Período: ${dados.periodo}`],
@@ -125,7 +132,6 @@ export function exportarExcel(dados: DadosExport) {
   ]);
   XLSX.utils.book_append_sheet(wb, resumoWs, "Resumo");
 
-  // Aba: Por Dia
   if (dados.porDia.length > 0) {
     const diasWs = XLSX.utils.aoa_to_sheet([
       ["Data", "Separado", "Não tem", "Parcial", "Pendente", "Total", "% Diferença"],
@@ -136,7 +142,6 @@ export function exportarExcel(dados: DadosExport) {
     XLSX.utils.book_append_sheet(wb, diasWs, "Por Dia");
   }
 
-  // Aba: Itens
   if (dados.frequencia.length > 0) {
     const itensWs = XLSX.utils.aoa_to_sheet([
       ["Código", "SKU", "Seção", "Ocorrências", "Status Dominante", "Total Pedido", "Total Real"],
@@ -155,6 +160,7 @@ export function exportarExcel(dados: DadosExport) {
 export function exportarPDF(dados: DadosExport) {
   const doc = new jsPDF({ orientation: "landscape" });
   const pageW = doc.internal.pageSize.getWidth();
+  const pageH = doc.internal.pageSize.getHeight();
 
   // Cabeçalho
   doc.setFillColor(20, 20, 20);
@@ -181,14 +187,8 @@ export function exportarPDF(dados: DadosExport) {
     startY: y,
     head: [["Separado", "Não tem", "Parcial", "Pendente", "Total SKUs", "Total Pedido", "Total Real", "% Diferença"]],
     body: [[
-      dados.resumo.separado,
-      dados.resumo.naoTem,
-      dados.resumo.parcial,
-      dados.resumo.pendente,
-      dados.resumo.totalItens,
-      dados.totalPedido,
-      dados.totalReal,
-      `${dados.pctDif}%`,
+      dados.resumo.separado, dados.resumo.naoTem, dados.resumo.parcial, dados.resumo.pendente,
+      dados.resumo.totalItens, dados.totalPedido, dados.totalReal, `${dados.pctDif}%`,
     ]],
     styles: { fontSize: 9, cellPadding: 3 },
     headStyles: { fillColor: [30, 30, 30] },
@@ -197,11 +197,34 @@ export function exportarPDF(dados: DadosExport) {
 
   y = (doc as any).lastAutoTable.finalY + 10;
 
+  // Gráficos capturados
+  if (dados.graficos && dados.graficos.length > 0) {
+    for (const g of dados.graficos) {
+      if (y > pageH - 80) { doc.addPage(); y = 20; }
+      doc.setFontSize(10);
+      doc.setFont("helvetica", "bold");
+      doc.setTextColor(0, 0, 0);
+      doc.text(g.label, 14, y);
+      y += 4;
+
+      // Calcula dimensões mantendo proporção, com largura máxima de pageW - 28
+      const maxW = pageW - 28;
+      const maxH = 80;
+      const ratio = Math.min(maxW / g.largura, maxH / g.altura);
+      const w = g.largura * ratio;
+      const h = g.altura * ratio;
+
+      doc.addImage(g.dataUrl, "PNG", 14, y, w, h);
+      y += h + 12;
+    }
+  }
+
   // Por dia
   if (dados.porDia.length > 0) {
-    if (y > doc.internal.pageSize.getHeight() - 60) { doc.addPage(); y = 20; }
+    if (y > pageH - 60) { doc.addPage(); y = 20; }
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
+    doc.setTextColor(0, 0, 0);
     doc.text("Resumo por Dia", 14, y);
     y += 4;
 
@@ -222,7 +245,7 @@ export function exportarPDF(dados: DadosExport) {
 
   // Itens (top 100)
   if (dados.frequencia.length > 0) {
-    if (y > doc.internal.pageSize.getHeight() - 60) { doc.addPage(); y = 20; }
+    if (y > pageH - 60) { doc.addPage(); y = 20; }
     doc.setFontSize(10);
     doc.setFont("helvetica", "bold");
     doc.setTextColor(0, 0, 0);
@@ -259,6 +282,14 @@ export function exportarHTML(dados: DadosExport) {
       <tbody>${rows.map((r, i) => `<tr style="${i % 2 === 1 ? trEven : ""}">${r.map((v) => `<td style="${tdStyle}">${v ?? "—"}</td>`).join("")}</tr>`).join("")}</tbody>
     </table>`;
 
+  const graficosHtml = dados.graficos && dados.graficos.length > 0
+    ? dados.graficos.map((g) => `
+  <h2>${g.label}</h2>
+  <div style="text-align:center;margin-bottom:24px">
+    <img src="${g.dataUrl}" alt="${g.label}" style="max-width:100%;border:1px solid #e5e7eb;border-radius:8px;box-shadow:0 1px 4px rgba(0,0,0,.08)"/>
+  </div>`).join("")
+    : "";
+
   const html = `<!DOCTYPE html>
 <html lang="pt-BR">
 <head>
@@ -270,8 +301,8 @@ export function exportarHTML(dados: DadosExport) {
     h1{font-size:22px;margin:0 0 4px}
     h2{font-size:16px;margin:24px 0 8px;border-bottom:2px solid #1e1e1e;padding-bottom:4px}
     .meta{font-size:12px;color:#666;margin-bottom:24px}
-    .header{background:#1e1e1e;color:#fff;padding:16px 24px;margin:-24px -24px 24px;border-radius:0}
-    @media print{.header{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
+    .header{background:#1e1e1e;color:#fff;padding:16px 24px;margin:-24px -24px 24px}
+    @media print{.header,.header *{print-color-adjust:exact;-webkit-print-color-adjust:exact}}
   </style>
 </head>
 <body>
@@ -286,6 +317,8 @@ export function exportarHTML(dados: DadosExport) {
     [[dados.resumo.separado, dados.resumo.naoTem, dados.resumo.parcial, dados.resumo.pendente,
       dados.resumo.totalItens, dados.totalPedido, dados.totalReal, `${dados.pctDif}%`]]
   )}
+
+  ${graficosHtml}
 
   ${dados.porDia.length > 0 ? `
   <h2>Resumo por Dia</h2>

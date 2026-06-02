@@ -44,6 +44,7 @@
     "clsx": "^2.1.1",
     "dompurify": "^3.1.6",
     "form-data": "^4.0.5",
+    "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
     "jspdf-autotable": "^5.0.7",
     "jszip": "^3.10.1",

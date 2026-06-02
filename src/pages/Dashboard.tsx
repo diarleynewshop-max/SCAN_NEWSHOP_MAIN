@@ -10,7 +10,8 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { exportarCSV, exportarExcel, exportarPDF, exportarHTML, type DadosExport } from "@/lib/exportDashboard";
+import html2canvas from "html2canvas";
+import { exportarCSV, exportarExcel, exportarPDF, exportarHTML, type DadosExport, type GraficoCapturado } from "@/lib/exportDashboard";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -477,11 +478,41 @@ const Dashboard = () => {
     return `${mesComparar1}_vs_${mesComparar2}`;
   }, [modoSeletor, diaUnico, periodoInicio, periodoFim, mesSelecionado, mesComparar1, mesComparar2]);
 
-  const handleExportar = useCallback((formato: "csv" | "excel" | "pdf" | "html") => {
+  const handleExportar = useCallback(async (formato: "csv" | "excel" | "pdf" | "html") => {
     if (!dados) {
       toast({ title: "Nenhum dado carregado para exportar", variant: "destructive" });
       return;
     }
+
+    // Captura o gráfico visível (apenas PDF e HTML)
+    let graficos: GraficoCapturado[] | undefined;
+    if ((formato === "pdf" || formato === "html") && chartRef.current) {
+      try {
+        const canvas = await html2canvas(chartRef.current, {
+          backgroundColor: "#ffffff",
+          scale: 2,
+          useCORS: true,
+          logging: false,
+        });
+        const tipoLabels: Record<string, string> = {
+          rosca: "Distribuição por Status (Rosca)",
+          barra: "Status por Dia (Barra)",
+          barra100: "Distribuição % por Dia (Barra 100%)",
+          pareto: "Pareto — Top 20 Itens",
+          linha: "Tendência por Status (Linha)",
+          unidades: "Unidades Pedidas × Enviadas",
+        };
+        graficos = [{
+          label: tipoLabels[tipoGrafico] ?? "Gráfico",
+          dataUrl: canvas.toDataURL("image/png"),
+          largura: canvas.width,
+          altura: canvas.height,
+        }];
+      } catch (e) {
+        console.warn("html2canvas falhou, exportando sem gráfico", e);
+      }
+    }
+
     const payload: DadosExport = {
       empresa,
       flag,
@@ -492,6 +523,7 @@ const Dashboard = () => {
       totalPedido: dados.totalPedido,
       totalReal: dados.totalReal,
       pctDif: dados.pctDif,
+      graficos,
     };
     try {
       if (formato === "csv") exportarCSV(payload);
@@ -503,7 +535,7 @@ const Dashboard = () => {
       console.error(e);
       toast({ title: "Erro ao exportar", variant: "destructive" });
     }
-  }, [dados, empresa, flag, periodoLabel, toast]);
+  }, [dados, empresa, flag, periodoLabel, tipoGrafico, toast]);
 
   // ── comparação mês × mês ───────────────────────────────────────────────────
   const dadosComparar = useMemo(() => {
@@ -590,6 +622,7 @@ const Dashboard = () => {
 
   // ── fotos ERP — carrega página atual primeiro, depois resto em background ────
   const fotosCancelRef = useRef(false);
+  const chartRef = useRef<HTMLDivElement>(null);
 
   const carregarFotosErp = useCallback(async (itensPrioritarios?: typeof itensFiltrados) => {
     if (carregandoFotosErp || !dados) return;
@@ -1024,7 +1057,7 @@ const Dashboard = () => {
                 </div>
 
                 {/* Área de gráfico */}
-                <Card>
+                <Card ref={chartRef}>
                   <CardContent className="pt-4">
                     <div className="h-64">
                       <ResponsiveContainer width="100%" height="100%">
