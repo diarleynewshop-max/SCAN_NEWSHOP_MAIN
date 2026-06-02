@@ -4,7 +4,8 @@
       "Bash(npm run *)",
       "Bash(node -e \"const p=require\\('./package.json'\\); const d={...p.dependencies,...p.devDependencies}; console.log\\('html2canvas:', d['html2canvas']||'NOT FOUND'\\)\")",
       "Bash(npm install *)",
-      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('html2canvas:', p.dependencies['html2canvas']\\)\")"
+      "Bash(node -e \"const p=require\\('./package.json'\\); console.log\\('html2canvas:', p.dependencies['html2canvas']\\)\")",
+      "mcp__gemma-obsidian__save_progress"
     ]
   },
   "enableAllProjectMcpServers": true,

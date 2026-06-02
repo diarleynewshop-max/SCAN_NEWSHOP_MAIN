@@ -1,6 +1,7 @@
 ﻿import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 import { erpFotoSync } from "./erpFotoSync";
+import { expedicaoSync } from "./expedicaoSync";
 
 if (!process.env.CLICKUP_TOKEN) throw new Error("CLICKUP_TOKEN não configurado no ambiente do Trigger.");
 const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN;
@@ -660,6 +661,28 @@ ${itensPendentesTexto}
         );
       } else {
         console.log("Nenhum item negativo/parcial para gerar task de compras.");
+      }
+
+      const itensSeparadosEParciais = itensPayload.filter(
+        (i: any) => i.status === "separado" || i.status === "nao_tem_tudo"
+      );
+
+      if (itensSeparadosEParciais.length > 0) {
+        try {
+          await expedicaoSync.trigger({
+            conferente: payload.conferente,
+            empresa: payload.empresa ?? "NEWSHOP",
+            dataConferencia: payload.dataConferencia,
+            itens: itensSeparadosEParciais.map((i: any) => ({
+              codigo: i.codigo,
+              ean: i.ean ?? null,
+              quantidadeReal: i.quantidadeReal ?? 0,
+            })),
+          });
+          console.info(`[conferencia-baixada] expedicao-sync disparado para ${itensSeparadosEParciais.length} item(ns)`);
+        } catch (expErr) {
+          console.error("[conferencia-baixada] Falha ao disparar expedicao-sync (nao bloqueia):", expErr);
+        }
       }
     } catch (err) {
       console.error("Erro na TASK 2 (conferencia-baixada):", err);

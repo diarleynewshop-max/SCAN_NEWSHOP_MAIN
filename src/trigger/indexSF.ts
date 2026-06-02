@@ -1,6 +1,7 @@
 import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
 import { erpFotoSync } from "./erpFotoSync";
+import { expedicaoSync } from "./expedicaoSync";
 
 type EmpresaSF = "SOYE" | "FACIL";
 type FlagLista = "loja" | "cd";
@@ -752,6 +753,28 @@ JSON com itens pendentes anexado.`;
         console.log(`Primeira tarefa de COMPRAS criada: ${todoTaskId}`);
       } else {
         console.log("Nenhum item negativo/parcial para gerar task de compras.");
+      }
+
+      const itensSeparadosEParciais = itensPayload.filter(
+        (i: any) => i.status === "separado" || i.status === "nao_tem_tudo"
+      );
+
+      if (itensSeparadosEParciais.length > 0) {
+        try {
+          await expedicaoSync.trigger({
+            conferente: payload.conferente,
+            empresa: String(empresa),
+            dataConferencia: payload.dataConferencia,
+            itens: itensSeparadosEParciais.map((i: any) => ({
+              codigo: i.codigo,
+              ean: i.ean ?? null,
+              quantidadeReal: i.quantidadeReal ?? 0,
+            })),
+          });
+          console.info(`[conferencia-baixada-sf] expedicao-sync disparado para ${itensSeparadosEParciais.length} item(ns)`);
+        } catch (expErr) {
+          console.error("[conferencia-baixada-sf] Falha ao disparar expedicao-sync (nao bloqueia):", expErr);
+        }
       }
     } catch (err) {
       console.error("Erro na TASK 2 (conferencia-baixada-sf):", err);
