@@ -1,7 +1,16 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { ArrowLeft, RefreshCw, Check, ImageOff, BarChart3, ChevronLeft, ChevronRight, X, Users } from "lucide-react";
+import { ArrowLeft, RefreshCw, Check, ImageOff, BarChart3, ChevronLeft, ChevronRight, X, Users, Download, FileText, FileSpreadsheet, Globe, Table2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { exportarCSV, exportarExcel, exportarPDF, exportarHTML, type DadosExport } from "@/lib/exportDashboard";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { useToast } from "@/hooks/use-toast";
@@ -460,6 +469,42 @@ const Dashboard = () => {
     return { resumo, porDia, frequencia, pareto, pizza, totalPedido, totalReal, pctDif };
   }, [relatoriosPeriodo]);
 
+  // ── label do período para exportação ───────────────────────────────────────
+  const periodoLabel = useMemo(() => {
+    if (modoSeletor === "dia") return diaUnico ?? "sem-data";
+    if (modoSeletor === "periodo") return `${periodoInicio ?? "?"}_${periodoFim ?? "?"}`;
+    if (modoSeletor === "mes") return mesSelecionado;
+    return `${mesComparar1}_vs_${mesComparar2}`;
+  }, [modoSeletor, diaUnico, periodoInicio, periodoFim, mesSelecionado, mesComparar1, mesComparar2]);
+
+  const handleExportar = useCallback((formato: "csv" | "excel" | "pdf" | "html") => {
+    if (!dados) {
+      toast({ title: "Nenhum dado carregado para exportar", variant: "destructive" });
+      return;
+    }
+    const payload: DadosExport = {
+      empresa,
+      flag,
+      periodo: periodoLabel,
+      resumo: dados.resumo,
+      porDia: dados.porDia,
+      frequencia: dados.frequencia,
+      totalPedido: dados.totalPedido,
+      totalReal: dados.totalReal,
+      pctDif: dados.pctDif,
+    };
+    try {
+      if (formato === "csv") exportarCSV(payload);
+      else if (formato === "excel") exportarExcel(payload);
+      else if (formato === "pdf") exportarPDF(payload);
+      else exportarHTML(payload);
+      toast({ title: `Exportado como ${formato.toUpperCase()}` });
+    } catch (e) {
+      console.error(e);
+      toast({ title: "Erro ao exportar", variant: "destructive" });
+    }
+  }, [dados, empresa, flag, periodoLabel, toast]);
+
   // ── comparação mês × mês ───────────────────────────────────────────────────
   const dadosComparar = useMemo(() => {
     if (modoSeletor !== "comparar" || relatoriosPeriodo.length === 0) return null;
@@ -655,6 +700,29 @@ const Dashboard = () => {
             <Button variant="outline" size="sm" onClick={() => carregarDados(true)} disabled={carregandoDatas}>
               <RefreshCw className={`h-3 w-3 mr-1 ${carregandoDatas ? "animate-spin" : ""}`} />Atualizar
             </Button>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" disabled={!dados}>
+                  <Download className="h-3 w-3 mr-1" />Exportar
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                <DropdownMenuLabel>Baixar relatório</DropdownMenuLabel>
+                <DropdownMenuSeparator />
+                <DropdownMenuItem onClick={() => handleExportar("pdf")}>
+                  <FileText className="h-4 w-4 mr-2 text-red-500" />PDF
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExportar("html")}>
+                  <Globe className="h-4 w-4 mr-2 text-blue-500" />HTML
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExportar("csv")}>
+                  <Table2 className="h-4 w-4 mr-2 text-green-600" />CSV
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => handleExportar("excel")}>
+                  <FileSpreadsheet className="h-4 w-4 mr-2 text-green-700" />Excel (.xlsx)
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
         </div>
 
