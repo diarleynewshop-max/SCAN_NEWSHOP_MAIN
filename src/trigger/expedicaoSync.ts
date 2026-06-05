@@ -1,9 +1,25 @@
 import { task } from "@trigger.dev/sdk/v3";
 
-const EXPEDICAO_API_URL = "https://wvykzzbzwyrbggzxkypf.supabase.co/functions/v1/expedicao-integration";
+// URL para Newshop
+const EXPEDICAO_API_URL_NEWSHOP = "https://wvykzzbzwyrbggzxkypf.supabase.co/functions/v1/expedicao-integration";
+// URL para Soye e Facil (configurar via env EXPEDICAO_API_URL_SF)
+const EXPEDICAO_API_URL_SF = process.env.EXPEDICAO_API_URL_SF ?? "";
 
 if (!process.env.EXPEDICAO_API_KEY) {
   console.warn("[expedicaoSync] EXPEDICAO_API_KEY nao configurada — chamadas a API serao ignoradas.");
+}
+
+type LojaExpedicao = "NEWSHOP" | "SOYE" | "FACIL";
+
+function getUrlExpedicao(empresa: string | undefined): string {
+  const loja = (empresa ?? "NEWSHOP").toUpperCase() as LojaExpedicao;
+  if (loja === "SOYE" || loja === "FACIL") {
+    if (!EXPEDICAO_API_URL_SF) {
+      throw new Error(`[expedicaoSync] EXPEDICAO_API_URL_SF nao configurada para empresa ${loja}`);
+    }
+    return EXPEDICAO_API_URL_SF;
+  }
+  return EXPEDICAO_API_URL_NEWSHOP;
 }
 
 interface ItemExpedicao {
@@ -52,9 +68,11 @@ export const expedicaoSync = task({
       itens: itensApi,
     };
 
-    console.log(`[expedicaoSync] Enviando ${itensApi.length} item(ns) para expedicao-integration`);
+    const urlExpedicao = getUrlExpedicao(payload.empresa);
+    const lojaLabel = (payload.empresa ?? "NEWSHOP").toUpperCase();
+    console.log(`[expedicaoSync] Enviando ${itensApi.length} item(ns) para expedicao-integration [loja=${lojaLabel}]`);
 
-    const response = await fetch(EXPEDICAO_API_URL, {
+    const response = await fetch(urlExpedicao, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
