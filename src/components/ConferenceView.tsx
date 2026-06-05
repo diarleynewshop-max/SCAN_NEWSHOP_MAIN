@@ -250,7 +250,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     try {
       const draft = {
         phase, empresa, flag, conferente, listeiro,
-        items: items.map(({ photo: _p, ...rest }) => rest), // sem foto — evita estourar localStorage
+        // Preserva URLs normais (proxy ERP, pequenas); strip apenas data: URLs (blobs grandes)
+        items: items.map(({ photo, ...rest }) => ({
+          ...rest,
+          photo: photo && !photo.startsWith("data:") ? photo : null,
+        })),
         currentIndex, taskOrigemIds, elapsedSeconds, apenasVisualizar,
         savedAt: Date.now(),
       };
@@ -522,6 +526,31 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       taskOrigemIdsRef.current = [task.id];
       setPhase("ready");
       toast({ title: `${parsed.length} itens carregados da task!` });
+
+      // Enriquece fotos do ERP para itens sem foto (Pendentes e outros sem imagem)
+      const empresaCtxFoto = (result.data.empresa ?? empresa) as string;
+      const flagCtxFoto = (result.data.flag ?? flag) as string;
+      const itensSemFoto = parsed.filter((it) => !it.photo);
+      if (itensSemFoto.length > 0) {
+        (async () => {
+          const enriched = await Promise.all(
+            itensSemFoto.map(async (it) => {
+              try {
+                const timeout4s = new Promise<null>((res) => setTimeout(() => res(null), 4000));
+                const produto = await Promise.race([
+                  buscarProdutoVarejoFacil(it.codigo, { empresa: empresaCtxFoto, flag: flagCtxFoto }),
+                  timeout4s,
+                ]);
+                return { id: it.id, photo: produto?.imagem ?? null };
+              } catch { return { id: it.id, photo: null }; }
+            })
+          );
+          const fotoMap = new Map(enriched.filter((e) => e.photo).map((e) => [e.id, e.photo!]));
+          if (fotoMap.size > 0) {
+            setItems((prev) => prev.map((it) => fotoMap.has(it.id) ? { ...it, photo: fotoMap.get(it.id)! } : it));
+          }
+        })().catch(() => undefined);
+      }
     } catch (e: any) {
       if (reservouPedido) {
         await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
