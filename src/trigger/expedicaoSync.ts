@@ -1,25 +1,23 @@
 import { task } from "@trigger.dev/sdk/v3";
 
-// URL para Newshop
-const EXPEDICAO_API_URL_NEWSHOP = "https://wvykzzbzwyrbggzxkypf.supabase.co/functions/v1/expedicao-integration";
-// URL para Soye e Facil (configurar via env EXPEDICAO_API_URL_SF)
-const EXPEDICAO_API_URL_SF = process.env.EXPEDICAO_API_URL_SF ?? "";
+const EXPEDICAO_API_URL = "https://wvykzzbzwyrbggzxkypf.supabase.co/functions/v1/expedicao-integration";
 
+// Newshop usa EXPEDICAO_API_KEY; Soye e Facil usam EXPEDICAO_API_KEY_SF
 if (!process.env.EXPEDICAO_API_KEY) {
-  console.warn("[expedicaoSync] EXPEDICAO_API_KEY nao configurada — chamadas a API serao ignoradas.");
+  console.warn("[expedicaoSync] EXPEDICAO_API_KEY nao configurada.");
+}
+if (!process.env.EXPEDICAO_API_KEY_SF) {
+  console.warn("[expedicaoSync] EXPEDICAO_API_KEY_SF nao configurada — Soye/Facil serao ignorados.");
 }
 
 type LojaExpedicao = "NEWSHOP" | "SOYE" | "FACIL";
 
-function getUrlExpedicao(empresa: string | undefined): string {
+function getApiKey(empresa: string | undefined): string | undefined {
   const loja = (empresa ?? "NEWSHOP").toUpperCase() as LojaExpedicao;
   if (loja === "SOYE" || loja === "FACIL") {
-    if (!EXPEDICAO_API_URL_SF) {
-      throw new Error(`[expedicaoSync] EXPEDICAO_API_URL_SF nao configurada para empresa ${loja}`);
-    }
-    return EXPEDICAO_API_URL_SF;
+    return process.env.EXPEDICAO_API_KEY_SF;
   }
-  return EXPEDICAO_API_URL_NEWSHOP;
+  return process.env.EXPEDICAO_API_KEY;
 }
 
 interface ItemExpedicao {
@@ -41,9 +39,11 @@ export const expedicaoSync = task({
   maxDuration: 120,
   retry: { maxAttempts: 3, factor: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000 },
   run: async (payload: PayloadExpedicaoSync) => {
-    const apiKey = process.env.EXPEDICAO_API_KEY;
+    const lojaLabel = (payload.empresa ?? "NEWSHOP").toUpperCase();
+    const apiKey = getApiKey(payload.empresa);
+
     if (!apiKey) {
-      console.warn("[expedicaoSync] EXPEDICAO_API_KEY ausente. Abortando sem erro.");
+      console.warn(`[expedicaoSync] API key ausente para loja=${lojaLabel}. Abortando sem erro.`);
       return { skipped: true };
     }
 
@@ -64,15 +64,13 @@ export const expedicaoSync = task({
 
     const body = {
       usuario: payload.conferente ?? "App Conferencia",
-      descricao: `Conferencia ${payload.empresa ?? "NEWSHOP"} - ${dataFormatada}`,
+      descricao: `Conferencia ${lojaLabel} - ${dataFormatada}`,
       itens: itensApi,
     };
 
-    const urlExpedicao = getUrlExpedicao(payload.empresa);
-    const lojaLabel = (payload.empresa ?? "NEWSHOP").toUpperCase();
-    console.log(`[expedicaoSync] Enviando ${itensApi.length} item(ns) para expedicao-integration [loja=${lojaLabel}]`);
+    console.log(`[expedicaoSync] Enviando ${itensApi.length} item(ns) [loja=${lojaLabel}]`);
 
-    const response = await fetch(urlExpedicao, {
+    const response = await fetch(EXPEDICAO_API_URL, {
       method: "POST",
       headers: {
         Authorization: `Bearer ${apiKey}`,
