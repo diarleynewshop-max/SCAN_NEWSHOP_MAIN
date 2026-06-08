@@ -1155,6 +1155,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (action === 'buscar-tasks') {
       const tasks = await buscarTasksAnalisado(empresa, flag, token);
+      res.setHeader('Cache-Control', 'private, max-age=60, stale-while-revalidate=30');
       return res.status(200).json({ tasks, empresa, flag });
     }
 
@@ -1167,6 +1168,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         rawTasks = await fetchTasksFromList(listId, token, false); // fallback sem fechadas
       }
       const tasks = rawTasks.map((task) => mapClickUpTask(task, listId));
+      res.setHeader('Cache-Control', 'private, max-age=60, stale-while-revalidate=30');
       return res.status(200).json({ tasks, empresa, listId });
     }
 
@@ -1208,6 +1210,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'listar-datas-relatorio') {
       const datas = await listarDatasRelatorio(empresa, flag, token);
+      res.setHeader('Cache-Control', 'private, max-age=120, stale-while-revalidate=60');
       return res.status(200).json({ datas, empresa, flag });
     }
 
@@ -1219,12 +1222,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'listar-relatorios-salvos') {
       const relatorios = await listarRelatoriosSalvos(empresa, flag, token);
+      res.setHeader('Cache-Control', 'private, max-age=120, stale-while-revalidate=60');
       return res.status(200).json({ relatorios, empresa, flag });
     }
 
     if (action === 'buscar-relatorio-salvo') {
       const relatorio = await buscarRelatorioSalvo(empresa, flag, token, dataRelatorio);
       if (!relatorio) return res.status(404).json({ error: 'Relatorio nao encontrado' });
+      res.setHeader('Cache-Control', 'private, max-age=300, stale-while-revalidate=60');
       return res.status(200).json(relatorio);
     }
 
@@ -1612,6 +1617,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return desc.includes('PENDENTES');
       }).length;
 
+      res.setHeader('Cache-Control', 'private, max-age=120, stale-while-revalidate=60');
       return res.status(200).json({ paraConferir, conferidas, ultimos7Dias, itensPendentes, empresa, flag });
     }
 

@@ -236,7 +236,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     }
 
     res.setHeader("Content-Type", contentType);
-    res.setHeader("Cache-Control", "public, max-age=3600");
+    res.setHeader("Cache-Control", "public, max-age=3600, s-maxage=86400, stale-while-revalidate=3600");
     return res.status(200).send(buffer);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido";
