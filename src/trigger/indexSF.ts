@@ -1,5 +1,6 @@
 import { task } from "@trigger.dev/sdk/v3";
 import sharp from "sharp";
+import { request as httpsRequest } from "node:https";
 import { erpFotoSync } from "./erpFotoSync";
 import { expedicaoSync } from "./expedicaoSync";
 
@@ -197,7 +198,7 @@ function truncarTexto(value: string, maxChars: number): string {
 }
 
 // Veja src/trigger/index.ts para histórico completo de quebras e NUNCA USE.
-// PADRÃO ATUAL (2026-06-08): Buffer manual + fetch(body=Blob). Ver index.ts.
+// PADRÃO ATUAL (2026-06-08 v2): Buffer manual + node:https (sem fetch). Ver index.ts.
 async function postClickUpAttachment(
   taskId: string,
   token: string,
@@ -225,24 +226,37 @@ async function postClickUpAttachment(
 
   console.log(`[ATTACH] ${filename} -> ${taskId} | ${bodyBuffer.length}b`);
 
-  // Usa Blob como body: undici lê Blob.type como Content-Type (não sobrescreve).
-  // NÃO definir Content-Type nos headers — conflito com o tipo do Blob quebra.
-  const blob = new Blob([bodyBuffer], { type: contentType });
-  const response = await fetch(
-    `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
-    {
-      method: "POST",
-      headers: {
-        Authorization: token,
+  return new Promise((resolve, reject) => {
+    const req = httpsRequest(
+      {
+        hostname: "api.clickup.com",
+        path: `/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
+        method: "POST",
+        headers: {
+          Authorization: token,
+          "Content-Type": contentType,
+          "Content-Length": bodyBuffer.length,
+        },
+        timeout: 60_000,
       },
-      body: blob,
-      signal: AbortSignal.timeout(60_000),
-    }
-  );
-
-  const text = await response.text();
-  console.log(`[ATTACH] status=${response.status}`);
-  return { status: response.status, text };
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          const text = Buffer.concat(chunks).toString("utf-8");
+          console.log(`[ATTACH] status=${res.statusCode}`);
+          resolve({ status: res.statusCode ?? 0, text });
+        });
+        res.on("error", reject);
+      }
+    );
+    req.on("error", reject);
+    req.on("timeout", () => {
+      req.destroy(new Error("ATTACH timeout 60s"));
+    });
+    req.write(bodyBuffer);
+    req.end();
+  });
 }
 
 async function anexarArquivoTextoClickUp(
