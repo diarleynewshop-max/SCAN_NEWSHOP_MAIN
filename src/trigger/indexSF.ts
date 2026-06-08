@@ -197,7 +197,7 @@ function truncarTexto(value: string, maxChars: number): string {
 }
 
 // Veja src/trigger/index.ts para histórico completo de quebras e NUNCA USE.
-// PADRÃO ATUAL (2026-05-27): Buffer manual + fetch(body=Buffer). Ver index.ts.
+// PADRÃO ATUAL (2026-06-08): Buffer manual + fetch(body=Blob). Ver index.ts.
 async function postClickUpAttachment(
   taskId: string,
   token: string,
@@ -220,20 +220,22 @@ async function postClickUpAttachment(
     "utf-8"
   );
   const epilogue = Buffer.from(`${CRLF}--${boundary}--${CRLF}`, "utf-8");
-  const body = Buffer.concat([preamble, fileBuffer, epilogue]);
+  const bodyBuffer = Buffer.concat([preamble, fileBuffer, epilogue]);
   const contentType = `multipart/form-data; boundary=${boundary}`;
 
-  console.log(`[ATTACH] ${filename} -> ${taskId} | ${body.length}b`);
+  console.log(`[ATTACH] ${filename} -> ${taskId} | ${bodyBuffer.length}b`);
 
+  // Usa Blob como body: undici lê Blob.type como Content-Type (não sobrescreve).
+  // NÃO definir Content-Type nos headers — conflito com o tipo do Blob quebra.
+  const blob = new Blob([bodyBuffer], { type: contentType });
   const response = await fetch(
     `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
     {
       method: "POST",
       headers: {
         Authorization: token,
-        "Content-Type": contentType,
       },
-      body: body as unknown as BodyInit,
+      body: blob,
       signal: AbortSignal.timeout(60_000),
     }
   );

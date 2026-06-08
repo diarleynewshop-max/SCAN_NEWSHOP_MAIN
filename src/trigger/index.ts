@@ -90,19 +90,20 @@ function truncarTexto(value: string, maxChars: number): string {
 // Esta função faz upload de anexos pro ClickUp API v2. Já quebrou MUITAS vezes
 // em prod com: 400 {"err":"Request is not 'multipart/form-data'","ECODE":"ATTCH_045"}
 //
-// PADRÃO ATUAL (2026-05-27):
-//   Buffer multipart manual + fetch nativo com body=Buffer (Uint8Array)
+// PADRÃO ATUAL (2026-06-08):
+//   Buffer multipart manual + fetch com body=Blob (Content-Type via Blob.type)
 //
-//   Por que buffer manual + fetch com body bruto:
-//   - fetch(body=FormData global) → undici altera/perde boundary (ATTCH_045)
-//   - axios.post(form) → axios@1.x sobrescreve Content-Type (ATTCH_045)
-//   - form-data.getBuffer() + https.request → ainda retorna ATTCH_045 (2026-05-27)
-//   - Buffer manual + fetch(body=Buffer) → undici não toca no Content-Type,
-//     boundary no header é exatamente igual ao boundary no body. ✅
+//   Por que Blob e não Buffer diretamente:
+//   - Node.js 22+/24 (trigger.dev runtime atual) usa undici v7 que sobrescreve
+//     o header Content-Type quando body é Buffer/Uint8Array (ATTCH_045)
+//   - Com new Blob([buffer], { type: contentType }) o undici lê o tipo do Blob
+//     e usa como Content-Type — NÃO definir Content-Type nos headers.
+//   - O body do Blob é nosso multipart manual, então o boundary fica intacto. ✅
 //
 // NUNCA USE:
 //   - axios.post(form, ...) — axios@1.x interfere no Content-Type (ATTCH_045)
 //   - fetch(body=FormData global) — undici reescreve boundary (ATTCH_045)
+//   - fetch(body=Buffer, headers={Content-Type}) — Node 22+ undici sobrescreve (ATTCH_045)
 //   - form-data.getBuffer() + https.request — https.request falhou em prod (ATTCH_045)
 //   - node-fetch@2 + form-data sem external — esbuild CJS (ATTCH_045)
 //
@@ -113,7 +114,9 @@ function truncarTexto(value: string, maxChars: number): string {
 //   - 2026-05-18: axios + form-data → funcionou
 //   - 2026-05-26: axios + form-data → ATTCH_045 (axios@1.x sobrescreve Content-Type)
 //   - 2026-05-26: form-data.getBuffer() + https.request → ATTCH_045 (2026-05-27 prod)
-//   - 2026-05-27: Buffer manual + fetch(body=Buffer) → PADRÃO ATUAL ✅
+//   - 2026-05-27: Buffer manual + fetch(body=Buffer) → funcionou até Node 22+
+//   - 2026-06-08: Buffer manual + fetch(body=Buffer) → ATTCH_045 (undici v7 / Node 24)
+//   - 2026-06-08: Buffer manual + fetch(body=Blob) → PADRÃO ATUAL ✅
 // ============================================================================
 async function postClickUpAttachment(
   taskId: string,
@@ -137,20 +140,22 @@ async function postClickUpAttachment(
     "utf-8"
   );
   const epilogue = Buffer.from(`${CRLF}--${boundary}--${CRLF}`, "utf-8");
-  const body = Buffer.concat([preamble, fileBuffer, epilogue]);
+  const bodyBuffer = Buffer.concat([preamble, fileBuffer, epilogue]);
   const contentType = `multipart/form-data; boundary=${boundary}`;
 
-  console.log(`[ATTACH] ${filename} -> ${taskId} | ${body.length}b`);
+  console.log(`[ATTACH] ${filename} -> ${taskId} | ${bodyBuffer.length}b`);
 
+  // Usa Blob como body: undici lê Blob.type como Content-Type (não sobrescreve).
+  // NÃO definir Content-Type nos headers — conflito com o tipo do Blob quebra.
+  const blob = new Blob([bodyBuffer], { type: contentType });
   const response = await fetch(
     `https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`,
     {
       method: "POST",
       headers: {
         Authorization: token,
-        "Content-Type": contentType,
       },
-      body: body as unknown as BodyInit,
+      body: blob,
       signal: AbortSignal.timeout(60_000),
     }
   );
