@@ -280,6 +280,7 @@ const Dashboard = () => {
       setFotosErp({});
       const salvos = await listarRelatoriosSalvos(empresa, flag);
       setRelatoriosSalvos(salvos);
+      salvarCacheDashboard(`dash:salvos:${empresa}:${flag}`, salvos);
       toast({ title: "Relatório gerado", description: `${dateKey} salvo no ClickUp` });
     } catch (err: any) {
       toast({ title: "Erro ao gerar", description: err.message, variant: "destructive" });
@@ -315,6 +316,7 @@ const Dashboard = () => {
     setGerandoTodos(false);
     const salvos = await listarRelatoriosSalvos(empresa, flag);
     setRelatoriosSalvos(salvos);
+    salvarCacheDashboard(`dash:salvos:${empresa}:${flag}`, salvos);
     toast({
       title: "Geração concluída",
       description: `${sucesso} gerado(s)${falhas > 0 ? `, ${falhas} erro(s)` : ""}`,

@@ -1222,7 +1222,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (action === 'listar-relatorios-salvos') {
       const relatorios = await listarRelatoriosSalvos(empresa, flag, token);
-      res.setHeader('Cache-Control', 'private, max-age=120, stale-while-revalidate=60');
+      res.setHeader('Cache-Control', 'no-store');
       return res.status(200).json({ relatorios, empresa, flag });
     }
 
