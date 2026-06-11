@@ -1930,6 +1930,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
           const mapa = new Map<string, RelatorioItem>();
           for (const item of itensTask) {
+            // Nunca usar itens com status "pendente" da task concluida como base da analise
+            if (item.status === 'pendente') continue;
             if (!mapa.has(item.codigo)) mapa.set(item.codigo, item);
           }
 

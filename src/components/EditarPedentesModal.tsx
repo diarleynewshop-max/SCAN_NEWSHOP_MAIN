@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { X, Trash2, Pencil, Search, Layers, RefreshCw, ArrowLeft } from "lucide-react";
+import { X, Trash2, Pencil, Search, Layers, RefreshCw, ArrowLeft, CheckSquare, Square } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import {
   listarTasksPendentes,
@@ -99,6 +99,12 @@ const EditarPedentesModal = ({ empresa, flag, onClose, onChanged }: EditarPedent
       else next.add(id);
       return next;
     });
+  };
+
+  const todasSelecionadas = pendentes.length > 0 && selecionadas.size === pendentes.length;
+
+  const alternarSelecionarTodas = () => {
+    setSelecionadas((prev) => (prev.size === pendentes.length ? new Set() : new Set(pendentes.map((p) => p.id))));
   };
 
   const abrirEditor = (task: PendenteTask) => {
@@ -259,9 +265,17 @@ const EditarPedentesModal = ({ empresa, flag, onClose, onChanged }: EditarPedent
             <>
               <div className="flex items-center justify-between">
                 <p className="text-xs text-muted-foreground">{pendentes.length} lista(s) pendente(s)</p>
-                <button onClick={carregar} disabled={loading} className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
-                  <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Atualizar
-                </button>
+                <div className="flex items-center gap-3">
+                  {pendentes.length > 0 && (
+                    <button onClick={alternarSelecionarTodas} className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                      {todasSelecionadas ? <CheckSquare className="w-3.5 h-3.5" /> : <Square className="w-3.5 h-3.5" />}
+                      {todasSelecionadas ? "Desmarcar tudo" : "Selecionar tudo"}
+                    </button>
+                  )}
+                  <button onClick={carregar} disabled={loading} className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
+                    <RefreshCw className={`w-3.5 h-3.5 ${loading ? "animate-spin" : ""}`} /> Atualizar
+                  </button>
+                </div>
               </div>
 
               {selecionadas.size > 0 && (
