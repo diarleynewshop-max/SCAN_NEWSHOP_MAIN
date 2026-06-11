@@ -161,16 +161,18 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     setEmpresa(empresaAtual);
     const cache = readProdutosCache(empresaAtual);
 
-    if (cache) {
+    if (cache && !force) {
+      // Cache so substitui o estado em carga normal; num refetch forcado
+      // (apos mover status) ele e mais velho que a UI e revertia o status.
       setProdutos(cache.produtos);
       setUltimaAtualizacao(new Date(cache.updatedAt));
       setLoading(false);
 
-      if (!force && Date.now() - cache.updatedAt < CACHE_TTL_MS) {
+      if (Date.now() - cache.updatedAt < CACHE_TTL_MS) {
         setError(null);
         return;
       }
-    } else {
+    } else if (!cache) {
       setLoading(true);
     }
 

@@ -4,7 +4,7 @@
   ],
   "functions": {
     "api/clickup-proxy.ts": { "maxDuration": 60 },
-    "api/clickup-compras-proxy.ts": { "maxDuration": 30 },
+    "api/clickup-compras-proxy.ts": { "maxDuration": 60 },
     "api/erp-proxy.ts": { "maxDuration": 30 },
     "api/erp-image-proxy.ts": { "maxDuration": 30 },
     "api/clickup-debug-sf.ts": { "maxDuration": 15 }

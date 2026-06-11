@@ -16,12 +16,13 @@ const DEFAULT_LISTS: Record<EmpresaKey, { compras: string; conferencia: string }
     compras: "901326684020",
     conferencia: "901325900510",
   },
+  // Soye e Facil compartilham a mesma lista de compras (mesma visao).
   SOYE: {
-    compras: "901326607319",
+    compras: "901326695640",
     conferencia: "901326607319",
   },
   FACIL: {
-    compras: "901326607320",
+    compras: "901326695640",
     conferencia: "901326607320",
   },
 };

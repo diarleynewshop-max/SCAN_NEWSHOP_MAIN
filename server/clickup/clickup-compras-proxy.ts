@@ -25,6 +25,7 @@ type CompraStatusApp =
 
 const CLICKUP_PAGE_SIZE = 100;
 const MAX_CLICKUP_PAGES = 20;
+const PARALLEL_PAGE_BATCH = 5;
 const REPEATED_ITEM_TAG = '( ITEM REPETIDO )';
 const MAX_REPEATED_TAGS_PER_REQUEST = 25;
 
@@ -385,36 +386,56 @@ async function markRepeatedTasksInClickUp(
   }
 }
 
-async function fetchAllCompraTasks(token: string, listId: string) {
-  const allTasks: unknown[] = [];
+async function fetchCompraTasksPage(token: string, listId: string, page: number): Promise<unknown[]> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 15000);
 
-  for (let page = 0; page < MAX_CLICKUP_PAGES; page++) {
-    const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), 15000);
-
-    try {
-      const response = await fetch(
-        `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=${page}`,
-        {
-          headers: { Authorization: token },
-          signal: controller.signal,
-        }
-      );
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`ClickUp ${response.status} na lista ${listId}: ${errorText}`);
+  try {
+    const response = await fetch(
+      `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=${page}`,
+      {
+        headers: { Authorization: token },
+        signal: controller.signal,
       }
+    );
 
-      const rawText = await response.text();
-      const data = rawText ? JSON.parse(rawText) : {};
-      const tasks = Array.isArray(data.tasks) ? data.tasks : [];
-      allTasks.push(...tasks);
-
-      if (tasks.length < CLICKUP_PAGE_SIZE) break;
-    } finally {
-      clearTimeout(timeout);
+    if (!response.ok) {
+      const errorText = await response.text();
+      throw new Error(`ClickUp ${response.status} na lista ${listId}: ${errorText}`);
     }
+
+    const rawText = await response.text();
+    const data = rawText ? JSON.parse(rawText) : {};
+    return Array.isArray(data.tasks) ? data.tasks : [];
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function fetchAllCompraTasks(token: string, listId: string) {
+  const firstPage = await fetchCompraTasksPage(token, listId, 0);
+  const allTasks: unknown[] = [...firstPage];
+  if (firstPage.length < CLICKUP_PAGE_SIZE) return allTasks;
+
+  // Listas grandes (SF) estouravam o maxDuration buscando pagina por pagina;
+  // as paginas seguintes sao buscadas em lotes paralelos.
+  for (let page = 1; page < MAX_CLICKUP_PAGES; page += PARALLEL_PAGE_BATCH) {
+    const pages: number[] = [];
+    for (let p = page; p < Math.min(page + PARALLEL_PAGE_BATCH, MAX_CLICKUP_PAGES); p++) {
+      pages.push(p);
+    }
+
+    const batches = await Promise.all(
+      pages.map((p) => fetchCompraTasksPage(token, listId, p))
+    );
+
+    let finished = false;
+    for (const tasks of batches) {
+      allTasks.push(...tasks);
+      if (tasks.length < CLICKUP_PAGE_SIZE) finished = true;
+    }
+
+    if (finished) break;
   }
 
   return allTasks;
@@ -469,7 +490,12 @@ async function buscarTasksCompras(
   }
 
   const { produtos: produtosUnicos, repetidos } = deduplicateProdutosCompras(produtos);
-  await markRepeatedTasksInClickUp(token, empresa, listId, repetidos);
+
+  // Marcar tags de repetido faz ate 25 escritas no ClickUp por leitura e
+  // contribuia para o timeout; agora so roda quando pedido explicitamente.
+  if (getSingle(req.query.marcarRepetidos) === '1') {
+    await markRepeatedTasksInClickUp(token, empresa, listId, repetidos);
+  }
 
   const produtosFiltrados = (statusFilter
     ? produtosUnicos.filter((produto) => produto.status === statusFilter)
