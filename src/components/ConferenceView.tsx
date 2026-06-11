@@ -24,6 +24,7 @@ import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { enviarConferenciaParaClickUp } from "@/lib/webhookRouter";
 import { obterLoginSalvo } from "@/hooks/useAuth";
+import EditarPedentesModal from "@/components/EditarPedentesModal";
 import {
   obterSenhaPadrao,
   validarSenha,
@@ -236,6 +237,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   // Faz o backend pular a verificacao de lock e aceitar a reserva.
   const [forcarReservaAndamento, setForcarReservaAndamento] = useState(false);
   const [rascunhoDisponivel, setRascunhoDisponivel] = useState(false);
+  const [editarPedentesAberto, setEditarPedentesAberto] = useState(false);
   const empresaRef = useRef(empresaInicial);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1661,6 +1663,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <ArrowLeft className="w-4 h-4" /> Voltar
           </button>
           <div className="flex items-center gap-3">
+            {(loginSalvo?.role === "admin" || loginSalvo?.role === "super") && (
+              <button onClick={() => setEditarPedentesAberto(true)}
+                className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+                <ClipboardList className="w-3.5 h-3.5" /> Editar Pedentes
+              </button>
+            )}
             <button onClick={abrirRelatorioPopup} disabled={gerandoRelatorio || loadingRelatorioDatas}
               className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
               {gerandoRelatorio || loadingRelatorioDatas ? (
@@ -1676,6 +1684,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             </button>
           </div>
         </div>
+
+        {editarPedentesAberto && (
+          <EditarPedentesModal
+            empresa={empresa as EmpresaKey}
+            flag={flag as FlagKey}
+            onClose={() => setEditarPedentesAberto(false)}
+            onChanged={() => recarregarTasks()}
+          />
+        )}
 
         <div className="flex items-center justify-between">
           <div>

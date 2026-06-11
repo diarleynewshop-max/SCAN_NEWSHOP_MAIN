@@ -448,6 +448,177 @@ function parseConferenceItems(description: string, conferente: string, taskId: s
   return items;
 }
 
+// ── Pendentes: parse/edicao/uniao/analise ──────────────────────────────────────
+
+interface PendenteItem {
+  codigo: string;
+  sku: string;
+  secao: string | null;
+  quantidadePedida: number;
+}
+
+interface PendenteInfo {
+  conferente: string;
+  listeiro: string;
+  empresa: string;
+  flag: FlagKey;
+  dataFormatada: string;
+  dateKey: string | null;
+  itens: PendenteItem[];
+}
+
+function isPendenteTask(task: any): boolean {
+  if (normalizeStatus(task?.status?.status) !== 'analisado') return false;
+  const name = String(task?.name ?? '');
+  const description = String(task?.description ?? task?.text_content ?? '');
+  return name.includes('PENDENTES') || name.startsWith('⏳') || normalizeText(description).includes('itens pendentes');
+}
+
+function parsePendenteDescricao(description: string, _name: string): PendenteInfo | null {
+  if (!description) return null;
+
+  const itens: PendenteItem[] = [];
+  let secaoAtual: string | null = null;
+
+  for (const rawLine of description.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+
+    if (line === '{S}' || line === '{M}') {
+      secaoAtual = line.slice(1, -1);
+      continue;
+    }
+    if (normalizeText(line) === 'sem categoria') {
+      secaoAtual = null;
+      continue;
+    }
+
+    const itemMatch = line.match(/^\d+\.\s*Codigo:\s*(\S+)\s*\|\s*SKU:\s*(.+?)\s*\|\s*Pedido:\s*(\d+)/i);
+    if (!itemMatch) continue;
+
+    itens.push({
+      codigo: itemMatch[1].trim(),
+      sku: itemMatch[2].trim() === '-' ? '' : itemMatch[2].trim(),
+      secao: secaoAtual,
+      quantidadePedida: Number(itemMatch[3]),
+    });
+  }
+
+  if (itens.length === 0) return null;
+
+  const conferenteMatch = description.match(/^Conferente:\s*(.+)$/im);
+  const listeiroMatch = description.match(/^Listeiro:\s*(.+)$/im);
+  const empresaMatch = description.match(/Empresa:\s*(\S+)/i);
+  const tipoMatch = description.match(/Tipo:\s*(CD|LOJA)/i);
+  const dataMatch = description.match(/Data:\s*(\d{2}\/\d{2}\/\d{4})/);
+  const dataFormatada = dataMatch?.[1] ?? '';
+
+  return {
+    conferente: conferenteMatch?.[1]?.trim() || 'Sem conferente',
+    listeiro: listeiroMatch?.[1]?.trim() || '',
+    empresa: empresaMatch?.[1] ?? 'NEWSHOP',
+    flag: tipoMatch?.[1]?.toUpperCase() === 'CD' ? 'cd' : 'loja',
+    dataFormatada,
+    dateKey: dataFormatada ? extractDateKeyFromText(`Data: ${dataFormatada}`) : null,
+    itens,
+  };
+}
+
+function formatarItemPendente(item: PendenteItem, idx: number): string {
+  return `${idx + 1}. Codigo: ${item.codigo} | SKU: ${item.sku || '-'} | Pedido: ${item.quantidadePedida} | Real: - | ⏳ Pendente`;
+}
+
+function montarDescricaoPendente(info: Omit<PendenteInfo, 'dateKey'>): string {
+  const itensTexto = info.itens.map((item, idx) => formatarItemPendente(item, idx)).join('\n');
+
+  const linhas = [
+    `Conferente: ${info.conferente}`,
+    info.listeiro ? `Listeiro: ${info.listeiro}` : null,
+    `Empresa: ${info.empresa}`,
+    `Tipo: ${info.flag === 'cd' ? 'CD' : 'LOJA'}`,
+    `Data: ${info.dataFormatada}`,
+    `Total Pendentes: ${info.itens.length}`,
+    '',
+    '⏳ ITENS PENDENTES',
+    itensTexto,
+  ].filter((linha) => linha !== null);
+
+  return linhas.join('\n');
+}
+
+async function atualizarTaskClickUp(taskId: string, updates: { name?: string; description?: string }, token: string): Promise<void> {
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+    method: 'PUT',
+    headers: { Authorization: token, 'Content-Type': 'application/json' },
+    body: JSON.stringify(updates),
+  });
+
+  if (!response.ok) {
+    throw new Error(`ClickUp ${response.status} ao atualizar task ${taskId}: ${await response.text()}`);
+  }
+}
+
+async function criarTaskSimples(listId: string, nome: string, descricao: string, status: string, token: string): Promise<string> {
+  const response = await fetch(`https://api.clickup.com/api/v2/list/${listId}/task`, {
+    method: 'POST',
+    headers: { Authorization: token, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: nome, description: descricao, status }),
+  });
+
+  if (!response.ok) {
+    throw new Error(`ClickUp ${response.status} ao criar task na lista ${listId}: ${await response.text()}`);
+  }
+
+  const data = await response.json();
+  return String(data.id);
+}
+
+async function deletarTaskClickUp(taskId: string, token: string): Promise<void> {
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+    method: 'DELETE',
+    headers: { Authorization: token },
+  });
+
+  if (!response.ok) {
+    throw new Error(`ClickUp ${response.status} ao deletar task ${taskId}: ${await response.text()}`);
+  }
+}
+
+async function buscarTasksPendentes(empresa: EmpresaKey, flag: FlagKey, token: string) {
+  const listId = getListId(empresa, flag);
+  const rawTasks = await fetchTasksFromList(listId, token, true);
+  const pendentes: Array<{
+    id: string;
+    name: string;
+    dateKey: string | null;
+    dataFormatada: string;
+    conferente: string;
+    listeiro: string;
+    totalItens: number;
+    itens: PendenteItem[];
+  }> = [];
+
+  for (const task of rawTasks) {
+    if (!isPendenteTask(task)) continue;
+    const description = String(task.description ?? task.text_content ?? '');
+    const info = parsePendenteDescricao(description, task.name);
+    if (!info) continue;
+
+    pendentes.push({
+      id: task.id,
+      name: task.name,
+      dateKey: info.dateKey,
+      dataFormatada: info.dataFormatada,
+      conferente: info.conferente,
+      listeiro: info.listeiro,
+      totalItens: info.itens.length,
+      itens: info.itens,
+    });
+  }
+
+  return pendentes;
+}
+
 const RELATORIO_DASHBOARD_STATUS_CANDIDATES = ['Relatorio', 'RELATORIO', 'Relatório', 'RELATÓRIO'];
 
 function buildRelatorioDescription(report: any, dataPtBr: string, empresa: EmpresaKey, flag: FlagKey): string {
@@ -1619,6 +1790,227 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       res.setHeader('Cache-Control', 'private, max-age=120, stale-while-revalidate=60');
       return res.status(200).json({ paraConferir, conferidas, ultimos7Dias, itensPendentes, empresa, flag });
+    }
+
+    if (action === 'listar-tasks-pendentes') {
+      const pendentes = await buscarTasksPendentes(empresa, flag, token);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json({ pendentes, empresa, flag });
+    }
+
+    if (action === 'editar-pendente') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const editTaskId = String(body.taskId ?? '').trim();
+      if (!editTaskId) return res.status(400).json({ error: 'taskId obrigatorio' });
+
+      const novosItens: PendenteItem[] = (Array.isArray(body.itens) ? body.itens : [])
+        .map((item: any) => ({
+          codigo: normalizeCodigo(item.codigo),
+          sku: String(item.sku ?? '').trim(),
+          secao: item.secao ?? null,
+          quantidadePedida: normalizeQuantidade(item.quantidadePedida),
+        }))
+        .filter((item: PendenteItem) => item.codigo && item.quantidadePedida > 0);
+
+      if (novosItens.length === 0) {
+        await deletarTaskClickUp(editTaskId, token);
+        return res.status(200).json({ deleted: true });
+      }
+
+      const detail = await fetchTaskDetail(editTaskId, token);
+      const description = String(detail.description ?? detail.text_content ?? '');
+      const info = parsePendenteDescricao(description, detail.name);
+      if (!info) return res.status(404).json({ error: 'Task nao e uma lista de pendentes valida' });
+
+      const novaDescricao = montarDescricaoPendente({ ...info, itens: novosItens });
+      await atualizarTaskClickUp(editTaskId, { description: novaDescricao }, token);
+      return res.status(200).json({ updated: true, totalItens: novosItens.length });
+    }
+
+    if (action === 'juntar-pendentes') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const taskIds = getTaskIds(req, '');
+      if (taskIds.length < 2) return res.status(400).json({ error: 'Selecione ao menos 2 listas para juntar' });
+
+      const origens: Array<{ taskId: string; info: PendenteInfo }> = [];
+      for (const id of taskIds) {
+        const detail = await fetchTaskDetail(id, token);
+        const description = String(detail.description ?? detail.text_content ?? '');
+        const info = parsePendenteDescricao(description, detail.name);
+        if (info) origens.push({ taskId: id, info });
+      }
+
+      if (origens.length === 0) return res.status(404).json({ error: 'Nenhuma lista de pendentes valida encontrada' });
+
+      const itensMap = new Map<string, PendenteItem>();
+      for (const { info } of origens) {
+        for (const item of info.itens) {
+          const key = `${item.codigo}::${item.sku}::${item.secao ?? ''}`;
+          const existente = itensMap.get(key);
+          if (existente) {
+            existente.quantidadePedida += item.quantidadePedida;
+          } else {
+            itensMap.set(key, { ...item });
+          }
+        }
+      }
+
+      const itensConsolidados = Array.from(itensMap.values());
+      const dataMaisRecente = origens
+        .map(({ info }) => info.dateKey)
+        .filter((dateKey): dateKey is string => Boolean(dateKey))
+        .sort()
+        .pop();
+      const dataFormatada = dataMaisRecente ? formatDatePtBr(dataMaisRecente) : origens[0].info.dataFormatada;
+      const listeiros = unique(origens.map(({ info }) => info.listeiro));
+
+      const novaDescricao = montarDescricaoPendente({
+        conferente: 'Lista Unificada',
+        listeiro: listeiros.join(' / '),
+        empresa: origens[0].info.empresa,
+        flag: origens[0].info.flag,
+        dataFormatada,
+        itens: itensConsolidados,
+      });
+
+      const listId = getListId(empresa, flag);
+      const novoNome = `⏳ Lista Unificada — ${dataFormatada} — PENDENTES`;
+      const novoId = await criarTaskSimples(listId, novoNome, novaDescricao, 'analisado', token);
+
+      for (const { taskId: id } of origens) {
+        await deletarTaskClickUp(id, token);
+      }
+
+      return res.status(200).json({ created: { id: novoId, name: novoNome, totalItens: itensConsolidados.length } });
+    }
+
+    if (action === 'analisar-pendentes') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const taskIds = getTaskIds(req, '');
+      if (taskIds.length === 0) return res.status(400).json({ error: 'Selecione ao menos uma lista' });
+      const itemCodigosFiltro: Record<string, string[]> = body.itemCodigos ?? {};
+
+      const listasInfo: Array<{ taskId: string; taskName: string; info: PendenteInfo }> = [];
+      for (const id of taskIds) {
+        const detail = await fetchTaskDetail(id, token);
+        const description = String(detail.description ?? detail.text_content ?? '');
+        const info = parsePendenteDescricao(description, detail.name);
+        if (!info) continue;
+
+        const filtroCodigos = itemCodigosFiltro[id];
+        const itens = Array.isArray(filtroCodigos) && filtroCodigos.length > 0
+          ? info.itens.filter((item) => filtroCodigos.includes(item.codigo))
+          : info.itens;
+
+        listasInfo.push({ taskId: id, taskName: detail.name, info: { ...info, itens } });
+      }
+
+      if (listasInfo.length === 0) return res.status(404).json({ error: 'Nenhuma lista de pendentes valida encontrada' });
+
+      const dateKeys = listasInfo.map(({ info }) => info.dateKey).filter((dateKey): dateKey is string => Boolean(dateKey));
+      const minDateKey = dateKeys.length > 0 ? dateKeys.sort()[0] : '0000-00-00';
+
+      const listId = getListId(empresa, flag);
+      const rawTasks = await fetchTasksFromList(listId, token, true);
+      const concluidas = rawTasks.filter((task) => {
+        const status = normalizeStatus(task.status?.status);
+        if (status !== 'concluido' && status !== 'complete') return false;
+        const dateKey = taskReportDateKey(task);
+        return dateKey ? dateKey >= minDateKey : false;
+      });
+
+      const concluidasComItens: Array<{ taskId: string; taskName: string; dateKey: string; itens: Map<string, RelatorioItem> }> = [];
+      await mapWithConcurrency(concluidas, RELATORIO_DETAIL_CONCURRENCY, async (task) => {
+        try {
+          const detail = await fetchTaskDetail(task.id, token);
+          const description = String(detail.description ?? detail.text_content ?? task.description ?? '');
+          const dateKey = taskReportDateKey(detail, description) ?? taskReportDateKey(task) ?? '';
+          const conferente = extractConferente(task, description);
+          const itensTask = parseConferenceItems(description, conferente, task.id);
+
+          const mapa = new Map<string, RelatorioItem>();
+          for (const item of itensTask) {
+            if (!mapa.has(item.codigo)) mapa.set(item.codigo, item);
+          }
+
+          concluidasComItens.push({ taskId: task.id, taskName: task.name, dateKey, itens: mapa });
+        } catch {
+          // ignora tasks com erro ao buscar detalhes
+        }
+      });
+
+      concluidasComItens.sort((a, b) => a.dateKey.localeCompare(b.dateKey));
+
+      const resultados = listasInfo.map(({ taskId: id, taskName, info }) => {
+        const encontrados: any[] = [];
+        const naoEncontrados: any[] = [];
+
+        for (const item of info.itens) {
+          const achado = concluidasComItens.find((conc) => {
+            if (info.dateKey && conc.dateKey < info.dateKey) return false;
+            return conc.itens.has(item.codigo);
+          });
+
+          if (achado) {
+            const match = achado.itens.get(item.codigo)!;
+            encontrados.push({
+              codigo: item.codigo,
+              sku: item.sku,
+              quantidadePedida: item.quantidadePedida,
+              quantidadeReal: match.real,
+              encontradoEm: { taskId: achado.taskId, taskName: achado.taskName, dateKey: achado.dateKey },
+            });
+          } else {
+            naoEncontrados.push({ codigo: item.codigo, sku: item.sku, quantidadePedida: item.quantidadePedida });
+          }
+        }
+
+        return {
+          taskId: id,
+          taskName,
+          dateKey: info.dateKey,
+          totalItens: info.itens.length,
+          encontrados,
+          naoEncontrados,
+        };
+      });
+
+      return res.status(200).json({ resultados });
+    }
+
+    if (action === 'aplicar-analise-pendentes') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const resultadosBody: Array<{ taskId: string; codigosParaRemover: string[] }> = Array.isArray(body.resultados) ? body.resultados : [];
+      if (resultadosBody.length === 0) return res.status(400).json({ error: 'resultados obrigatorio' });
+
+      const processados: Array<{ taskId: string; removidos: number; restantes: number; deleted: boolean }> = [];
+
+      for (const resultado of resultadosBody) {
+        const id = String(resultado.taskId ?? '').trim();
+        const codigos = new Set((Array.isArray(resultado.codigosParaRemover) ? resultado.codigosParaRemover : []).map((codigo) => normalizeCodigo(codigo)));
+        if (!id || codigos.size === 0) continue;
+
+        const detail = await fetchTaskDetail(id, token);
+        const description = String(detail.description ?? detail.text_content ?? '');
+        const info = parsePendenteDescricao(description, detail.name);
+        if (!info) continue;
+
+        const restantes = info.itens.filter((item) => !codigos.has(item.codigo));
+        const removidos = info.itens.length - restantes.length;
+        if (removidos === 0) continue;
+
+        if (restantes.length === 0) {
+          await deletarTaskClickUp(id, token);
+          processados.push({ taskId: id, removidos, restantes: 0, deleted: true });
+          continue;
+        }
+
+        const novaDescricao = montarDescricaoPendente({ ...info, itens: restantes });
+        await atualizarTaskClickUp(id, { description: novaDescricao }, token);
+        processados.push({ taskId: id, removidos, restantes: restantes.length, deleted: false });
+      }
+
+      return res.status(200).json({ processados });
     }
 
     if (action === 'deletar-task') {

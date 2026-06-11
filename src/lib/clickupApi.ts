@@ -361,3 +361,125 @@ export async function buscarHistoricoItem(
   const data = await response.json();
   return Array.isArray(data.ocorrencias) ? data.ocorrencias : [];
 }
+
+// ── Editar Pedentes (admin/super) ─────────────────────────────────────────────
+
+export interface PendenteItem {
+  codigo: string;
+  sku: string;
+  secao: string | null;
+  quantidadePedida: number;
+}
+
+export interface PendenteTask {
+  id: string;
+  name: string;
+  dateKey: string | null;
+  dataFormatada: string;
+  conferente: string;
+  listeiro: string;
+  totalItens: number;
+  itens: PendenteItem[];
+}
+
+export interface AnaliseItemEncontrado {
+  codigo: string;
+  sku: string;
+  quantidadePedida: number;
+  quantidadeReal: number | null;
+  encontradoEm: { taskId: string; taskName: string; dateKey: string };
+}
+
+export interface AnaliseItemNaoEncontrado {
+  codigo: string;
+  sku: string;
+  quantidadePedida: number;
+}
+
+export interface AnaliseResultado {
+  taskId: string;
+  taskName: string;
+  dateKey: string | null;
+  totalItens: number;
+  encontrados: AnaliseItemEncontrado[];
+  naoEncontrados: AnaliseItemNaoEncontrado[];
+}
+
+export interface AplicarAnaliseProcessado {
+  taskId: string;
+  removidos: number;
+  restantes: number;
+  deleted: boolean;
+}
+
+export async function listarTasksPendentes(
+  empresa: EmpresaKey,
+  flag: FlagKey
+): Promise<PendenteTask[]> {
+  const params = new URLSearchParams({ action: 'listar-tasks-pendentes', empresa, flag });
+  const response = await fetch(`/api/clickup-proxy?${params}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao listar pendentes`);
+  const data = await response.json();
+  return data.pendentes ?? [];
+}
+
+export async function editarPendente(
+  empresa: EmpresaKey,
+  taskId: string,
+  itens: PendenteItem[]
+): Promise<{ deleted?: boolean; updated?: boolean; totalItens?: number }> {
+  const response = await fetch(`/api/clickup-proxy?action=editar-pendente&empresa=${empresa}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskId, itens }),
+  });
+  if (!response.ok) throw new Error(`Erro ${response.status} ao editar pendente`);
+  return await response.json();
+}
+
+export async function excluirPendente(empresa: EmpresaKey, taskId: string): Promise<void> {
+  return deletarTask(empresa, taskId);
+}
+
+export async function juntarPendentes(
+  empresa: EmpresaKey,
+  taskIds: string[]
+): Promise<{ created: { id: string; name: string; totalItens: number } }> {
+  const response = await fetch(`/api/clickup-proxy?action=juntar-pendentes&empresa=${empresa}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskIds }),
+  });
+  if (!response.ok) throw new Error(`Erro ${response.status} ao juntar pendentes`);
+  return await response.json();
+}
+
+export async function analisarPendentes(
+  empresa: EmpresaKey,
+  flag: FlagKey,
+  taskIds: string[],
+  itemCodigos?: Record<string, string[]>
+): Promise<AnaliseResultado[]> {
+  const response = await fetch(`/api/clickup-proxy?action=analisar-pendentes&empresa=${empresa}&flag=${flag}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ taskIds, itemCodigos }),
+  });
+  if (!response.ok) throw new Error(`Erro ${response.status} ao analisar pendentes`);
+  const data = await response.json();
+  return data.resultados ?? [];
+}
+
+export async function aplicarAnalisePendentes(
+  empresa: EmpresaKey,
+  resultados: Array<{ taskId: string; codigosParaRemover: string[] }>
+): Promise<AplicarAnaliseProcessado[]> {
+  const response = await fetch(`/api/clickup-proxy?action=aplicar-analise-pendentes&empresa=${empresa}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ resultados }),
+  });
+  if (!response.ok) throw new Error(`Erro ${response.status} ao aplicar analise`);
+  const data = await response.json();
+  return data.processados ?? [];
+}
