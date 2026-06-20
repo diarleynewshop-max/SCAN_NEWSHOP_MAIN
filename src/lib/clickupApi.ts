@@ -353,9 +353,6 @@ export async function buscarDashboardKpis(
 
 export interface AnaliseAutomaticaConfig {
   ativo: boolean;
-  modo: "tempo" | "quantidade";
-  intervaloMinutos: number;
-  quantidadeMinima: number;
   atualizadoPor: string;
   atualizadoEm: string;
   ultimaExecucaoEm: string | null;
@@ -372,7 +369,7 @@ export async function obterConfigAnaliseAutomatica(empresa: EmpresaKey): Promise
 
 export async function salvarConfigAnaliseAutomatica(
   empresa: EmpresaKey,
-  partial: Partial<Pick<AnaliseAutomaticaConfig, "ativo" | "modo" | "intervaloMinutos" | "quantidadeMinima">>,
+  partial: Partial<Pick<AnaliseAutomaticaConfig, "ativo">>,
   atualizadoPor: string
 ): Promise<AnaliseAutomaticaConfig> {
   const params = new URLSearchParams({ action: "salvar-config-analise-automatica", empresa });

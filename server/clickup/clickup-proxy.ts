@@ -625,9 +625,6 @@ async function buscarTasksPendentes(empresa: EmpresaKey, flag: FlagKey, token: s
 
 interface AnaliseAutomaticaConfig {
   ativo: boolean;
-  modo: 'tempo' | 'quantidade';
-  intervaloMinutos: number;
-  quantidadeMinima: number;
   atualizadoPor: string;
   atualizadoEm: string;
   ultimaExecucaoEm: string | null;
@@ -636,9 +633,6 @@ interface AnaliseAutomaticaConfig {
 
 const CONFIG_ANALISE_DEFAULT: AnaliseAutomaticaConfig = {
   ativo: false,
-  modo: 'tempo',
-  intervaloMinutos: 30,
-  quantidadeMinima: 5,
   atualizadoPor: '',
   atualizadoEm: '',
   ultimaExecucaoEm: null,
@@ -668,9 +662,6 @@ function parseConfigAnaliseDescricao(description: string): AnaliseAutomaticaConf
 
   return {
     ativo: getBool('Ativo', CONFIG_ANALISE_DEFAULT.ativo),
-    modo: getStr('Modo', CONFIG_ANALISE_DEFAULT.modo) === 'quantidade' ? 'quantidade' : 'tempo',
-    intervaloMinutos: getNum('IntervaloMinutos', CONFIG_ANALISE_DEFAULT.intervaloMinutos),
-    quantidadeMinima: getNum('QuantidadeMinima', CONFIG_ANALISE_DEFAULT.quantidadeMinima),
     atualizadoPor: getStr('AtualizadoPor', ''),
     atualizadoEm: getStr('AtualizadoEm', ''),
     ultimaExecucaoEm: getStr('UltimaExecucaoEm', '') || null,
@@ -681,9 +672,6 @@ function parseConfigAnaliseDescricao(description: string): AnaliseAutomaticaConf
 function montarDescricaoConfigAnalise(config: AnaliseAutomaticaConfig): string {
   return [
     `Ativo: ${config.ativo}`,
-    `Modo: ${config.modo}`,
-    `IntervaloMinutos: ${config.intervaloMinutos}`,
-    `QuantidadeMinima: ${config.quantidadeMinima}`,
     `AtualizadoPor: ${config.atualizadoPor}`,
     `AtualizadoEm: ${config.atualizadoEm}`,
     `UltimaExecucaoEm: ${config.ultimaExecucaoEm ?? ''}`,
@@ -780,18 +768,8 @@ async function executarAnaliseAutomatica(empresa: EmpresaKey, flag: FlagKey, tok
     return { executado: false, motivo: 'sem pendentes', config };
   }
 
-  if (config.modo === 'tempo') {
-    const ultimaMs = config.ultimaExecucaoEm ? new Date(config.ultimaExecucaoEm).getTime() : 0;
-    const intervaloMs = config.intervaloMinutos * 60 * 1000;
-    if (ultimaMs && Date.now() - ultimaMs < intervaloMs) {
-      return { executado: false, motivo: 'aguardando intervalo', config };
-    }
-  } else {
-    if (pendentes.length < config.quantidadeMinima) {
-      return { executado: false, motivo: 'abaixo do minimo', config };
-    }
-  }
-
+  // Cadência (horários fixos seg-sex) é controlada pelo cron do Trigger.dev,
+  // não aqui — quando essa action é chamada e está ativo, processa tudo que tiver.
   const statusAnalisado = await resolveStatusName(listId, token, 'analisado', 'Analisado');
 
   const resultados = await mapWithConcurrency(pendentes, 4, async (task) => {
@@ -1609,13 +1587,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       const atualizadoPor = String(body.atualizadoPor ?? '').trim() || 'Admin';
       const partial: Partial<AnaliseAutomaticaConfig> = {
         ativo: typeof body.ativo === 'boolean' ? body.ativo : undefined,
-        modo: body.modo === 'quantidade' ? 'quantidade' : body.modo === 'tempo' ? 'tempo' : undefined,
-        intervaloMinutos: Number.isFinite(Number(body.intervaloMinutos))
-          ? Math.max(5, Math.round(Number(body.intervaloMinutos)))
-          : undefined,
-        quantidadeMinima: Number.isFinite(Number(body.quantidadeMinima))
-          ? Math.max(1, Math.min(99999, Math.round(Number(body.quantidadeMinima))))
-          : undefined,
       };
       const config = await salvarConfigAnaliseAutomatica(empresa, token, partial, atualizadoPor);
       return res.status(200).json({ config, empresa });

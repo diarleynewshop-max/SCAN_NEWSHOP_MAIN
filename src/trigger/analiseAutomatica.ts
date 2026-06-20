@@ -3,14 +3,15 @@ import { schedules } from "@trigger.dev/sdk/v3";
 const EMPRESAS = ["NEWSHOP", "SOYE", "FACIL"] as const;
 const FLAGS = ["loja", "cd"] as const;
 
-// Roda a cada 5 minutos e pergunta ao /api/clickup-proxy (action=executar-analise-automatica)
-// se cada empresa tem a Análise Automática ligada e se já é hora/quantidade de mover
-// os pedidos de "to do" (pendente) para "Analisado". A decisão de ligar/desligar e o modo
-// (tempo ou quantidade) ficam guardados numa task de config no próprio ClickUp,
+// Roda seg-sex às 8h, 12h, 15h e 17h (America/Fortaleza) e pergunta ao
+// /api/clickup-proxy (action=executar-analise-automatica) se cada empresa tem a
+// Análise Automática ligada — se sim, move todos os pedidos de "to do" (pendente)
+// para "Analisado" nesse momento. Sem checagem de tempo/quantidade aqui: a cadência
+// é só este horário fixo. O on/off fica guardado numa task de config no ClickUp,
 // editável só por admin na tela de Configurações do app.
 export const analiseAutomatica = schedules.task({
   id: "analise-automatica-clickup",
-  cron: "*/5 * * * *",
+  cron: { pattern: "0 8,12,15,17 * * 1-5", timezone: "America/Fortaleza" },
   maxDuration: 120,
   run: async () => {
     const baseUrl = process.env.APP_BASE_URL;

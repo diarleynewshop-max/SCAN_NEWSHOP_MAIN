@@ -1,5 +1,5 @@
 ﻿import { useNavigate, useSearchParams } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Lock, Shield, Package, Kanban, Zap, Clock, Hash, PlayCircle } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Lock, Shield, Package, Kanban, Zap, PlayCircle } from "lucide-react";
 import { useState, useEffect } from "react";
 import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -321,7 +321,7 @@ const Home = () => {
       .finally(() => setAnaliseAutoLoading(false));
   }, [mostrarConfiguracoes, loginSalvo?.empresa]);
 
-  const salvarAnaliseAuto = async (partial: Partial<Pick<AnaliseAutomaticaConfig, "ativo" | "modo" | "intervaloMinutos" | "quantidadeMinima">>) => {
+  const salvarAnaliseAuto = async (partial: Partial<Pick<AnaliseAutomaticaConfig, "ativo">>) => {
     if (!loginSalvo?.empresa || !podeEditarAnaliseAuto) return;
     setAnaliseAutoSalvando(true);
     try {
@@ -347,7 +347,7 @@ const Home = () => {
       if (resultado.executado) {
         toast({ title: "Análise automática executada", description: `${resultado.processado} pedido(s) movido(s) para Analisado.` });
       } else {
-        toast({ title: "Nada para fazer agora", description: resultado.motivo === "sem pendentes" ? "Não há pedidos pendentes." : resultado.motivo === "aguardando intervalo" ? "Ainda não chegou a hora do próximo ciclo." : resultado.motivo === "abaixo do minimo" ? "Quantidade de pendentes ainda não atingiu o mínimo." : "Análise automática está desligada." });
+        toast({ title: "Nada para fazer agora", description: resultado.motivo === "sem pendentes" ? "Não há pedidos pendentes." : "Análise automática está desligada." });
       }
     } catch (e: any) {
       toast({ title: "Erro ao executar", description: e.message, variant: "destructive" });
@@ -1372,96 +1372,13 @@ const Home = () => {
                     )}
                   </div>
 
-                  {!podeEditarAnaliseAuto && (
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
-                      Apenas ADMIN pode ligar/configurar. {analiseAutoConfig?.ativo
-                        ? `Modo ${analiseAutoConfig.modo === "tempo" ? `por tempo (a cada ${analiseAutoConfig.intervaloMinutos} min)` : `por quantidade (a partir de ${analiseAutoConfig.quantidadeMinima} pedido(s))`}.`
-                        : ""}
-                    </p>
-                  )}
+                  <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
+                    {!podeEditarAnaliseAuto && "Apenas ADMIN pode ligar/desligar. "}
+                    Roda automaticamente seg-sex às 8h, 12h, 15h e 17h{analiseAutoConfig?.ativo ? "." : " quando ligado."}
+                  </p>
 
                   {podeEditarAnaliseAuto && analiseAutoConfig?.ativo && (
                     <div style={{ display: "flex", flexDirection: "column", gap: 10, paddingTop: 10, borderTop: "1px solid hsl(var(--border))" }}>
-                      {/* Modo */}
-                      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-                        <button
-                          onClick={() => salvarAnaliseAuto({ modo: "tempo" })}
-                          disabled={analiseAutoSalvando}
-                          style={{
-                            height: 38, borderRadius: 8, fontSize: 12, fontWeight: 700,
-                            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                            cursor: "pointer",
-                            background: analiseAutoConfig.modo === "tempo" ? "hsl(var(--foreground))" : "hsl(var(--background))",
-                            color: analiseAutoConfig.modo === "tempo" ? "hsl(var(--background))" : "hsl(var(--foreground))",
-                            border: "1.5px solid hsl(var(--border))",
-                          }}
-                        >
-                          <Clock style={{ width: 14, height: 14 }} /> Por tempo
-                        </button>
-                        <button
-                          onClick={() => salvarAnaliseAuto({ modo: "quantidade" })}
-                          disabled={analiseAutoSalvando}
-                          style={{
-                            height: 38, borderRadius: 8, fontSize: 12, fontWeight: 700,
-                            display: "flex", alignItems: "center", justifyContent: "center", gap: 6,
-                            cursor: "pointer",
-                            background: analiseAutoConfig.modo === "quantidade" ? "hsl(var(--foreground))" : "hsl(var(--background))",
-                            color: analiseAutoConfig.modo === "quantidade" ? "hsl(var(--background))" : "hsl(var(--foreground))",
-                            border: "1.5px solid hsl(var(--border))",
-                          }}
-                        >
-                          <Hash style={{ width: 14, height: 14 }} /> Por pedido
-                        </button>
-                      </div>
-
-                      {analiseAutoConfig.modo === "tempo" ? (
-                        <div>
-                          <label style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>
-                            Varrer a cada quantos minutos (ex: 30, 60, 480 = 8h, 720 = 12h)
-                          </label>
-                          <input
-                            type="number"
-                            min={5}
-                            max={1440}
-                            defaultValue={analiseAutoConfig.intervaloMinutos}
-                            key={`intervalo-${analiseAutoConfig.intervaloMinutos}`}
-                            onBlur={(e) => {
-                              const v = Math.max(5, Math.min(1440, Number(e.target.value) || analiseAutoConfig.intervaloMinutos));
-                              if (v !== analiseAutoConfig.intervaloMinutos) salvarAnaliseAuto({ intervaloMinutos: v });
-                            }}
-                            disabled={analiseAutoSalvando}
-                            style={{
-                              width: "100%", height: 40, padding: "0 12px", borderRadius: 8,
-                              border: "1.5px solid hsl(var(--border))", background: "hsl(var(--background))",
-                              color: "hsl(var(--foreground))", fontSize: 14, fontWeight: 600, outline: "none", boxSizing: "border-box",
-                            }}
-                          />
-                        </div>
-                      ) : (
-                        <div>
-                          <label style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 4, display: "block" }}>
-                            Mover quando houver pelo menos quantos pedidos pendentes (1 a 99999)
-                          </label>
-                          <input
-                            type="number"
-                            min={1}
-                            max={99999}
-                            defaultValue={analiseAutoConfig.quantidadeMinima}
-                            key={`quantidade-${analiseAutoConfig.quantidadeMinima}`}
-                            onBlur={(e) => {
-                              const v = Math.max(1, Math.min(99999, Number(e.target.value) || analiseAutoConfig.quantidadeMinima));
-                              if (v !== analiseAutoConfig.quantidadeMinima) salvarAnaliseAuto({ quantidadeMinima: v });
-                            }}
-                            disabled={analiseAutoSalvando}
-                            style={{
-                              width: "100%", height: 40, padding: "0 12px", borderRadius: 8,
-                              border: "1.5px solid hsl(var(--border))", background: "hsl(var(--background))",
-                              color: "hsl(var(--foreground))", fontSize: 14, fontWeight: 600, outline: "none", boxSizing: "border-box",
-                            }}
-                          />
-                        </div>
-                      )}
-
                       <button
                         onClick={executarAnaliseAutoAgora}
                         disabled={analiseAutoExecutando}
@@ -1487,12 +1404,6 @@ const Home = () => {
                         </p>
                       )}
                     </div>
-                  )}
-
-                  {podeEditarAnaliseAuto && !analiseAutoConfig?.ativo && (
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, borderTop: "1px solid hsl(var(--border))" }}>
-                      Quando ligar, escolha entre varrer por tempo (ex: a cada 30min) ou mover automaticamente quando acumular X pedidos pendentes.
-                    </p>
                   )}
                 </div>
               )}
