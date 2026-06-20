@@ -49,6 +49,7 @@ type CompraProdutoInterno = {
   status_clickup: string;
   date_created: string;
   tags: unknown;
+  vezesPedido?: number;
 };
 
 function getSingle(value: unknown): string {
@@ -288,15 +289,18 @@ function shouldReplaceDuplicate(kept: CompraProdutoInterno, candidate: CompraPro
 
 function deduplicateProdutosCompras(produtos: CompraProdutoInterno[]) {
   const byProduct = new Map<string, CompraProdutoInterno>();
+  const contagemPorChave = new Map<string, number>();
   const semChave: CompraProdutoInterno[] = [];
   const repetidos: CompraProdutoInterno[] = [];
 
   for (const produto of produtos) {
     const key = getProdutoDuplicateKey(produto);
     if (!key) {
-      semChave.push(produto);
+      semChave.push({ ...produto, vezesPedido: 1 });
       continue;
     }
+
+    contagemPorChave.set(key, (contagemPorChave.get(key) ?? 0) + 1);
 
     const kept = byProduct.get(key);
     if (!kept) {
@@ -312,8 +316,13 @@ function deduplicateProdutosCompras(produtos: CompraProdutoInterno[]) {
     }
   }
 
+  const produtosUnicos = [...byProduct.entries()].map(([key, produto]) => ({
+    ...produto,
+    vezesPedido: contagemPorChave.get(key) ?? 1,
+  }));
+
   return {
-    produtos: [...semChave, ...byProduct.values()],
+    produtos: [...semChave, ...produtosUnicos],
     repetidos,
   };
 }

@@ -846,7 +846,12 @@ const Compras = () => {
                           </div>
                         )}
                         <div className="min-w-0">
-                          <div className="font-bold text-sm">{produto.codigo}</div>
+                          <div className="flex items-center gap-2">
+                            <div className="font-bold text-sm">{produto.codigo}</div>
+                            <span className="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800">
+                              {produto.vezesPedido}x
+                            </span>
+                          </div>
                           <div className="text-sm text-gray-600 break-words leading-tight">{descricao}</div>
                           {produtoErp?.secao && <div className="text-xs text-indigo-600">{produtoErp.secao}</div>}
                           {produto.sku && <div className="text-xs text-gray-400">{produto.sku}</div>}
@@ -1063,7 +1068,12 @@ const Compras = () => {
                     )}
 
                     <div className="p-4">
-                      <div className="text-lg font-bold text-gray-900">{produtoAnalise.codigo}</div>
+                      <div className="flex items-center gap-2">
+                        <div className="text-lg font-bold text-gray-900">{produtoAnalise.codigo}</div>
+                        <span className="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800">
+                          {produtoAnalise.vezesPedido}x
+                        </span>
+                      </div>
                       <div className="text-sm text-gray-700 mt-1">{descricaoAnalise}</div>
                       {produtoAnaliseErp?.secao && (
                         <div className="text-xs text-indigo-600 mt-2">Secao: {produtoAnaliseErp.secao}</div>

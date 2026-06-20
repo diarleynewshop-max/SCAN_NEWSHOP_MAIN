@@ -9,6 +9,7 @@ export interface ProdutoComprar {
   foto: string | null;
   status: CompraStatusApp;
   date_created: string;
+  vezesPedido: number;
 }
 
 export type CompraStatusApp =
@@ -88,14 +89,21 @@ function deveSubstituirProduto(mantido: ProdutoComprar, candidato: ProdutoCompra
 
 function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
   const porProduto = new Map<string, ProdutoComprar>();
+  // Soma vezesPedido em vez de contar ocorrências brutas: o servidor já manda os
+  // produtos deduplicados com a contagem real, então essa passagem precisa ser
+  // idempotente (não pode "resetar" pra 1 quando já não há duplicado no array).
+  const somaPorChave = new Map<string, number>();
   const semChave: ProdutoComprar[] = [];
 
   for (const produto of produtos) {
     const key = getProdutoKey(produto);
+    const vezes = produto.vezesPedido ?? 1;
     if (!key) {
-      semChave.push(produto);
+      semChave.push({ ...produto, vezesPedido: vezes });
       continue;
     }
+
+    somaPorChave.set(key, (somaPorChave.get(key) ?? 0) + vezes);
 
     const mantido = porProduto.get(key);
     if (!mantido || deveSubstituirProduto(mantido, produto)) {
@@ -103,7 +111,12 @@ function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
     }
   }
 
-  return [...semChave, ...porProduto.values()];
+  const resultado = [...porProduto.entries()].map(([key, produto]) => ({
+    ...produto,
+    vezesPedido: somaPorChave.get(key) ?? 1,
+  }));
+
+  return [...semChave, ...resultado];
 }
 
 function isAbortError(err: unknown): boolean {
