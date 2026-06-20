@@ -21,8 +21,8 @@ function getApiKey(empresa: string | undefined): string | undefined {
 }
 
 interface ItemExpedicao {
-  codigo: string;
-  ean?: string | null;
+  descricao: string;
+  ean: string;
   quantidadeReal: number;
 }
 
@@ -53,8 +53,8 @@ export const expedicaoSync = task({
     }
 
     const itensApi = payload.itens.map((item) => ({
-      descricao: item.codigo,
-      ...(item.ean ? { ean: item.ean } : {}),
+      descricao: item.descricao,
+      ean: item.ean,
       quantidade: item.quantidadeReal,
     }));
 

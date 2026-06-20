@@ -546,7 +546,7 @@ function montarDescricaoPendente(info: Omit<PendenteInfo, 'dateKey'>): string {
   return linhas.join('\n');
 }
 
-async function atualizarTaskClickUp(taskId: string, updates: { name?: string; description?: string }, token: string): Promise<void> {
+async function atualizarTaskClickUp(taskId: string, updates: { name?: string; description?: string; status?: string }, token: string): Promise<void> {
   const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
     method: 'PUT',
     headers: { Authorization: token, 'Content-Type': 'application/json' },
@@ -617,6 +617,200 @@ async function buscarTasksPendentes(empresa: EmpresaKey, flag: FlagKey, token: s
   }
 
   return pendentes;
+}
+
+// ── Análise Automática: move tasks "to do" (pendente) para "analisado" sozinho ────
+// Config fica guardada numa task fixa por empresa (mesmo padrão dos relatórios),
+// usando o status "Relatorio" pra não ser contada como pendente pela própria automação.
+
+interface AnaliseAutomaticaConfig {
+  ativo: boolean;
+  modo: 'tempo' | 'quantidade';
+  intervaloMinutos: number;
+  quantidadeMinima: number;
+  atualizadoPor: string;
+  atualizadoEm: string;
+  ultimaExecucaoEm: string | null;
+  ultimoProcessado: number;
+}
+
+const CONFIG_ANALISE_DEFAULT: AnaliseAutomaticaConfig = {
+  ativo: false,
+  modo: 'tempo',
+  intervaloMinutos: 30,
+  quantidadeMinima: 5,
+  atualizadoPor: '',
+  atualizadoEm: '',
+  ultimaExecucaoEm: null,
+  ultimoProcessado: 0,
+};
+
+const CONFIG_ANALISE_TASK_PREFIX = '⚙️ CONFIG ANALISE AUTOMATICA';
+const CONFIG_ANALISE_STATUS_CANDIDATES = ['Relatorio', 'RELATORIO', 'Relatório', 'RELATÓRIO', 'to do'];
+
+function nomeConfigAnaliseTask(empresa: EmpresaKey): string {
+  return `${CONFIG_ANALISE_TASK_PREFIX} - ${empresa}`;
+}
+
+function parseConfigAnaliseDescricao(description: string): AnaliseAutomaticaConfig {
+  const getBool = (label: string, def: boolean) => {
+    const m = description.match(new RegExp(`^${label}:\\s*(true|false)`, 'im'));
+    return m ? m[1] === 'true' : def;
+  };
+  const getNum = (label: string, def: number) => {
+    const m = description.match(new RegExp(`^${label}:\\s*(-?\\d+)`, 'im'));
+    return m ? Number(m[1]) : def;
+  };
+  const getStr = (label: string, def: string) => {
+    const m = description.match(new RegExp(`^${label}:\\s*(.*)$`, 'im'));
+    return m ? m[1].trim() : def;
+  };
+
+  return {
+    ativo: getBool('Ativo', CONFIG_ANALISE_DEFAULT.ativo),
+    modo: getStr('Modo', CONFIG_ANALISE_DEFAULT.modo) === 'quantidade' ? 'quantidade' : 'tempo',
+    intervaloMinutos: getNum('IntervaloMinutos', CONFIG_ANALISE_DEFAULT.intervaloMinutos),
+    quantidadeMinima: getNum('QuantidadeMinima', CONFIG_ANALISE_DEFAULT.quantidadeMinima),
+    atualizadoPor: getStr('AtualizadoPor', ''),
+    atualizadoEm: getStr('AtualizadoEm', ''),
+    ultimaExecucaoEm: getStr('UltimaExecucaoEm', '') || null,
+    ultimoProcessado: getNum('UltimoProcessado', 0),
+  };
+}
+
+function montarDescricaoConfigAnalise(config: AnaliseAutomaticaConfig): string {
+  return [
+    `Ativo: ${config.ativo}`,
+    `Modo: ${config.modo}`,
+    `IntervaloMinutos: ${config.intervaloMinutos}`,
+    `QuantidadeMinima: ${config.quantidadeMinima}`,
+    `AtualizadoPor: ${config.atualizadoPor}`,
+    `AtualizadoEm: ${config.atualizadoEm}`,
+    `UltimaExecucaoEm: ${config.ultimaExecucaoEm ?? ''}`,
+    `UltimoProcessado: ${config.ultimoProcessado}`,
+  ].join('\n');
+}
+
+async function buscarConfigAnaliseTaskRaw(empresa: EmpresaKey, token: string): Promise<any | null> {
+  const listId = getListId(empresa, 'loja');
+  const rawTasks = await fetchTasksFromList(listId, token, true);
+  const nome = nomeConfigAnaliseTask(empresa);
+  return rawTasks.find((t) => String(t.name ?? '') === nome) ?? null;
+}
+
+async function lerConfigAnaliseAutomatica(empresa: EmpresaKey, token: string): Promise<AnaliseAutomaticaConfig> {
+  const task = await buscarConfigAnaliseTaskRaw(empresa, token);
+  if (!task) return { ...CONFIG_ANALISE_DEFAULT };
+  return parseConfigAnaliseDescricao(String(task.description ?? task.text_content ?? ''));
+}
+
+async function salvarConfigAnaliseAutomatica(
+  empresa: EmpresaKey,
+  token: string,
+  partial: Partial<AnaliseAutomaticaConfig>,
+  atualizadoPor?: string
+): Promise<AnaliseAutomaticaConfig> {
+  const task = await buscarConfigAnaliseTaskRaw(empresa, token);
+  const atual = task
+    ? parseConfigAnaliseDescricao(String(task.description ?? task.text_content ?? ''))
+    : { ...CONFIG_ANALISE_DEFAULT };
+
+  const novo: AnaliseAutomaticaConfig = {
+    ...atual,
+    ...Object.fromEntries(Object.entries(partial).filter(([, v]) => v !== undefined)),
+  };
+  if (atualizadoPor) {
+    novo.atualizadoPor = atualizadoPor;
+    novo.atualizadoEm = new Date().toISOString();
+  }
+
+  const descricao = montarDescricaoConfigAnalise(novo);
+
+  if (task) {
+    await atualizarTaskClickUp(task.id, { description: descricao }, token);
+  } else {
+    const listId = getListId(empresa, 'loja');
+    let criado = false;
+    let lastError = '';
+    for (const status of CONFIG_ANALISE_STATUS_CANDIDATES) {
+      try {
+        await criarTaskSimples(listId, nomeConfigAnaliseTask(empresa), descricao, status, token);
+        criado = true;
+        break;
+      } catch (e: any) {
+        lastError = e.message;
+      }
+    }
+    if (!criado) throw new Error(`Nao foi possivel criar task de configuracao: ${lastError}`);
+  }
+
+  return novo;
+}
+
+async function resolveStatusName(
+  listId: string,
+  token: string,
+  normalizedTarget: string,
+  fallback: string
+): Promise<string> {
+  try {
+    const resp = await fetch(`https://api.clickup.com/api/v2/list/${listId}`, { headers: { Authorization: token } });
+    if (!resp.ok) return fallback;
+    const data = await resp.json();
+    const statuses: Array<{ status: string }> = Array.isArray(data.statuses) ? data.statuses : [];
+    const found = statuses.find((s) => normalizeStatus(s.status) === normalizedTarget);
+    return found?.status ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+async function executarAnaliseAutomatica(empresa: EmpresaKey, flag: FlagKey, token: string) {
+  const config = await lerConfigAnaliseAutomatica(empresa, token);
+  if (!config.ativo) return { executado: false, motivo: 'desativado', config };
+
+  const listId = getListId(empresa, flag);
+  const rawTasks = await fetchTasksFromList(listId, token, false);
+  const nomeConfig = nomeConfigAnaliseTask(empresa);
+  const pendentes = rawTasks.filter(
+    (t) => normalizeStatus(t.status?.status) === 'to do' && String(t.name ?? '') !== nomeConfig
+  );
+
+  if (pendentes.length === 0) {
+    return { executado: false, motivo: 'sem pendentes', config };
+  }
+
+  if (config.modo === 'tempo') {
+    const ultimaMs = config.ultimaExecucaoEm ? new Date(config.ultimaExecucaoEm).getTime() : 0;
+    const intervaloMs = config.intervaloMinutos * 60 * 1000;
+    if (ultimaMs && Date.now() - ultimaMs < intervaloMs) {
+      return { executado: false, motivo: 'aguardando intervalo', config };
+    }
+  } else {
+    if (pendentes.length < config.quantidadeMinima) {
+      return { executado: false, motivo: 'abaixo do minimo', config };
+    }
+  }
+
+  const statusAnalisado = await resolveStatusName(listId, token, 'analisado', 'Analisado');
+
+  const resultados = await mapWithConcurrency(pendentes, 4, async (task) => {
+    try {
+      await atualizarTaskClickUp(task.id, { status: statusAnalisado }, token);
+      return { taskId: task.id, ok: true };
+    } catch (e: any) {
+      return { taskId: task.id, ok: false, erro: e?.message ?? 'erro desconhecido' };
+    }
+  });
+
+  const movidos = resultados.filter((r) => r.ok).length;
+
+  const novaConfig = await salvarConfigAnaliseAutomatica(empresa, token, {
+    ultimaExecucaoEm: new Date().toISOString(),
+    ultimoProcessado: movidos,
+  });
+
+  return { executado: true, processado: movidos, total: pendentes.length, resultados, config: novaConfig };
 }
 
 const RELATORIO_DASHBOARD_STATUS_CANDIDATES = ['Relatorio', 'RELATORIO', 'Relatório', 'RELATÓRIO'];
@@ -1404,6 +1598,40 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       return res.status(200).json(relatorio);
     }
 
+    if (action === 'obter-config-analise-automatica') {
+      const config = await lerConfigAnaliseAutomatica(empresa, token);
+      res.setHeader('Cache-Control', 'no-store');
+      return res.status(200).json({ config, empresa });
+    }
+
+    if (action === 'salvar-config-analise-automatica') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const atualizadoPor = String(body.atualizadoPor ?? '').trim() || 'Admin';
+      const partial: Partial<AnaliseAutomaticaConfig> = {
+        ativo: typeof body.ativo === 'boolean' ? body.ativo : undefined,
+        modo: body.modo === 'quantidade' ? 'quantidade' : body.modo === 'tempo' ? 'tempo' : undefined,
+        intervaloMinutos: Number.isFinite(Number(body.intervaloMinutos))
+          ? Math.max(5, Math.round(Number(body.intervaloMinutos)))
+          : undefined,
+        quantidadeMinima: Number.isFinite(Number(body.quantidadeMinima))
+          ? Math.max(1, Math.min(99999, Math.round(Number(body.quantidadeMinima))))
+          : undefined,
+      };
+      const config = await salvarConfigAnaliseAutomatica(empresa, token, partial, atualizadoPor);
+      return res.status(200).json({ config, empresa });
+    }
+
+    if (action === 'executar-analise-automatica') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const cronSecretEsperado = process.env.CRON_SECRET;
+      if (cronSecretEsperado) {
+        const recebido = getSingle(req.headers['x-cron-secret'] ?? req.query.cronSecret);
+        if (recebido !== cronSecretEsperado) return res.status(401).json({ error: 'Nao autorizado' });
+      }
+      const resultado = await executarAnaliseAutomatica(empresa, flag, token);
+      return res.status(200).json(resultado);
+    }
+
     if (action === 'buscar-meus-pedidos') {
       // Retorna TODOS os pedidos da lista; filtro por pessoa é feito no frontend
       const listId = getListId(empresa, flag);
@@ -1788,8 +2016,28 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         return desc.includes('PENDENTES');
       }).length;
 
+      // porDia: contagem de conferências concluídas por dia (dados em tempo real,
+      // não depende de relatórios "Relatorio - ..." salvos manualmente no /dashboard)
+      const diasKeys: string[] = [];
+      for (let i = 6; i >= 0; i--) {
+        const d = new Date();
+        d.setDate(d.getDate() - i);
+        diasKeys.push(formatDateKey(d));
+      }
+      const contagemPorDia = new Map(diasKeys.map((k) => [k, 0]));
+      for (const t of allTasks) {
+        const st = normalizeStatus(t.status?.status);
+        if (st !== 'complete' && st !== 'concluido' && st !== 'concluído') continue;
+        if (String(t.name ?? '').startsWith('Relatorio - ')) continue;
+        const dateKey = taskReportDateKey(t);
+        if (dateKey && contagemPorDia.has(dateKey)) {
+          contagemPorDia.set(dateKey, (contagemPorDia.get(dateKey) ?? 0) + 1);
+        }
+      }
+      const porDia = diasKeys.map((data) => ({ data, valor: contagemPorDia.get(data) ?? 0 }));
+
       res.setHeader('Cache-Control', 'private, max-age=120, stale-while-revalidate=60');
-      return res.status(200).json({ paraConferir, conferidas, ultimos7Dias, itensPendentes, empresa, flag });
+      return res.status(200).json({ paraConferir, conferidas, ultimos7Dias, itensPendentes, porDia, empresa, flag });
     }
 
     if (action === 'listar-tasks-pendentes') {

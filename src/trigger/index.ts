@@ -695,8 +695,8 @@ ${itensPendentesTexto}
             empresa: payload.empresa ?? "NEWSHOP",
             dataConferencia: payload.dataConferencia,
             itens: itensSeparadosEParciais.map((i: any) => ({
-              codigo: i.codigo,
-              ean: i.ean ?? null,
+              descricao: i.sku || i.codigo,
+              ean: i.codigo,
               quantidadeReal: i.quantidadeReal ?? 0,
             })),
           });

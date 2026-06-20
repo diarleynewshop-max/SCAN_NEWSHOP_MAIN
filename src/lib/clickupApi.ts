@@ -338,6 +338,7 @@ export interface DashboardKpis {
   conferidas: number;
   ultimos7Dias: number;
   itensPendentes: number;
+  porDia: { data: string; valor: number }[];
 }
 
 export async function buscarDashboardKpis(
@@ -347,6 +348,59 @@ export async function buscarDashboardKpis(
   const params = new URLSearchParams({ action: 'buscar-dashboard-kpis', empresa, flag });
   const response = await fetch(`/api/clickup-proxy?${params}`);
   if (!response.ok) throw new Error(`Erro ${response.status} ao buscar KPIs do dashboard`);
+  return await response.json();
+}
+
+export interface AnaliseAutomaticaConfig {
+  ativo: boolean;
+  modo: "tempo" | "quantidade";
+  intervaloMinutos: number;
+  quantidadeMinima: number;
+  atualizadoPor: string;
+  atualizadoEm: string;
+  ultimaExecucaoEm: string | null;
+  ultimoProcessado: number;
+}
+
+export async function obterConfigAnaliseAutomatica(empresa: EmpresaKey): Promise<AnaliseAutomaticaConfig> {
+  const params = new URLSearchParams({ action: "obter-config-analise-automatica", empresa });
+  const response = await fetch(`/api/clickup-proxy?${params}`);
+  if (!response.ok) throw new Error(`Erro ${response.status} ao buscar configuração de análise automática`);
+  const data = await response.json();
+  return data.config;
+}
+
+export async function salvarConfigAnaliseAutomatica(
+  empresa: EmpresaKey,
+  partial: Partial<Pick<AnaliseAutomaticaConfig, "ativo" | "modo" | "intervaloMinutos" | "quantidadeMinima">>,
+  atualizadoPor: string
+): Promise<AnaliseAutomaticaConfig> {
+  const params = new URLSearchParams({ action: "salvar-config-analise-automatica", empresa });
+  const response = await fetch(`/api/clickup-proxy?${params}`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ ...partial, atualizadoPor }),
+  });
+  if (!response.ok) throw new Error(`Erro ${response.status} ao salvar configuração de análise automática`);
+  const data = await response.json();
+  return data.config;
+}
+
+export interface ExecutarAnaliseAutomaticaResultado {
+  executado: boolean;
+  motivo?: string;
+  processado?: number;
+  total?: number;
+  config: AnaliseAutomaticaConfig;
+}
+
+export async function executarAnaliseAutomaticaAgora(
+  empresa: EmpresaKey,
+  flag: FlagKey = "loja"
+): Promise<ExecutarAnaliseAutomaticaResultado> {
+  const params = new URLSearchParams({ action: "executar-analise-automatica", empresa, flag });
+  const response = await fetch(`/api/clickup-proxy?${params}`, { method: "POST" });
+  if (!response.ok) throw new Error(`Erro ${response.status} ao executar análise automática`);
   return await response.json();
 }
 

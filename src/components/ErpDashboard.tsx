@@ -47,18 +47,12 @@ function emptyDays() {
 }
 
 
-function buildPorDiaFromRelatorios(relatorios: RelatorioSalvo[]): { dia: string; valor: number }[] {
-  const out = emptyDays();
-  for (const r of relatorios) {
-    // r.data é "YYYY-MM-DD"
-    const parts = r.data.split("-");
-    if (parts.length !== 3) continue;
+function buildPorDiaFromKpis(porDia: { data: string; valor: number }[]): { dia: string; valor: number }[] {
+  return porDia.map(({ data, valor }) => {
+    const parts = data.split("-");
     const d = new Date(Number(parts[0]), Number(parts[1]) - 1, Number(parts[2]));
-    const label = diaLabel(d);
-    const slot = out.find(o => o.dia === label);
-    if (slot) slot.valor = r.totalConferencias;
-  }
-  return out;
+    return { dia: diaLabel(d), valor };
+  });
 }
 
 function diaLabel(d: Date) {
@@ -207,7 +201,6 @@ interface ClickUpSummary {
   pendente: number;
   totalItens: number;
   totalConferencias: number;
-  porDia: { dia: string; valor: number }[];
 }
 
 export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
@@ -262,9 +255,8 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
           }),
           { separado: 0, naoTem: 0, parcial: 0, pendente: 0, totalItens: 0, totalConferencias: 0 }
         );
-        const summary: ClickUpSummary = { ...resumo, porDia: buildPorDiaFromRelatorios(ultimos7) };
-        setCuSummary(summary);
-        salvarCacheDash(summaryKey, summary);
+        setCuSummary(resumo);
+        salvarCacheDash(summaryKey, resumo);
         setLastFetch(Date.now());
       })
       .catch(err => setCuError(err.message ?? "Erro ao buscar dados do ClickUp"))
@@ -278,8 +270,8 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [loginSalvo?.empresa, loginSalvo?.flag]);
 
-  const porDia = cuSummary ? cuSummary.porDia : emptyDays();
-  const totalChart = cuSummary ? cuSummary.totalConferencias : 0;
+  const porDia = kpis?.porDia ? buildPorDiaFromKpis(kpis.porDia) : emptyDays();
+  const totalChart = kpis?.porDia ? kpis.porDia.reduce((sum, d) => sum + d.valor, 0) : 0;
 
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 28, maxWidth: 1400 }}>
@@ -414,7 +406,7 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
               ⚠ {cuError}
             </p>
           )}
-          <BarChart7Dias data={porDia} loading={cuLoading} />
+          <BarChart7Dias data={porDia} loading={kpisLoading} />
           {lastFetch > 0 && (
             <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))", marginTop: 10, fontFamily: "var(--font-mono)" }}>
               ClickUp · atualizado {new Date(lastFetch).toLocaleTimeString("pt-BR", { hour: "2-digit", minute: "2-digit" })}
