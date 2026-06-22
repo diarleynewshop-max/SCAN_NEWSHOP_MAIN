@@ -626,6 +626,156 @@ async function moverStatusCompra(
   });
 }
 
+// ── Conferencia de Galpao ─────────────────────────────────────────────────────
+// Itens com status "produto_bom" (Pode ser que tem no Galpao) sao conferidos
+// 1 a 1: se TEM, o frontend dispara o trigger normal de conferencia (mesma
+// logica de loja, gera relatorio + expedicao) e essa task de Compras e
+// excluida. Se NAO TEM, a task volta pra "to do" com a tag abaixo, e fica de
+// fora dessa fila pra sempre (nao volta a aparecer em Conferencia de Galpao).
+const ITEM_REALMENTE_NAO_TEM_TAG = 'ITEM REALMENTE NAO TEM';
+
+function taskHasNamedTag(tags: unknown, tagName: string): boolean {
+  if (!Array.isArray(tags)) return false;
+  const alvo = normalizeClickUpStatus(tagName);
+  return tags.some((tag) => {
+    const nome = typeof tag === 'string' ? tag : String((tag as Record<string, unknown> | null)?.name ?? '');
+    return normalizeClickUpStatus(nome) === alvo;
+  });
+}
+
+async function addTagToTask(token: string, taskId: string, tagName: string): Promise<void> {
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}/tag/${encodeURIComponent(tagName)}`, {
+    method: 'POST',
+    headers: { Authorization: token },
+  });
+  if (!response.ok && response.status !== 409) {
+    throw new Error(`ClickUp ${response.status} ao aplicar tag ${tagName}: ${await response.text()}`);
+  }
+}
+
+function extrairCampoDescricao(descricao: string, label: string): string | null {
+  const match = descricao.match(new RegExp(`^${label}:\\s*(.+)$`, 'im'));
+  return match ? match[1].trim() : null;
+}
+
+async function buscarTasksGalpao(
+  req: VercelRequest,
+  res: VercelResponse,
+  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL',
+  token: string,
+  listId: string
+) {
+  const rawTasks = await fetchAllCompraTasks(token, listId);
+
+  const tasks = (rawTasks as Record<string, unknown>[])
+    .filter((task) => {
+      const status = String((task.status as Record<string, unknown> | undefined)?.status ?? '');
+      if (mapTaskStatus(status) !== 'produto_bom') return false;
+      return !taskHasNamedTag(task.tags, ITEM_REALMENTE_NAO_TEM_TAG);
+    })
+    .map((task) => {
+      const id = String(task.id ?? '');
+      const nome = String(task.name ?? '');
+      const descricao = String(task.description ?? task.text_content ?? '');
+      const pedido = Number(extrairCampoDescricao(descricao, 'Pedido') ?? 0);
+      const secao = extrairCampoDescricao(descricao, 'Secao');
+      const empresaOriginal = extrairCampoDescricao(descricao, 'Empresa');
+      const tipoOriginal = extrairCampoDescricao(descricao, 'Tipo');
+      const conferenteOriginal = extrairCampoDescricao(descricao, 'Conferente');
+
+      return {
+        id,
+        codigo: extractCodigo(nome),
+        sku: extractSku(nome),
+        descricao: extractDescricao(nome),
+        foto: extractFirstImageUrl(task.attachments),
+        secao: secao && secao !== 'Nao informada' ? secao : null,
+        quantidadePedida: Number.isFinite(pedido) && pedido > 0 ? pedido : 1,
+        empresaOriginal: empresaOriginal || empresa,
+        flagOriginal: tipoOriginal?.toUpperCase() === 'CD' ? 'cd' : 'loja',
+        conferenteOriginal: conferenteOriginal || null,
+      };
+    });
+
+  return res.json({ tasks, empresa, total: tasks.length });
+}
+
+async function confirmarGalpaoNaoTem(
+  req: VercelRequest,
+  res: VercelResponse,
+  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL',
+  token: string,
+  listId: string
+) {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const taskId = getSingle(req.query.taskId || (body.taskId as string | undefined)).trim();
+  if (!taskId) return res.status(400).json({ error: 'taskId obrigatorio' });
+
+  let availableStatuses: string[] = [];
+  try {
+    const listResp = await fetch(`https://api.clickup.com/api/v2/list/${listId}`, { headers: { Authorization: token } });
+    if (listResp.ok) {
+      const listData = await listResp.json();
+      availableStatuses = Array.isArray(listData.statuses)
+        ? listData.statuses.map((status: Record<string, unknown>) => String(status?.status ?? '').trim())
+        : [];
+    }
+  } catch {
+    availableStatuses = [];
+  }
+
+  const novoStatus = resolveCompraClickUpStatus('todo', availableStatuses);
+  const candidateStatuses = novoStatus
+    ? [novoStatus, ...getCompraStatusCandidates('todo').filter((alias) => alias.toLowerCase() !== novoStatus.toLowerCase())]
+    : getCompraStatusCandidates('todo');
+
+  let statusAplicado: string | null = null;
+  for (const statusCandidate of candidateStatuses) {
+    const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+      method: 'PUT',
+      headers: { Authorization: token, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: statusCandidate }),
+    });
+    if (response.ok) {
+      statusAplicado = statusCandidate;
+      break;
+    }
+  }
+
+  if (!statusAplicado) {
+    return res.status(409).json({ error: 'Nao foi possivel mover a task para "to do"', taskId, attemptedStatuses: candidateStatuses });
+  }
+
+  try {
+    await addTagToTask(token, taskId, ITEM_REALMENTE_NAO_TEM_TAG);
+  } catch (err) {
+    console.error('[clickup-compras] falha ao aplicar tag de nao-tem:', { taskId, erro: String(err) });
+  }
+
+  return res.json({ ok: true, taskId, status: statusAplicado, empresa });
+}
+
+async function excluirTaskGalpao(
+  req: VercelRequest,
+  res: VercelResponse,
+  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL',
+  token: string
+) {
+  const taskId = getSingle(req.query.taskId || (req.body as Record<string, unknown> | undefined)?.taskId).trim();
+  if (!taskId) return res.status(400).json({ error: 'taskId obrigatorio' });
+
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}`, {
+    method: 'DELETE',
+    headers: { Authorization: token },
+  });
+
+  if (!response.ok && response.status !== 404) {
+    return res.status(response.status).json({ error: await response.text(), taskId, empresa });
+  }
+
+  return res.json({ ok: true, taskId });
+}
+
 function parsePdfDataUrl(value: string): Buffer {
   const match = value.match(/^data:application\/pdf(?:;[^;,]+)*;base64,(.+)$/);
   if (!match) {
@@ -840,6 +990,31 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (!token) return res.status(500).json({ error: 'Token nao configurado', empresa });
 
       return await buscarPdfPedido(req, res, empresa, token);
+    }
+
+    if (action === 'buscar-tasks-galpao') {
+      const token = getClickUpToken(empresa);
+      const listId = getClickUpListId(empresa, 'compras');
+      if (!token) return res.status(500).json({ error: 'Token nao configurado', empresa });
+
+      return await buscarTasksGalpao(req, res, empresa, token, listId);
+    }
+
+    if (action === 'confirmar-galpao-nao-tem') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const token = getClickUpToken(empresa);
+      const listId = getClickUpListId(empresa, 'compras');
+      if (!token) return res.status(500).json({ error: 'Token nao configurado', empresa });
+
+      return await confirmarGalpaoNaoTem(req, res, empresa, token, listId);
+    }
+
+    if (action === 'excluir-task-galpao') {
+      if (req.method !== 'POST') return res.status(405).json({ error: 'Metodo nao permitido' });
+      const token = getClickUpToken(empresa);
+      if (!token) return res.status(500).json({ error: 'Token nao configurado', empresa });
+
+      return await excluirTaskGalpao(req, res, empresa, token);
     }
 
     return res.status(400).json({ error: 'Action invalida', action });

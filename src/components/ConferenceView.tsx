@@ -18,6 +18,7 @@ import {
   Lock,
   RefreshCw,
   ClipboardList,
+  PackageSearch,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
@@ -25,6 +26,7 @@ import JSZip from "jszip";
 import { enviarConferenciaParaClickUp } from "@/lib/webhookRouter";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import EditarPedentesModal from "@/components/EditarPedentesModal";
+import ConferenciaGalpaoModal from "@/components/ConferenciaGalpaoModal";
 import {
   obterSenhaPadrao,
   validarSenha,
@@ -238,6 +240,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [forcarReservaAndamento, setForcarReservaAndamento] = useState(false);
   const [rascunhoDisponivel, setRascunhoDisponivel] = useState(false);
   const [editarPedentesAberto, setEditarPedentesAberto] = useState(false);
+  const [conferenciaGalpaoAberta, setConferenciaGalpaoAberta] = useState(false);
   const empresaRef = useRef(empresaInicial);
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -1669,6 +1672,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                 <ClipboardList className="w-3.5 h-3.5" /> Editar Pedentes
               </button>
             )}
+            <button onClick={() => setConferenciaGalpaoAberta(true)}
+              className="flex items-center gap-1.5 text-xs font-semibold text-primary">
+              <PackageSearch className="w-3.5 h-3.5" /> Conferencia de Galpao
+            </button>
             <button onClick={abrirRelatorioPopup} disabled={gerandoRelatorio || loadingRelatorioDatas}
               className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
               {gerandoRelatorio || loadingRelatorioDatas ? (
@@ -1690,6 +1697,16 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             empresa={empresa as EmpresaKey}
             flag={flag as FlagKey}
             onClose={() => setEditarPedentesAberto(false)}
+            onChanged={() => recarregarTasks()}
+          />
+        )}
+
+        {conferenciaGalpaoAberta && (
+          <ConferenciaGalpaoModal
+            empresa={empresa as EmpresaKey}
+            flag={flag as FlagKey}
+            conferente={conferente}
+            onClose={() => setConferenciaGalpaoAberta(false)}
             onChanged={() => recarregarTasks()}
           />
         )}
