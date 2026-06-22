@@ -525,11 +525,13 @@ const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {
   if (emAndamento) return emAndamento;
 
   const promessa = (async () => {
-    // Nao filtramos por data na query (o ERP tem 2 campos quase iguais, "data" e
-    // "dataVenda" — filtrar pelo nome errado retorna 200 com lista vazia, sem erro,
-    // o que mascarava vendas reais como "0"). Em vez disso paginamos por ordem de
-    // chegada (identificadorId, sequencial) e cortamos no cliente quando os cupons
-    // ficarem mais antigos que o periodo.
+    // Nao confiamos em nenhum nome de campo pra filtrar/ordenar por data: o swagger
+    // do ERP tem campos que nao existem de fato na API real (ja vimos "dataVenda"
+    // filtrar igual a query invalida retornando 200 vazio, e "identificadorId" dar
+    // 422 no sort). Em vez disso pedimos a ordem padrao da API (sem `sort`) e
+    // filtramos a data no cliente, sem assumir que vem ordenado por recencia —
+    // por isso so paramos por "ultima pagina" ou pelo limite de seguranca, nunca
+    // por "pagina toda fora do periodo" (essa heuristica exigiria ordem garantida).
     const dataInicio = new Date();
     dataInicio.setDate(dataInicio.getDate() - VELOCIDADE_DIAS);
     const dataInicioStr = dataInicio.toISOString().slice(0, 10);
@@ -545,7 +547,7 @@ const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {
       let data: ErpListResponse<ErpCupomFiscal> | null = null;
       try {
         data = await fetchJson<ErpListResponse<ErpCupomFiscal>>(
-          `/v1/venda/cupons-fiscais?sort=-identificadorId&start=${start}&count=${VELOCIDADE_PAGE_SIZE}`,
+          `/v1/venda/cupons-fiscais?start=${start}&count=${VELOCIDADE_PAGE_SIZE}`,
           contexto
         );
       } catch (err) {
@@ -562,12 +564,10 @@ const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {
       if (cupons.length === 0) break;
 
       cuponsAnalisados += cupons.length;
-      let algumDentroDoPeriodo = false;
 
       for (const cupom of cupons) {
         const dataKey = cupomDataKey(cupom);
-        if (dataKey && dataKey < dataInicioStr) continue; // cupom mais antigo que o periodo
-        algumDentroDoPeriodo = true;
+        if (dataKey && dataKey < dataInicioStr) continue; // cupom fora do periodo de 90 dias
 
         for (const item of cupom.itensVenda ?? []) {
           if (!item.produtoId) continue;
@@ -577,7 +577,6 @@ const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {
       }
 
       if (cupons.length < VELOCIDADE_PAGE_SIZE) break; // ultima pagina que existe
-      if (!algumDentroDoPeriodo) break; // pagina inteira ja e mais antiga que o periodo
       if (pagina === VELOCIDADE_MAX_PAGINAS - 1) parcial = true;
     }
 
@@ -625,7 +624,7 @@ export interface PedidoCompraAberto {
   quantidadePedida: number;
 }
 
-type ErpFornecedorProduto = { fornecedorId?: number };
+type ErpFornecedorProduto = { fornecedorId?: number; nivel?: "PRINCIPAL" | "SECUNDARIO" };
 type ErpItemPedidoCompra = { produtoId?: number; quantidade?: number; quantidadeCompleta?: number };
 type ErpPedidoCompra = {
   id?: number;
@@ -697,4 +696,70 @@ export const buscarPedidosCompraAbertosPorProduto = async (
   }
 
   return resultado;
+};
+
+// ── Fornecedor principal do produto (pra agrupar pedido em PDF por fornecedor) ───
+
+export interface FornecedorProduto {
+  fornecedorId: string;
+  nome: string;
+}
+
+type ErpFornecedor = { id?: number; nome?: string; fantasia?: string };
+
+const fornecedorNomeCache = new Map<string, string>();
+
+const buscarNomeFornecedor = async (
+  fornecedorId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<string> => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  const cacheKey = `${empresa}:${fornecedorId}`;
+  const cached = fornecedorNomeCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const fornecedor = await fetchJson<ErpFornecedor>(`/v1/pessoa/fornecedores/${fornecedorId}`, contexto);
+    const nome = fornecedor?.fantasia || fornecedor?.nome || `Fornecedor ${fornecedorId}`;
+    fornecedorNomeCache.set(cacheKey, nome);
+    return nome;
+  } catch (err) {
+    console.warn("[VarejoFacil][Fornecedor] Falha ao buscar nome do fornecedor", {
+      fornecedorId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    return `Fornecedor ${fornecedorId}`;
+  }
+};
+
+// Busca o fornecedor PRINCIPAL cadastrado pro produto no ERP (cai pro primeiro
+// disponivel se nenhum estiver marcado como principal). Retorna null se o
+// produto nao tiver nenhum fornecedor cadastrado.
+export const buscarFornecedorPrincipalProduto = async (
+  produtoId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<FornecedorProduto | null> => {
+  if (!produtoId) return null;
+
+  let referencias: ErpFornecedorProduto[] = [];
+  try {
+    const data = await fetchJson<ErpListResponse<ErpFornecedorProduto>>(
+      `/v1/produto/produtos/${produtoId}/fornecedores`,
+      contexto
+    );
+    referencias = data?.items ?? [];
+  } catch (err) {
+    console.warn("[VarejoFacil][Fornecedor] Falha ao buscar fornecedores do produto", {
+      produtoId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+
+  const principal = referencias.find((ref) => ref.nivel === "PRINCIPAL") ?? referencias[0];
+  if (!principal?.fornecedorId) return null;
+
+  const fornecedorId = String(principal.fornecedorId);
+  const nome = await buscarNomeFornecedor(fornecedorId, contexto);
+  return { fornecedorId, nome };
 };

@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
@@ -12,10 +12,19 @@ import {
   buscarProdutoVarejoFacil,
   buscarVelocidadeVendaProduto,
   buscarPedidosCompraAbertosPorProduto,
+  buscarFornecedorPrincipalProduto,
   type VarejoFacilProduct,
   type VelocidadeVendaProduto,
   type PedidoCompraAberto,
 } from "@/lib/varejoFacilIntegration";
+import {
+  gerarPdfPedidoFornecedor,
+  baixarPdfNoNavegador,
+  anexarPdfNaTaskClickUp,
+  buscarPdfAnexadoNaTask,
+  baixarPdfDataUrl,
+  type ItemPedidoPdf,
+} from "@/lib/pedidoFornecedorPdf";
 
 const PAGE_SIZE = 10;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -237,6 +246,9 @@ const Compras = () => {
   const [produtosErp, setProdutosErp] = useState<Record<string, VarejoFacilProduct | null>>({});
   const [velocidadeVendas, setVelocidadeVendas] = useState<Record<string, VelocidadeVendaProduto | null>>({});
   const [fotosClickUp, setFotosClickUp] = useState<Record<string, string | null>>({});
+  const [itensSelecionadosPedido, setItensSelecionadosPedido] = useState<Set<string>>(new Set());
+  const [gerandoPedidos, setGerandoPedidos] = useState(false);
+  const [baixandoPdfPedido, setBaixandoPdfPedido] = useState<string | null>(null);
   const [analiseAberta, setAnaliseAberta] = useState(false);
   const [escolhaDireita, setEscolhaDireita] = useState(false);
   const [dragX, setDragX] = useState(0);
@@ -359,6 +371,143 @@ const Compras = () => {
     } catch (err) {
       console.error("[Compras][PedidoAberto] Checagem falhou", { produtoId, erro: err instanceof Error ? err.message : String(err) });
       return true;
+    }
+  };
+
+  const toggleSelecaoPedido = (produtoId: string) => {
+    setItensSelecionadosPedido((prev) => {
+      const next = new Set(prev);
+      if (next.has(produtoId)) next.delete(produtoId);
+      else next.add(produtoId);
+      return next;
+    });
+  };
+
+  const SEM_FORNECEDOR_KEY = "SEM_FORNECEDOR";
+
+  // Pra cada item selecionado: resolve o fornecedor PRINCIPAL no ERP, agrupa por
+  // fornecedor, gera 1 PDF (foto+codigo+descricao) por grupo, baixa no navegador
+  // (pra mandar pro fornecedor), anexa o mesmo PDF em cada task do grupo no
+  // ClickUp (fica disponivel pra baixar de novo em "Pedido em Andamento") e move
+  // todos os itens do grupo para esse status.
+  const gerarPedidosPorFornecedor = async () => {
+    const idsSelecionados = Array.from(itensSelecionadosPedido);
+    if (idsSelecionados.length === 0) return;
+
+    setGerandoPedidos(true);
+    try {
+      const selecionados = produtos.filter((p) => idsSelecionados.includes(p.id));
+      const grupos = new Map<string, { nome: string; itens: ProdutoComprar[] }>();
+      const semProdutoErp: ProdutoComprar[] = [];
+
+      for (const produto of selecionados) {
+        const produtoErpId = produtosErp[produto.id]?.id;
+        if (!produtoErpId) {
+          semProdutoErp.push(produto);
+          continue;
+        }
+
+        let fornecedorId = SEM_FORNECEDOR_KEY;
+        let fornecedorNome = "Sem Fornecedor Cadastrado";
+        try {
+          const fornecedor = await buscarFornecedorPrincipalProduto(produtoErpId, { empresa, flag: "loja" });
+          if (fornecedor) {
+            fornecedorId = fornecedor.fornecedorId;
+            fornecedorNome = fornecedor.nome;
+          }
+        } catch (err) {
+          console.error("[Compras][Pedido] Falha ao resolver fornecedor", {
+            produtoId: produto.id,
+            produtoErpId,
+            erro: err instanceof Error ? err.message : String(err),
+          });
+        }
+
+        const grupo = grupos.get(fornecedorId) ?? { nome: fornecedorNome, itens: [] };
+        grupo.itens.push(produto);
+        grupos.set(fornecedorId, grupo);
+      }
+
+      if (semProdutoErp.length > 0) {
+        toast({
+          title: "Alguns itens ficaram de fora",
+          description: `${semProdutoErp.length} item(ns) ainda nao carregaram os dados do ERP — espera a foto/preco aparecer na tela e tenta de novo.`,
+          variant: "destructive",
+        });
+      }
+
+      let totalProcessado = 0;
+      const erros: string[] = [];
+
+      for (const [fornecedorId, grupo] of grupos) {
+        const itensPdf: ItemPedidoPdf[] = grupo.itens.map((produto) => {
+          const produtoErp = produtosErp[produto.id];
+          const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
+          return {
+            codigo: produto.codigo,
+            descricao: produtoErp?.descricao || produto.descricao,
+            foto: fotoSelecionada?.src ?? null,
+          };
+        });
+
+        let pdf;
+        try {
+          pdf = await gerarPdfPedidoFornecedor(fornecedorId, grupo.nome, itensPdf);
+          baixarPdfNoNavegador(pdf);
+        } catch (err) {
+          erros.push(`${grupo.nome}: falha ao gerar PDF (${err instanceof Error ? err.message : String(err)})`);
+          continue;
+        }
+
+        for (const produto of grupo.itens) {
+          try {
+            await anexarPdfNaTaskClickUp(produto.id, empresa, pdf);
+          } catch (err) {
+            console.error("[Compras][Pedido] Falha ao anexar PDF no ClickUp", {
+              produtoId: produto.id,
+              erro: err instanceof Error ? err.message : String(err),
+            });
+            erros.push(`${produto.codigo}: PDF baixado mas nao anexado no ClickUp`);
+          }
+
+          try {
+            await pedidoAndamento(produto.id);
+          } catch (err) {
+            erros.push(`${produto.codigo}: nao moveu pra Pedido em Andamento`);
+          }
+          totalProcessado += 1;
+        }
+      }
+
+      setItensSelecionadosPedido(new Set());
+
+      if (totalProcessado > 0) {
+        toast({
+          title: `${grupos.size} PDF(s) gerado(s)`,
+          description: `${totalProcessado} item(ns) movido(s) para Pedido em Andamento.`,
+        });
+      }
+      if (erros.length > 0) {
+        toast({ title: "Alguns itens tiveram problema", description: erros.join(" | "), variant: "destructive" });
+      }
+    } finally {
+      setGerandoPedidos(false);
+    }
+  };
+
+  const baixarOuReBaixarPdfPedido = async (produto: ProdutoComprar) => {
+    setBaixandoPdfPedido(produto.id);
+    try {
+      const anexado = await buscarPdfAnexadoNaTask(produto.id, empresa);
+      if (!anexado) {
+        toast({ title: "Nenhum PDF encontrado", description: "Esse item nao tem PDF de pedido anexado no ClickUp.", variant: "destructive" });
+        return;
+      }
+      baixarPdfDataUrl(anexado.dataUrl, anexado.filename);
+    } catch (err) {
+      toast({ title: "Erro ao baixar PDF", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    } finally {
+      setBaixandoPdfPedido(null);
     }
   };
 
@@ -974,6 +1123,22 @@ const Compras = () => {
             )}
             {!loading && !error && filteredProdutos.length > 0 && (
               <div className="space-y-4">
+                {itensSelecionadosPedido.size > 0 && (
+                  <div className="flex items-center justify-between gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex-wrap">
+                    <span className="text-sm font-medium text-indigo-900">
+                      {itensSelecionadosPedido.size} item(ns) selecionado(s)
+                    </span>
+                    <div className="flex items-center gap-2">
+                      <Button size="sm" variant="ghost" onClick={() => setItensSelecionadosPedido(new Set())} disabled={gerandoPedidos}>
+                        Limpar selecao
+                      </Button>
+                      <Button size="sm" onClick={gerarPedidosPorFornecedor} disabled={gerandoPedidos}>
+                        {gerandoPedidos ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+                        Gerar Pedido(s) em PDF
+                      </Button>
+                    </div>
+                  </div>
+                )}
                 <div className="flex items-center justify-between text-xs text-gray-500">
                   <span>
                     Mostrando {inicio + 1}-{Math.min(fim, produtosOrdenados.length)} de {produtosOrdenados.length}
@@ -994,6 +1159,15 @@ const Compras = () => {
                   return (
                     <div key={produto.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded-lg gap-3">
                       <div className="flex items-center gap-3 min-w-0">
+                        {produto.status === "fazer_pedido" && (
+                          <input
+                            type="checkbox"
+                            className="shrink-0 h-5 w-5"
+                            checked={itensSelecionadosPedido.has(produto.id)}
+                            onChange={() => toggleSelecaoPedido(produto.id)}
+                            aria-label={`Selecionar ${produto.codigo} para gerar pedido`}
+                          />
+                        )}
                         {podeMostrarImagem ? (
                           <img
                             src={foto as string}
@@ -1082,6 +1256,16 @@ const Compras = () => {
 
                         {produto.status === "pedido_andamento" && (
                           <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={baixandoPdfPedido === produto.id}
+                              onClick={() => baixarOuReBaixarPdfPedido(produto)}
+                              className="text-indigo-700 border-indigo-200"
+                            >
+                              {baixandoPdfPedido === produto.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileDown className="h-4 w-4 mr-1" />}
+                              Baixar PDF
+                            </Button>
                             <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Compra realizada")}>
                               {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
                               Compra Realizada

@@ -626,6 +626,103 @@ async function moverStatusCompra(
   });
 }
 
+function parsePdfDataUrl(value: string): Buffer {
+  const match = value.match(/^data:application\/pdf(?:;[^;,]+)*;base64,(.+)$/);
+  if (!match) {
+    throw new Error('PDF precisa estar em data:application/pdf;base64,...');
+  }
+  return Buffer.from(match[1], 'base64');
+}
+
+async function anexarPdfPedido(
+  req: VercelRequest,
+  res: VercelResponse,
+  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL',
+  token: string
+) {
+  const body = (req.body ?? {}) as Record<string, unknown>;
+  const taskId = getSingle(req.query.taskId || (body.taskId as string | undefined)).trim();
+  const pdfBase64 = String(body.pdfBase64 ?? '');
+  const filename = String(body.filename ?? `pedido_${taskId}.pdf`);
+
+  if (!taskId) return res.status(400).json({ error: 'taskId obrigatorio' });
+  if (!pdfBase64) return res.status(400).json({ error: 'pdfBase64 obrigatorio' });
+
+  let buffer: Buffer;
+  try {
+    buffer = parsePdfDataUrl(pdfBase64);
+  } catch (err) {
+    return res.status(400).json({ error: err instanceof Error ? err.message : 'PDF invalido' });
+  }
+
+  const boundary = `ClickUpBound${Date.now()}`;
+  const nl = '\r\n';
+  const bodyBuf = Buffer.concat([
+    Buffer.from(`--${boundary}${nl}`),
+    Buffer.from(`Content-Disposition: form-data; name="attachment"; filename="${filename}"${nl}`),
+    Buffer.from(`Content-Type: application/pdf${nl}${nl}`),
+    buffer,
+    Buffer.from(`${nl}--${boundary}--${nl}`),
+  ]);
+
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${encodeURIComponent(taskId)}/attachment`, {
+    method: 'POST',
+    headers: {
+      Authorization: token,
+      'Content-Type': `multipart/form-data; boundary=${boundary}`,
+    },
+    body: bodyBuf,
+  });
+
+  if (!response.ok) {
+    const text = await response.text();
+    return res.status(response.status).json({ error: text || 'Falha ao anexar PDF no ClickUp', empresa, taskId });
+  }
+
+  return res.json({ ok: true, taskId, filename });
+}
+
+async function buscarPdfPedido(
+  req: VercelRequest,
+  res: VercelResponse,
+  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL',
+  token: string
+) {
+  const taskId = getSingle(req.query.taskId).trim();
+  if (!taskId) return res.status(400).json({ error: 'taskId obrigatorio' });
+
+  const response = await fetch(`https://api.clickup.com/api/v2/task/${taskId}?include_attachments=true`, {
+    headers: { Authorization: token },
+  });
+
+  if (!response.ok) {
+    return res.status(response.status).json({ error: await response.text(), empresa, taskId });
+  }
+
+  const task = (await response.json()) as Record<string, unknown>;
+  const attachments: Record<string, unknown>[] = Array.isArray(task.attachments) ? task.attachments : [];
+  const pdfAttachment = attachments.find((attachment) => {
+    const title = String(attachment?.title ?? attachment?.file_name ?? '').toLowerCase();
+    const mimetype = String(attachment?.mimetype ?? '').toLowerCase();
+    return mimetype === 'application/pdf' || title.endsWith('.pdf');
+  });
+
+  if (!pdfAttachment?.url) {
+    return res.status(404).json({ error: 'Nenhum PDF de pedido anexado nessa task', taskId });
+  }
+
+  const fileResponse = await fetch(String(pdfAttachment.url), { headers: { Authorization: token } });
+  if (!fileResponse.ok) {
+    return res.status(fileResponse.status).json({ error: 'Falha ao baixar PDF do ClickUp', taskId });
+  }
+
+  const buffer = Buffer.from(await fileResponse.arrayBuffer());
+  const dataUrl = `data:application/pdf;base64,${buffer.toString('base64')}`;
+  const filename = String(pdfAttachment.title ?? pdfAttachment.file_name ?? `pedido_${taskId}.pdf`);
+
+  return res.json({ taskId, pdfBase64: dataUrl, filename });
+}
+
 async function buscarFotoTask(
   req: VercelRequest,
   res: VercelResponse,
@@ -726,6 +823,23 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       return await buscarFotoTask(req, res, empresa, token);
+    }
+
+    if (action === 'anexar-pdf-pedido') {
+      if (req.method !== 'POST') {
+        return res.status(405).json({ error: 'Metodo nao permitido para anexar-pdf-pedido' });
+      }
+      const token = getClickUpToken(empresa);
+      if (!token) return res.status(500).json({ error: 'Token nao configurado', empresa });
+
+      return await anexarPdfPedido(req, res, empresa, token);
+    }
+
+    if (action === 'buscar-pdf-pedido') {
+      const token = getClickUpToken(empresa);
+      if (!token) return res.status(500).json({ error: 'Token nao configurado', empresa });
+
+      return await buscarPdfPedido(req, res, empresa, token);
     }
 
     return res.status(400).json({ error: 'Action invalida', action });
