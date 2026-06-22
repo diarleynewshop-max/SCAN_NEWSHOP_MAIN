@@ -19,6 +19,11 @@ import {
 
 const PAGE_SIZE = 10;
 const CACHE_TTL_MS = 30 * 60 * 1000;
+// Desativado por ora: a API do ERP nao aceita os nomes de campo que o swagger
+// documenta pra filtrar/ordenar cupons fiscais (dataVenda e identificadorId deram
+// erro/retorno vazio em producao). Reativar quando confirmarmos os campos reais
+// com uma amostra da API (ver PROGRESSO.md).
+const VELOCIDADE_VENDA_ATIVA = false;
 
 type FotoFonte = "ERP" | "CLICKUP_TASK" | "CLICKUP_LIST";
 
@@ -608,6 +613,7 @@ const Compras = () => {
     let cancelado = false;
 
     const carregarVelocidadeVendas = async () => {
+      if (!VELOCIDADE_VENDA_ATIVA) return;
       const origem = Array.from(
         new Map([
           ...produtosPaginados,
@@ -917,15 +923,17 @@ const Compras = () => {
                   <TrendingUp className="h-4 w-4 mr-2" />
                   Mais Pedidos
                 </Button>
-                <Button
-                  size="sm"
-                  variant={ordenarMaisVendidos ? "default" : "outline"}
-                  onClick={() => { setOrdenarMaisVendidos((prev) => !prev); setOrdenarMaisPedidos(false); }}
-                  className={ordenarMaisVendidos ? "" : "text-amber-700 border-amber-200"}
-                  title="Ordena so os itens desta pagina pela venda dos ultimos 90 dias (carrega conforme abre a pagina)"
-                >
-                  📈 Mais Vendidos (90d)
-                </Button>
+                {VELOCIDADE_VENDA_ATIVA && (
+                  <Button
+                    size="sm"
+                    variant={ordenarMaisVendidos ? "default" : "outline"}
+                    onClick={() => { setOrdenarMaisVendidos((prev) => !prev); setOrdenarMaisPedidos(false); }}
+                    className={ordenarMaisVendidos ? "" : "text-amber-700 border-amber-200"}
+                    title="Ordena so os itens desta pagina pela venda dos ultimos 90 dias (carrega conforme abre a pagina)"
+                  >
+                    📈 Mais Vendidos (90d)
+                  </Button>
+                )}
               </div>
               <span className="text-xs text-gray-500">
                 Filtro: {filteredProdutos.length} de {produtos.length} produto(s)
