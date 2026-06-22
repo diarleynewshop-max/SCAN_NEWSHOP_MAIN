@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
@@ -139,6 +139,11 @@ function getCodigoConsulta(codigo: string): string {
   return qualquerCodigo?.[0] ?? codigo;
 }
 
+function formatarPreco(valor: number | undefined | null): string | null {
+  if (!valor || valor <= 0) return null;
+  return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
 function normalizarFiltro(value: string | null | undefined): string {
   return String(value ?? "")
     .normalize("NFD")
@@ -195,6 +200,7 @@ const Compras = () => {
   const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("todos");
   const [filtroSecao, setFiltroSecao] = useState("todos");
   const [filtroSecaoAnalise, setFiltroSecaoAnalise] = useState("todos");
+  const [ordenarMaisPedidos, setOrdenarMaisPedidos] = useState(false);
   const [importando, setImportando] = useState(false);
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
@@ -336,19 +342,28 @@ const Compras = () => {
   }, [filtroSecao, produtosErp, produtosPorBuscaStatus]);
 
   const produtosOrdenados = useMemo(() => {
+    if (ordenarMaisPedidos) {
+      return [...filteredProdutos].sort((a, b) => {
+        const vezesA = a.vezesPedido ?? 1;
+        const vezesB = b.vezesPedido ?? 1;
+        if (vezesA !== vezesB) return vezesB - vezesA;
+        return Number(b.date_created || 0) - Number(a.date_created || 0);
+      });
+    }
+
     return [...filteredProdutos].sort((a, b) => {
       const prioridadeA = STATUS_PRIORITY[a.status] ?? 99;
       const prioridadeB = STATUS_PRIORITY[b.status] ?? 99;
       if (prioridadeA !== prioridadeB) return prioridadeA - prioridadeB;
       return Number(b.date_created || 0) - Number(a.date_created || 0);
     });
-  }, [filteredProdutos]);
+  }, [filteredProdutos, ordenarMaisPedidos]);
 
   const totalPaginas = Math.max(1, Math.ceil(produtosOrdenados.length / PAGE_SIZE));
 
   useEffect(() => {
     setPaginaAtual(1);
-  }, [filtroSecao, filtroStatus, searchTerm, produtos.length]);
+  }, [filtroSecao, filtroStatus, searchTerm, produtos.length, ordenarMaisPedidos]);
 
   useEffect(() => {
     if (paginaAtual > totalPaginas) {
@@ -377,6 +392,7 @@ const Compras = () => {
     : null;
   const fotoAnalise = fotoAnaliseSelecionada?.src ?? null;
   const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
+  const precoVendaAnalise = formatarPreco(produtoAnaliseErp?.precoVarejo);
   const podeMostrarFotoAnalise = Boolean(produtoAnalise && fotoAnaliseSelecionada);
 
   useEffect(() => {
@@ -541,7 +557,7 @@ const Compras = () => {
     }
   };
 
-  const filtrosAtivos = Boolean(searchTerm || filtroStatus !== "todos" || filtroSecao !== "todos");
+  const filtrosAtivos = Boolean(searchTerm || filtroStatus !== "todos" || filtroSecao !== "todos" || ordenarMaisPedidos);
   const carregandoFiltroSecao = filtroSecao !== "todos" && produtosPorBuscaStatus.some((produto) => !(produto.id in produtosErp));
   const carregandoFiltroSecaoAnalise = analiseAberta && filtroSecaoAnalise !== "todos" && produtosPendentesAnalise.some((produto) => !(produto.id in produtosErp));
 
@@ -761,6 +777,7 @@ const Compras = () => {
                   setSearchTerm("");
                   setFiltroSecao("todos");
                   setFiltroStatus("todos");
+                  setOrdenarMaisPedidos(false);
                 }}
                 disabled={!filtrosAtivos}
               >
@@ -769,8 +786,17 @@ const Compras = () => {
               </Button>
             </div>
 
-            <div className="mt-3 flex items-center justify-between gap-3 text-xs text-gray-500">
-              <span>
+            <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
+              <Button
+                size="sm"
+                variant={ordenarMaisPedidos ? "default" : "outline"}
+                onClick={() => setOrdenarMaisPedidos((prev) => !prev)}
+                className={ordenarMaisPedidos ? "" : "text-violet-700 border-violet-200"}
+              >
+                <TrendingUp className="h-4 w-4 mr-2" />
+                Mais Pedidos
+              </Button>
+              <span className="text-xs text-gray-500">
                 Filtro: {filteredProdutos.length} de {produtos.length} produto(s)
               </span>
               {carregandoFiltroSecao && (
@@ -820,6 +846,7 @@ const Compras = () => {
                   const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
                   const produtoErp = produtosErp[produto.id];
                   const descricao = produtoErp?.descricao || produto.descricao;
+                  const precoVenda = formatarPreco(produtoErp?.precoVarejo);
                   const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
                   const foto = fotoSelecionada?.src ?? null;
                   const podeMostrarImagem = Boolean(fotoSelecionada);
@@ -855,6 +882,7 @@ const Compras = () => {
                           <div className="text-sm text-gray-600 break-words leading-tight">{descricao}</div>
                           {produtoErp?.secao && <div className="text-xs text-indigo-600">{produtoErp.secao}</div>}
                           {produto.sku && <div className="text-xs text-gray-400">{produto.sku}</div>}
+                          {precoVenda && <div className="text-xs font-semibold text-emerald-700">{precoVenda}</div>}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap sm:justify-end w-full sm:w-auto">
@@ -1077,6 +1105,9 @@ const Compras = () => {
                       <div className="text-sm text-gray-700 mt-1">{descricaoAnalise}</div>
                       {produtoAnaliseErp?.secao && (
                         <div className="text-xs text-indigo-600 mt-2">Secao: {produtoAnaliseErp.secao}</div>
+                      )}
+                      {precoVendaAnalise && (
+                        <div className="text-sm font-semibold text-emerald-700 mt-1">{precoVendaAnalise}</div>
                       )}
                       <div className="mt-3">{getStatusBadge(produtoAnalise.status)}</div>
                     </div>
