@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { X, RefreshCw, CheckCircle2, XCircle, PackageSearch } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { enviarConferenciaParaClickUp } from "@/lib/webhookRouter";
+import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
 import type { EmpresaKey, FlagKey } from "@/lib/clickupApi";
 
 interface ConferenciaGalpaoModalProps {
@@ -32,6 +33,9 @@ const ConferenciaGalpaoModal = ({ empresa, flag, conferente, onClose, onChanged 
   const [erro, setErro] = useState<string | null>(null);
   const [processando, setProcessando] = useState(false);
   const [houveAlteracao, setHouveAlteracao] = useState(false);
+  const [fotosErp, setFotosErp] = useState<Record<string, string | null>>({});
+  const [perguntandoQuantidade, setPerguntandoQuantidade] = useState(false);
+  const [quantidadeInput, setQuantidadeInput] = useState("");
 
   const carregar = async () => {
     setLoading(true);
@@ -60,17 +64,71 @@ const ConferenciaGalpaoModal = ({ empresa, flag, conferente, onClose, onChanged 
 
   const itemAtual = itens[0] ?? null;
 
+  // Foto do anexo do ClickUp quase nunca existe nessas tasks de Compras — a
+  // foto de verdade vem do cadastro do produto no ERP, igual ja fazemos em
+  // Compras.tsx. Busca so do item atual (nao da fila inteira) pra nao bater
+  // no ERP por nada.
+  useEffect(() => {
+    if (!itemAtual || itemAtual.id in fotosErp) return;
+    let cancelado = false;
+
+    buscarProdutoVarejoFacil(itemAtual.codigo, {
+      empresa: itemAtual.empresaOriginal || empresa,
+      flag: itemAtual.flagOriginal || flag,
+    })
+      .then((produtoErp) => {
+        if (cancelado) return;
+        setFotosErp((prev) => ({ ...prev, [itemAtual.id]: produtoErp?.imagem ?? null }));
+      })
+      .catch(() => {
+        if (cancelado) return;
+        setFotosErp((prev) => ({ ...prev, [itemAtual.id]: null }));
+      });
+
+    return () => {
+      cancelado = true;
+    };
+  }, [itemAtual, fotosErp, empresa, flag]);
+
+  const fotoAtual = itemAtual ? (fotosErp[itemAtual.id] ?? itemAtual.foto) : null;
+
   const removerItemAtual = () => {
     setItens((prev) => prev.slice(1));
     setHouveAlteracao(true);
+    setPerguntandoQuantidade(false);
+    setQuantidadeInput("");
+  };
+
+  const abrirPerguntaQuantidade = () => {
+    if (!itemAtual) return;
+    setQuantidadeInput(String(itemAtual.quantidadePedida));
+    setPerguntandoQuantidade(true);
   };
 
   const confirmarTem = async () => {
     if (!itemAtual) return;
+
+    const quantidadeReal = Number(quantidadeInput);
+    if (!Number.isFinite(quantidadeReal) || quantidadeReal <= 0) {
+      toast({ title: "Quantidade invalida", description: "Informe um numero maior que zero.", variant: "destructive" });
+      return;
+    }
+
     setProcessando(true);
     try {
       const empresaConferencia = (itemAtual.empresaOriginal || empresa) as EmpresaKey;
       const flagConferencia = itemAtual.flagOriginal || flag;
+
+      // Achou menos que o pedido? Marca "parcial" — o pipeline normal de
+      // conferencia ja sabe criar uma task nova de Compras com a diferenca
+      // que ainda falta, sem eu precisar reimplementar isso aqui.
+      const status = quantidadeReal >= itemAtual.quantidadePedida ? "separado" : "nao_tem_tudo";
+      const resumo = {
+        separado: status === "separado" ? 1 : 0,
+        naoTem: 0,
+        parcial: status === "nao_tem_tudo" ? 1 : 0,
+        pendente: 0,
+      };
 
       const payloadConferencia: Record<string, unknown> = {
         conferente,
@@ -79,16 +137,16 @@ const ConferenciaGalpaoModal = ({ empresa, flag, conferente, onClose, onChanged 
         flag: flagConferencia,
         tempo: "00:00:00",
         totalItens: 1,
-        resumo: { separado: 1, naoTem: 0, parcial: 0, pendente: 0 },
+        resumo,
         itens: [
           {
             codigo: itemAtual.codigo,
             sku: itemAtual.sku ?? "",
             secao: itemAtual.secao,
             quantidadePedida: itemAtual.quantidadePedida,
-            quantidadeReal: itemAtual.quantidadePedida,
-            status: "separado",
-            photo: itemAtual.foto,
+            quantidadeReal,
+            status,
+            photo: fotoAtual,
           },
         ],
       };
@@ -105,7 +163,12 @@ const ConferenciaGalpaoModal = ({ empresa, flag, conferente, onClose, onChanged 
         console.warn("[ConferenciaGalpao] Conferencia criada mas task de Compras nao foi excluida", err);
       }
 
-      toast({ title: "Enviado para a loja", description: `${itemAtual.codigo} entrou no relatorio do dia.` });
+      toast({
+        title: "Enviado para a loja",
+        description: status === "separado"
+          ? `${itemAtual.codigo} (${quantidadeReal} un.) entrou no relatorio do dia.`
+          : `${itemAtual.codigo}: ${quantidadeReal} de ${itemAtual.quantidadePedida} un. enviados; o restante volta pra Compras automaticamente.`,
+      });
       removerItemAtual();
     } catch (e: unknown) {
       toast({ title: "Erro ao confirmar item", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
@@ -177,8 +240,8 @@ const ConferenciaGalpaoModal = ({ empresa, flag, conferente, onClose, onChanged 
           {!loading && !erro && itemAtual && (
             <>
               <div className="rounded-xl border border-border overflow-hidden">
-                {itemAtual.foto ? (
-                  <img src={itemAtual.foto} alt={itemAtual.codigo} className="w-full h-48 object-cover bg-muted" />
+                {fotoAtual ? (
+                  <img src={fotoAtual} alt={itemAtual.codigo} className="w-full h-48 object-cover bg-muted" />
                 ) : (
                   <div className="w-full h-48 flex items-center justify-center bg-muted text-muted-foreground text-xs">
                     sem foto
@@ -192,22 +255,58 @@ const ConferenciaGalpaoModal = ({ empresa, flag, conferente, onClose, onChanged 
                 </div>
               </div>
 
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={confirmarNaoTem}
-                  disabled={processando}
-                  className="h-12 rounded-xl border border-destructive/30 bg-destructive/5 text-destructive font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <XCircle className="w-4 h-4" /> Nao Tem
-                </button>
-                <button
-                  onClick={confirmarTem}
-                  disabled={processando}
-                  className="h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                >
-                  <CheckCircle2 className="w-4 h-4" /> Tem
-                </button>
-              </div>
+              {!perguntandoQuantidade ? (
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={confirmarNaoTem}
+                    disabled={processando}
+                    className="h-12 rounded-xl border border-destructive/30 bg-destructive/5 text-destructive font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <XCircle className="w-4 h-4" /> Nao Tem
+                  </button>
+                  <button
+                    onClick={abrirPerguntaQuantidade}
+                    disabled={processando}
+                    className="h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                  >
+                    <CheckCircle2 className="w-4 h-4" /> Tem
+                  </button>
+                </div>
+              ) : (
+                <div className="space-y-3 rounded-xl border border-primary/30 bg-primary/5 p-3">
+                  <label className="text-xs font-semibold text-foreground block">
+                    Quantos voce encontrou no Galpao?
+                  </label>
+                  <input
+                    type="number"
+                    min={1}
+                    autoFocus
+                    value={quantidadeInput}
+                    onChange={(e) => setQuantidadeInput(e.target.value)}
+                    onKeyDown={(e) => e.key === "Enter" && confirmarTem()}
+                    className="w-full h-11 rounded-lg border border-border bg-background px-3 text-base font-bold text-foreground"
+                  />
+                  <p className="text-xs text-muted-foreground">
+                    Pedido original: {itemAtual.quantidadePedida} un. Se for menos, o restante volta pra Compras automaticamente.
+                  </p>
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={() => setPerguntandoQuantidade(false)}
+                      disabled={processando}
+                      className="h-11 rounded-lg bg-muted text-muted-foreground font-bold text-sm disabled:opacity-50"
+                    >
+                      Cancelar
+                    </button>
+                    <button
+                      onClick={confirmarTem}
+                      disabled={processando}
+                      className="h-11 rounded-lg bg-primary text-primary-foreground font-bold text-sm disabled:opacity-50"
+                    >
+                      Confirmar
+                    </button>
+                  </div>
+                </div>
+              )}
 
               {processando && (
                 <p className="text-center text-xs text-muted-foreground flex items-center justify-center gap-1.5">
