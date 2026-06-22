@@ -487,9 +487,9 @@ export interface VelocidadeVendaProduto {
 type ErpItemVenda = { produtoId?: number; quantidadeVenda?: number };
 type ErpCupomFiscal = { itensVenda?: ErpItemVenda[] };
 
-const VELOCIDADE_DIAS = 7;
-const VELOCIDADE_PAGE_SIZE = 100;
-const VELOCIDADE_MAX_PAGINAS = 5; // limite de 500 cupons/consulta para nao travar a tela
+const VELOCIDADE_DIAS = 90;
+const VELOCIDADE_PAGE_SIZE = 150;
+const VELOCIDADE_MAX_PAGINAS = 30; // limite de 4500 cupons/consulta para nao travar a tela
 const VELOCIDADE_CACHE_TTL_MS = 30 * 60 * 1000;
 
 type VelocidadeCacheEntry = {

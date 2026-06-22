@@ -154,12 +154,14 @@ function formatarPreco(valor: number | undefined | null): string | null {
 function formatarVelocidadeVenda(velocidade: VelocidadeVendaProduto | null | undefined): string | null {
   if (!velocidade) return null;
   const porDia = velocidade.mediaPorDia;
-  const porSemana = velocidade.unidades;
+  const unidadesPeriodo = velocidade.unidades;
+  // "+" indica que a contagem bateu no limite de seguranca antes de cobrir o
+  // periodo inteiro (loja com bastante movimento) — numero e um piso, nao exato.
   const sufixo = velocidade.parcial ? "+" : "";
   if (porDia >= 1) {
     return `~${porDia.toFixed(1)} un/dia${sufixo}`;
   }
-  return `${porSemana}${sufixo} un/${velocidade.dias}d`;
+  return `${unidadesPeriodo}${sufixo} un/${velocidade.dias}d`;
 }
 
 function normalizarFiltro(value: string | null | undefined): string {
@@ -219,6 +221,7 @@ const Compras = () => {
   const [filtroSecao, setFiltroSecao] = useState("todos");
   const [filtroSecaoAnalise, setFiltroSecaoAnalise] = useState("todos");
   const [ordenarMaisPedidos, setOrdenarMaisPedidos] = useState(false);
+  const [ordenarMaisVendidos, setOrdenarMaisVendidos] = useState(false);
   const [importando, setImportando] = useState(false);
   const [paginaAtual, setPaginaAtual] = useState(1);
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
@@ -418,6 +421,20 @@ const Compras = () => {
   const inicio = (paginaAtual - 1) * PAGE_SIZE;
   const fim = inicio + PAGE_SIZE;
   const produtosPaginados = produtosOrdenados.slice(inicio, fim);
+
+  // "Mais Vendidos" so reordena dentro da pagina atual: a API do ERP nao filtra cupom
+  // fiscal por produto, entao ranquear o catalogo inteiro exigiria resolver o produtoId
+  // de cada item filtrado (caro). Aqui so reordenamos os ~10 itens ja carregados pela
+  // pagina; conforme a velocidade de cada um chega, a ordem destes 10 se ajusta. Ao
+  // mudar de pagina, os proximos 10 carregam e ordenam do mesmo jeito.
+  const produtosPaginadosExibidos = useMemo(() => {
+    if (!ordenarMaisVendidos) return produtosPaginados;
+    return [...produtosPaginados].sort((a, b) => {
+      const unidadesA = velocidadeVendas[a.id]?.unidades ?? -1;
+      const unidadesB = velocidadeVendas[b.id]?.unidades ?? -1;
+      return unidadesB - unidadesA;
+    });
+  }, [produtosPaginados, ordenarMaisVendidos, velocidadeVendas]);
   const produtosPendentesAnalise = useMemo(() => {
     return [...produtos.filter((produto) => produto.status === "todo")].sort((a, b) => (
       Number(b.date_created || 0) - Number(a.date_created || 0)
@@ -656,7 +673,7 @@ const Compras = () => {
     }
   };
 
-  const filtrosAtivos = Boolean(searchTerm || filtroStatus !== "todos" || filtroSecao !== "todos" || ordenarMaisPedidos);
+  const filtrosAtivos = Boolean(searchTerm || filtroStatus !== "todos" || filtroSecao !== "todos" || ordenarMaisPedidos || ordenarMaisVendidos);
   const carregandoFiltroSecao = filtroSecao !== "todos" && produtosPorBuscaStatus.some((produto) => !(produto.id in produtosErp));
   const carregandoFiltroSecaoAnalise = analiseAberta && filtroSecaoAnalise !== "todos" && produtosPendentesAnalise.some((produto) => !(produto.id in produtosErp));
 
@@ -877,6 +894,7 @@ const Compras = () => {
                   setFiltroSecao("todos");
                   setFiltroStatus("todos");
                   setOrdenarMaisPedidos(false);
+                  setOrdenarMaisVendidos(false);
                 }}
                 disabled={!filtrosAtivos}
               >
@@ -886,15 +904,26 @@ const Compras = () => {
             </div>
 
             <div className="mt-3 flex items-center justify-between gap-3 flex-wrap">
-              <Button
-                size="sm"
-                variant={ordenarMaisPedidos ? "default" : "outline"}
-                onClick={() => setOrdenarMaisPedidos((prev) => !prev)}
-                className={ordenarMaisPedidos ? "" : "text-violet-700 border-violet-200"}
-              >
-                <TrendingUp className="h-4 w-4 mr-2" />
-                Mais Pedidos
-              </Button>
+              <div className="flex items-center gap-2 flex-wrap">
+                <Button
+                  size="sm"
+                  variant={ordenarMaisPedidos ? "default" : "outline"}
+                  onClick={() => { setOrdenarMaisPedidos((prev) => !prev); setOrdenarMaisVendidos(false); }}
+                  className={ordenarMaisPedidos ? "" : "text-violet-700 border-violet-200"}
+                >
+                  <TrendingUp className="h-4 w-4 mr-2" />
+                  Mais Pedidos
+                </Button>
+                <Button
+                  size="sm"
+                  variant={ordenarMaisVendidos ? "default" : "outline"}
+                  onClick={() => { setOrdenarMaisVendidos((prev) => !prev); setOrdenarMaisPedidos(false); }}
+                  className={ordenarMaisVendidos ? "" : "text-amber-700 border-amber-200"}
+                  title="Ordena so os itens desta pagina pela venda dos ultimos 90 dias (carrega conforme abre a pagina)"
+                >
+                  📈 Mais Vendidos (90d)
+                </Button>
+              </div>
               <span className="text-xs text-gray-500">
                 Filtro: {filteredProdutos.length} de {produtos.length} produto(s)
               </span>
@@ -941,7 +970,7 @@ const Compras = () => {
                   <span>Pagina {paginaAtual} de {totalPaginas}</span>
                 </div>
 
-                {produtosPaginados.map((produto) => {
+                {produtosPaginadosExibidos.map((produto) => {
                   const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
                   const produtoErp = produtosErp[produto.id];
                   const descricao = produtoErp?.descricao || produto.descricao;
