@@ -153,6 +153,9 @@ function formatarPreco(valor: number | undefined | null): string | null {
 
 function formatarVelocidadeVenda(velocidade: VelocidadeVendaProduto | null | undefined): string | null {
   if (!velocidade) return null;
+  // Erro na consulta ao ERP nao e a mesma coisa que "0 vendas" — nao mostra numero
+  // confiante quando a busca falhou (ve detalhes em console "[VarejoFacil][Velocidade]").
+  if (velocidade.erro) return "⚠️ erro ao consultar vendas";
   const porDia = velocidade.mediaPorDia;
   const unidadesPeriodo = velocidade.unidades;
   // "+" indica que a contagem bateu no limite de seguranca antes de cobrir o

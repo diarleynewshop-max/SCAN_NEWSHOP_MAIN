@@ -482,39 +482,54 @@ export interface VelocidadeVendaProduto {
   mediaPorDia: number;
   cuponsAnalisados: number;
   parcial: boolean; // true se bateu no limite de paginas antes de cobrir todo o periodo
+  erro: boolean; // true se a consulta ao ERP falhou (nao confundir "0" com "sem dados")
 }
 
 type ErpItemVenda = { produtoId?: number; quantidadeVenda?: number };
-type ErpCupomFiscal = { itensVenda?: ErpItemVenda[] };
+type ErpCupomFiscal = { itensVenda?: ErpItemVenda[]; data?: string; dataVenda?: string; identificadorId?: number };
 
 const VELOCIDADE_DIAS = 90;
 const VELOCIDADE_PAGE_SIZE = 150;
 const VELOCIDADE_MAX_PAGINAS = 30; // limite de 4500 cupons/consulta para nao travar a tela
 const VELOCIDADE_CACHE_TTL_MS = 30 * 60 * 1000;
+const VELOCIDADE_CACHE_ERRO_TTL_MS = 60 * 1000; // erro nao fica em cache 30min — tenta de novo rapido
 
 type VelocidadeCacheEntry = {
   mapa: Map<string, number>;
   cuponsAnalisados: number;
   parcial: boolean;
+  erro: boolean;
   ts: number;
 };
 
 const velocidadeCache = new Map<string, VelocidadeCacheEntry>();
 const velocidadeEmAndamento = new Map<string, Promise<VelocidadeCacheEntry>>();
 
+function cupomDataKey(cupom: ErpCupomFiscal): string | null {
+  const valor = cupom.dataVenda || cupom.data;
+  if (!valor) return null;
+  // aceita "YYYY-MM-DD" ou ISO completo
+  return valor.slice(0, 10);
+}
+
 const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {}): Promise<VelocidadeCacheEntry> => {
   const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
 
   const cached = velocidadeCache.get(empresa);
-  if (cached && Date.now() - cached.ts < VELOCIDADE_CACHE_TTL_MS) {
-    return Promise.resolve(cached);
+  if (cached) {
+    const ttl = cached.erro ? VELOCIDADE_CACHE_ERRO_TTL_MS : VELOCIDADE_CACHE_TTL_MS;
+    if (Date.now() - cached.ts < ttl) return Promise.resolve(cached);
   }
 
   const emAndamento = velocidadeEmAndamento.get(empresa);
   if (emAndamento) return emAndamento;
 
   const promessa = (async () => {
-    const lojaId = getErpLojaAtiva(contexto);
+    // Nao filtramos por data na query (o ERP tem 2 campos quase iguais, "data" e
+    // "dataVenda" — filtrar pelo nome errado retorna 200 com lista vazia, sem erro,
+    // o que mascarava vendas reais como "0"). Em vez disso paginamos por ordem de
+    // chegada (identificadorId, sequencial) e cortamos no cliente quando os cupons
+    // ficarem mais antigos que o periodo.
     const dataInicio = new Date();
     dataInicio.setDate(dataInicio.getDate() - VELOCIDADE_DIAS);
     const dataInicioStr = dataInicio.toISOString().slice(0, 10);
@@ -522,23 +537,24 @@ const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {
     const mapa = new Map<string, number>();
     let cuponsAnalisados = 0;
     let parcial = false;
+    let erro = false;
 
     for (let pagina = 0; pagina < VELOCIDADE_MAX_PAGINAS; pagina++) {
-      const fiql = encodeURIComponent(`dataVenda=ge=${dataInicioStr};lojaId==${lojaId}`);
       const start = pagina * VELOCIDADE_PAGE_SIZE;
 
       let data: ErpListResponse<ErpCupomFiscal> | null = null;
       try {
         data = await fetchJson<ErpListResponse<ErpCupomFiscal>>(
-          `/v1/venda/cupons-fiscais?q=${fiql}&sort=-dataVenda&start=${start}&count=${VELOCIDADE_PAGE_SIZE}`,
+          `/v1/venda/cupons-fiscais?sort=-identificadorId&start=${start}&count=${VELOCIDADE_PAGE_SIZE}`,
           contexto
         );
       } catch (err) {
-        console.warn("[VarejoFacil][Velocidade] Falha ao buscar cupons fiscais", {
+        console.error("[VarejoFacil][Velocidade] Falha ao buscar cupons fiscais — badge vai mostrar erro, nao 0", {
           empresa,
           pagina,
           erro: err instanceof Error ? err.message : String(err),
         });
+        erro = true;
         break;
       }
 
@@ -546,7 +562,13 @@ const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {
       if (cupons.length === 0) break;
 
       cuponsAnalisados += cupons.length;
+      let algumDentroDoPeriodo = false;
+
       for (const cupom of cupons) {
+        const dataKey = cupomDataKey(cupom);
+        if (dataKey && dataKey < dataInicioStr) continue; // cupom mais antigo que o periodo
+        algumDentroDoPeriodo = true;
+
         for (const item of cupom.itensVenda ?? []) {
           if (!item.produtoId) continue;
           const key = String(item.produtoId);
@@ -554,11 +576,12 @@ const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {
         }
       }
 
-      if (cupons.length < VELOCIDADE_PAGE_SIZE) break; // ultima pagina do periodo
+      if (cupons.length < VELOCIDADE_PAGE_SIZE) break; // ultima pagina que existe
+      if (!algumDentroDoPeriodo) break; // pagina inteira ja e mais antiga que o periodo
       if (pagina === VELOCIDADE_MAX_PAGINAS - 1) parcial = true;
     }
 
-    const entry: VelocidadeCacheEntry = { mapa, cuponsAnalisados, parcial, ts: Date.now() };
+    const entry: VelocidadeCacheEntry = { mapa, cuponsAnalisados, parcial, erro, ts: Date.now() };
     velocidadeCache.set(empresa, entry);
     return entry;
   })();
@@ -577,7 +600,7 @@ export const buscarVelocidadeVendaProduto = async (
 ): Promise<VelocidadeVendaProduto | null> => {
   if (!produtoId) return null;
 
-  const { mapa, cuponsAnalisados, parcial } = await buscarMapaVelocidadeVendas(contexto);
+  const { mapa, cuponsAnalisados, parcial, erro } = await buscarMapaVelocidadeVendas(contexto);
   const unidades = mapa.get(String(produtoId)) ?? 0;
 
   return {
@@ -585,6 +608,7 @@ export const buscarVelocidadeVendaProduto = async (
     dias: VELOCIDADE_DIAS,
     mediaPorDia: unidades / VELOCIDADE_DIAS,
     cuponsAnalisados,
+    erro,
     parcial,
   };
 };
