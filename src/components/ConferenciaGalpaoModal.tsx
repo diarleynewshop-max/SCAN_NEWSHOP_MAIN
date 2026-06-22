@@ -198,6 +198,32 @@ const ConferenciaGalpaoModal = ({ empresa, flag, conferente, onClose, onChanged 
     }
   };
 
+  // Tem no Galpao, mas nao deve ir pra loja (ex: vai ficar reservado, vendido
+  // direto no galpao etc.) — so sai da fila de Compras, sem gerar conferencia,
+  // sem relatorio, sem expedicaoSync. Nenhuma outra consequencia.
+  const confirmarTemSemEnviar = async () => {
+    if (!itemAtual) return;
+    setProcessando(true);
+    try {
+      const response = await fetch(`/api/clickup-compras-proxy?action=excluir-task-galpao&empresa=${empresa}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ taskId: itemAtual.id }),
+      });
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}));
+        throw new Error(data?.error ?? `Erro ${response.status}`);
+      }
+
+      toast({ title: "Removido do Compras", description: `${itemAtual.codigo} tem no Galpao, mas nao foi enviado pra loja.` });
+      removerItemAtual();
+    } catch (e: unknown) {
+      toast({ title: "Erro ao confirmar item", description: e instanceof Error ? e.message : String(e), variant: "destructive" });
+    } finally {
+      setProcessando(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/55 p-3 md:p-6 overflow-auto flex items-center justify-center">
       <div className="mx-auto w-full max-w-md rounded-2xl border border-border bg-background shadow-2xl">
@@ -256,20 +282,30 @@ const ConferenciaGalpaoModal = ({ empresa, flag, conferente, onClose, onChanged 
               </div>
 
               {!perguntandoQuantidade ? (
-                <div className="grid grid-cols-2 gap-3">
+                <div className="space-y-2">
+                  <div className="grid grid-cols-2 gap-3">
+                    <button
+                      onClick={confirmarNaoTem}
+                      disabled={processando}
+                      className="h-12 rounded-xl border border-destructive/30 bg-destructive/5 text-destructive font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      <XCircle className="w-4 h-4" /> Nao Tem
+                    </button>
+                    <button
+                      onClick={abrirPerguntaQuantidade}
+                      disabled={processando}
+                      className="h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                    >
+                      <CheckCircle2 className="w-4 h-4" /> Tem
+                    </button>
+                  </div>
                   <button
-                    onClick={confirmarNaoTem}
+                    onClick={confirmarTemSemEnviar}
                     disabled={processando}
-                    className="h-12 rounded-xl border border-destructive/30 bg-destructive/5 text-destructive font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
+                    title="Confirma que tem no Galpao, mas nao envia conferencia pra loja — so sai do Compras"
+                    className="w-full h-10 rounded-xl border border-border bg-muted/50 text-muted-foreground font-semibold text-xs flex items-center justify-center gap-2 disabled:opacity-50"
                   >
-                    <XCircle className="w-4 h-4" /> Nao Tem
-                  </button>
-                  <button
-                    onClick={abrirPerguntaQuantidade}
-                    disabled={processando}
-                    className="h-12 rounded-xl bg-primary text-primary-foreground font-bold text-sm flex items-center justify-center gap-2 disabled:opacity-50"
-                  >
-                    <CheckCircle2 className="w-4 h-4" /> Tem
+                    <CheckCircle2 className="w-3.5 h-3.5" /> Tem, mas nao vai pra loja
                   </button>
                 </div>
               ) : (
