@@ -468,3 +468,209 @@ export const sincronizarProduto = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilProduct | null> => buscarProdutoVarejoFacil(codigoBarras, contexto);
+
+// ── Velocidade de venda (unidades vendidas/dia) ───────────────────────────────
+// Agrega /v1/venda/cupons-fiscais dos ultimos N dias por produtoId. A API nao
+// permite filtrar cupons por produto (produtoId fica dentro de itensVenda[]),
+// entao a unica forma e paginar os cupons do periodo e somar no cliente.
+// Resultado fica em cache por empresa (nao por produto) para nao repetir a
+// paginacao inteira a cada item da tela.
+
+export interface VelocidadeVendaProduto {
+  unidades: number;
+  dias: number;
+  mediaPorDia: number;
+  cuponsAnalisados: number;
+  parcial: boolean; // true se bateu no limite de paginas antes de cobrir todo o periodo
+}
+
+type ErpItemVenda = { produtoId?: number; quantidadeVenda?: number };
+type ErpCupomFiscal = { itensVenda?: ErpItemVenda[] };
+
+const VELOCIDADE_DIAS = 7;
+const VELOCIDADE_PAGE_SIZE = 100;
+const VELOCIDADE_MAX_PAGINAS = 5; // limite de 500 cupons/consulta para nao travar a tela
+const VELOCIDADE_CACHE_TTL_MS = 30 * 60 * 1000;
+
+type VelocidadeCacheEntry = {
+  mapa: Map<string, number>;
+  cuponsAnalisados: number;
+  parcial: boolean;
+  ts: number;
+};
+
+const velocidadeCache = new Map<string, VelocidadeCacheEntry>();
+const velocidadeEmAndamento = new Map<string, Promise<VelocidadeCacheEntry>>();
+
+const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {}): Promise<VelocidadeCacheEntry> => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+
+  const cached = velocidadeCache.get(empresa);
+  if (cached && Date.now() - cached.ts < VELOCIDADE_CACHE_TTL_MS) {
+    return Promise.resolve(cached);
+  }
+
+  const emAndamento = velocidadeEmAndamento.get(empresa);
+  if (emAndamento) return emAndamento;
+
+  const promessa = (async () => {
+    const lojaId = getErpLojaAtiva(contexto);
+    const dataInicio = new Date();
+    dataInicio.setDate(dataInicio.getDate() - VELOCIDADE_DIAS);
+    const dataInicioStr = dataInicio.toISOString().slice(0, 10);
+
+    const mapa = new Map<string, number>();
+    let cuponsAnalisados = 0;
+    let parcial = false;
+
+    for (let pagina = 0; pagina < VELOCIDADE_MAX_PAGINAS; pagina++) {
+      const fiql = encodeURIComponent(`dataVenda=ge=${dataInicioStr};lojaId==${lojaId}`);
+      const start = pagina * VELOCIDADE_PAGE_SIZE;
+
+      let data: ErpListResponse<ErpCupomFiscal> | null = null;
+      try {
+        data = await fetchJson<ErpListResponse<ErpCupomFiscal>>(
+          `/v1/venda/cupons-fiscais?q=${fiql}&sort=-dataVenda&start=${start}&count=${VELOCIDADE_PAGE_SIZE}`,
+          contexto
+        );
+      } catch (err) {
+        console.warn("[VarejoFacil][Velocidade] Falha ao buscar cupons fiscais", {
+          empresa,
+          pagina,
+          erro: err instanceof Error ? err.message : String(err),
+        });
+        break;
+      }
+
+      const cupons = data?.items ?? [];
+      if (cupons.length === 0) break;
+
+      cuponsAnalisados += cupons.length;
+      for (const cupom of cupons) {
+        for (const item of cupom.itensVenda ?? []) {
+          if (!item.produtoId) continue;
+          const key = String(item.produtoId);
+          mapa.set(key, (mapa.get(key) ?? 0) + Number(item.quantidadeVenda ?? 0));
+        }
+      }
+
+      if (cupons.length < VELOCIDADE_PAGE_SIZE) break; // ultima pagina do periodo
+      if (pagina === VELOCIDADE_MAX_PAGINAS - 1) parcial = true;
+    }
+
+    const entry: VelocidadeCacheEntry = { mapa, cuponsAnalisados, parcial, ts: Date.now() };
+    velocidadeCache.set(empresa, entry);
+    return entry;
+  })();
+
+  velocidadeEmAndamento.set(empresa, promessa);
+  try {
+    return await promessa;
+  } finally {
+    velocidadeEmAndamento.delete(empresa);
+  }
+};
+
+export const buscarVelocidadeVendaProduto = async (
+  produtoId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VelocidadeVendaProduto | null> => {
+  if (!produtoId) return null;
+
+  const { mapa, cuponsAnalisados, parcial } = await buscarMapaVelocidadeVendas(contexto);
+  const unidades = mapa.get(String(produtoId)) ?? 0;
+
+  return {
+    unidades,
+    dias: VELOCIDADE_DIAS,
+    mediaPorDia: unidades / VELOCIDADE_DIAS,
+    cuponsAnalisados,
+    parcial,
+  };
+};
+
+// ── Pedido de compra ja aberto pra esse produto/fornecedor ───────────────────
+// Evita duplicar pedido manual: busca os fornecedores do produto e ve se ja
+// existe um Pedido de Compra (ERP) em aberto contendo esse produtoId.
+
+export interface PedidoCompraAberto {
+  pedidoId: string;
+  fornecedorId: string;
+  status: string;
+  dataDeEmissao?: string;
+  quantidadePedida: number;
+}
+
+type ErpFornecedorProduto = { fornecedorId?: number };
+type ErpItemPedidoCompra = { produtoId?: number; quantidade?: number; quantidadeCompleta?: number };
+type ErpPedidoCompra = {
+  id?: number;
+  fornecedorId?: number;
+  status?: string;
+  dataDeEmissao?: string;
+  itens?: ErpItemPedidoCompra[];
+};
+
+// Status que ainda representam pedido "em aberto" (nao cancelado/encerrado)
+const STATUS_PEDIDO_COMPRA_ABERTO = ["ABERTO", "ATENDIDO_PARCIALMENTE", "BLOQUEADO"];
+
+export const buscarPedidosCompraAbertosPorProduto = async (
+  produtoId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<PedidoCompraAberto[]> => {
+  if (!produtoId) return [];
+
+  let fornecedorIds: string[] = [];
+  try {
+    const data = await fetchJson<ErpListResponse<ErpFornecedorProduto>>(
+      `/v1/produto/produtos/${produtoId}/fornecedores`,
+      contexto
+    );
+    fornecedorIds = (data?.items ?? [])
+      .map((item) => item.fornecedorId)
+      .filter((id): id is number => typeof id === "number")
+      .map(String);
+  } catch (err) {
+    console.warn("[VarejoFacil][PedidoAberto] Falha ao buscar fornecedores do produto", {
+      produtoId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  if (fornecedorIds.length === 0) return [];
+
+  const fornecedorFiql = fornecedorIds.map((id) => `fornecedorId==${id}`).join(",");
+  const statusFiql = STATUS_PEDIDO_COMPRA_ABERTO.map((status) => `status==${status}`).join(",");
+  const fiql = encodeURIComponent(`(${fornecedorFiql});(${statusFiql})`);
+
+  let pedidos: ErpPedidoCompra[] = [];
+  try {
+    const data = await fetchJson<ErpListResponse<ErpPedidoCompra>>(
+      `/v1/compra/pedidos?q=${fiql}&sort=-dataDeEmissao&count=50`,
+      contexto
+    );
+    pedidos = data?.items ?? [];
+  } catch (err) {
+    console.warn("[VarejoFacil][PedidoAberto] Falha ao buscar pedidos de compra", {
+      produtoId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+
+  const resultado: PedidoCompraAberto[] = [];
+  for (const pedido of pedidos) {
+    const itemDoProduto = (pedido.itens ?? []).find((item) => String(item.produtoId) === String(produtoId));
+    if (!itemDoProduto || !pedido.id) continue;
+
+    resultado.push({
+      pedidoId: String(pedido.id),
+      fornecedorId: String(pedido.fornecedorId ?? ""),
+      status: pedido.status ?? "",
+      dataDeEmissao: pedido.dataDeEmissao,
+      quantidadePedida: Number(itemDoProduto.quantidadeCompleta ?? itemDoProduto.quantidade ?? 0),
+    });
+  }
+
+  return resultado;
+};

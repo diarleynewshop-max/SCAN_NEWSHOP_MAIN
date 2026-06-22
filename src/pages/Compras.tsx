@@ -8,7 +8,14 @@ import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { useToast } from "@/hooks/use-toast";
-import { buscarProdutoVarejoFacil, type VarejoFacilProduct } from "@/lib/varejoFacilIntegration";
+import {
+  buscarProdutoVarejoFacil,
+  buscarVelocidadeVendaProduto,
+  buscarPedidosCompraAbertosPorProduto,
+  type VarejoFacilProduct,
+  type VelocidadeVendaProduto,
+  type PedidoCompraAberto,
+} from "@/lib/varejoFacilIntegration";
 
 const PAGE_SIZE = 10;
 const CACHE_TTL_MS = 30 * 60 * 1000;
@@ -144,6 +151,17 @@ function formatarPreco(valor: number | undefined | null): string | null {
   return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+function formatarVelocidadeVenda(velocidade: VelocidadeVendaProduto | null | undefined): string | null {
+  if (!velocidade) return null;
+  const porDia = velocidade.mediaPorDia;
+  const porSemana = velocidade.unidades;
+  const sufixo = velocidade.parcial ? "+" : "";
+  if (porDia >= 1) {
+    return `~${porDia.toFixed(1)} un/dia${sufixo}`;
+  }
+  return `${porSemana}${sufixo} un/${velocidade.dias}d`;
+}
+
 function normalizarFiltro(value: string | null | undefined): string {
   return String(value ?? "")
     .normalize("NFD")
@@ -206,6 +224,7 @@ const Compras = () => {
   const [imagemComErro, setImagemComErro] = useState<Record<string, boolean>>({});
   const [acaoEmAndamento, setAcaoEmAndamento] = useState<string | null>(null);
   const [produtosErp, setProdutosErp] = useState<Record<string, VarejoFacilProduct | null>>({});
+  const [velocidadeVendas, setVelocidadeVendas] = useState<Record<string, VelocidadeVendaProduto | null>>({});
   const [fotosClickUp, setFotosClickUp] = useState<Record<string, string | null>>({});
   const [analiseAberta, setAnaliseAberta] = useState(false);
   const [escolhaDireita, setEscolhaDireita] = useState(false);
@@ -230,6 +249,7 @@ const Compras = () => {
   useEffect(() => {
     setProdutosErp(lerCacheLocal<Record<string, VarejoFacilProduct | null>>(getComprasCacheKey(empresa, "erp")) ?? {});
     setFotosClickUp(lerCacheLocal<Record<string, string | null>>(getComprasCacheKey(empresa, "fotos")) ?? {});
+    setVelocidadeVendas({});
     setImagemComErro({});
   }, [empresa]);
 
@@ -304,6 +324,30 @@ const Compras = () => {
       });
     } finally {
       setAcaoEmAndamento(null);
+    }
+  };
+
+  // Antes de mandar "Fazer Pedido", confere no ERP se ja existe pedido de compra
+  // aberto com algum fornecedor desse produto. Se a checagem falhar (ERP fora, sem
+  // fornecedor cadastrado etc.), nao bloqueia o fluxo normal do app.
+  const confirmarFazerPedido = async (produtoId: string): Promise<boolean> => {
+    const produtoErpId = produtosErp[produtoId]?.id;
+    if (!produtoErpId) return true;
+
+    try {
+      const pedidosAbertos = await buscarPedidosCompraAbertosPorProduto(produtoErpId, { empresa, flag: "loja" });
+      if (pedidosAbertos.length === 0) return true;
+
+      const resumo = pedidosAbertos
+        .map((p: PedidoCompraAberto) => `Pedido #${p.pedidoId} — status ${p.status}${p.dataDeEmissao ? ` (${p.dataDeEmissao})` : ""} — ${p.quantidadePedida} un.`)
+        .join("\n");
+
+      return window.confirm(
+        `Já existe pedido de compra aberto no ERP para esse produto:\n\n${resumo}\n\nCriar mesmo assim a task de "Fazer Pedido" no ClickUp?`
+      );
+    } catch (err) {
+      console.error("[Compras][PedidoAberto] Checagem falhou", { produtoId, erro: err instanceof Error ? err.message : String(err) });
+      return true;
     }
   };
 
@@ -393,6 +437,7 @@ const Compras = () => {
   const fotoAnalise = fotoAnaliseSelecionada?.src ?? null;
   const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
   const precoVendaAnalise = formatarPreco(produtoAnaliseErp?.precoVarejo);
+  const velocidadeVendaAnalise = produtoAnalise ? formatarVelocidadeVenda(velocidadeVendas[produtoAnalise.id]) : null;
   const podeMostrarFotoAnalise = Boolean(produtoAnalise && fotoAnaliseSelecionada);
 
   useEffect(() => {
@@ -535,6 +580,60 @@ const Compras = () => {
       cancelado = true;
     };
   }, [empresa, fotosClickUp, produtoAnalise, produtosErp, produtosPaginados]);
+
+  // Velocidade de venda: so consulta depois que o produtoErp ja carregou (precisa do
+  // produtoId do ERP). A primeira chamada por empresa pagina os cupons fiscais e fica
+  // em cache por 30min; as proximas so leem o mapa ja calculado.
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregarVelocidadeVendas = async () => {
+      const origem = Array.from(
+        new Map([
+          ...produtosPaginados,
+          ...(produtoAnalise ? [produtoAnalise] : []),
+        ].map((produto) => [produto.id, produto])).values()
+      );
+      const pendentes = origem.filter((produto) => {
+        const produtoErpId = produtosErp[produto.id]?.id;
+        return Boolean(produtoErpId) && !(produto.id in velocidadeVendas);
+      });
+
+      if (pendentes.length === 0) return;
+
+      const resultados = await Promise.all(
+        pendentes.map(async (produto) => {
+          const produtoErpId = produtosErp[produto.id]?.id as string;
+          try {
+            const velocidade = await buscarVelocidadeVendaProduto(produtoErpId, { empresa, flag: "loja" });
+            return [produto.id, velocidade] as const;
+          } catch (err) {
+            console.error("[Compras][Velocidade] ERP falhou", {
+              produtoId: produto.id,
+              produtoErpId,
+              erro: err instanceof Error ? err.message : String(err),
+            });
+            return [produto.id, null] as const;
+          }
+        })
+      );
+
+      if (cancelado) return;
+      setVelocidadeVendas((prev) => {
+        const next = { ...prev };
+        for (const [id, velocidade] of resultados) {
+          next[id] = velocidade;
+        }
+        return next;
+      });
+    };
+
+    void carregarVelocidadeVendas();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [empresa, produtoAnalise, produtosErp, produtosPaginados, velocidadeVendas]);
 
   const getStatusBadge = (status: string) => {
     switch (status) {
@@ -847,6 +946,7 @@ const Compras = () => {
                   const produtoErp = produtosErp[produto.id];
                   const descricao = produtoErp?.descricao || produto.descricao;
                   const precoVenda = formatarPreco(produtoErp?.precoVarejo);
+                  const velocidadeVenda = formatarVelocidadeVenda(velocidadeVendas[produto.id]);
                   const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
                   const foto = fotoSelecionada?.src ?? null;
                   const podeMostrarImagem = Boolean(fotoSelecionada);
@@ -883,6 +983,9 @@ const Compras = () => {
                           {produtoErp?.secao && <div className="text-xs text-indigo-600">{produtoErp.secao}</div>}
                           {produto.sku && <div className="text-xs text-gray-400">{produto.sku}</div>}
                           {precoVenda && <div className="text-xs font-semibold text-emerald-700">{precoVenda}</div>}
+                          {velocidadeVenda && (
+                            <div className="text-xs font-semibold text-amber-700">📈 {velocidadeVenda}</div>
+                          )}
                         </div>
                       </div>
                       <div className="flex items-center gap-2 flex-wrap sm:justify-end w-full sm:w-auto">
@@ -903,7 +1006,10 @@ const Compras = () => {
 
                         {produto.status === "produto_bom" && (
                           <>
-                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto movido para fazer pedido")}>
+                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={async () => {
+                              if (!(await confirmarFazerPedido(produto.id))) return;
+                              executarAcao(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto movido para fazer pedido");
+                            }}>
                               {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-1" />}
                               Fazer Pedido
                             </Button>
@@ -1109,6 +1215,9 @@ const Compras = () => {
                       {precoVendaAnalise && (
                         <div className="text-sm font-semibold text-emerald-700 mt-1">{precoVendaAnalise}</div>
                       )}
+                      {velocidadeVendaAnalise && (
+                        <div className="text-sm font-semibold text-amber-700 mt-1">📈 {velocidadeVendaAnalise}</div>
+                      )}
                       <div className="mt-3">{getStatusBadge(produtoAnalise.status)}</div>
                     </div>
                   </div>
@@ -1126,7 +1235,10 @@ const Compras = () => {
                     </Button>
                     <Button
                       disabled={!!acaoEmAndamento}
-                      onClick={() => executarAnalise("FAZER_PEDIDO", () => fazerPedido(produtoAnalise.id), "Produto enviado para Fazer Pedido")}
+                      onClick={async () => {
+                        if (!(await confirmarFazerPedido(produtoAnalise.id))) return;
+                        executarAnalise("FAZER_PEDIDO", () => fazerPedido(produtoAnalise.id), "Produto enviado para Fazer Pedido");
+                      }}
                     >
                       <ShoppingCart className="h-4 w-4 mr-2" />
                       Fazer Pedido
