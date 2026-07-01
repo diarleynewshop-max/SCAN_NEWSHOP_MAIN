@@ -29,14 +29,19 @@ const PARALLEL_PAGE_BATCH = 5;
 const REPEATED_ITEM_TAG = '( ITEM REPETIDO )';
 const MAX_REPEATED_TAGS_PER_REQUEST = 25;
 
+// Prioridade de deduplicacao: quando o mesmo produto aparece em varias tasks,
+// mantemos a de maior prioridade. `todo` (Pendente) fica ABAIXO de qualquer status
+// que ja passou por analise — incluindo os finais (andamento/realizada/concluido) —
+// para que uma re-importacao da planilha nao ressuscite como "pendente" um produto
+// que ja foi analisado/comprado. So reaparece se nunca tiver sido analisado.
 const DUPLICATE_STATUS_PRIORITY: Record<CompraStatusApp, number> = {
   fazer_pedido: 400,
   produto_bom: 300,
   produto_ruim: 200,
+  pedido_andamento: 150,
+  compra_realizada: 140,
+  concluido: 130,
   todo: 100,
-  pedido_andamento: 90,
-  compra_realizada: 80,
-  concluido: 10,
 };
 
 type CompraProdutoInterno = {

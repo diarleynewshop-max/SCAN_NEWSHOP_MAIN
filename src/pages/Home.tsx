@@ -5,6 +5,7 @@ import { useAuth, validarSenha, type LoginFlag } from "@/hooks/useAuth";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
 import { HISTORICO_COMPRAS_KEY, getHistoricoComprasEnabled } from "@/lib/historicoCompras";
+import { getSecoesFixasPorEmpresa } from "@/lib/secoesCompras";
 import { useToast } from "@/hooks/use-toast";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 import { ErpLayout } from "@/components/ErpLayout";
@@ -199,6 +200,8 @@ const Home = () => {
   const [senhaAcessoInput, setSenhaAcessoInput] = useState('');
   const [erroSenhaAcesso, setErroSenhaAcesso] = useState(false);
   const [mostrarSenhaAcesso, setMostrarSenhaAcesso] = useState(false);
+  // Secoes marcadas para o perfil de compras selecionado (Ferramenta, Eletronico...).
+  const [secoesSelecionadas, setSecoesSelecionadas] = useState<string[]>([]);
 
   // Estados para configurações
   const [modoEscuro, setModoEscuro] = useState(() => {
@@ -459,17 +462,43 @@ const Home = () => {
     'admin': 'ADMIN',
   };
 
+  const isNivelCompras = (nivel: string | null): boolean =>
+    nivel === 'compras-newshop' || nivel === 'compras-sf';
+
+  // Lista fixa de secoes disponivel para cada perfil de compras (por empresa).
+  const getSecoesDoNivel = (nivel: string | null): string[] => {
+    if (nivel === 'compras-newshop') return getSecoesFixasPorEmpresa('NEWSHOP');
+    if (nivel === 'compras-sf') return getSecoesFixasPorEmpresa('SOYE');
+    return [];
+  };
+
+  const toggleSecaoSelecionada = (secao: string) => {
+    setSecoesSelecionadas((prev) =>
+      prev.includes(secao) ? prev.filter((s) => s !== secao) : [...prev, secao]
+    );
+  };
+
   const handleAplicarPerfil = () => {
     if (!nivelSelecionado || !loginSalvo) return;
     if (!SENHAS_NIVEL[nivelSelecionado].includes(senhaAcessoInput)) {
       setErroSenhaAcesso(true);
       return;
     }
-    const novoLogin = { ...loginSalvo, role: ROLES_NIVEL[nivelSelecionado] as 'operador' | 'compras' | 'admin' | 'super' };
+    const novoLogin: Record<string, unknown> = {
+      ...loginSalvo,
+      role: ROLES_NIVEL[nivelSelecionado] as 'operador' | 'compras' | 'admin' | 'super',
+    };
+    // So o perfil de compras guarda secoes; outros niveis limpam o campo.
+    if (isNivelCompras(nivelSelecionado)) {
+      novoLogin.secoesCompras = secoesSelecionadas;
+    } else {
+      delete novoLogin.secoesCompras;
+    }
     localStorage.setItem("scan_newshop_login", JSON.stringify(novoLogin));
     setMostrarPopupSenhaAcesso(false);
     setNivelSelecionado(null);
     setSenhaAcessoInput('');
+    setSecoesSelecionadas([]);
     setMostrarConfiguracoes(false);
     setTimeout(() => window.location.reload(), 300);
   };
@@ -1465,6 +1494,10 @@ const Home = () => {
                          setSenhaAcessoInput('');
                          setErroSenhaAcesso(false);
                          setMostrarSenhaAcesso(false);
+                         // Pre-marca as secoes ja salvas (se estiver reconfigurando o mesmo perfil).
+                         setSecoesSelecionadas(
+                           isNivelCompras(id) ? (loginSalvo?.secoesCompras ?? []) : []
+                         );
                          setMostrarPopupSenhaAcesso(true);
                        }}
                        style={{
@@ -1626,9 +1659,55 @@ const Home = () => {
               </p>
             )}
 
+            {/* Secoes do comprador: marca quais secoes esse perfil acompanha. */}
+            {isNivelCompras(nivelSelecionado) && (
+              <div style={{ marginBottom: 16 }}>
+                <p style={{ fontSize: 12, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 2 }}>
+                  Secoes deste comprador
+                </p>
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginBottom: 10 }}>
+                  Ao abrir Compras, so essas secoes carregam. As demais ficam no filtro.
+                </p>
+                <div style={{ display: "flex", flexDirection: "column", gap: 6, maxHeight: 200, overflowY: "auto" }}>
+                  {getSecoesDoNivel(nivelSelecionado).map((secao) => {
+                    const marcada = secoesSelecionadas.includes(secao);
+                    return (
+                      <button
+                        key={secao}
+                        type="button"
+                        onClick={() => toggleSecaoSelecionada(secao)}
+                        style={{
+                          display: "flex", alignItems: "center", gap: 10,
+                          padding: "10px 12px", borderRadius: 8, cursor: "pointer", textAlign: "left",
+                          background: marcada ? "hsl(var(--primary) / 0.1)" : "hsl(var(--secondary))",
+                          border: `1.5px solid ${marcada ? "hsl(var(--primary))" : "hsl(var(--border))"}`,
+                        }}
+                      >
+                        <span style={{
+                          width: 18, height: 18, borderRadius: 5, flexShrink: 0,
+                          display: "flex", alignItems: "center", justifyContent: "center",
+                          background: marcada ? "hsl(var(--primary))" : "transparent",
+                          border: `1.5px solid ${marcada ? "hsl(var(--primary))" : "hsl(var(--muted-foreground))"}`,
+                          color: "hsl(var(--primary-foreground))", fontSize: 12, fontWeight: 700,
+                        }}>
+                          {marcada ? "✓" : ""}
+                        </span>
+                        <span style={{ fontSize: 13, fontWeight: 500, color: "hsl(var(--foreground))" }}>{secao}</span>
+                      </button>
+                    );
+                  })}
+                </div>
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginTop: 8 }}>
+                  {secoesSelecionadas.length === 0
+                    ? "Nenhuma marcada = ve todas as secoes."
+                    : `${secoesSelecionadas.length} secao(oes) selecionada(s).`}
+                </p>
+              </div>
+            )}
+
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
               <button
-                onClick={() => { setMostrarPopupSenhaAcesso(false); setNivelSelecionado(null); setSenhaAcessoInput(''); }}
+                onClick={() => { setMostrarPopupSenhaAcesso(false); setNivelSelecionado(null); setSenhaAcessoInput(''); setSecoesSelecionadas([]); }}
                 style={{ height: 48, borderRadius: 10, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))", fontWeight: 600, fontSize: 14, cursor: "pointer" }}
               >
                 Cancelar

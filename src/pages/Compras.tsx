@@ -6,6 +6,8 @@ import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Load
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
+import { obterLoginSalvo } from "@/hooks/useAuth";
+import { getSecoesFixasPorEmpresa } from "@/lib/secoesCompras";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -51,28 +53,10 @@ const STATUS_FILTROS: Array<{ value: StatusFiltro; label: string }> = [
   { value: "todo", label: "Pendente" },
 ];
 
-const SECOES_FIXAS_NEWSHOP = ["Eletronico", "Papelaria", "Bijuteria"];
-const SECOES_FIXAS_SF = [
-  "GERAL",
-  "PET SHOP",
-  "UTILIDADES DOMÉSTICAS",
-  "PAPELARIA",
-  "ÁREA KIDS",
-  "ELETRÔNICOS E INFORMÁTICA",
-  "USO PESSOAL",
-  "AUTOMOTIVO",
-  "ESPORTE E LAZER",
-  "CONSUMO",
-];
-
-function getSecoesFixasPorEmpresa(empresa: string): string[] {
-  const empresaNormalizada = empresa.toUpperCase();
-  if (empresaNormalizada.includes("FACIL") || empresaNormalizada.includes("SOYE")) {
-    return SECOES_FIXAS_SF;
-  }
-
-  return SECOES_FIXAS_NEWSHOP;
-}
+// Valor especial do filtro de secao: mostra apenas as secoes atribuidas ao
+// comprador no perfil (login.secoesCompras). Se o comprador tiver secoes
+// configuradas, o filtro ja abre nessa opcao.
+const FILTRO_MINHAS_SECOES = "__minhas_secoes__";
 
 const STATUS_PRIORITY: Record<string, number> = {
   fazer_pedido: 0,
@@ -203,6 +187,20 @@ function secaoCombinaFiltro(secao: string | null | undefined, filtro: string): b
   );
 }
 
+// Aplica o filtro de secao considerando a opcao especial "Minhas secoes": nesse
+// caso o produto entra se casar com QUALQUER uma das secoes do comprador.
+function produtoCombinaSecao(
+  secao: string | null | undefined,
+  filtro: string,
+  secoesCompras: string[]
+): boolean {
+  if (filtro === FILTRO_MINHAS_SECOES) {
+    if (secoesCompras.length === 0) return true;
+    return secoesCompras.some((minha) => secaoCombinaFiltro(secao, minha));
+  }
+  return secaoCombinaFiltro(secao, filtro);
+}
+
 function getImagemErroKey(produtoId: string, fonte: FotoFonte, foto: string | null): string {
   return `${produtoId}:${fonte}:${foto || "sem-foto"}`;
 }
@@ -233,10 +231,14 @@ function selecionarFotoProduto(
 const Compras = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
+  // Secoes atribuidas ao comprador no perfil (login.secoesCompras). Lido uma vez:
+  // trocar de perfil recarrega a pagina, entao nao muda durante o uso da tela.
+  const secoesCompras = useMemo(() => obterLoginSalvo()?.secoesCompras ?? [], []);
+  const temSecoesCompras = secoesCompras.length > 0;
   const [searchTerm, setSearchTerm] = useState("");
   const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("todos");
-  const [filtroSecao, setFiltroSecao] = useState("todos");
-  const [filtroSecaoAnalise, setFiltroSecaoAnalise] = useState("todos");
+  const [filtroSecao, setFiltroSecao] = useState(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
+  const [filtroSecaoAnalise, setFiltroSecaoAnalise] = useState(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
   const [ordenarMaisPedidos, setOrdenarMaisPedidos] = useState(false);
   const [ordenarMaisVendidos, setOrdenarMaisVendidos] = useState(false);
   const [importando, setImportando] = useState(false);
@@ -541,9 +543,9 @@ const Compras = () => {
 
   const filteredProdutos = useMemo(() => {
     return produtosPorBuscaStatus.filter((p) => (
-      secaoCombinaFiltro(produtosErp[p.id]?.secao, filtroSecao)
+      produtoCombinaSecao(produtosErp[p.id]?.secao, filtroSecao, secoesCompras)
     ));
-  }, [filtroSecao, produtosErp, produtosPorBuscaStatus]);
+  }, [filtroSecao, produtosErp, produtosPorBuscaStatus, secoesCompras]);
 
   const produtosOrdenados = useMemo(() => {
     if (ordenarMaisPedidos) {
@@ -599,9 +601,9 @@ const Compras = () => {
   }, [produtos]);
   const produtosAnalise = useMemo(
     () => produtosPendentesAnalise.filter((produto) => (
-      secaoCombinaFiltro(produtosErp[produto.id]?.secao, filtroSecaoAnalise)
+      produtoCombinaSecao(produtosErp[produto.id]?.secao, filtroSecaoAnalise, secoesCompras)
     )),
-    [filtroSecaoAnalise, produtosErp, produtosPendentesAnalise]
+    [filtroSecaoAnalise, produtosErp, produtosPendentesAnalise, secoesCompras]
   );
   const produtoAnalise = produtosAnalise[0] ?? null;
   const produtoAnaliseErp = produtoAnalise ? produtosErp[produtoAnalise.id] : null;
@@ -1025,6 +1027,11 @@ const Compras = () => {
                 onChange={(e) => setFiltroSecao(e.target.value)}
                 className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
               >
+                {temSecoesCompras && (
+                  <option value={FILTRO_MINHAS_SECOES}>
+                    Minhas secoes ({secoesCompras.length})
+                  </option>
+                )}
                 <option value="todos">Todas as secoes</option>
                 {secoesDisponiveis.map((secao) => (
                   <option key={secao} value={secao}>
@@ -1049,7 +1056,7 @@ const Compras = () => {
                 variant="outline"
                 onClick={() => {
                   setSearchTerm("");
-                  setFiltroSecao("todos");
+                  setFiltroSecao(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
                   setFiltroStatus("todos");
                   setOrdenarMaisPedidos(false);
                   setOrdenarMaisVendidos(false);
@@ -1360,6 +1367,11 @@ const Compras = () => {
                 }}
                 className="h-10 w-full rounded-md border border-gray-300 bg-white px-3 py-2 text-sm"
               >
+                {temSecoesCompras && (
+                  <option value={FILTRO_MINHAS_SECOES}>
+                    Minhas secoes ({secoesCompras.length})
+                  </option>
+                )}
                 <option value="todos">Todas as secoes</option>
                 {secoesDisponiveis.map((secao) => (
                   <option key={secao} value={secao}>

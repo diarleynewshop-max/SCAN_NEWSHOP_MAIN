@@ -46,14 +46,19 @@ function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
   return 'NEWSHOP';
 }
 
+// Prioridade de deduplicacao: quando o mesmo produto aparece em varias tasks,
+// mantemos a de maior prioridade. `todo` (Pendente) fica ABAIXO de qualquer status
+// que ja passou por analise — incluindo os finais (andamento/realizada/concluido) —
+// para que uma re-importacao da planilha nao ressuscite como "pendente" um produto
+// que ja foi analisado/comprado. So reaparece se nunca tiver sido analisado.
 const STATUS_DUPLICADO_PRIORITY: Record<CompraStatusApp, number> = {
   fazer_pedido: 400,
   produto_bom: 300,
   produto_ruim: 200,
+  pedido_andamento: 150,
+  compra_realizada: 140,
+  concluido: 130,
   todo: 100,
-  pedido_andamento: 90,
-  compra_realizada: 80,
-  concluido: 10,
 };
 
 function normalizarProdutoKey(value: string | null | undefined): string {

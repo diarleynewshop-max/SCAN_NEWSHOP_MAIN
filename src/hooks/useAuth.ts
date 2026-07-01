@@ -12,6 +12,9 @@ export interface LoginData {
   nomePessoa: string;
   flag: LoginFlag;
   role: UserRole; // NOVO: perfil do usuário
+  // Secoes que o comprador (role 'compras') acompanha. Definido no perfil
+  // ("Alterar Perfil de Acesso"). Vazio/ausente = ve todas as secoes.
+  secoesCompras?: string[];
 }
 
 const STORAGE_KEY = "scan_newshop_login";
