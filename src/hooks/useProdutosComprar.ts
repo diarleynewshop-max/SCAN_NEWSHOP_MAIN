@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { obterLoginSalvo } from '@/hooks/useAuth';
+import { upsertComprasFromClickup } from '@/lib/comprasSupabase';
 
 export interface ProdutoComprar {
   id: string;
@@ -217,6 +218,13 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       const updatedAt = new Date();
       setUltimaAtualizacao(updatedAt);
       writeProdutosCache(empresaAtual, produtosAtualizados);
+
+      // Dual-write (piloto de migracao): espelha os itens no Supabase em segundo
+      // plano. E "melhor esforco" — se falhar, so loga e NAO afeta a tela (ClickUp
+      // segue como fonte de verdade nesta fase).
+      void upsertComprasFromClickup(produtosAtualizados, empresaAtual).catch((err) => {
+        console.warn('[compras][supabase] dual-write falhou (ignorado):', err);
+      });
     } catch (err: unknown) {
       if (isAbortError(err)) {
         return;
