@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { request as httpsRequest } from "node:https";
 import { erpFotoSync } from "./erpFotoSync";
 import { expedicaoSync } from "./expedicaoSync";
+import { registrarItemCompraSupabase } from "./supabaseCompras";
 
 type EmpresaSF = "SOYE" | "FACIL";
 type FlagLista = "loja" | "cd";
@@ -469,6 +470,21 @@ Foto anexada abaixo (se houver)`,
 
     if (!primeiraTaskId) {
       primeiraTaskId = taskId;
+    }
+
+    // Dual-write: espelha o item de compra no Supabase (best-effort). SOYE/FACIL
+    // sao a mesma empresa (SF) no banco — o mapeamento e feito no helper.
+    try {
+      await registrarItemCompraSupabase({
+        empresa,
+        codigo: item.codigo,
+        sku: item.sku ?? null,
+        descricao: `🛒 ${item.codigo} — ${payload.conferente} — ${dataFormatada}`,
+        secao: item.secao ?? null,
+        clickupTaskId: taskId,
+      });
+    } catch (err) {
+      console.error("[trigger][supabase] falha ao espelhar item de compra SF:", err);
     }
 
     if (item.photo && item.photo.length > 0) {

@@ -3,6 +3,7 @@ import sharp from "sharp";
 import { request as httpsRequest } from "node:https";
 import { erpFotoSync } from "./erpFotoSync";
 import { expedicaoSync } from "./expedicaoSync";
+import { registrarItemCompraSupabase } from "./supabaseCompras";
 
 if (!process.env.CLICKUP_TOKEN) throw new Error("CLICKUP_TOKEN não configurado no ambiente do Trigger.");
 const CLICKUP_TOKEN = process.env.CLICKUP_TOKEN;
@@ -391,6 +392,21 @@ Real: ${item.quantidadeReal ?? 0}
 
     if (!primeiraTaskId) {
       primeiraTaskId = taskId;
+    }
+
+    // Dual-write: espelha o item de compra no Supabase (best-effort; se falhar, o
+    // ClickUp ja foi criado e o fluxo segue normal).
+    try {
+      await registrarItemCompraSupabase({
+        empresa: payload.empresa,
+        codigo: item.codigo,
+        sku: item.sku ?? null,
+        descricao: `🛒 ${item.codigo} — ${payload.conferente} — ${dataFormatada}`,
+        secao: item.secao ?? null,
+        clickupTaskId: taskId,
+      });
+    } catch (err) {
+      console.error("[trigger][supabase] falha ao espelhar item de compra:", err);
     }
 
     if (item.photo && item.photo.length > 0) {
