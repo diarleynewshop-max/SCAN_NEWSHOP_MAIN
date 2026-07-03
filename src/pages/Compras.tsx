@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown, MoreVertical, Barcode } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
@@ -149,6 +149,22 @@ function formatarPreco(valor: number | undefined | null): string | null {
   return valor.toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
 }
 
+// Deixa a secao em Caixa de Titulo ("UTILIDADES DOMESTICAS" -> "Utilidades Domesticas").
+function formatarSecao(secao: string | null | undefined): string | null {
+  const limpo = secao?.trim();
+  if (!limpo) return null;
+  return limpo
+    .toLocaleLowerCase("pt-BR")
+    .replace(/(^|[\s/\-–—])(\p{L})/gu, (_, sep: string, letra: string) => sep + letra.toLocaleUpperCase("pt-BR"));
+}
+
+// Destaque do card: os primeiros N caracteres da descricao (nao o codigo de barras).
+function truncarDescricao(descricao: string, max = 30): string {
+  const limpo = (descricao || "").trim();
+  if (limpo.length <= max) return limpo;
+  return `${limpo.slice(0, max).trimEnd()}…`;
+}
+
 function formatarVelocidadeVenda(velocidade: VelocidadeVendaProduto | null | undefined): string | null {
   if (!velocidade) return null;
   // Erro na consulta ao ERP nao e a mesma coisa que "0 vendas" — nao mostra numero
@@ -255,6 +271,8 @@ const Compras = () => {
   const [gerandoPedidos, setGerandoPedidos] = useState(false);
   const [baixandoPdfPedido, setBaixandoPdfPedido] = useState<string | null>(null);
   const [analiseAberta, setAnaliseAberta] = useState(false);
+  // Item aberto no modal de detalhes (mostra codigo de barras + acoes).
+  const [produtoDetalhe, setProdutoDetalhe] = useState<ProdutoComprar | null>(null);
   const [escolhaDireita, setEscolhaDireita] = useState(false);
   const [dragX, setDragX] = useState(0);
   const dragStartRef = useRef<number | null>(null);
@@ -960,6 +978,107 @@ const Compras = () => {
     toast({ title: parado ? "Pre-carregamento parado" : "Pre-carregamento concluido" });
   };
 
+  // Dispara uma acao a partir do modal de detalhes e fecha o modal ao terminar.
+  const acaoDetalhe = (actionKey: string, action: () => Promise<void>, sucesso: string) => {
+    void executarAcao(actionKey, action, sucesso).finally(() => setProdutoDetalhe(null));
+  };
+
+  // Botoes de acao do item (usados no modal de detalhes), conforme o status atual.
+  const renderAcoesProduto = (produto: ProdutoComprar) => {
+    const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
+
+    switch (produto.status) {
+      case "todo":
+        return (
+          <>
+            <Button className="w-full justify-center" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:LIKE`, () => like(produto.id), "Produto marcado como bom")}>
+              {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-2" />}
+              Galpao / CD
+            </Button>
+            <Button className="w-full justify-center text-red-600" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto marcado como ruim")}>
+              {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-2" />}
+              Ruim
+            </Button>
+          </>
+        );
+      case "produto_bom":
+        return (
+          <>
+            <Button className="w-full justify-center" disabled={!!acaoEmAndamento} onClick={async () => {
+              if (!(await confirmarFazerPedido(produto.id))) return;
+              acaoDetalhe(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto movido para fazer pedido");
+            }}>
+              {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-2" />}
+              Fazer Pedido
+            </Button>
+            <Button className="w-full justify-center text-red-600" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto marcado como ruim")}>
+              {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-2" />}
+              Ruim
+            </Button>
+          </>
+        );
+      case "produto_ruim":
+        return (
+          <Button className="w-full justify-center text-emerald-700" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:LIKE`, () => like(produto.id), "Produto marcado como bom")}>
+            {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-2" />}
+            Galpao / CD
+          </Button>
+        );
+      case "fazer_pedido":
+        return (
+          <>
+            <Button className="w-full justify-center" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Compra realizada")}>
+              {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+              Compra Realizada
+            </Button>
+            <Button className="w-full justify-center text-red-600" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto movido para ruim")}>
+              {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-2" />}
+              Mover para Ruim
+            </Button>
+          </>
+        );
+      case "pedido_andamento":
+        return (
+          <>
+            <Button className="w-full justify-center" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Compra realizada")}>
+              {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+              Compra Realizada
+            </Button>
+            <Button className="w-full justify-center text-indigo-700 border-indigo-200" variant="outline" disabled={baixandoPdfPedido === produto.id} onClick={() => baixarOuReBaixarPdfPedido(produto)}>
+              {baixandoPdfPedido === produto.id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+              Baixar PDF
+            </Button>
+            <Button className="w-full justify-center" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto voltou para fazer pedido")}>
+              {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-2" />}
+              Voltar Pedido
+            </Button>
+          </>
+        );
+      case "compra_realizada":
+        return (
+          <>
+            <Button className="w-full justify-center" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:CONCLUIR`, () => concluir(produto.id), "Produto concluido")}>
+              {isActionLoading("CONCLUIR") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
+              Concluir
+            </Button>
+            <Button className="w-full justify-center" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:PEDIDO_ANDAMENTO`, () => pedidoAndamento(produto.id), "Produto voltou para pedido em andamento")}>
+              {isActionLoading("PEDIDO_ANDAMENTO") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+              Voltar Andamento
+            </Button>
+          </>
+        );
+      case "concluido":
+        return (
+          <Button className="w-full justify-center" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Produto reaberto")}>
+            {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Reabrir
+          </Button>
+        );
+      default:
+        return null;
+    }
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
@@ -1283,17 +1402,17 @@ const Compras = () => {
                 </div>
 
                 {produtosPaginadosExibidos.map((produto) => {
-                  const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
                   const produtoErp = produtosErp[produto.id];
                   const descricao = produtoErp?.descricao || produto.descricao;
+                  const descricaoCurta = truncarDescricao(descricao);
                   const precoVenda = formatarPreco(produtoErp?.precoVarejo);
-                  const velocidadeVenda = formatarVelocidadeVenda(velocidadeVendas[produto.id]);
+                  const secaoFormatada = formatarSecao(produto.secao ?? produtoErp?.secao);
                   const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
                   const foto = fotoSelecionada?.src ?? null;
                   const podeMostrarImagem = Boolean(fotoSelecionada);
 
                   return (
-                    <div key={produto.id} className="flex flex-col sm:flex-row sm:items-center sm:justify-between p-3 bg-gray-50 rounded-lg gap-3">
+                    <div key={produto.id} className="flex items-center justify-between p-3 bg-gray-50 rounded-lg gap-3">
                       <div className="flex items-center gap-3 min-w-0">
                         {produto.status === "fazer_pedido" && (
                           <input
@@ -1307,7 +1426,7 @@ const Compras = () => {
                         {podeMostrarImagem ? (
                           <img
                             src={foto as string}
-                            alt={produto.codigo}
+                            alt={descricaoCurta}
                             className="w-14 h-14 object-cover rounded shrink-0"
                             onError={() => {
                               if (!fotoSelecionada) return;
@@ -1323,116 +1442,26 @@ const Compras = () => {
                           </div>
                         )}
                         <div className="min-w-0">
-                          <div className="flex items-center gap-2">
-                            <div className="font-bold text-sm">{produto.codigo}</div>
+                          <div className="font-bold text-sm sm:text-base text-gray-900 truncate">{descricaoCurta}</div>
+                          <div className="flex items-center gap-2 mt-0.5">
                             <span className="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800">
                               {produto.vezesPedido}x
                             </span>
+                            {getStatusBadge(produto.status)}
                           </div>
-                          <div className="text-sm text-gray-600 break-words leading-tight">{descricao}</div>
-                          {(produto.secao ?? produtoErp?.secao) && <div className="text-xs text-indigo-600">{produto.secao ?? produtoErp?.secao}</div>}
-                          {produto.sku && <div className="text-xs text-gray-400">{produto.sku}</div>}
+                          {secaoFormatada && <div className="text-xs text-indigo-600 mt-0.5">{secaoFormatada}</div>}
                           {precoVenda && <div className="text-xs font-semibold text-emerald-700">{precoVenda}</div>}
-                          {velocidadeVenda && (
-                            <div className="text-xs font-semibold text-amber-700">📈 {velocidadeVenda}</div>
-                          )}
                         </div>
                       </div>
-                      <div className="flex items-center gap-2 flex-wrap sm:justify-end w-full sm:w-auto">
-                        {getStatusBadge(produto.status)}
-
-                        {produto.status === "todo" && (
-                          <>
-                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto marcado como bom")}>
-                              {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
-                              Galpao
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto marcado como ruim")} className="text-red-600">
-                              {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-1" />}
-                              Ruim
-                            </Button>
-                          </>
-                        )}
-
-                        {produto.status === "produto_bom" && (
-                          <>
-                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={async () => {
-                              if (!(await confirmarFazerPedido(produto.id))) return;
-                              executarAcao(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto movido para fazer pedido");
-                            }}>
-                              {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-1" />}
-                              Fazer Pedido
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto marcado como ruim")} className="text-red-600">
-                              {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-1" />}
-                              Ruim
-                            </Button>
-                          </>
-                        )}
-
-                        {produto.status === "produto_ruim" && (
-                          <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:LIKE`, () => like(produto.id), "Produto marcado como bom")} className="text-emerald-700">
-                            {isActionLoading("LIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsUp className="h-4 w-4 mr-1" />}
-                            Galpao
-                          </Button>
-                        )}
-
-                        {produto.status === "fazer_pedido" && (
-                          <>
-                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:DISLIKE`, () => dislike(produto.id), "Produto movido para ruim")} className="text-red-600">
-                              {isActionLoading("DISLIKE") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ThumbsDown className="h-4 w-4 mr-1" />}
-                              Mover para Ruim
-                            </Button>
-                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Compra realizada")}>
-                              {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
-                              Compra Realizada
-                            </Button>
-                          </>
-                        )}
-
-                        {produto.status === "pedido_andamento" && (
-                          <>
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={baixandoPdfPedido === produto.id}
-                              onClick={() => baixarOuReBaixarPdfPedido(produto)}
-                              className="text-indigo-700 border-indigo-200"
-                            >
-                              {baixandoPdfPedido === produto.id ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <FileDown className="h-4 w-4 mr-1" />}
-                              Baixar PDF
-                            </Button>
-                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Compra realizada")}>
-                              {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
-                              Compra Realizada
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto voltou para fazer pedido")}>
-                              {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-1" />}
-                              Voltar Pedido
-                            </Button>
-                          </>
-                        )}
-
-                        {produto.status === "compra_realizada" && (
-                          <>
-                            <Button size="sm" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:CONCLUIR`, () => concluir(produto.id), "Produto concluido")}>
-                              {isActionLoading("CONCLUIR") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <Check className="h-4 w-4 mr-1" />}
-                              Concluir
-                            </Button>
-                            <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:PEDIDO_ANDAMENTO`, () => pedidoAndamento(produto.id), "Produto voltou para pedido em andamento")}>
-                              {isActionLoading("PEDIDO_ANDAMENTO") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-                              Voltar Andamento
-                            </Button>
-                          </>
-                        )}
-
-                        {produto.status === "concluido" && (
-                          <Button size="sm" variant="outline" disabled={!!acaoEmAndamento} onClick={() => executarAcao(`${produto.id}:COMPRA_REALIZADA`, () => compraRealizada(produto.id), "Produto reaberto")}>
-                            {isActionLoading("COMPRA_REALIZADA") ? <Loader2 className="h-4 w-4 mr-1 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-1" />}
-                            Reabrir
-                          </Button>
-                        )}
-                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="shrink-0"
+                        onClick={() => setProdutoDetalhe(produto)}
+                        aria-label={`Ver detalhes e acoes de ${descricaoCurta}`}
+                      >
+                        <MoreVertical className="h-5 w-5" />
+                      </Button>
                     </div>
                   );
                 })}
@@ -1637,6 +1666,73 @@ const Compras = () => {
           </div>
         </div>
       )}
+
+      {produtoDetalhe && (() => {
+        const produtoErp = produtosErp[produtoDetalhe.id];
+        const descricao = produtoErp?.descricao || produtoDetalhe.descricao;
+        const precoVenda = formatarPreco(produtoErp?.precoVarejo);
+        const secaoFormatada = formatarSecao(produtoDetalhe.secao ?? produtoErp?.secao);
+        const velocidadeVenda = formatarVelocidadeVenda(velocidadeVendas[produtoDetalhe.id]);
+        const fotoSelecionada = selecionarFotoProduto(produtoDetalhe, produtoErp, fotosClickUp, imagemComErro);
+        const foto = fotoSelecionada?.src ?? null;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-end sm:items-center justify-center p-0 sm:p-4" onClick={() => setProdutoDetalhe(null)}>
+            <div
+              className="w-full sm:max-w-md max-h-[92vh] bg-white rounded-t-2xl sm:rounded-xl shadow-2xl overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-start justify-between gap-3 p-4 border-b">
+                <h2 className="text-base font-bold text-gray-900 leading-tight">{descricao}</h2>
+                <button
+                  type="button"
+                  className="shrink-0 h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center"
+                  onClick={() => setProdutoDetalhe(null)}
+                  aria-label="Fechar"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="p-4 space-y-3">
+                {foto ? (
+                  <img src={foto} alt={descricao} className="w-full max-h-64 object-contain bg-gray-100 rounded-lg" />
+                ) : (
+                  <div className="w-full h-40 bg-gray-100 rounded-lg flex items-center justify-center text-gray-400">sem foto</div>
+                )}
+
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded bg-violet-100 text-violet-800">
+                    Pedido {produtoDetalhe.vezesPedido}x
+                  </span>
+                  {getStatusBadge(produtoDetalhe.status)}
+                </div>
+
+                <div className="flex items-center gap-2 text-sm text-gray-700">
+                  <Barcode className="h-4 w-4 text-gray-500 shrink-0" />
+                  <span className="font-mono">{produtoDetalhe.codigo}</span>
+                </div>
+                {produtoDetalhe.sku && (
+                  <div className="text-xs text-gray-500">SKU: {produtoDetalhe.sku}</div>
+                )}
+                {secaoFormatada && (
+                  <div className="text-sm text-indigo-600">Secao: {secaoFormatada}</div>
+                )}
+                {precoVenda && (
+                  <div className="text-sm font-semibold text-emerald-700">{precoVenda}</div>
+                )}
+                {velocidadeVenda && (
+                  <div className="text-sm font-semibold text-amber-700">📈 {velocidadeVenda}</div>
+                )}
+
+                <div className="flex flex-col gap-2 pt-2">
+                  {renderAcoesProduto(produtoDetalhe)}
+                </div>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
