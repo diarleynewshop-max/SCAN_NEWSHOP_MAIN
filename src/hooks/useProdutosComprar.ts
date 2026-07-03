@@ -1,6 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { obterLoginSalvo } from '@/hooks/useAuth';
-import { upsertComprasFromClickup } from '@/lib/comprasSupabase';
+import {
+  upsertComprasFromClickup,
+  fetchComprasSupabase,
+  subscribeComprasSupabase,
+  atualizarStatusPorId,
+} from '@/lib/comprasSupabase';
+
+// Fonte de dados da tela de Compras: 'clickup' (padrao atual) ou 'supabase' (piloto).
+export type CompraFonte = 'clickup' | 'supabase';
 
 export interface ProdutoComprar {
   id: string;
@@ -28,6 +36,8 @@ interface UseProdutosComprarReturn {
   error: string | null;
   ultimaAtualizacao: Date | null;
   empresa: 'NEWSHOP' | 'SOYE' | 'FACIL';
+  fonte: CompraFonte;
+  setFonte: (fonte: CompraFonte) => void;
   refetch: () => Promise<void>;
   like: (taskId: string) => Promise<void>;
   dislike: (taskId: string) => Promise<void>;
@@ -38,6 +48,23 @@ interface UseProdutosComprarReturn {
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const FONTE_KEY = 'compras:fonte';
+
+function getFonteSalva(): CompraFonte {
+  try {
+    return window.localStorage.getItem(FONTE_KEY) === 'supabase' ? 'supabase' : 'clickup';
+  } catch {
+    return 'clickup';
+  }
+}
+
+function setFonteSalva(fonte: CompraFonte) {
+  try {
+    window.localStorage.setItem(FONTE_KEY, fonte);
+  } catch {
+    // preferencia opcional
+  }
+}
 
 function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
   const login = obterLoginSalvo();
@@ -173,11 +200,30 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [error, setError] = useState<string | null>(null);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
   const [empresa, setEmpresa] = useState<'NEWSHOP' | 'SOYE' | 'FACIL'>(() => getEmpresaAtual());
+  const [fonte, setFonteState] = useState<CompraFonte>(() => getFonteSalva());
   const requestControllerRef = useRef<AbortController | null>(null);
 
   const fetchProdutos = useCallback(async (force = false) => {
     const empresaAtual = getEmpresaAtual();
     setEmpresa(empresaAtual);
+
+    // Fonte Supabase: le direto do banco (com realtime via efeito abaixo).
+    if (fonte === 'supabase') {
+      setLoading(true);
+      setError(null);
+      try {
+        const lista = await fetchComprasSupabase(empresaAtual);
+        setProdutos(lista);
+        setUltimaAtualizacao(new Date());
+      } catch (err: unknown) {
+        console.error('[useProdutosComprar][supabase] Erro ao buscar:', err);
+        setError(getErrorMessage(err, 'Falha ao carregar do Supabase'));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     const cache = readProdutosCache(empresaAtual);
 
     if (cache && !force) {
@@ -236,7 +282,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
         setLoading(false);
       }
     }
-  }, []);
+  }, [fonte]);
 
   useEffect(() => {
     fetchProdutos();
@@ -245,6 +291,16 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       requestControllerRef.current?.abort();
     };
   }, [fetchProdutos]);
+
+  // Realtime: quando a fonte e Supabase, assina mudancas da tabela e recarrega.
+  useEffect(() => {
+    if (fonte !== 'supabase') return;
+    const empresaAtual = getEmpresaAtual();
+    const unsubscribe = subscribeComprasSupabase(empresaAtual, () => {
+      void fetchProdutos(true);
+    });
+    return unsubscribe;
+  }, [fonte, fetchProdutos]);
 
   const executarAcao = useCallback(async (taskId: string, acao: string) => {
     const empresaAtual = getEmpresaAtual();
@@ -263,6 +319,26 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       setProdutos((prev) =>
         prev.map((p) => (p.id === taskId ? { ...p, status: previsao[acao] } : p))
       );
+    }
+
+    // Fonte Supabase: atualiza o status pelo UUID da linha. O realtime propaga a
+    // mudanca; um refetch garante consistencia local.
+    if (fonte === 'supabase') {
+      try {
+        if (previsao[acao]) {
+          await atualizarStatusPorId(taskId, previsao[acao]);
+        }
+        await fetchProdutos(true);
+      } catch (err: unknown) {
+        if (statusAnterior) {
+          setProdutos((prev) =>
+            prev.map((p) => (p.id === taskId ? { ...p, status: statusAnterior } : p))
+          );
+        }
+        console.error('[useProdutosComprar][supabase] Erro na acao:', err);
+        throw err;
+      }
+      return;
     }
 
     try {
@@ -301,7 +377,12 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       console.error('[useProdutosComprar] Erro na acao:', err);
       throw err;
     }
-  }, [fetchProdutos, produtos]);
+  }, [fonte, fetchProdutos, produtos]);
+
+  const setFonte = useCallback((nova: CompraFonte) => {
+    setFonteSalva(nova);
+    setFonteState(nova);
+  }, []);
 
   const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
   const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
@@ -316,6 +397,8 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     error,
     ultimaAtualizacao,
     empresa,
+    fonte,
+    setFonte,
     refetch: () => fetchProdutos(true),
     like,
     dislike,

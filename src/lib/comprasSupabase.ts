@@ -51,7 +51,9 @@ interface CompraRow {
 
 function rowToProduto(row: CompraRow): ProdutoComprar {
   return {
-    id: row.clickup_task_id || row.id,
+    // Na leitura via Supabase, o id do produto e o UUID da linha (identificador
+    // estavel do banco). As acoes de status atualizam por esse id.
+    id: row.id,
     codigo: row.codigo,
     sku: row.sku,
     descricao: row.descricao ?? '',
@@ -105,18 +107,14 @@ export async function upsertComprasFromClickup(
   }
 }
 
-// Atualiza o status de um item (por ID da task do ClickUp) no Supabase.
-export async function moverStatusSupabase(
-  empresa: Empresa,
-  clickupTaskId: string,
+// Atualiza o status de um item pelo UUID da linha no Supabase (usado quando a
+// tela de Compras esta lendo direto do Supabase).
+export async function atualizarStatusPorId(
+  id: string,
   status: CompraStatusApp
 ): Promise<void> {
   if (!isSupabaseConfigured) return;
-  const { error } = await supabase
-    .from('compras')
-    .update({ status })
-    .eq('empresa', empresaCompras(empresa))
-    .eq('clickup_task_id', clickupTaskId);
+  const { error } = await supabase.from('compras').update({ status }).eq('id', id);
   if (error) throw error;
 }
 

@@ -269,6 +269,8 @@ const Compras = () => {
     concluir,
     ultimaAtualizacao,
     empresa,
+    fonte,
+    setFonte,
   } = useProdutosComprar();
 
   useEffect(() => {
@@ -920,6 +922,14 @@ const Compras = () => {
                 <Upload className="h-4 w-4 mr-2" />
               )}
               Importar Planilha
+            </Button>
+            <Button
+              variant={fonte === "supabase" ? "default" : "outline"}
+              onClick={() => setFonte(fonte === "supabase" ? "clickup" : "supabase")}
+              title="Alterna a fonte de dados: ClickUp (atual) ou Supabase (banco novo, tempo real)"
+              className={fonte === "supabase" ? "bg-emerald-600 hover:bg-emerald-700" : "text-emerald-700 border-emerald-200"}
+            >
+              Fonte: {fonte === "supabase" ? "Supabase (tempo real)" : "ClickUp"}
             </Button>
             <Button variant="outline" onClick={() => refetch()} disabled={loading}>
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
