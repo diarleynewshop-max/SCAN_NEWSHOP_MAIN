@@ -71,8 +71,8 @@
     "@tailwindcss/typography": "^0.5.16",
     "@testing-library/jest-dom": "^6.6.0",
     "@testing-library/react": "^16.0.0",
-    "@trigger.dev/build": "4.4.6",
-    "@trigger.dev/sdk": "4.4.6",
+    "@trigger.dev/build": "4.5.0",
+    "@trigger.dev/sdk": "4.5.0",
     "@types/node": "^22.16.5",
     "@types/node-fetch": "^2.6.13",
     "@types/react": "^18.3.28",
@@ -89,6 +89,7 @@
     "typescript": "^5.8.3",
     "typescript-eslint": "^8.38.0",
     "vite": "^5.4.19",
+    "vite-plugin-pwa": "^0.20.5",
     "vitest": "^3.2.4"
   }
 }

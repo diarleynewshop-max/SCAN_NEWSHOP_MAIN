@@ -10,6 +10,7 @@ import {
   persistirFotoCompra,
   isFotoStorage,
 } from '@/lib/comprasSupabase';
+import { lerComprasCache, salvarComprasCache } from '@/lib/comprasCache';
 
 // Fonte de dados da tela de Compras: 'clickup' (padrao atual) ou 'supabase' (piloto).
 export type CompraFonte = 'clickup' | 'supabase';
@@ -215,17 +216,27 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     const empresaAtual = getEmpresaAtual();
     setEmpresa(empresaAtual);
 
-    // Fonte Supabase: le direto do banco (com realtime via efeito abaixo).
+    // Fonte Supabase: mostra o cache IndexedDB na hora e revalida em segundo plano
+    // (stale-while-revalidate). Realtime atualiza depois via efeito abaixo.
     if (fonte === 'supabase') {
-      setLoading(true);
+      const cacheKey = `supabase:${empresaAtual}`;
+      const cache = await lerComprasCache(cacheKey);
+      if (cache && cache.length > 0) {
+        setProdutos(cache);
+        setUltimaAtualizacao(new Date());
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
       setError(null);
       try {
         const lista = await fetchComprasSupabase(empresaAtual);
         setProdutos(lista);
         setUltimaAtualizacao(new Date());
+        void salvarComprasCache(cacheKey, lista);
       } catch (err: unknown) {
         console.error('[useProdutosComprar][supabase] Erro ao buscar:', err);
-        setError(getErrorMessage(err, 'Falha ao carregar do Supabase'));
+        if (!cache) setError(getErrorMessage(err, 'Falha ao carregar do Supabase'));
       } finally {
         setLoading(false);
       }
