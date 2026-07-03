@@ -18,7 +18,8 @@ const Home = lazy(() => import("./pages/Home"));
 const Index = lazy(() => import("./pages/Index"));
 const NotFound = lazy(() => import("./pages/NotFound"));
 const Analytics = lazy(() => import("./pages/Analytics"));
-const Dashboard = lazy(() => import("./pages/Dashboard"));
+// Dashboard temporariamente em manutencao (migracao Supabase) — ver rota /dashboard.
+const EmManutencao = lazy(() => import("./pages/EmManutencao"));
 const Compras = lazy(() => import("./pages/Compras"));
 const ConsultaPreco = lazy(() => import("./pages/ConsultaPreco"));
 const MeusPedidos = lazy(() => import("./pages/MeusPedidos"));
@@ -41,15 +42,14 @@ const App = () => (
       {/* Botão SOYE ↔ FACIL (apenas para Compras/Admin logado em SOYE ou FACIL) */}
       <EmpresaToggleSF />
 
-{/* Botão para iniciar o Tutorial (acima do conteúdo) */}
-      {/* <div className="fixed top-4 right-20 z-50" style={{ display: 'flex', gap: 8 }}>
+      {/* Botão Tutorial (fora do Router, não usa useLocation) */}
+      <div className="fixed top-14 right-4 z-[60]">
         <TutorialButton />
-      </div> */}
-
-      {/* Guia de Tour global (inicia oculto; ativado pelo TutorialButton) */}
-      {/* <TourGuide /> */}
+      </div>
 
       <BrowserRouter>
+        {/* TourGuide DENTRO do Router para useLocation funcionar */}
+        <TourGuide />
         <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Carregando...</div>}>
           <Routes>
             {/* Home gerencia o próprio DesktopShell (tem dashboard + modais embutidos) */}
@@ -80,7 +80,7 @@ const App = () => (
 
             <Route path="/dashboard" element={
               <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
-                <DesktopShell pageTitle="Dashboard"><Dashboard /></DesktopShell>
+                <DesktopShell pageTitle="Dashboard"><EmManutencao titulo="Dashboard" /></DesktopShell>
               </ProtectedRoute>
             } />
 

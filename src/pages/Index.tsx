@@ -455,6 +455,7 @@ const Index = () => {
           </span>
           <button
             onClick={handleCloseList}
+            data-tut="fechar-lista"
             style={{ fontFamily: "var(--font-mono)", fontSize: 10, color: "hsl(var(--destructive))", background: "transparent", border: "1px solid hsl(var(--destructive) / 0.3)", borderRadius: 6, padding: "4px 10px", cursor: "pointer", letterSpacing: "0.05em", textTransform: "uppercase" }}
           >
             Fechar
@@ -500,6 +501,7 @@ const Index = () => {
               {!activeList && (
                 <button
                   onClick={handleOpenList}
+                  data-tut="abrir-lista"
                   style={{ ...S.btnPrimary, height: modoDesktop ? 56 : 52, fontSize: modoDesktop ? 15 : 14 }}
                 >
                   <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Abrir Lista

@@ -55,7 +55,7 @@ const comprasMenuItems = [
 
 // Menu para analytics (admin, super)
 const analyticsMenuItems = [
-  { Icon: BarChart3,    label: "Dashboard",   description: "Relatórios e gráficos de conferência",  path: "/dashboard", accent: "hsl(var(--violet))" },
+  { Icon: BarChart3,    label: "Dashboard",   description: "Relatórios e gráficos de conferência",  path: "/dashboard", accent: "hsl(var(--violet))", manutencao: true },
 ];
 
 // Menu exclusivo admin (admin, super)
@@ -70,16 +70,17 @@ interface MenuCardProps {
   description: string;
   path: string | null;
   accent: string;
+  manutencao?: boolean;
   navigate: (path: string) => void;
   setMostrarPerfil: (show: boolean) => void;
   setMostrarConfiguracoes: (show: boolean) => void;
 }
 
-const MenuCard: React.FC<MenuCardProps> = ({ 
-  Icon, label, description, path, accent, navigate, setMostrarPerfil, setMostrarConfiguracoes 
+const MenuCard: React.FC<MenuCardProps> = ({
+  Icon, label, description, path, accent, manutencao = false, navigate, setMostrarPerfil, setMostrarConfiguracoes
 }) => {
   const isDesktop = window.innerWidth >= 768; // Simples check para desktop
-  
+
   return (
     <button onClick={() => {
       if (path === null) {
@@ -108,6 +109,8 @@ const MenuCard: React.FC<MenuCardProps> = ({
         height: isDesktop ? 168 : 80,
         boxSizing: "border-box",
         overflow: "hidden",
+        opacity: manutencao ? 0.55 : 1,
+        filter: manutencao ? "grayscale(1)" : undefined,
       }}
     >
       <div style={{ 
@@ -127,9 +130,14 @@ const MenuCard: React.FC<MenuCardProps> = ({
           fontSize: isDesktop ? 18 : 15, 
           fontWeight: 700, 
           color: "hsl(var(--foreground))", 
-          marginBottom: isDesktop ? 8 : 2 
+          marginBottom: isDesktop ? 8 : 2
         }}>
           {label}
+          {manutencao && (
+            <span style={{ marginLeft: 8, fontSize: 10, fontWeight: 700, color: "hsl(var(--muted-foreground))", background: "hsl(var(--muted))", padding: "2px 6px", borderRadius: 6, textTransform: "uppercase", letterSpacing: "0.05em" }}>
+              Em manutenção
+            </span>
+          )}
         </p>
         <p style={{
           fontSize: isDesktop ? 13 : 12,
@@ -648,7 +656,7 @@ const Home = () => {
           
           {/* Cards para analytics (se tiver acesso) */}
           {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
-            analyticsMenuItems.map(({ Icon, label, description, path, accent }) => (
+            analyticsMenuItems.map(({ Icon, label, description, path, accent, manutencao }) => (
               <div key={label}>
                 <MenuCard
                   Icon={Icon}
@@ -656,6 +664,7 @@ const Home = () => {
                   description={description}
                   path={path}
                   accent={accent}
+                  manutencao={manutencao}
                   navigate={navigate}
                   setMostrarPerfil={setMostrarPerfil}
                   setMostrarConfiguracoes={setMostrarConfiguracoes}
