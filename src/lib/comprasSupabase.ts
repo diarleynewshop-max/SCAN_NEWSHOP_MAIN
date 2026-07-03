@@ -86,10 +86,15 @@ export async function upsertComprasFromClickup(
     }))
     .filter((r) => r.produto_key);
   if (rows.length === 0) return;
-  const { error } = await supabase
-    .from('compras')
-    .upsert(rows, { onConflict: 'empresa,produto_key' });
-  if (error) throw error;
+  // Envia em lotes para nao mandar payloads gigantes numa requisicao so.
+  const CHUNK = 200;
+  for (let i = 0; i < rows.length; i += CHUNK) {
+    const chunk = rows.slice(i, i + CHUNK);
+    const { error } = await supabase
+      .from('compras')
+      .upsert(chunk, { onConflict: 'empresa,produto_key' });
+    if (error) throw error;
+  }
 }
 
 // Atualiza o status de um item (por ID da task do ClickUp) no Supabase.
