@@ -278,6 +278,10 @@ const Compras = () => {
     persistirFoto,
   } = useProdutosComprar();
 
+  // Pre-carregamento em lote (1 produto por vez) de secao/foto do ERP -> Supabase.
+  const [preSync, setPreSync] = useState<{ atual: number; total: number } | null>(null);
+  const preSyncCancelRef = useRef(false);
+
   useEffect(() => {
     setProdutosErp(lerCacheLocal<Record<string, VarejoFacilProduct | null>>(getComprasCacheKey(empresa, "erp")) ?? {});
     setFotosClickUp(lerCacheLocal<Record<string, string | null>>(getComprasCacheKey(empresa, "fotos")) ?? {});
@@ -901,6 +905,61 @@ const Compras = () => {
     setDragX(0);
   };
 
+  // Percorre os produtos que ainda nao tem secao/foto no Supabase, UM DE CADA VEZ:
+  // busca no ERP, converte a imagem e persiste (secao + foto). So passa pro proximo
+  // quando o atual termina. Pode ser parado; o que ja processou fica salvo.
+  const preCarregarErp = async () => {
+    const pendentes = produtos.filter((p) => {
+      const temSecao = Boolean(p.secao);
+      const temFoto = Boolean(p.foto && p.foto.includes("/storage/v1/object/public/"));
+      return !temSecao || !temFoto;
+    });
+
+    if (pendentes.length === 0) {
+      toast({ title: "Tudo ja sincronizado", description: "Todos os produtos ja tem secao e foto no banco." });
+      return;
+    }
+
+    preSyncCancelRef.current = false;
+    setPreSync({ atual: 0, total: pendentes.length });
+
+    for (let i = 0; i < pendentes.length; i += 1) {
+      if (preSyncCancelRef.current) break;
+      const produto = pendentes[i];
+
+      try {
+        let dados = produtosErp[produto.id];
+        if (!dados) {
+          const codigo = getCodigoConsulta(produto.codigo);
+          dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
+          if (dados?.imagem) {
+            try {
+              dados = { ...dados, imagem: await baixarImagemParaDataUrl(dados.imagem) };
+            } catch {
+              // imagem e opcional; segue com o resto
+            }
+          }
+          setProdutosErp((prev) => ({ ...prev, [produto.id]: dados ?? null }));
+        }
+
+        const secaoErp = dados?.secao?.trim();
+        if (secaoErp) persistirSecao(produto.id, secaoErp);
+        if (dados?.imagem && dados.imagem.startsWith("data:")) persistirFoto(produto.id, dados.imagem);
+      } catch (err) {
+        console.error("[Compras][preCarregarErp] falhou", {
+          produtoId: produto.id,
+          erro: err instanceof Error ? err.message : String(err),
+        });
+      }
+
+      setPreSync((prev) => (prev ? { ...prev, atual: i + 1 } : prev));
+    }
+
+    const parado = preSyncCancelRef.current;
+    setPreSync(null);
+    toast({ title: parado ? "Pre-carregamento parado" : "Pre-carregamento concluido" });
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-b from-gray-50 to-gray-100 p-4 md:p-6">
       <div className="max-w-7xl mx-auto">
@@ -956,8 +1015,47 @@ const Compras = () => {
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
               Atualizar
             </Button>
+            {preSync ? (
+              <Button
+                variant="outline"
+                onClick={() => { preSyncCancelRef.current = true; }}
+                className="text-red-600 border-red-200"
+              >
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Parar ({preSync.atual}/{preSync.total})
+              </Button>
+            ) : (
+              <Button
+                variant="outline"
+                onClick={preCarregarErp}
+                disabled={loading}
+                title="Busca secao e foto de todos os produtos no ERP (1 por vez) e salva no banco, para carregar rapido depois"
+                className="text-indigo-700 border-indigo-200"
+              >
+                <FileDown className="h-4 w-4 mr-2" />
+                Pre-carregar ERP
+              </Button>
+            )}
           </div>
         </div>
+
+        {preSync && (
+          <div className="mb-4 p-3 bg-indigo-50 border border-indigo-200 rounded-lg">
+            <div className="flex items-center justify-between text-sm text-indigo-900 mb-2">
+              <span className="inline-flex items-center gap-2">
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Pre-carregando seções e fotos do ERP (1 por vez)…
+              </span>
+              <span className="font-semibold">{preSync.atual} / {preSync.total}</span>
+            </div>
+            <div className="w-full h-2 bg-indigo-100 rounded-full overflow-hidden">
+              <div
+                className="h-full bg-indigo-600 transition-all"
+                style={{ width: `${Math.round((preSync.atual / Math.max(1, preSync.total)) * 100)}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 mb-4">
           <Card>
