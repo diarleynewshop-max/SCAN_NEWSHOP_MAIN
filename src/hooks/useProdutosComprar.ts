@@ -7,6 +7,8 @@ import {
   atualizarStatusPorId,
   atualizarSecaoPorId,
   atualizarSecaoPorClickup,
+  persistirFotoCompra,
+  isFotoStorage,
 } from '@/lib/comprasSupabase';
 
 // Fonte de dados da tela de Compras: 'clickup' (padrao atual) ou 'supabase' (piloto).
@@ -43,6 +45,7 @@ interface UseProdutosComprarReturn {
   fonte: CompraFonte;
   setFonte: (fonte: CompraFonte) => void;
   persistirSecao: (produtoId: string, secao: string) => void;
+  persistirFoto: (produtoId: string, dataUrl: string) => void;
   refetch: () => Promise<void>;
   like: (taskId: string) => Promise<void>;
   dislike: (taskId: string) => Promise<void>;
@@ -405,6 +408,31 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     });
   }, [fonte]);
 
+  // Sobe a foto (data URL do ERP) no Storage e guarda a URL no Supabase, uma vez
+  // por produto, para nao rebaixar do ERP nas proximas cargas. Best-effort.
+  const persistirFoto = useCallback((produtoId: string, dataUrl: string) => {
+    if (!dataUrl) return;
+    const produto = produtos.find((p) => p.id === produtoId);
+    if (!produto || isFotoStorage(produto.foto)) return;
+    const empresaAtual = getEmpresaAtual();
+    void persistirFotoCompra({
+      produtoId,
+      empresa: empresaAtual,
+      codigo: produto.codigo,
+      sku: produto.sku,
+      dataUrl,
+      porUuid: fonte === 'supabase',
+    })
+      .then((url) => {
+        if (url) {
+          setProdutos((prev) => prev.map((p) => (p.id === produtoId ? { ...p, foto: url } : p)));
+        }
+      })
+      .catch((err) => {
+        console.warn('[compras][supabase] persistir foto falhou (ignorado):', err);
+      });
+  }, [fonte, produtos]);
+
   const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
   const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
   const fazerPedido = useCallback((id: string) => executarAcao(id, 'FAZER_PEDIDO'), [executarAcao]);
@@ -421,6 +449,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     fonte,
     setFonte,
     persistirSecao,
+    persistirFoto,
     refetch: () => fetchProdutos(true),
     like,
     dislike,

@@ -145,6 +145,63 @@ export async function atualizarSecaoPorClickup(
   if (error) throw error;
 }
 
+// ── Fotos no Supabase Storage ────────────────────────────────────────────────
+const FOTO_BUCKET = 'compras-fotos';
+
+export function isFotoStorage(url: string | null | undefined): boolean {
+  return Boolean(url && url.includes('/storage/v1/object/public/'));
+}
+
+function dataUrlParaBlob(dataUrl: string): { blob: Blob; contentType: string } | null {
+  const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/);
+  if (!m) return null;
+  const contentType = m[1];
+  const bin = atob(m[2]);
+  const bytes = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i += 1) bytes[i] = bin.charCodeAt(i);
+  return { blob: new Blob([bytes], { type: contentType }), contentType };
+}
+
+function nomeArquivoFoto(emp: EmpresaCompras, codigo: string, sku: string | null): string {
+  const key = produtoKey(codigo, sku) || String(codigo ?? '');
+  const safe = key.replace(/[^A-Za-z0-9_-]/g, '_');
+  return `${emp}/${safe}.jpg`;
+}
+
+// Sobe a foto (data URL do ERP) no Storage e grava a URL publica em compras.foto_url.
+// porUuid = true no modo Supabase (id e UUID); false no modo ClickUp (clickup_task_id).
+export async function persistirFotoCompra(params: {
+  produtoId: string;
+  empresa: Empresa;
+  codigo: string;
+  sku: string | null;
+  dataUrl: string;
+  porUuid: boolean;
+}): Promise<string | null> {
+  if (!isSupabaseConfigured || !params.dataUrl) return null;
+  const conv = dataUrlParaBlob(params.dataUrl);
+  if (!conv) return null;
+
+  const emp = empresaCompras(params.empresa);
+  const path = nomeArquivoFoto(emp, params.codigo, params.sku);
+
+  const up = await supabase.storage.from(FOTO_BUCKET).upload(path, conv.blob, {
+    contentType: conv.contentType,
+    upsert: true,
+  });
+  if (up.error) throw up.error;
+
+  const url = supabase.storage.from(FOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+
+  const query = supabase.from('compras').update({ foto_url: url });
+  const { error } = params.porUuid
+    ? await query.eq('id', params.produtoId)
+    : await query.eq('empresa', emp).eq('clickup_task_id', params.produtoId);
+  if (error) throw error;
+
+  return url;
+}
+
 // Assina mudancas em tempo real da tabela compras (por empresa).
 export function subscribeComprasSupabase(
   empresa: Empresa,

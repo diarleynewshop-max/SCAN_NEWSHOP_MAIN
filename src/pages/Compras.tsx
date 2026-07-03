@@ -36,7 +36,7 @@ const CACHE_TTL_MS = 30 * 60 * 1000;
 // com uma amostra da API (ver PROGRESSO.md).
 const VELOCIDADE_VENDA_ATIVA = false;
 
-type FotoFonte = "ERP" | "CLICKUP_TASK" | "CLICKUP_LIST";
+type FotoFonte = "SUPABASE" | "ERP" | "CLICKUP_TASK" | "CLICKUP_LIST";
 
 type FotoOpcao = {
   src: string;
@@ -210,10 +210,13 @@ function montarOpcoesFoto(
   produtoErp: VarejoFacilProduct | null | undefined,
   fotosClickUp: Record<string, string | null>
 ): FotoOpcao[] {
+  // Foto ja no Supabase Storage tem prioridade (rapida, sem consultar o ERP).
+  const fotoStorage = Boolean(produto.foto && produto.foto.includes("/storage/v1/object/public/"));
   return [
+    fotoStorage ? { src: produto.foto as string, fonte: "SUPABASE" as const } : null,
     produtoErp?.imagem ? { src: produtoErp.imagem, fonte: "ERP" as const } : null,
     fotosClickUp[produto.id] ? { src: fotosClickUp[produto.id] as string, fonte: "CLICKUP_TASK" as const } : null,
-    produto.foto ? { src: produto.foto, fonte: "CLICKUP_LIST" as const } : null,
+    !fotoStorage && produto.foto ? { src: produto.foto, fonte: "CLICKUP_LIST" as const } : null,
   ].filter((opcao): opcao is FotoOpcao => Boolean(opcao?.src && isValidImageSrc(opcao.src)));
 }
 
@@ -272,6 +275,7 @@ const Compras = () => {
     fonte,
     setFonte,
     persistirSecao,
+    persistirFoto,
   } = useProdutosComprar();
 
   useEffect(() => {
@@ -685,10 +689,11 @@ const Compras = () => {
         return next;
       });
 
-      // Grava a secao do ERP no Supabase (uma vez) para nao reconsultar depois.
+      // Grava secao e foto do ERP no Supabase (uma vez) para nao reconsultar depois.
       for (const [id, dados] of resultados) {
         const secaoErp = dados?.secao?.trim();
         if (secaoErp) persistirSecao(id, secaoErp);
+        if (dados?.imagem && dados.imagem.startsWith("data:")) persistirFoto(id, dados.imagem);
       }
     };
 
@@ -708,6 +713,7 @@ const Compras = () => {
     produtosPendentesAnalise,
     produtosPorBuscaStatus,
     persistirSecao,
+    persistirFoto,
   ]);
 
   useEffect(() => {
