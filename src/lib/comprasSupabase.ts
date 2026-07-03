@@ -8,6 +8,13 @@ import type { ProdutoComprar, CompraStatusApp } from '@/hooks/useProdutosComprar
 
 type Empresa = 'NEWSHOP' | 'SOYE' | 'FACIL';
 
+// No dominio de Compras, Soye e Facil sao a MESMA empresa (SF): mesmo preco e
+// mesmo setor de compras. Por isso a tabela `compras` usa 'NEWSHOP' e 'SF'.
+type EmpresaCompras = 'NEWSHOP' | 'SF';
+function empresaCompras(empresa: Empresa): EmpresaCompras {
+  return empresa === 'NEWSHOP' ? 'NEWSHOP' : 'SF';
+}
+
 function normalizar(value: string | null | undefined): string {
   return String(value ?? '')
     .normalize('NFD')
@@ -61,7 +68,7 @@ export async function fetchComprasSupabase(empresa: Empresa): Promise<ProdutoCom
   const { data, error } = await supabase
     .from('compras')
     .select('*')
-    .eq('empresa', empresa);
+    .eq('empresa', empresaCompras(empresa));
   if (error) throw error;
   return (data as CompraRow[] | null ?? []).map(rowToProduto);
 }
@@ -73,9 +80,10 @@ export async function upsertComprasFromClickup(
   empresa: Empresa
 ): Promise<void> {
   if (!isSupabaseConfigured || produtos.length === 0) return;
+  const emp = empresaCompras(empresa);
   const rows = produtos
     .map((p) => ({
-      empresa,
+      empresa: emp,
       produto_key: produtoKey(p.codigo, p.sku),
       codigo: p.codigo,
       sku: p.sku,
@@ -107,7 +115,7 @@ export async function moverStatusSupabase(
   const { error } = await supabase
     .from('compras')
     .update({ status })
-    .eq('empresa', empresa)
+    .eq('empresa', empresaCompras(empresa))
     .eq('clickup_task_id', clickupTaskId);
   if (error) throw error;
 }
@@ -118,11 +126,12 @@ export function subscribeComprasSupabase(
   onChange: () => void
 ): () => void {
   if (!isSupabaseConfigured) return () => {};
+  const emp = empresaCompras(empresa);
   const channel = supabase
-    .channel(`compras:${empresa}`)
+    .channel(`compras:${emp}`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'compras', filter: `empresa=eq.${empresa}` },
+      { event: '*', schema: 'public', table: 'compras', filter: `empresa=eq.${emp}` },
       () => onChange()
     )
     .subscribe();
