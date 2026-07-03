@@ -5,6 +5,8 @@ import {
   fetchComprasSupabase,
   subscribeComprasSupabase,
   atualizarStatusPorId,
+  atualizarSecaoPorId,
+  atualizarSecaoPorClickup,
 } from '@/lib/comprasSupabase';
 
 // Fonte de dados da tela de Compras: 'clickup' (padrao atual) ou 'supabase' (piloto).
@@ -19,6 +21,8 @@ export interface ProdutoComprar {
   status: CompraStatusApp;
   date_created: string;
   vezesPedido: number;
+  // Secao do produto, quando ja persistida no Supabase (evita reconsultar o ERP).
+  secao?: string | null;
 }
 
 export type CompraStatusApp =
@@ -38,6 +42,7 @@ interface UseProdutosComprarReturn {
   empresa: 'NEWSHOP' | 'SOYE' | 'FACIL';
   fonte: CompraFonte;
   setFonte: (fonte: CompraFonte) => void;
+  persistirSecao: (produtoId: string, secao: string) => void;
   refetch: () => Promise<void>;
   like: (taskId: string) => Promise<void>;
   dislike: (taskId: string) => Promise<void>;
@@ -384,6 +389,22 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     setFonteState(nova);
   }, []);
 
+  // Persiste a secao (vinda do ERP na primeira carga) no Supabase, para nao
+  // precisar reconsultar o ERP so pela secao nas proximas vezes. Best-effort.
+  const persistirSecao = useCallback((produtoId: string, secao: string) => {
+    if (!secao) return;
+    setProdutos((prev) =>
+      prev.map((p) => (p.id === produtoId && p.secao !== secao ? { ...p, secao } : p))
+    );
+    const empresaAtual = getEmpresaAtual();
+    const acao = fonte === 'supabase'
+      ? atualizarSecaoPorId(produtoId, secao)
+      : atualizarSecaoPorClickup(empresaAtual, produtoId, secao);
+    void acao.catch((err) => {
+      console.warn('[compras][supabase] persistir secao falhou (ignorado):', err);
+    });
+  }, [fonte]);
+
   const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
   const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
   const fazerPedido = useCallback((id: string) => executarAcao(id, 'FAZER_PEDIDO'), [executarAcao]);
@@ -399,6 +420,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     empresa,
     fonte,
     setFonte,
+    persistirSecao,
     refetch: () => fetchProdutos(true),
     like,
     dislike,

@@ -271,6 +271,7 @@ const Compras = () => {
     empresa,
     fonte,
     setFonte,
+    persistirSecao,
   } = useProdutosComprar();
 
   useEffect(() => {
@@ -540,12 +541,19 @@ const Compras = () => {
       secoes.set(normalizarFiltro(secao), secao);
     }
 
+    // Secoes ja persistidas no proprio produto (Supabase) — nao dependem do ERP.
+    for (const produto of produtos) {
+      const secao = produto.secao?.trim();
+      if (!secao) continue;
+      secoes.set(normalizarFiltro(secao), secao);
+    }
+
     return Array.from(secoes.values()).sort((a, b) => a.localeCompare(b, "pt-BR"));
-  }, [empresa, produtosErp]);
+  }, [empresa, produtosErp, produtos]);
 
   const filteredProdutos = useMemo(() => {
     return produtosPorBuscaStatus.filter((p) => (
-      produtoCombinaSecao(produtosErp[p.id]?.secao, filtroSecao, secoesCompras)
+      produtoCombinaSecao(p.secao ?? produtosErp[p.id]?.secao, filtroSecao, secoesCompras)
     ));
   }, [filtroSecao, produtosErp, produtosPorBuscaStatus, secoesCompras]);
 
@@ -603,7 +611,7 @@ const Compras = () => {
   }, [produtos]);
   const produtosAnalise = useMemo(
     () => produtosPendentesAnalise.filter((produto) => (
-      produtoCombinaSecao(produtosErp[produto.id]?.secao, filtroSecaoAnalise, secoesCompras)
+      produtoCombinaSecao(produto.secao ?? produtosErp[produto.id]?.secao, filtroSecaoAnalise, secoesCompras)
     )),
     [filtroSecaoAnalise, produtosErp, produtosPendentesAnalise, secoesCompras]
   );
@@ -676,6 +684,12 @@ const Compras = () => {
         salvarCacheLocal(getComprasCacheKey(empresa, "erp"), next);
         return next;
       });
+
+      // Grava a secao do ERP no Supabase (uma vez) para nao reconsultar depois.
+      for (const [id, dados] of resultados) {
+        const secaoErp = dados?.secao?.trim();
+        if (secaoErp) persistirSecao(id, secaoErp);
+      }
     };
 
     void carregarProdutosErp();
@@ -693,6 +707,7 @@ const Compras = () => {
     produtosPaginados,
     produtosPendentesAnalise,
     produtosPorBuscaStatus,
+    persistirSecao,
   ]);
 
   useEffect(() => {
@@ -836,8 +851,8 @@ const Compras = () => {
   };
 
   const filtrosAtivos = Boolean(searchTerm || filtroStatus !== "todos" || filtroSecao !== "todos" || ordenarMaisPedidos || ordenarMaisVendidos);
-  const carregandoFiltroSecao = filtroSecao !== "todos" && produtosPorBuscaStatus.some((produto) => !(produto.id in produtosErp));
-  const carregandoFiltroSecaoAnalise = analiseAberta && filtroSecaoAnalise !== "todos" && produtosPendentesAnalise.some((produto) => !(produto.id in produtosErp));
+  const carregandoFiltroSecao = filtroSecao !== "todos" && produtosPorBuscaStatus.some((produto) => !produto.secao && !(produto.id in produtosErp));
+  const carregandoFiltroSecaoAnalise = analiseAberta && filtroSecaoAnalise !== "todos" && produtosPendentesAnalise.some((produto) => !produto.secao && !(produto.id in produtosErp));
 
   const executarAnalise = async (
     acao: "DISLIKE" | "LIKE" | "FAZER_PEDIDO",
@@ -1211,7 +1226,7 @@ const Compras = () => {
                             </span>
                           </div>
                           <div className="text-sm text-gray-600 break-words leading-tight">{descricao}</div>
-                          {produtoErp?.secao && <div className="text-xs text-indigo-600">{produtoErp.secao}</div>}
+                          {(produto.secao ?? produtoErp?.secao) && <div className="text-xs text-indigo-600">{produto.secao ?? produtoErp?.secao}</div>}
                           {produto.sku && <div className="text-xs text-gray-400">{produto.sku}</div>}
                           {precoVenda && <div className="text-xs font-semibold text-emerald-700">{precoVenda}</div>}
                           {velocidadeVenda && (

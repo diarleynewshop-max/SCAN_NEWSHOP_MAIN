@@ -31,7 +31,9 @@ export function produtoKey(codigo: string, sku: string | null | undefined): stri
   if (numerico) return `COD:${numerico}`;
   const s = normalizar(sku);
   if (s) return `SKU:${s}`;
-  return cod ? `COD:${cod}` : '';
+  // Sem codigo numerico nem SKU nao e produto real (ex.: tasks agregadas do
+  // ClickUp). Retorna vazio para NAO gravar/espelhar lixo no Supabase.
+  return '';
 }
 
 interface CompraRow {
@@ -61,6 +63,7 @@ function rowToProduto(row: CompraRow): ProdutoComprar {
     status: row.status,
     date_created: row.created_at ? String(new Date(row.created_at).getTime()) : '',
     vezesPedido: row.vezes_pedido ?? 1,
+    secao: row.secao ?? null,
   };
 }
 
@@ -115,6 +118,30 @@ export async function atualizarStatusPorId(
 ): Promise<void> {
   if (!isSupabaseConfigured) return;
   const { error } = await supabase.from('compras').update({ status }).eq('id', id);
+  if (error) throw error;
+}
+
+// Persiste a secao (vinda do ERP) na linha, pelo UUID — usado no modo Supabase.
+export async function atualizarSecaoPorId(id: string, secao: string): Promise<void> {
+  if (!isSupabaseConfigured || !secao) return;
+  const { error } = await supabase.from('compras').update({ secao }).eq('id', id);
+  if (error) throw error;
+}
+
+// Persiste a secao pela task do ClickUp — usado no modo ClickUp (popula o banco
+// para leituras futuras no modo Supabase). So grava onde ainda esta vazio.
+export async function atualizarSecaoPorClickup(
+  empresa: Empresa,
+  clickupTaskId: string,
+  secao: string
+): Promise<void> {
+  if (!isSupabaseConfigured || !secao) return;
+  const { error } = await supabase
+    .from('compras')
+    .update({ secao })
+    .eq('empresa', empresaCompras(empresa))
+    .eq('clickup_task_id', clickupTaskId)
+    .is('secao', null);
   if (error) throw error;
 }
 

@@ -18,7 +18,8 @@ function produtoKey(codigo?: string, sku?: string | null): string {
   if (num) return `COD:${num}`;
   const s = String(sku ?? "").toUpperCase().trim();
   if (s) return `SKU:${s}`;
-  return cod ? `COD:${cod}` : "";
+  // Sem codigo numerico nem SKU: nao e produto real — nao espelha.
+  return "";
 }
 
 export interface ItemCompraSupabase {
