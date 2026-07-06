@@ -36,6 +36,24 @@ export function produtoKey(codigo: string, sku: string | null | undefined): stri
   return '';
 }
 
+function isDescricaoCompraReal(descricao: string | null | undefined, codigo: string | null | undefined): boolean {
+  const desc = String(descricao ?? '').trim();
+  if (!desc) return false;
+
+  const cod = String(codigo ?? '').trim();
+  const codigoNumerico = cod.match(/\d{6,14}/)?.[0] ?? '';
+  const descNormalizada = normalizar(desc);
+
+  if (desc === cod || desc === codigoNumerico) return false;
+  if (/^\d{6,14}$/.test(desc)) return false;
+  if (desc.includes('\u{1F6D2}')) return false;
+  if (codigoNumerico && desc.includes(codigoNumerico)) return false;
+  if (descNormalizada.includes('CARLOS')) return false;
+  if (/\s[\u2014-]\s/.test(desc) && /\d{6,14}/.test(desc)) return false;
+
+  return true;
+}
+
 interface CompraRow {
   id: string;
   empresa: string;
@@ -92,7 +110,7 @@ export async function upsertComprasFromClickup(
       produto_key: produtoKey(p.codigo, p.sku),
       codigo: p.codigo,
       sku: p.sku,
-      descricao: p.descricao,
+      descricao: isDescricaoCompraReal(p.descricao, p.codigo) ? p.descricao : undefined,
       status: p.status,
       vezes_pedido: p.vezesPedido ?? 1,
       clickup_task_id: p.id,

@@ -29,6 +29,7 @@ import {
 } from "@/lib/pedidoFornecedorPdf";
 
 const PAGE_SIZE = 10;
+const ERP_BATCH_SIZE = 5;
 const CACHE_TTL_MS = 30 * 60 * 1000;
 // Desativado por ora: a API do ERP nao aceita os nomes de campo que o swagger
 // documenta pra filtrar/ordenar cupons fiscais (dataVenda e identificadorId deram
@@ -142,6 +143,42 @@ function getCodigoConsulta(codigo: string): string {
 
   const qualquerCodigo = codigo.match(/\d{6,14}/);
   return qualquerCodigo?.[0] ?? codigo;
+}
+
+function isDescricaoRealProduto(produto: Pick<ProdutoComprar, "codigo" | "descricao">): boolean {
+  const descricao = produto.descricao.trim();
+  if (!descricao) return false;
+
+  const codigo = produto.codigo.trim();
+  const codigoConsulta = getCodigoConsulta(produto.codigo).trim();
+  const descricaoNormalizada = normalizarFiltro(descricao);
+
+  if (descricao === codigo || descricao === codigoConsulta) return false;
+  if (/^\d{6,14}$/.test(descricao)) return false;
+  if (descricao.includes("🛒")) return false;
+  if (codigoConsulta && descricao.includes(codigoConsulta)) return false;
+  if (descricaoNormalizada.includes("carlos")) return false;
+  if (/\s[\u2014-]\s/.test(descricao) && /\d{6,14}/.test(descricao)) return false;
+
+  return true;
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
+}
+
+function getDescricaoExibicao(
+  produto: ProdutoComprar,
+  produtoErp: VarejoFacilProduct | null | undefined
+): string {
+  const descricaoErp = produtoErp?.descricao?.trim();
+  if (descricaoErp) return descricaoErp;
+  if (isDescricaoRealProduto(produto)) return produto.descricao.trim();
+  return "Consultando descricao no ERP";
 }
 
 function formatarPreco(valor: number | undefined | null): string | null {
@@ -297,7 +334,7 @@ const Compras = () => {
     persistirFoto,
   } = useProdutosComprar();
 
-  // Pre-carregamento em lote (1 produto por vez) de secao/foto do ERP -> Supabase.
+  // Pre-carregamento em lote (5 produtos por vez) de dados do ERP -> Supabase.
   const [preSync, setPreSync] = useState<{ atual: number; total: number } | null>(null);
   const preSyncCancelRef = useRef(false);
 
@@ -477,7 +514,7 @@ const Compras = () => {
           const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
           return {
             codigo: produto.codigo,
-            descricao: produtoErp?.descricao || produto.descricao,
+            descricao: getDescricaoExibicao(produto, produtoErp),
             foto: fotoSelecionada?.src ?? null,
           };
         });
@@ -648,7 +685,7 @@ const Compras = () => {
     ? selecionarFotoProduto(produtoAnalise, produtoAnaliseErp, fotosClickUp, imagemComErro)
     : null;
   const fotoAnalise = fotoAnaliseSelecionada?.src ?? null;
-  const descricaoAnalise = produtoAnalise ? (produtoAnaliseErp?.descricao || produtoAnalise.descricao) : "";
+  const descricaoAnalise = produtoAnalise ? getDescricaoExibicao(produtoAnalise, produtoAnaliseErp) : "";
   const precoVendaAnalise = formatarPreco(produtoAnaliseErp?.precoVarejo);
   const velocidadeVendaAnalise = produtoAnalise ? formatarVelocidadeVenda(velocidadeVendas[produtoAnalise.id]) : null;
   const podeMostrarFotoAnalise = Boolean(produtoAnalise && fotoAnaliseSelecionada);
@@ -668,39 +705,49 @@ const Compras = () => {
         new Map([...origemTela, ...origemAnalise].map((produto) => [produto.id, produto])).values()
       );
       const limite = filtroSecao !== "todos" || (analiseAberta && filtroSecaoAnalise !== "todos") ? 25 : PAGE_SIZE;
-      const pendentes = origem.filter((produto) => !(produto.id in produtosErp)).slice(0, limite);
+      const pendentes = origem
+        .filter((produto) => !(produto.id in produtosErp) || !isDescricaoRealProduto(produto))
+        .slice(0, limite);
       if (pendentes.length === 0) return;
 
-      const resultados = await Promise.all(
-        pendentes.map(async (produto) => {
-          const codigo = getCodigoConsulta(produto.codigo);
-          try {
-            let dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
-            if (dados?.imagem) {
-              try {
-                const imagemDataUrl = await baixarImagemParaDataUrl(dados.imagem);
-                dados = { ...dados, imagem: imagemDataUrl };
-              } catch (imageError) {
-                console.error("[Compras][Foto] ERP imagem nao baixou", {
-                  produtoId: produto.id,
-                  codigo,
-                  erpId: dados.id,
-                  imagem: dados.imagem,
-                  erro: imageError instanceof Error ? imageError.message : String(imageError),
-                });
+      const resultados: Array<readonly [string, VarejoFacilProduct | null]> = [];
+      for (const lote of chunkArray(pendentes, ERP_BATCH_SIZE)) {
+        if (cancelado) return;
+        const loteResultados = await Promise.all(
+          lote.map(async (produto) => {
+            const codigo = getCodigoConsulta(produto.codigo);
+            try {
+              let dados = produtosErp[produto.id];
+              if (!dados) {
+                dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
               }
+              if (dados?.imagem && !dados.imagem.startsWith("data:")) {
+                try {
+                  const imagemDataUrl = await baixarImagemParaDataUrl(dados.imagem);
+                  dados = { ...dados, imagem: imagemDataUrl };
+                } catch (imageError) {
+                  console.error("[Compras][Foto] ERP imagem nao baixou", {
+                    produtoId: produto.id,
+                    codigo,
+                    erpId: dados.id,
+                    imagem: dados.imagem,
+                    erro: imageError instanceof Error ? imageError.message : String(imageError),
+                  });
+                }
+              }
+              return [produto.id, dados ?? null] as const;
+            } catch (err) {
+              console.error("[Compras][Foto] ERP falhou", {
+                produtoId: produto.id,
+                codigo,
+                erro: err instanceof Error ? err.message : String(err),
+              });
+              return [produto.id, null] as const;
             }
-            return [produto.id, dados] as const;
-          } catch (err) {
-            console.error("[Compras][Foto] ERP falhou", {
-              produtoId: produto.id,
-              codigo,
-              erro: err instanceof Error ? err.message : String(err),
-            });
-            return [produto.id, null] as const;
-          }
-        })
-      );
+          })
+        );
+        resultados.push(...loteResultados);
+      }
 
       if (cancelado) return;
       setProdutosErp((prev) => {
@@ -927,18 +974,14 @@ const Compras = () => {
     setDragX(0);
   };
 
-  // Percorre os produtos que ainda nao tem secao/descricao/foto no Supabase, UM DE CADA VEZ:
-  // busca no ERP, converte a imagem e persiste (secao + descricao + foto). So passa pro proximo
-  // quando o atual termina. Pode ser parado; o que ja processou fica salvo.
+  // Percorre os produtos que ainda nao tem secao/descricao/foto no Supabase em lotes de 5.
+  // Busca no ERP, converte a imagem e persiste (secao + descricao + foto). Pode ser
+  // parado; o que ja processou fica salvo.
   const preCarregarErp = async () => {
     const pendentes = produtos.filter((p) => {
       const temSecao = Boolean(p.secao);
       const temFoto = Boolean(p.foto && p.foto.includes("/storage/v1/object/public/"));
-      const descricaoAtual = p.descricao.trim();
-      const codigoConsulta = getCodigoConsulta(p.codigo).trim();
-      const temDescricaoReal = Boolean(
-        descricaoAtual && descricaoAtual !== p.codigo.trim() && descricaoAtual !== codigoConsulta
-      );
+      const temDescricaoReal = isDescricaoRealProduto(p);
       return !temSecao || !temDescricaoReal || !temFoto;
     });
 
@@ -950,38 +993,40 @@ const Compras = () => {
     preSyncCancelRef.current = false;
     setPreSync({ atual: 0, total: pendentes.length });
 
-    for (let i = 0; i < pendentes.length; i += 1) {
+    for (let i = 0; i < pendentes.length; i += ERP_BATCH_SIZE) {
       if (preSyncCancelRef.current) break;
-      const produto = pendentes[i];
+      const lote = pendentes.slice(i, i + ERP_BATCH_SIZE);
 
-      try {
-        let dados = produtosErp[produto.id];
-        if (!dados) {
-          const codigo = getCodigoConsulta(produto.codigo);
-          dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
-          if (dados?.imagem) {
-            try {
-              dados = { ...dados, imagem: await baixarImagemParaDataUrl(dados.imagem) };
-            } catch {
-              // imagem e opcional; segue com o resto
+      await Promise.all(lote.map(async (produto) => {
+        try {
+          let dados = produtosErp[produto.id];
+          if (!dados) {
+            const codigo = getCodigoConsulta(produto.codigo);
+            dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
+            if (dados?.imagem && !dados.imagem.startsWith("data:")) {
+              try {
+                dados = { ...dados, imagem: await baixarImagemParaDataUrl(dados.imagem) };
+              } catch {
+                // imagem e opcional; segue com o resto
+              }
             }
+            setProdutosErp((prev) => ({ ...prev, [produto.id]: dados ?? null }));
           }
-          setProdutosErp((prev) => ({ ...prev, [produto.id]: dados ?? null }));
+
+          const secaoErp = dados?.secao?.trim();
+          const descricaoErp = dados?.descricao?.trim();
+          if (secaoErp) persistirSecao(produto.id, secaoErp);
+          if (descricaoErp) persistirDescricao(produto.id, descricaoErp);
+          if (dados?.imagem && dados.imagem.startsWith("data:")) persistirFoto(produto.id, dados.imagem);
+        } catch (err) {
+          console.error("[Compras][preCarregarErp] falhou", {
+            produtoId: produto.id,
+            erro: err instanceof Error ? err.message : String(err),
+          });
         }
+      }));
 
-        const secaoErp = dados?.secao?.trim();
-        const descricaoErp = dados?.descricao?.trim();
-        if (secaoErp) persistirSecao(produto.id, secaoErp);
-        if (descricaoErp) persistirDescricao(produto.id, descricaoErp);
-        if (dados?.imagem && dados.imagem.startsWith("data:")) persistirFoto(produto.id, dados.imagem);
-      } catch (err) {
-        console.error("[Compras][preCarregarErp] falhou", {
-          produtoId: produto.id,
-          erro: err instanceof Error ? err.message : String(err),
-        });
-      }
-
-      setPreSync((prev) => (prev ? { ...prev, atual: i + 1 } : prev));
+      setPreSync((prev) => (prev ? { ...prev, atual: Math.min(i + lote.length, pendentes.length) } : prev));
     }
 
     const parado = preSyncCancelRef.current;
@@ -1159,7 +1204,7 @@ const Compras = () => {
                 variant="outline"
                 onClick={preCarregarErp}
                 disabled={loading}
-                title="Busca secao, descricao e foto de todos os produtos no ERP (1 por vez) e salva no banco, para carregar rapido depois"
+                title="Busca secao, descricao e foto de todos os produtos no ERP (5 por vez) e salva no banco, para carregar rapido depois"
                 className="text-indigo-700 border-indigo-200"
               >
                 <FileDown className="h-4 w-4 mr-2" />
@@ -1414,7 +1459,7 @@ const Compras = () => {
 
                 {produtosPaginadosExibidos.map((produto) => {
                   const produtoErp = produtosErp[produto.id];
-                  const descricao = produtoErp?.descricao || produto.descricao;
+                  const descricao = getDescricaoExibicao(produto, produtoErp);
                   const descricaoCurta = truncarDescricao(descricao);
                   const precoVenda = formatarPreco(produtoErp?.precoVarejo);
                   const secaoFormatada = formatarSecao(produto.secao ?? produtoErp?.secao);
@@ -1454,6 +1499,7 @@ const Compras = () => {
                         )}
                         <div className="min-w-0">
                           <div className="font-bold text-sm sm:text-base text-gray-900 truncate">{descricaoCurta}</div>
+                          <div className="text-xs text-gray-500 font-mono truncate mt-0.5">{produto.codigo}</div>
                           <div className="flex items-center gap-2 mt-0.5">
                             <span className="shrink-0 text-xs font-bold px-1.5 py-0.5 rounded bg-violet-100 text-violet-800">
                               {produto.vezesPedido}x
@@ -1680,7 +1726,7 @@ const Compras = () => {
 
       {produtoDetalhe && (() => {
         const produtoErp = produtosErp[produtoDetalhe.id];
-        const descricao = produtoErp?.descricao || produtoDetalhe.descricao;
+        const descricao = getDescricaoExibicao(produtoDetalhe, produtoErp);
         const precoVenda = formatarPreco(produtoErp?.precoVarejo);
         const secaoFormatada = formatarSecao(produtoDetalhe.secao ?? produtoErp?.secao);
         const velocidadeVenda = formatarVelocidadeVenda(velocidadeVendas[produtoDetalhe.id]);
