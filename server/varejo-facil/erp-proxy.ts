@@ -18,7 +18,7 @@ type UploadAttempt = {
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
-  SOYE: "soye.varejofacil.com",
+  SOYE: "facil.varejofacil.com",
 };
 
 const tokenCache = new Map<string, string>();
@@ -44,8 +44,15 @@ function normalizeEmpresa(value: string | string[] | undefined): EmpresaKey {
   return "NEWSHOP";
 }
 
+function erpBaseEmpresa(empresa: EmpresaKey): EmpresaKey {
+  return empresa === "SOYE" ? "FACIL" : empresa;
+}
+
 function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN"): string {
+  const baseEmpresa = erpBaseEmpresa(empresa);
   return (
+    process.env[`ERP_API_${key}_${baseEmpresa}`] ||
+    process.env[`VITE_ERP_API_${key}_${baseEmpresa}`] ||
     process.env[`ERP_API_${key}_${empresa}`] ||
     process.env[`VITE_ERP_API_${key}_${empresa}`] ||
     process.env[`ERP_API_${key}`] ||
@@ -55,7 +62,9 @@ function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOK
 }
 
 function getWebCookie(empresa: EmpresaKey): string {
+  const baseEmpresa = erpBaseEmpresa(empresa);
   return (
+    process.env[`ERP_WEB_COOKIE_${baseEmpresa}`] ||
     process.env[`ERP_WEB_COOKIE_${empresa}`] ||
     process.env.ERP_WEB_COOKIE ||
     ""
@@ -63,7 +72,8 @@ function getWebCookie(empresa: EmpresaKey): string {
 }
 
 function resolveBaseUrl(empresa: EmpresaKey): string {
-  const configuredUrl = (getEnv(empresa, "URL") || `https://${HOSTS[empresa]}`).replace(/\/$/, "");
+  const baseEmpresa = erpBaseEmpresa(empresa);
+  const configuredUrl = (getEnv(empresa, "URL") || `https://${HOSTS[baseEmpresa]}`).replace(/\/$/, "");
   return configuredUrl.endsWith("/api") ? configuredUrl : `${configuredUrl}/api`;
 }
 

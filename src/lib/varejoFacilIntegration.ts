@@ -34,6 +34,8 @@ type ErpProduto = {
   descricao?: string;
   codigoInterno?: string;
   unidadeDeVenda?: string;
+  secaoId?: number;
+  grupoId?: number;
   imagem?: string;
   imagemUrl?: string;
   urlImagem?: string;
@@ -81,7 +83,7 @@ type ErpListResponse<T> = {
 const VAREJO_FACIL_HOSTS: Record<VarejoFacilEmpresa, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
-  SOYE: "soye.varejofacil.com",
+  SOYE: "facil.varejofacil.com",
 };
 
 const ERP_LOJA_BY_EMPRESA: Record<VarejoFacilEmpresa, number> = {
@@ -126,7 +128,8 @@ const grupoCache = new Map<string, string>();
 const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpresa => {
   const normalizada = (empresa ?? "").toUpperCase();
 
-  if (normalizada.includes("SOYE")) return "SOYE";
+  // SOYE e FACIL usam a mesma base ERP.
+  if (normalizada.includes("SOYE")) return "FACIL";
   if (normalizada.includes("FACIL")) return "FACIL";
   return "NEWSHOP";
 };

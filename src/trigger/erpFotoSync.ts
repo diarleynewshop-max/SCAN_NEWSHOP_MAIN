@@ -9,11 +9,13 @@ type EmpresaKey = "NEWSHOP" | "SOYE" | "FACIL";
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
-  SOYE: "soye.varejofacil.com",
+  SOYE: "facil.varejofacil.com",
 };
 
 function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN"): string {
+  const baseEmpresa = empresa === "SOYE" ? "FACIL" : empresa;
   return (
+    process.env[`ERP_API_${key}_${baseEmpresa}`] ||
     process.env[`ERP_API_${key}_${empresa}`] ||
     process.env[`ERP_API_${key}`] ||
     ""
@@ -21,7 +23,8 @@ function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOK
 }
 
 function resolveOrigin(empresa: EmpresaKey): string {
-  const url = (getEnv(empresa, "URL") || `https://${HOSTS[empresa]}`).replace(/\/$/, "");
+  const baseEmpresa = empresa === "SOYE" ? "FACIL" : empresa;
+  const url = (getEnv(empresa, "URL") || `https://${HOSTS[baseEmpresa]}`).replace(/\/$/, "");
   return url.replace(/\/api$/, "");
 }
 
@@ -240,7 +243,7 @@ async function uploadImagemErp(
     timeout: 30_000,
   });
 
-  const contentType = res.headers["content-type"] || "";
+  const contentType = String(res.headers["content-type"] || "");
   console.info(`[erp-foto-sync] Upload status=${res.status} ct=${contentType}`);
 
   if (contentType.includes("text/html")) {

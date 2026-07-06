@@ -16,7 +16,7 @@ const DEFAULT_RELATORIO_LISTS: Record<EmpresaRelatorio, string> = {
 };
 const ERP_HOSTS: Record<EmpresaRelatorio, string> = {
   NEWSHOP: "newshop.varejofacil.com",
-  SOYE: "soye.varejofacil.com",
+  SOYE: "facil.varejofacil.com",
   FACIL: "facil.varejofacil.com",
 };
 const erpTokenCache = new Map<string, string>();
@@ -56,7 +56,10 @@ function getClickUpToken(empresa: EmpresaRelatorio): string {
 }
 
 function getErpEnv(empresa: EmpresaRelatorio, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN"): string {
+  const baseEmpresa = empresa === "SOYE" ? "FACIL" : empresa;
   return (
+    process.env[`ERP_API_${key}_${baseEmpresa}`] ||
+    process.env[`VITE_ERP_API_${key}_${baseEmpresa}`] ||
     process.env[`ERP_API_${key}_${empresa}`] ||
     process.env[`VITE_ERP_API_${key}_${empresa}`] ||
     process.env[`ERP_API_${key}`] ||
@@ -66,7 +69,8 @@ function getErpEnv(empresa: EmpresaRelatorio, key: "URL" | "USERNAME" | "PASSWOR
 }
 
 function getErpApiBaseUrl(empresa: EmpresaRelatorio): string {
-  const configuredUrl = (getErpEnv(empresa, "URL") || `https://${ERP_HOSTS[empresa]}`).replace(/\/$/, "");
+  const baseEmpresa = empresa === "SOYE" ? "FACIL" : empresa;
+  const configuredUrl = (getErpEnv(empresa, "URL") || `https://${ERP_HOSTS[baseEmpresa]}`).replace(/\/$/, "");
   return configuredUrl.endsWith("/api") ? configuredUrl : `${configuredUrl}/api`;
 }
 
