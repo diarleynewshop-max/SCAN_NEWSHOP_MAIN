@@ -366,6 +366,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     const empresaAtual = getEmpresaAtual();
     const produtoAtual = produtos.find((p) => p.id === taskId);
     const statusAnterior = produtoAtual?.status;
+    const pedidoFeitoAnterior = produtoAtual?.pedidoFeito;
     const previsao: Record<string, CompraStatusApp> = {
       LIKE: 'produto_bom',
       DISLIKE: 'produto_ruim',
@@ -374,10 +375,16 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       COMPRA_REALIZADA: 'compra_realizada',
       CONCLUIR: 'concluido',
     };
+    const marcaPedidoFeito = acao === 'FAZER_PEDIDO';
+    const statusPrevisto = marcaPedidoFeito ? 'pedido_andamento' : previsao[acao];
 
-    if (previsao[acao]) {
+    if (statusPrevisto) {
       setProdutos((prev) =>
-        prev.map((p) => (p.id === taskId ? { ...p, status: previsao[acao] } : p))
+        prev.map((p) => (
+          p.id === taskId
+            ? { ...p, status: statusPrevisto, pedidoFeito: marcaPedidoFeito ? true : p.pedidoFeito }
+            : p
+        ))
       );
     }
 
@@ -385,14 +392,18 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     // mudanca; um refetch garante consistencia local.
     if (fonte === 'supabase') {
       try {
-        if (previsao[acao]) {
-          await atualizarStatusPorId(taskId, previsao[acao]);
+        if (marcaPedidoFeito) {
+          await marcarPedidoFeitoPorId(taskId);
+        } else if (statusPrevisto) {
+          await atualizarStatusPorId(taskId, statusPrevisto);
         }
         await fetchProdutos(true);
       } catch (err: unknown) {
         if (statusAnterior) {
           setProdutos((prev) =>
-            prev.map((p) => (p.id === taskId ? { ...p, status: statusAnterior } : p))
+            prev.map((p) => (
+              p.id === taskId ? { ...p, status: statusAnterior, pedidoFeito: pedidoFeitoAnterior } : p
+            ))
           );
         }
         console.error('[useProdutosComprar][supabase] Erro na acao:', err);
@@ -427,11 +438,20 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
         throw new Error((data.error ?? 'Erro ao executar acao') + detalhe + statusDisponiveis + statusTentados);
       }
 
+      if (marcaPedidoFeito) {
+        if (produtoAtual) {
+          await upsertComprasFromClickup([{ ...produtoAtual, status: 'fazer_pedido' }], empresaAtual);
+        }
+        await marcarPedidoFeitoPorClickup(empresaAtual, taskId);
+      }
+
       await fetchProdutos(true);
     } catch (err: unknown) {
       if (statusAnterior) {
         setProdutos((prev) =>
-          prev.map((p) => (p.id === taskId ? { ...p, status: statusAnterior } : p))
+          prev.map((p) => (
+            p.id === taskId ? { ...p, status: statusAnterior, pedidoFeito: pedidoFeitoAnterior } : p
+          ))
         );
       }
       console.error('[useProdutosComprar] Erro na acao:', err);
