@@ -66,10 +66,23 @@ interface CompraRow {
   vezes_pedido: number | null;
   foto_url: string | null;
   clickup_task_id: string | null;
+  pedido_feito: number | null;
   created_at: string | null;
 }
 
+export interface PedidoFeitoCompraRow {
+  produto_key: string;
+  clickup_task_id: string | null;
+  status: CompraStatusApp;
+  pedido_feito: number | null;
+}
+
 function rowToProduto(row: CompraRow): ProdutoComprar {
+  const pedidoFeito = row.pedido_feito === 1;
+  const status = pedidoFeito && row.status !== 'compra_realizada' && row.status !== 'concluido'
+    ? 'pedido_andamento'
+    : row.status;
+
   return {
     // Na leitura via Supabase, o id do produto e o UUID da linha (identificador
     // estavel do banco). As acoes de status atualizam por esse id.
@@ -78,10 +91,11 @@ function rowToProduto(row: CompraRow): ProdutoComprar {
     sku: row.sku,
     descricao: row.descricao ?? '',
     foto: row.foto_url,
-    status: row.status,
+    status,
     date_created: row.created_at ? String(new Date(row.created_at).getTime()) : '',
     vezesPedido: row.vezes_pedido ?? 1,
     secao: row.secao ?? null,
+    pedidoFeito,
   };
 }
 
@@ -94,6 +108,17 @@ export async function fetchComprasSupabase(empresa: Empresa): Promise<ProdutoCom
     .eq('empresa', empresaCompras(empresa));
   if (error) throw error;
   return (data as CompraRow[] | null ?? []).map(rowToProduto);
+}
+
+export async function fetchPedidosFeitosSupabase(empresa: Empresa): Promise<PedidoFeitoCompraRow[]> {
+  if (!isSupabaseConfigured) return [];
+  const { data, error } = await supabase
+    .from('compras')
+    .select('produto_key,clickup_task_id,status,pedido_feito')
+    .eq('empresa', empresaCompras(empresa))
+    .eq('pedido_feito', 1);
+  if (error) throw error;
+  return (data as PedidoFeitoCompraRow[] | null) ?? [];
 }
 
 // Espelha no Supabase os produtos ja deduplicados vindos do ClickUp (dual-write).
@@ -137,6 +162,37 @@ export async function atualizarStatusPorId(
   if (!isSupabaseConfigured) return;
   const { error } = await supabase.from('compras').update({ status }).eq('id', id);
   if (error) throw error;
+}
+
+// Marca "pedido feito" (equivale a gerar o PDF do pedido ao fornecedor). Grava
+// pedido_feito = 1; o trigger no banco move o item para 'pedido_andamento'
+// automaticamente. Modo Supabase (id = UUID da linha).
+export async function marcarPedidoFeitoPorId(id: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const { data, error } = await supabase
+    .from('compras')
+    .update({ pedido_feito: 1 })
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Item nao encontrado no Supabase para marcar pedido feito');
+}
+
+// Mesma marcacao, mas pela task do ClickUp — usado no modo ClickUp (popula o
+// Supabase enquanto o ClickUp ainda esta ativo).
+export async function marcarPedidoFeitoPorClickup(
+  empresa: Empresa,
+  clickupTaskId: string
+): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const { data, error } = await supabase
+    .from('compras')
+    .update({ pedido_feito: 1 })
+    .eq('empresa', empresaCompras(empresa))
+    .eq('clickup_task_id', clickupTaskId)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Item ClickUp nao encontrado no Supabase para marcar pedido feito');
 }
 
 // Persiste a secao (vinda do ERP) na linha, pelo UUID — usado no modo Supabase.

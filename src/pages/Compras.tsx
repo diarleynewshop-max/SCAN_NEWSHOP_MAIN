@@ -22,9 +22,6 @@ import {
 import {
   gerarPdfPedidoFornecedor,
   baixarPdfNoNavegador,
-  anexarPdfNaTaskClickUp,
-  buscarPdfAnexadoNaTask,
-  baixarPdfDataUrl,
   type ItemPedidoPdf,
 } from "@/lib/pedidoFornecedorPdf";
 
@@ -332,6 +329,7 @@ const Compras = () => {
     persistirSecao,
     persistirDescricao,
     persistirFoto,
+    marcarPedidoFeito,
   } = useProdutosComprar();
 
   useEffect(() => {
@@ -452,9 +450,7 @@ const Compras = () => {
 
   // Pra cada item selecionado: resolve o fornecedor PRINCIPAL no ERP, agrupa por
   // fornecedor, gera 1 PDF (foto+codigo+descricao) por grupo, baixa no navegador
-  // (pra mandar pro fornecedor), anexa o mesmo PDF em cada task do grupo no
-  // ClickUp (fica disponivel pra baixar de novo em "Pedido em Andamento") e move
-  // todos os itens do grupo para esse status.
+  // e marca pedido_feito no Supabase.
   const gerarPedidosPorFornecedor = async () => {
     const idsSelecionados = Array.from(itensSelecionadosPedido);
     if (idsSelecionados.length === 0) return;
@@ -525,22 +521,18 @@ const Compras = () => {
         }
 
         for (const produto of grupo.itens) {
+          // Marca "pedido feito" no Supabase (pedido_feito = 1). O trigger no
+          // banco ja move o item para "pedido feito" (pedido_andamento).
           try {
-            await anexarPdfNaTaskClickUp(produto.id, empresa, pdf);
+            await marcarPedidoFeito(produto.id);
+            totalProcessado += 1;
           } catch (err) {
-            console.error("[Compras][Pedido] Falha ao anexar PDF no ClickUp", {
+            console.error("[Compras][Pedido] Falha ao marcar pedido feito", {
               produtoId: produto.id,
               erro: err instanceof Error ? err.message : String(err),
             });
-            erros.push(`${produto.codigo}: PDF baixado mas nao anexado no ClickUp`);
+            erros.push(`${produto.codigo}: PDF baixado mas nao marcou pedido feito`);
           }
-
-          try {
-            await pedidoAndamento(produto.id);
-          } catch (err) {
-            erros.push(`${produto.codigo}: nao moveu pra Pedido em Andamento`);
-          }
-          totalProcessado += 1;
         }
       }
 
@@ -549,7 +541,7 @@ const Compras = () => {
       if (totalProcessado > 0) {
         toast({
           title: `${grupos.size} PDF(s) gerado(s)`,
-          description: `${totalProcessado} item(ns) movido(s) para Pedido em Andamento.`,
+          description: `${totalProcessado} item(ns) marcado(s) como Pedido Feito.`,
         });
       }
       if (erros.length > 0) {
@@ -560,17 +552,37 @@ const Compras = () => {
     }
   };
 
+  // Regenera o PDF do pedido a partir dos dados atuais do item (sem depender de
+  // anexo no ClickUp). Resolve o fornecedor pelo ERP; se nao achar, gera "Sem Fornecedor".
   const baixarOuReBaixarPdfPedido = async (produto: ProdutoComprar) => {
     setBaixandoPdfPedido(produto.id);
     try {
-      const anexado = await buscarPdfAnexadoNaTask(produto.id, empresa);
-      if (!anexado) {
-        toast({ title: "Nenhum PDF encontrado", description: "Esse item nao tem PDF de pedido anexado no ClickUp.", variant: "destructive" });
-        return;
+      const produtoErp = produtosErp[produto.id];
+      const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
+
+      let fornecedorId = SEM_FORNECEDOR_KEY;
+      let fornecedorNome = "Sem Fornecedor Cadastrado";
+      const produtoErpId = produtoErp?.id;
+      if (produtoErpId) {
+        try {
+          const fornecedor = await buscarFornecedorPrincipalProduto(produtoErpId, { empresa, flag: "loja" });
+          if (fornecedor) {
+            fornecedorId = fornecedor.fornecedorId;
+            fornecedorNome = fornecedor.nome;
+          }
+        } catch {
+          // sem fornecedor: segue com o padrao
+        }
       }
-      baixarPdfDataUrl(anexado.dataUrl, anexado.filename);
+
+      const pdf = await gerarPdfPedidoFornecedor(fornecedorId, fornecedorNome, [{
+        codigo: produto.codigo,
+        descricao: getDescricaoExibicao(produto, produtoErp),
+        foto: fotoSelecionada?.src ?? null,
+      }]);
+      baixarPdfNoNavegador(pdf);
     } catch (err) {
-      toast({ title: "Erro ao baixar PDF", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+      toast({ title: "Erro ao gerar PDF", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
     } finally {
       setBaixandoPdfPedido(null);
     }
@@ -915,7 +927,7 @@ const Compras = () => {
       case "fazer_pedido":
         return <Badge className="bg-amber-100 text-amber-800">Fazer Pedido</Badge>;
       case "pedido_andamento":
-        return <Badge className="bg-orange-100 text-orange-800">Pedido em Andamento</Badge>;
+        return <Badge className="bg-orange-100 text-orange-800">Pedido Feito</Badge>;
       case "compra_realizada":
         return <Badge className="bg-red-100 text-red-800">Compra Realizada</Badge>;
       case "concluido":
@@ -1040,10 +1052,12 @@ const Compras = () => {
               {baixandoPdfPedido === produto.id ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
               Baixar PDF
             </Button>
-            <Button className="w-full justify-center" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto voltou para fazer pedido")}>
-              {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-2" />}
-              Voltar Pedido
-            </Button>
+            {!produto.pedidoFeito && (
+              <Button className="w-full justify-center" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:FAZER_PEDIDO`, () => fazerPedido(produto.id), "Produto voltou para fazer pedido")}>
+                {isActionLoading("FAZER_PEDIDO") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <ShoppingCart className="h-4 w-4 mr-2" />}
+                Voltar Pedido
+              </Button>
+            )}
           </>
         );
       case "compra_realizada":
@@ -1053,9 +1067,9 @@ const Compras = () => {
               {isActionLoading("CONCLUIR") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Check className="h-4 w-4 mr-2" />}
               Concluir
             </Button>
-            <Button className="w-full justify-center" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:PEDIDO_ANDAMENTO`, () => pedidoAndamento(produto.id), "Produto voltou para pedido em andamento")}>
+            <Button className="w-full justify-center" variant="outline" disabled={!!acaoEmAndamento} onClick={() => acaoDetalhe(`${produto.id}:PEDIDO_ANDAMENTO`, () => pedidoAndamento(produto.id), "Produto voltou para pedido feito")}>
               {isActionLoading("PEDIDO_ANDAMENTO") ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-              Voltar Andamento
+              Voltar Pedido Feito
             </Button>
           </>
         );
@@ -1183,7 +1197,7 @@ const Compras = () => {
           </Card>
           <Card>
             <CardHeader className="px-3 pt-3 pb-1">
-              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Andamento</CardTitle>
+              <CardTitle className="text-xs sm:text-sm font-medium text-muted-foreground">Pedido Feito</CardTitle>
             </CardHeader>
             <CardContent className="px-3 pb-3">
               <div className="text-2xl font-bold text-orange-600">

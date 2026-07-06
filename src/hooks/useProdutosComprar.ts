@@ -3,14 +3,18 @@ import { obterLoginSalvo } from '@/hooks/useAuth';
 import {
   upsertComprasFromClickup,
   fetchComprasSupabase,
+  fetchPedidosFeitosSupabase,
   subscribeComprasSupabase,
   atualizarStatusPorId,
   atualizarSecaoPorId,
   atualizarSecaoPorClickup,
   atualizarDescricaoPorId,
   atualizarDescricaoPorClickup,
+  marcarPedidoFeitoPorId,
+  marcarPedidoFeitoPorClickup,
   persistirFotoCompra,
   isFotoStorage,
+  type PedidoFeitoCompraRow,
 } from '@/lib/comprasSupabase';
 import { lerComprasCache, salvarComprasCache } from '@/lib/comprasCache';
 
@@ -28,6 +32,8 @@ export interface ProdutoComprar {
   vezesPedido: number;
   // Secao do produto, quando ja persistida no Supabase (evita reconsultar o ERP).
   secao?: string | null;
+  // true quando o pedido ao fornecedor ja foi feito (coluna pedido_feito).
+  pedidoFeito?: boolean;
 }
 
 export type CompraStatusApp =
@@ -50,6 +56,7 @@ interface UseProdutosComprarReturn {
   persistirSecao: (produtoId: string, secao: string) => void;
   persistirDescricao: (produtoId: string, descricao: string) => void;
   persistirFoto: (produtoId: string, dataUrl: string) => void;
+  marcarPedidoFeito: (produtoId: string) => Promise<void>;
   refetch: () => Promise<void>;
   like: (taskId: string) => Promise<void>;
   dislike: (taskId: string) => Promise<void>;
@@ -100,6 +107,8 @@ const STATUS_DUPLICADO_PRIORITY: Record<CompraStatusApp, number> = {
   concluido: 130,
   todo: 100,
 };
+
+const STATUS_FINAIS = new Set<CompraStatusApp>(['compra_realizada', 'concluido']);
 
 function normalizarProdutoKey(value: string | null | undefined): string {
   return String(value ?? '')
@@ -162,6 +171,34 @@ function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
   }));
 
   return [...semChave, ...resultado];
+}
+
+function aplicarPedidosFeitosSupabase(
+  produtos: ProdutoComprar[],
+  pedidosFeitos: PedidoFeitoCompraRow[]
+): ProdutoComprar[] {
+  if (pedidosFeitos.length === 0) return produtos;
+
+  const porTaskId = new Map<string, PedidoFeitoCompraRow>();
+  const porProdutoKey = new Map<string, PedidoFeitoCompraRow>();
+
+  for (const row of pedidosFeitos) {
+    if (row.clickup_task_id) porTaskId.set(row.clickup_task_id, row);
+    if (row.produto_key) porProdutoKey.set(row.produto_key, row);
+  }
+
+  return produtos.map((produto) => {
+    const row = porTaskId.get(produto.id) ?? porProdutoKey.get(getProdutoKey(produto));
+    if (!row || row.pedido_feito !== 1) return produto;
+
+    const status = STATUS_FINAIS.has(produto.status)
+      ? produto.status
+      : STATUS_FINAIS.has(row.status)
+        ? row.status
+        : 'pedido_andamento';
+
+    return { ...produto, pedidoFeito: true, status };
+  });
 }
 
 function isAbortError(err: unknown): boolean {
@@ -281,18 +318,19 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       }
 
       const data = await response.json();
-      const produtosAtualizados = deduplicarProdutos(data.produtos ?? []);
+      let produtosAtualizados = deduplicarProdutos(data.produtos ?? []);
+      try {
+        await upsertComprasFromClickup(produtosAtualizados, empresaAtual);
+        const pedidosFeitos = await fetchPedidosFeitosSupabase(empresaAtual);
+        produtosAtualizados = aplicarPedidosFeitosSupabase(produtosAtualizados, pedidosFeitos);
+      } catch (err) {
+        console.warn('[compras][supabase] pedido_feito/dual-write falhou (ignorado):', err);
+      }
       setProdutos(produtosAtualizados);
       const updatedAt = new Date();
       setUltimaAtualizacao(updatedAt);
       writeProdutosCache(empresaAtual, produtosAtualizados);
 
-      // Dual-write (piloto de migracao): espelha os itens no Supabase em segundo
-      // plano. E "melhor esforco" — se falhar, so loga e NAO afeta a tela (ClickUp
-      // segue como fonte de verdade nesta fase).
-      void upsertComprasFromClickup(produtosAtualizados, empresaAtual).catch((err) => {
-        console.warn('[compras][supabase] dual-write falhou (ignorado):', err);
-      });
     } catch (err: unknown) {
       if (isAbortError(err)) {
         return;
@@ -464,6 +502,37 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       });
   }, [fonte, produtos]);
 
+  // Marca "pedido feito" no Supabase (substitui o anexo de PDF na task do ClickUp).
+  // O item vai automaticamente para 'pedido_andamento' (via trigger no banco),
+  // menos se ja estiver em compra_realizada/concluido. Update otimista + revert.
+  const marcarPedidoFeito = useCallback(async (produtoId: string) => {
+    const empresaAtual = getEmpresaAtual();
+    const anterior = produtos.find((p) => p.id === produtoId);
+    const statusFinal = anterior && (anterior.status === 'compra_realizada' || anterior.status === 'concluido')
+      ? anterior.status
+      : 'pedido_andamento';
+    setProdutos((prev) =>
+      prev.map((p) => (p.id === produtoId ? { ...p, pedidoFeito: true, status: statusFinal } : p))
+    );
+    try {
+      if (fonte === 'supabase') {
+        await marcarPedidoFeitoPorId(produtoId);
+      } else {
+        if (anterior) {
+          await upsertComprasFromClickup([anterior], empresaAtual);
+        }
+        await marcarPedidoFeitoPorClickup(empresaAtual, produtoId);
+      }
+    } catch (err) {
+      if (anterior) {
+        setProdutos((prev) =>
+          prev.map((p) => (p.id === produtoId ? { ...p, pedidoFeito: anterior.pedidoFeito, status: anterior.status } : p))
+        );
+      }
+      throw err;
+    }
+  }, [fonte, produtos]);
+
   const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
   const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
   const fazerPedido = useCallback((id: string) => executarAcao(id, 'FAZER_PEDIDO'), [executarAcao]);
@@ -482,6 +551,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     persistirSecao,
     persistirDescricao,
     persistirFoto,
+    marcarPedidoFeito,
     refetch: () => fetchProdutos(true),
     like,
     dislike,
@@ -491,4 +561,3 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     concluir,
   };
 };
-
