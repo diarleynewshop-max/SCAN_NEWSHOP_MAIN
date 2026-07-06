@@ -10,7 +10,6 @@ import { DesktopShell } from "@/components/DesktopShell";
 
 // 1. IMPORTAMOS O BOTÃO AQUI
 import { ThemeToggle } from "@/components/ui/theme-toggle";
-import TutorialButton from "@/components/TutorialButton";
 import TourGuide from "@/components/TourGuide";
 import { EmpresaToggleSF } from "@/components/EmpresaToggleSF";
 
@@ -41,11 +40,6 @@ const App = () => (
 
       {/* Botão SOYE ↔ FACIL (apenas para Compras/Admin logado em SOYE ou FACIL) */}
       <EmpresaToggleSF />
-
-      {/* Botão Tutorial (fora do Router, não usa useLocation) */}
-      <div className="fixed top-14 right-4 z-[60]">
-        <TutorialButton />
-      </div>
 
       <BrowserRouter>
         {/* TourGuide DENTRO do Router para useLocation funcionar */}
