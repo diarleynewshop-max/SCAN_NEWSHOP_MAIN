@@ -293,6 +293,7 @@ const Compras = () => {
     fonte,
     setFonte,
     persistirSecao,
+    persistirDescricao,
     persistirFoto,
   } = useProdutosComprar();
 
@@ -711,10 +712,12 @@ const Compras = () => {
         return next;
       });
 
-      // Grava secao e foto do ERP no Supabase (uma vez) para nao reconsultar depois.
+      // Grava dados do ERP no Supabase (uma vez) para nao reconsultar depois.
       for (const [id, dados] of resultados) {
         const secaoErp = dados?.secao?.trim();
+        const descricaoErp = dados?.descricao?.trim();
         if (secaoErp) persistirSecao(id, secaoErp);
+        if (descricaoErp) persistirDescricao(id, descricaoErp);
         if (dados?.imagem && dados.imagem.startsWith("data:")) persistirFoto(id, dados.imagem);
       }
     };
@@ -735,6 +738,7 @@ const Compras = () => {
     produtosPendentesAnalise,
     produtosPorBuscaStatus,
     persistirSecao,
+    persistirDescricao,
     persistirFoto,
   ]);
 
@@ -923,18 +927,23 @@ const Compras = () => {
     setDragX(0);
   };
 
-  // Percorre os produtos que ainda nao tem secao/foto no Supabase, UM DE CADA VEZ:
-  // busca no ERP, converte a imagem e persiste (secao + foto). So passa pro proximo
+  // Percorre os produtos que ainda nao tem secao/descricao/foto no Supabase, UM DE CADA VEZ:
+  // busca no ERP, converte a imagem e persiste (secao + descricao + foto). So passa pro proximo
   // quando o atual termina. Pode ser parado; o que ja processou fica salvo.
   const preCarregarErp = async () => {
     const pendentes = produtos.filter((p) => {
       const temSecao = Boolean(p.secao);
       const temFoto = Boolean(p.foto && p.foto.includes("/storage/v1/object/public/"));
-      return !temSecao || !temFoto;
+      const descricaoAtual = p.descricao.trim();
+      const codigoConsulta = getCodigoConsulta(p.codigo).trim();
+      const temDescricaoReal = Boolean(
+        descricaoAtual && descricaoAtual !== p.codigo.trim() && descricaoAtual !== codigoConsulta
+      );
+      return !temSecao || !temDescricaoReal || !temFoto;
     });
 
     if (pendentes.length === 0) {
-      toast({ title: "Tudo ja sincronizado", description: "Todos os produtos ja tem secao e foto no banco." });
+      toast({ title: "Tudo ja sincronizado", description: "Todos os produtos ja tem secao, descricao e foto no banco." });
       return;
     }
 
@@ -961,7 +970,9 @@ const Compras = () => {
         }
 
         const secaoErp = dados?.secao?.trim();
+        const descricaoErp = dados?.descricao?.trim();
         if (secaoErp) persistirSecao(produto.id, secaoErp);
+        if (descricaoErp) persistirDescricao(produto.id, descricaoErp);
         if (dados?.imagem && dados.imagem.startsWith("data:")) persistirFoto(produto.id, dados.imagem);
       } catch (err) {
         console.error("[Compras][preCarregarErp] falhou", {
@@ -1148,7 +1159,7 @@ const Compras = () => {
                 variant="outline"
                 onClick={preCarregarErp}
                 disabled={loading}
-                title="Busca secao e foto de todos os produtos no ERP (1 por vez) e salva no banco, para carregar rapido depois"
+                title="Busca secao, descricao e foto de todos os produtos no ERP (1 por vez) e salva no banco, para carregar rapido depois"
                 className="text-indigo-700 border-indigo-200"
               >
                 <FileDown className="h-4 w-4 mr-2" />

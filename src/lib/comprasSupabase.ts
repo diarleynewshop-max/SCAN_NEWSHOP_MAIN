@@ -145,6 +145,29 @@ export async function atualizarSecaoPorClickup(
   if (error) throw error;
 }
 
+// Persiste a descricao (nome real vindo do ERP) na linha, pelo UUID — modo Supabase.
+export async function atualizarDescricaoPorId(id: string, descricao: string): Promise<void> {
+  if (!isSupabaseConfigured || !descricao) return;
+  const { error } = await supabase.from('compras').update({ descricao }).eq('id', id);
+  if (error) throw error;
+}
+
+// Persiste a descricao pela task do ClickUp — modo ClickUp. Sobrescreve o valor
+// atual (produtos antigos guardaram o codigo de barras no lugar do nome real).
+export async function atualizarDescricaoPorClickup(
+  empresa: Empresa,
+  clickupTaskId: string,
+  descricao: string
+): Promise<void> {
+  if (!isSupabaseConfigured || !descricao) return;
+  const { error } = await supabase
+    .from('compras')
+    .update({ descricao })
+    .eq('empresa', empresaCompras(empresa))
+    .eq('clickup_task_id', clickupTaskId);
+  if (error) throw error;
+}
+
 // ── Fotos no Supabase Storage ────────────────────────────────────────────────
 const FOTO_BUCKET = 'compras-fotos';
 

@@ -7,6 +7,8 @@ import {
   atualizarStatusPorId,
   atualizarSecaoPorId,
   atualizarSecaoPorClickup,
+  atualizarDescricaoPorId,
+  atualizarDescricaoPorClickup,
   persistirFotoCompra,
   isFotoStorage,
 } from '@/lib/comprasSupabase';
@@ -46,6 +48,7 @@ interface UseProdutosComprarReturn {
   fonte: CompraFonte;
   setFonte: (fonte: CompraFonte) => void;
   persistirSecao: (produtoId: string, secao: string) => void;
+  persistirDescricao: (produtoId: string, descricao: string) => void;
   persistirFoto: (produtoId: string, dataUrl: string) => void;
   refetch: () => Promise<void>;
   like: (taskId: string) => Promise<void>;
@@ -419,6 +422,23 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     });
   }, [fonte]);
 
+  // Persiste a descricao real vinda do ERP. Alguns itens antigos entraram no banco
+  // com codigo de barras no lugar do nome do produto.
+  const persistirDescricao = useCallback((produtoId: string, descricao: string) => {
+    const descricaoLimpa = descricao.trim();
+    if (!descricaoLimpa) return;
+    setProdutos((prev) =>
+      prev.map((p) => (p.id === produtoId && p.descricao !== descricaoLimpa ? { ...p, descricao: descricaoLimpa } : p))
+    );
+    const empresaAtual = getEmpresaAtual();
+    const acao = fonte === 'supabase'
+      ? atualizarDescricaoPorId(produtoId, descricaoLimpa)
+      : atualizarDescricaoPorClickup(empresaAtual, produtoId, descricaoLimpa);
+    void acao.catch((err) => {
+      console.warn('[compras][supabase] persistir descricao falhou (ignorado):', err);
+    });
+  }, [fonte]);
+
   // Sobe a foto (data URL do ERP) no Storage e guarda a URL no Supabase, uma vez
   // por produto, para nao rebaixar do ERP nas proximas cargas. Best-effort.
   const persistirFoto = useCallback((produtoId: string, dataUrl: string) => {
@@ -460,6 +480,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     fonte,
     setFonte,
     persistirSecao,
+    persistirDescricao,
     persistirFoto,
     refetch: () => fetchProdutos(true),
     like,
