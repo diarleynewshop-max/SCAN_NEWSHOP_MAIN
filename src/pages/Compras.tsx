@@ -28,6 +28,7 @@ import {
 const PAGE_SIZE = 10;
 const ERP_BATCH_SIZE = 5;
 const CACHE_TTL_MS = 30 * 60 * 1000;
+const ERP_MISS_TTL_MS = 60 * 60 * 1000;
 // Desativado por ora: a API do ERP nao aceita os nomes de campo que o swagger
 // documenta pra filtrar/ordenar cupons fiscais (dataVenda e identificadorId deram
 // erro/retorno vazio em producao). Reativar quando confirmarmos os campos reais
@@ -99,6 +100,46 @@ function salvarCacheLocal<T>(key: string, data: T) {
   } catch {
     // Cache local e opcional.
   }
+}
+
+const erpMissCache = new Map<string, number>();
+
+function getErpMissCacheKey(empresa: string, codigo: string): string {
+  return `compras:erp-miss:${empresa}:${codigo}`;
+}
+
+function isErpMissBloqueado(empresa: string, codigo: string): boolean {
+  const key = getErpMissCacheKey(empresa, codigo);
+  const mem = erpMissCache.get(key);
+  if (mem && Date.now() - mem < ERP_MISS_TTL_MS) return true;
+  if (mem) erpMissCache.delete(key);
+
+  try {
+    const raw = window.localStorage.getItem(key);
+    const ts = raw ? Number(raw) : 0;
+    if (ts && Date.now() - ts < ERP_MISS_TTL_MS) {
+      erpMissCache.set(key, ts);
+      return true;
+    }
+    if (raw) window.localStorage.removeItem(key);
+  } catch {
+    // Cache negativo e opcional.
+  }
+
+  return false;
+}
+
+function marcarErpMiss(empresa: string, codigo: string) {
+  const key = getErpMissCacheKey(empresa, codigo);
+  const ts = Date.now();
+  erpMissCache.set(key, ts);
+  try { window.localStorage.setItem(key, String(ts)); } catch { /* opcional */ }
+}
+
+function limparErpMiss(empresa: string, codigo: string) {
+  const key = getErpMissCacheKey(empresa, codigo);
+  erpMissCache.delete(key);
+  try { window.localStorage.removeItem(key); } catch { /* opcional */ }
 }
 
 function isValidImageSrc(foto: string | null): boolean {
@@ -311,6 +352,7 @@ const Compras = () => {
   const [dragX, setDragX] = useState(0);
   const dragStartRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const produtosErpRef = useRef<Record<string, VarejoFacilProduct | null>>({});
   const {
     produtos,
     loading,
@@ -333,7 +375,13 @@ const Compras = () => {
   } = useProdutosComprar();
 
   useEffect(() => {
-    setProdutosErp(lerCacheLocal<Record<string, VarejoFacilProduct | null>>(getComprasCacheKey(empresa, "erp")) ?? {});
+    produtosErpRef.current = produtosErp;
+  }, [produtosErp]);
+
+  useEffect(() => {
+    const erpCache = lerCacheLocal<Record<string, VarejoFacilProduct | null>>(getComprasCacheKey(empresa, "erp")) ?? {};
+    produtosErpRef.current = erpCache;
+    setProdutosErp(erpCache);
     setFotosClickUp(lerCacheLocal<Record<string, string | null>>(getComprasCacheKey(empresa, "fotos")) ?? {});
     setVelocidadeVendas({});
     setImagemComErro({});
@@ -713,8 +761,21 @@ const Compras = () => {
         new Map([...origemTela, ...origemAnalise].map((produto) => [produto.id, produto])).values()
       );
       const limite = filtroSecao !== "todos" || (analiseAberta && filtroSecaoAnalise !== "todos") ? 25 : PAGE_SIZE;
+      const erpAtual = produtosErpRef.current;
       const pendentes = origem
-        .filter((produto) => !(produto.id in produtosErp) || !isDescricaoRealProduto(produto))
+        .filter((produto) => {
+          const codigo = getCodigoConsulta(produto.codigo).trim();
+          if (!codigo) return false;
+          if (produto.id in erpAtual) return false;
+          if (isErpMissBloqueado(empresa, codigo)) return false;
+
+          const temDadosPersistidos =
+            isDescricaoRealProduto(produto) &&
+            Boolean(produto.secao?.trim()) &&
+            Boolean(produto.foto && produto.foto.includes("/storage/v1/object/public/"));
+
+          return !temDadosPersistidos;
+        })
         .slice(0, limite);
       if (pendentes.length === 0) return;
 
@@ -725,10 +786,13 @@ const Compras = () => {
           lote.map(async (produto) => {
             const codigo = getCodigoConsulta(produto.codigo);
             try {
-              let dados = produtosErp[produto.id];
-              if (!dados) {
+              const cacheAtual = produtosErpRef.current;
+              let dados = cacheAtual[produto.id];
+              if (!(produto.id in cacheAtual)) {
                 dados = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
               }
+              if (dados) limparErpMiss(empresa, codigo);
+              else marcarErpMiss(empresa, codigo);
               if (dados?.imagem && !dados.imagem.startsWith("data:")) {
                 try {
                   const imagemDataUrl = await baixarImagemParaDataUrl(dados.imagem);
@@ -745,6 +809,7 @@ const Compras = () => {
               }
               return [produto.id, dados ?? null] as const;
             } catch (err) {
+              marcarErpMiss(empresa, codigo);
               console.error("[Compras][Foto] ERP falhou", {
                 produtoId: produto.id,
                 codigo,
@@ -763,6 +828,7 @@ const Compras = () => {
         for (const [id, dados] of resultados) {
           next[id] = dados;
         }
+        produtosErpRef.current = next;
         salvarCacheLocal(getComprasCacheKey(empresa, "erp"), next);
         return next;
       });
@@ -788,7 +854,6 @@ const Compras = () => {
     filtroSecao,
     filtroSecaoAnalise,
     produtoAnalise,
-    produtosErp,
     produtosPaginados,
     produtosPendentesAnalise,
     produtosPorBuscaStatus,

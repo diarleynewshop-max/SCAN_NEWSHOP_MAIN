@@ -124,6 +124,45 @@ function _lsSet(key: string, value: string) {
 
 const secaoCache = new Map<string, string>();
 const grupoCache = new Map<string, string>();
+const produtoLookupInFlight = new Map<string, Promise<VarejoFacilProduct | null>>();
+const PRODUTO_LOOKUP_LS_KEY = "vf_produto_lookup_v1";
+const PRODUTO_LOOKUP_TTL_MS = 60 * 60 * 1000;
+
+type ProdutoLookupCacheEntry = {
+  ts: number;
+  value: VarejoFacilProduct | null;
+};
+
+function loadProdutoLookupCache(): Record<string, ProdutoLookupCacheEntry> {
+  try {
+    const raw = localStorage.getItem(PRODUTO_LOOKUP_LS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, ProdutoLookupCacheEntry>) : {};
+  } catch {
+    return {};
+  }
+}
+
+let produtoLookupStore = loadProdutoLookupCache();
+
+function getProdutoLookupKey(codigo: string, contexto: VarejoFacilLookupContext = {}): string {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  return `${empresa}:${codigo.trim()}`;
+}
+
+function getProdutoLookupCached(key: string): VarejoFacilProduct | null | undefined {
+  const entry = produtoLookupStore[key];
+  if (!entry) return undefined;
+  if (Date.now() - entry.ts > PRODUTO_LOOKUP_TTL_MS) {
+    delete produtoLookupStore[key];
+    return undefined;
+  }
+  return entry.value;
+}
+
+function setProdutoLookupCached(key: string, value: VarejoFacilProduct | null) {
+  produtoLookupStore[key] = { ts: Date.now(), value };
+  try { localStorage.setItem(PRODUTO_LOOKUP_LS_KEY, JSON.stringify(produtoLookupStore)); } catch { /* cache opcional */ }
+}
 
 const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpresa => {
   const normalizada = (empresa ?? "").toUpperCase();
@@ -328,7 +367,7 @@ const buscarProdutoPorCodigoBarras = async (
   return null;
 };
 
-export const buscarProdutoVarejoFacil = async (
+const buscarProdutoVarejoFacilSemCache = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilProduct | null> => {
@@ -416,6 +455,37 @@ export const buscarProdutoVarejoFacil = async (
     imagem,
     hasErpImage,
   };
+};
+
+export const buscarProdutoVarejoFacil = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VarejoFacilProduct | null> => {
+  const codigo = codigoBarras.trim();
+  if (!codigo) return null;
+
+  const cacheKey = getProdutoLookupKey(codigo, contexto);
+  const cached = getProdutoLookupCached(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const pending = produtoLookupInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const lookup = buscarProdutoVarejoFacilSemCache(codigo, contexto)
+    .then((produto) => {
+      setProdutoLookupCached(cacheKey, produto);
+      return produto;
+    })
+    .catch((err) => {
+      setProdutoLookupCached(cacheKey, null);
+      throw err;
+    })
+    .finally(() => {
+      produtoLookupInFlight.delete(cacheKey);
+    });
+
+  produtoLookupInFlight.set(cacheKey, lookup);
+  return lookup;
 };
 
 export const consultarPrecoProdutoVarejoFacil = async (
