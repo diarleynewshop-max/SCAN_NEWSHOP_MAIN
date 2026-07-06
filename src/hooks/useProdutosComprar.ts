@@ -70,10 +70,12 @@ const CACHE_TTL_MS = 5 * 60 * 1000;
 const FONTE_KEY = 'compras:fonte';
 
 function getFonteSalva(): CompraFonte {
+  // Padrao agora e Supabase (leitura direto do banco, sem passar pelas functions
+  // da Vercel). So fica no ClickUp quem escolheu explicitamente no botao.
   try {
-    return window.localStorage.getItem(FONTE_KEY) === 'supabase' ? 'supabase' : 'clickup';
+    return window.localStorage.getItem(FONTE_KEY) === 'clickup' ? 'clickup' : 'supabase';
   } catch {
-    return 'clickup';
+    return 'supabase';
   }
 }
 

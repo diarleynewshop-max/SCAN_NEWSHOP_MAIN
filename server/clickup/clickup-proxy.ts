@@ -1,5 +1,16 @@
 import { VercelRequest, VercelResponse } from '@vercel/node';
 
+// Logs de diagnostico ficam DESLIGADOS por padrao — cada linha vira um evento de
+// Observability na Vercel (custo por evento). Ligue com CLICKUP_DEBUG=1 quando
+// precisar investigar. console.error de verdade continua sempre ativo.
+const DEBUG_LOGS = process.env.CLICKUP_DEBUG === '1';
+function dbg(...args: unknown[]): void {
+  if (DEBUG_LOGS) console.log(...args);
+}
+function dbgWarn(...args: unknown[]): void {
+  if (DEBUG_LOGS) console.warn(...args);
+}
+
 type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
 type FlagKey = 'loja' | 'cd';
 type ListaKey = FlagKey | 'compras';
@@ -77,7 +88,7 @@ function protectLojaFromCdEnv(
   if (!envListId) return defaultLojaId;
 
   if (empresa !== 'NEWSHOP' && envListId === cdListId) {
-    console.warn(`[clickup-proxy] CLICKUP_LIST_ID_${empresa} aponta para CD. Usando LOJA padrao.`);
+    dbgWarn(`[clickup-proxy] CLICKUP_LIST_ID_${empresa} aponta para CD. Usando LOJA padrao.`);
     return defaultLojaId;
   }
 
@@ -864,27 +875,27 @@ async function salvarRelatorioDashboard(
   dateKey: string
 ): Promise<any> {
   const t0 = Date.now();
-  console.log(`[DASH][1] INICIO | empresa=${empresa} flag=${flag} data=${dateKey}`);
+  dbg(`[DASH][1] INICIO | empresa=${empresa} flag=${flag} data=${dateKey}`);
 
   // PASSO 1 — verifica se já existe
   let existente: any = null;
   try {
     existente = await buscarRelatorioSalvo(empresa, flag, token, dateKey);
   } catch (err: any) {
-    console.warn(`[DASH][1] buscarRelatorioSalvo falhou (ignorando): ${err.message}`);
+    dbgWarn(`[DASH][1] buscarRelatorioSalvo falhou (ignorando): ${err.message}`);
   }
   if (existente) {
-    console.log(`[DASH][1] Relatorio existente encontrado (+${Date.now() - t0}ms) — retornando`);
+    dbg(`[DASH][1] Relatorio existente encontrado (+${Date.now() - t0}ms) — retornando`);
     return existente;
   }
-  console.log(`[DASH][1] Nenhum relatorio existente (+${Date.now() - t0}ms)`);
+  dbg(`[DASH][1] Nenhum relatorio existente (+${Date.now() - t0}ms)`);
 
   // PASSO 2 — gera relatório do zero
-  console.log(`[DASH][2] gerarRelatorioDiario...`);
+  dbg(`[DASH][2] gerarRelatorioDiario...`);
   let report: any;
   try {
     report = await gerarRelatorioDiario(empresa, flag, token, dateKey);
-    console.log(`[DASH][2] OK (+${Date.now() - t0}ms) | conferencias=${report.totalConferencias} | itens=${report.resumo?.totalItens} | ignoradas=${report.ignoradas?.length ?? 0}`);
+    dbg(`[DASH][2] OK (+${Date.now() - t0}ms) | conferencias=${report.totalConferencias} | itens=${report.resumo?.totalItens} | ignoradas=${report.ignoradas?.length ?? 0}`);
   } catch (err: any) {
     console.error(`[DASH][2] ERRO gerarRelatorioDiario: ${err.message}`);
     throw new Error(`Falha ao gerar relatorio: ${err.message}`);
@@ -895,7 +906,7 @@ async function salvarRelatorioDashboard(
   const dataPtBr = formatDatePtBr(dateKey);
   const nome = `Relatorio - ${dataPtBr} - ${empresa} ${flag.toUpperCase()}`;
   const descricao = buildRelatorioDescription(report, dataPtBr, empresa, flag).slice(0, 12000);
-  console.log(`[DASH][3] Criando task | lista=${listId} | nome="${nome}" | desc_chars=${descricao.length}`);
+  dbg(`[DASH][3] Criando task | lista=${listId} | nome="${nome}" | desc_chars=${descricao.length}`);
 
   let taskId: string | null = null;
   let lastError = '';
@@ -907,11 +918,11 @@ async function salvarRelatorioDashboard(
     });
     if (r.ok) {
       taskId = (await r.json()).id as string;
-      console.log(`[DASH][3] OK (+${Date.now() - t0}ms) | task=${taskId} | status="${status}"`);
+      dbg(`[DASH][3] OK (+${Date.now() - t0}ms) | task=${taskId} | status="${status}"`);
       break;
     }
     lastError = await r.text();
-    console.warn(`[DASH][3] status="${status}" recusado: ${lastError.slice(0, 120)}`);
+    dbgWarn(`[DASH][3] status="${status}" recusado: ${lastError.slice(0, 120)}`);
   }
 
   if (!taskId) {
@@ -924,7 +935,7 @@ async function salvarRelatorioDashboard(
   const reportWithId = { ...report, clickupTaskId: taskId };
   const jsonString = JSON.stringify(reportWithId);
   const fileName = `relatorio_dashboard_${empresa}_${flag}_${dateKey}.json`;
-  console.log(`[DASH][4] Anexando JSON | task=${taskId} | arquivo=${fileName} | bytes=${Buffer.byteLength(jsonString)}`);
+  dbg(`[DASH][4] Anexando JSON | task=${taskId} | arquivo=${fileName} | bytes=${Buffer.byteLength(jsonString)}`);
 
   const boundary = `ClickUpBound${Date.now()}`;
   const nl = '\r\n';
@@ -963,8 +974,8 @@ async function salvarRelatorioDashboard(
     throw new Error(`ClickUp ${attachResponse.status} ao anexar JSON: ${attachError}`);
   }
 
-  console.log(`[DASH][4] OK (+${Date.now() - t0}ms) | JSON anexado`);
-  console.log(`[DASH][FIM] Relatorio salvo com sucesso | task=${taskId} | total=${Date.now() - t0}ms`);
+  dbg(`[DASH][4] OK (+${Date.now() - t0}ms) | JSON anexado`);
+  dbg(`[DASH][FIM] Relatorio salvo com sucesso | task=${taskId} | total=${Date.now() - t0}ms`);
   return reportWithId;
 }
 
@@ -1228,7 +1239,7 @@ async function baixarJsonsDeTask(taskId: string, token: string): Promise<any[]> 
   const taskData = await response.json();
   const allAttachments: any[] = taskData.attachments ?? [];
   const jsonAttachments = allAttachments.filter(isJsonAttachment);
-  console.log(`[baixarJsonsDeTask] task=${taskId} attachments_total=${allAttachments.length} json_attachments=${jsonAttachments.length}`);
+  dbg(`[baixarJsonsDeTask] task=${taskId} attachments_total=${allAttachments.length} json_attachments=${jsonAttachments.length}`);
 
   if (jsonAttachments.length === 0) return [];
 
@@ -1244,16 +1255,16 @@ async function baixarJsonsDeTask(taskId: string, token: string): Promise<any[]> 
       fileResponse = await fetch(attachment.url);
     }
     if (!fileResponse.ok) {
-      console.warn(`[baixarJsonsDeTask] JSON ignorado (${fileResponse.status}) task=${taskId} title=${title}`);
+      dbgWarn(`[baixarJsonsDeTask] JSON ignorado (${fileResponse.status}) task=${taskId} title=${title}`);
       continue;
     }
 
     try {
       const parsed = await fileResponse.json();
-      console.log(`[baixarJsonsDeTask] JSON ok title=${title} type=${parsed?.type} items=${Array.isArray(parsed?.items) ? parsed.items.length : 'n/a'}`);
+      dbg(`[baixarJsonsDeTask] JSON ok title=${title} type=${parsed?.type} items=${Array.isArray(parsed?.items) ? parsed.items.length : 'n/a'}`);
       jsons.push(parsed);
     } catch {
-      console.warn(`[baixarJsonsDeTask] JSON invalido ignorado task=${taskId} title=${title}`);
+      dbgWarn(`[baixarJsonsDeTask] JSON invalido ignorado task=${taskId} title=${title}`);
     }
   }
 
@@ -1276,15 +1287,15 @@ async function baixarJsonDaTask(taskId: string, token: string): Promise<any | nu
   // 2) fallback: qualquer JSON com items[] (upload manual sem campo type)
   const withItems = jsons.filter((json) => Array.isArray(json?.items) && json.items.length > 0);
   if (withItems.length > 0) {
-    console.warn(`[baixarJsonDaTask] task=${taskId} usando fallback items[] (tipos: ${jsons.map(j => j?.type ?? 'sem-type').join(', ')})`);
+    dbgWarn(`[baixarJsonDaTask] task=${taskId} usando fallback items[] (tipos: ${jsons.map(j => j?.type ?? 'sem-type').join(', ')})`);
     withItems.sort((a, b) => b.items.length - a.items.length);
     return { type: 'conference-file', ...withItems[0] };
   }
 
   if (jsons.length > 0) {
-    console.warn(`[baixarJsonDaTask] task=${taskId} tem JSON mas sem conference-file nem items[] (tipos: ${jsons.map(j => j?.type).join(', ')})`);
+    dbgWarn(`[baixarJsonDaTask] task=${taskId} tem JSON mas sem conference-file nem items[] (tipos: ${jsons.map(j => j?.type).join(', ')})`);
   } else {
-    console.warn(`[baixarJsonDaTask] task=${taskId} sem nenhum attachment JSON`);
+    dbgWarn(`[baixarJsonDaTask] task=${taskId} sem nenhum attachment JSON`);
   }
   return null;
 }
@@ -1427,7 +1438,7 @@ async function buscarTasksAnalisado(
     primaryTasks = raw
       .filter((task) => normalizeStatus(task.status?.status) === 'analisado')
       .map((task) => ({ ...mapClickUpTask(task, primaryListId), emAndamento: taskHasTag(task, CONFERENCIA_LOCK_TAG) }));
-    console.log('[clickup-proxy] buscar-tasks', JSON.stringify({
+    dbg('[clickup-proxy] buscar-tasks', JSON.stringify({
       empresa, flag, primaryListId,
       primaryCount: primaryTasks.length,
       returnedStatuses: raw.map((task) => task.status?.status),
@@ -1462,7 +1473,7 @@ async function buscarTasksAnalisado(
     }
   }
 
-  console.log('[clickup-proxy] fallback SOYE/FACIL', JSON.stringify({
+  dbg('[clickup-proxy] fallback SOYE/FACIL', JSON.stringify({
     empresa, flag, fallbackListIds, fallbackCount: fallbackTasks.length, errosPorLista,
   }));
 
@@ -1747,13 +1758,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
       pedidos.sort((a, b) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
       const pessoas = Array.from(pessoasSet).sort();
-      console.log(`[meus-pedidos] empresa=${empresa} flag=${flag} listId=${listId} total=${todasTasks.length} pedidos=${pedidos.length} pessoas=${pessoas.join(',')}`);
+      dbg(`[meus-pedidos] empresa=${empresa} flag=${flag} listId=${listId} total=${todasTasks.length} pedidos=${pedidos.length} pessoas=${pessoas.join(',')}`);
       return res.status(200).json({ pedidos, pessoas, empresa, flag });
     }
 
     if (action === 'buscar-kanban-admin') {
       const listId = getListId(empresa, flag ?? 'loja');
-      console.log(`[kanban-admin] empresa=${empresa} flag=${flag} listId=${listId} tokenLen=${token?.length ?? 0}`);
+      dbg(`[kanban-admin] empresa=${empresa} flag=${flag} listId=${listId} tokenLen=${token?.length ?? 0}`);
 
       // Busca statuses da lista para construir colunas na ordem correta
       const listResp = await fetch(`https://api.clickup.com/api/v2/list/${listId}`, { headers: { Authorization: token } });
@@ -1846,7 +1857,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .filter((t: any) => t.statusLabel !== undefined);
 
       kanbanTasks.sort((a: any, b: any) => Number(b.dataAtualizacao || b.dataCriacao) - Number(a.dataAtualizacao || a.dataCriacao));
-      console.log(`[kanban-admin] empresa=${empresa} total=${kanbanTasks.length} statuses=${statuses.length}`);
+      dbg(`[kanban-admin] empresa=${empresa} total=${kanbanTasks.length} statuses=${statuses.length}`);
       return res.status(200).json({ tasks: kanbanTasks, statuses });
     }
 
@@ -1901,7 +1912,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
 
       const listId = getListId(empresa, flag);
-      console.log(`[HIST][1] barcode=${barcode} barcodeNorm=${barcodeNorm} lista=${listId} empresa=${empresa} flag=${flag}`);
+      dbg(`[HIST][1] barcode=${barcode} barcodeNorm=${barcodeNorm} lista=${listId} empresa=${empresa} flag=${flag}`);
 
       const t0 = Date.now();
       // Filtra Relatorio server-side para reduzir volume (evita ITEMV2_003 em listas grandes)
@@ -1910,7 +1921,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         .join('&');
       const histUrl = `https://api.clickup.com/api/v2/list/${listId}/task?include_closed=true&page=0&subtasks=false&${statusFilter}`;
       const response = await fetch(histUrl, { headers: { Authorization: token } });
-      console.log(`[HIST][2] ClickUp respondeu status=${response.status} (+${Date.now() - t0}ms)`);
+      dbg(`[HIST][2] ClickUp respondeu status=${response.status} (+${Date.now() - t0}ms)`);
       if (!response.ok) {
         const errBody = await response.text().catch(() => '');
         console.error(`[HIST][ERR] ClickUp falhou: ${errBody}`);
@@ -1923,7 +1934,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const s = (t.status?.status ?? '').toLowerCase().trim();
         return s === 'relatorio' || s === 'relatório';
       });
-      console.log(`[HIST][3] total tasks=${todas.length} relatorios=${relatorios.length}`);
+      dbg(`[HIST][3] total tasks=${todas.length} relatorios=${relatorios.length}`);
 
       const ocorrencias: Array<{ data: string; dataFormatada: string; status: string; listeiro: string }> = [];
 
@@ -1932,7 +1943,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         const descLen = desc.length;
         const temCodigo = desc.includes('Codigo:');
         const status = buscarNaDescricao(desc);
-        console.log(`[HIST][4] task=${task.id} name="${task.name?.slice(0,40)}" descLen=${descLen} temCodigo=${temCodigo} found=${status ?? 'null'}`);
+        dbg(`[HIST][4] task=${task.id} name="${task.name?.slice(0,40)}" descLen=${descLen} temCodigo=${temCodigo} found=${status ?? 'null'}`);
         if (!status) continue;
 
         const dateKey = extrairData(desc);
@@ -1940,12 +1951,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           ? new Date(`${dateKey}T12:00:00`)
           : new Date(Number(task.date_updated));
         const dataFormatada = dtObj.toLocaleDateString('pt-BR');
-        console.log(`[HIST][5] ENCONTRADO data=${dateKey} status=${status}`);
+        dbg(`[HIST][5] ENCONTRADO data=${dateKey} status=${status}`);
         ocorrencias.push({ data: dateKey, dataFormatada, status, listeiro: '' });
       }
 
       ocorrencias.sort((a, b) => b.data.localeCompare(a.data));
-      console.log(`[HIST][FIM] ocorrencias=${ocorrencias.length} (+${Date.now() - t0}ms)`);
+      dbg(`[HIST][FIM] ocorrencias=${ocorrencias.length} (+${Date.now() - t0}ms)`);
       return res.status(200).json({ ocorrencias });
     }
 
