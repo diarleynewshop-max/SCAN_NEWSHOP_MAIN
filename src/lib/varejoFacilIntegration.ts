@@ -34,6 +34,8 @@ type ErpProduto = {
   descricao?: string;
   codigoInterno?: string;
   unidadeDeVenda?: string;
+  secaoId?: number;
+  grupoId?: number;
   imagem?: string;
   imagemUrl?: string;
   urlImagem?: string;
@@ -81,7 +83,7 @@ type ErpListResponse<T> = {
 const VAREJO_FACIL_HOSTS: Record<VarejoFacilEmpresa, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
-  SOYE: "soye.varejofacil.com",
+  SOYE: "facil.varejofacil.com",
 };
 
 const ERP_LOJA_BY_EMPRESA: Record<VarejoFacilEmpresa, number> = {
@@ -89,10 +91,6 @@ const ERP_LOJA_BY_EMPRESA: Record<VarejoFacilEmpresa, number> = {
   NEWSHOP: 2,
   SOYE: 1,
 };
-
-let cachedAccessToken: string | null = null;
-let cachedAuthKey: string | null = null;
-let tokenPromise: Promise<string> | null = null;
 
 // Cache em memória + localStorage (TTL 24h) para evitar re-consultar seção/grupo a cada reload
 const MERCADOLOGICO_LS_KEY = "vf_mercadologico_v1";
@@ -126,122 +124,126 @@ function _lsSet(key: string, value: string) {
 
 const secaoCache = new Map<string, string>();
 const grupoCache = new Map<string, string>();
+const produtoLookupInFlight = new Map<string, Promise<VarejoFacilProduct | null>>();
+const PRODUTO_LOOKUP_LS_KEY = "vf_produto_lookup_v1";
+const PRODUTO_LOOKUP_TTL_MS = 60 * 60 * 1000;
+
+type ProdutoLookupCacheEntry = {
+  ts: number;
+  value: VarejoFacilProduct | null;
+};
+
+function loadProdutoLookupCache(): Record<string, ProdutoLookupCacheEntry> {
+  try {
+    const raw = localStorage.getItem(PRODUTO_LOOKUP_LS_KEY);
+    return raw ? (JSON.parse(raw) as Record<string, ProdutoLookupCacheEntry>) : {};
+  } catch {
+    return {};
+  }
+}
+
+let produtoLookupStore = loadProdutoLookupCache();
+
+function getProdutoLookupKey(codigo: string, contexto: VarejoFacilLookupContext = {}): string {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  return `${empresa}:${codigo.trim()}`;
+}
+
+function getProdutoLookupCached(key: string): VarejoFacilProduct | null | undefined {
+  const entry = produtoLookupStore[key];
+  if (!entry) return undefined;
+  if (Date.now() - entry.ts > PRODUTO_LOOKUP_TTL_MS) {
+    delete produtoLookupStore[key];
+    return undefined;
+  }
+  return entry.value;
+}
+
+function setProdutoLookupCached(key: string, value: VarejoFacilProduct | null) {
+  produtoLookupStore[key] = { ts: Date.now(), value };
+  try { localStorage.setItem(PRODUTO_LOOKUP_LS_KEY, JSON.stringify(produtoLookupStore)); } catch { /* cache opcional */ }
+}
 
 const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpresa => {
   const normalizada = (empresa ?? "").toUpperCase();
 
-  if (normalizada.includes("SOYE")) return "SOYE";
+  // SOYE e FACIL usam a mesma base ERP.
+  if (normalizada.includes("SOYE")) return "FACIL";
   if (normalizada.includes("FACIL")) return "FACIL";
   return "NEWSHOP";
 };
 
-const resolveErpApiBase = (contexto: VarejoFacilLookupContext = {}) => {
-  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+// Em producao, a consulta ERP volta para Vercel Functions (/api/*).
+// Em desenvolvimento, ainda permite usar Supabase Edge Functions como fallback.
+declare const __SUPABASE_URL_FALLBACK__: string;
+declare const __SUPABASE_FUNCTIONS_URL_FALLBACK__: string;
+declare const __SUPABASE_ANON_KEY_FALLBACK__: string;
 
-  if (import.meta.env.DEV) {
-    return `/erp-api-${empresa.toLowerCase()}/api`;
-  }
-
-  const configuredUrl = (
-    import.meta.env[`VITE_ERP_API_URL_${empresa}`] ||
-    import.meta.env.VITE_ERP_API_URL ||
-    `https://${VAREJO_FACIL_HOSTS[empresa]}`
-  ).replace(/\/$/, "");
-
-  return configuredUrl.endsWith("/api") ? configuredUrl : `${configuredUrl}/api`;
+const getSupabaseFunctionsBase = (): string => {
+  const supabaseUrl =
+    (import.meta.env.VITE_SUPABASE_FUNCTIONS_URL as string | undefined) ||
+    __SUPABASE_FUNCTIONS_URL_FALLBACK__ ||
+    (import.meta.env.VITE_SUPABASE_URL as string | undefined) ||
+    __SUPABASE_URL_FALLBACK__ ||
+    "";
+  return supabaseUrl ? `${supabaseUrl.replace(/\/$/, "")}/functions/v1` : "";
 };
 
-const getEnvByEmpresa = (empresa: VarejoFacilEmpresa, key: "USERNAME" | "PASSWORD" | "TOKEN") =>
-  import.meta.env[`VITE_ERP_API_${key}_${empresa}`] || import.meta.env[`VITE_ERP_API_${key}`] || "";
+const getConfiguredErpProxyBase = (): string =>
+  ((import.meta.env.VITE_ERP_PROXY_BASE as string | undefined) || "").replace(/\/$/, "");
 
-const resolveTokenFromAuth = (data: Record<string, unknown>) =>
-  (typeof data.accessToken === "string" && data.accessToken) ||
-  (typeof data.access_token === "string" && data.access_token) ||
-  (typeof data.token === "string" && data.token) ||
-  (typeof data.jwt === "string" && data.jwt) ||
+const getErpProxyEndpoint = (name: "erp-proxy" | "erp-image-proxy"): string => {
+  const configuredBase = getConfiguredErpProxyBase();
+  if (configuredBase) return `${configuredBase}/${name}`;
+
+  const supabaseFunctionsBase = getSupabaseFunctionsBase();
+  if (import.meta.env.DEV && supabaseFunctionsBase) return `${supabaseFunctionsBase}/${name}`;
+
+  return `/api/${name}`;
+};
+
+const getSupabaseAnonKey = (): string =>
+  (import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined) ||
+  __SUPABASE_ANON_KEY_FALLBACK__ ||
   "";
 
-const getErpAccessToken = async (contexto: VarejoFacilLookupContext = {}) => {
-  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-  const baseUrl = resolveErpApiBase(contexto);
-  const username = getEnvByEmpresa(empresa, "USERNAME");
-  const password = getEnvByEmpresa(empresa, "PASSWORD");
-  const configuredToken = getEnvByEmpresa(empresa, "TOKEN");
-  const authKey = `${empresa}:${baseUrl}:${username}`;
+const getSupabaseFunctionHeaders = (): Record<string, string> => {
+  const anonKey = getSupabaseAnonKey();
+  const headers: Record<string, string> = { Accept: "application/json" };
 
-  if (cachedAccessToken && cachedAuthKey === authKey) return cachedAccessToken;
-
-  if (username && password) {
-    if (!tokenPromise) {
-      tokenPromise = (async () => {
-        const response = await fetch(`${baseUrl}/auth`, {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            Accept: "application/json",
-          },
-          body: JSON.stringify({ username, password }),
-        });
-
-        if (!response.ok) {
-          throw new Error("Nao foi possivel autenticar no ERP. Verifique usuario e senha.");
-        }
-
-        const data = (await response.json()) as Record<string, unknown>;
-        const token = resolveTokenFromAuth(data);
-
-        if (!token) {
-          throw new Error("O ERP nao retornou um access token valido no login.");
-        }
-
-        cachedAccessToken = token;
-        cachedAuthKey = authKey;
-        return token;
-      })().finally(() => {
-        tokenPromise = null;
-      });
-    }
-
-    return tokenPromise;
+  if (anonKey) {
+    headers.apikey = anonKey;
+    headers.Authorization = `Bearer ${anonKey}`;
   }
 
-  if (configuredToken) {
-    cachedAccessToken = configuredToken;
-    cachedAuthKey = authKey;
-    return configuredToken;
-  }
-
-  throw new Error("Credenciais do ERP nao configuradas. Defina VITE_ERP_API_USERNAME e VITE_ERP_API_PASSWORD.");
+  return headers;
 };
 
-const buildHeaders = async (contexto: VarejoFacilLookupContext = {}) => {
-  const token = await getErpAccessToken(contexto);
-  return {
-    Authorization: token,
-    Accept: "application/json",
-  };
-};
+const getHeadersForProxyEndpoint = (endpoint: string): Record<string, string> =>
+  endpoint.includes("/functions/v1/")
+    ? getSupabaseFunctionHeaders()
+    : { Accept: "application/json" };
 
 const fetchJson = async <T>(path: string, contexto: VarejoFacilLookupContext = {}) => {
   const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-  const url = import.meta.env.DEV
-    ? `${resolveErpApiBase(contexto)}${path}`
-    : `/api/erp-proxy?empresa=${empresa.toLowerCase()}&path=${encodeURIComponent(path)}`;
+  const endpoint = getErpProxyEndpoint("erp-proxy");
+  const url = `${endpoint}?empresa=${empresa.toLowerCase()}&path=${encodeURIComponent(path)}`;
 
-  const response = await fetch(url, {
-    headers: import.meta.env.DEV ? await buildHeaders(contexto) : { Accept: "application/json" },
-  });
-
-  if (response.status === 401) {
-    cachedAccessToken = null;
-    cachedAuthKey = null;
-    throw new Error("ERP nao autorizado. Verifique as credenciais configuradas.");
-  }
+  const response = await fetch(url, { headers: getHeadersForProxyEndpoint(endpoint) });
 
   if (response.status === 404) return null;
 
+  const contentType = response.headers.get("content-type") || "";
+  const isJson = contentType.toLowerCase().includes("application/json");
+
   if (!response.ok) {
-    throw new Error(`Falha ao consultar ERP (${response.status}).`);
+    const body = await response.text().catch(() => "");
+    throw new Error(`Falha ao consultar ERP (${response.status})${body ? `: ${body}` : ""}`);
+  }
+
+  if (!isJson) {
+    const body = await response.text().catch(() => "");
+    throw new Error(`ERP proxy respondeu formato invalido (${contentType || "sem content-type"}) em ${url}: ${body.slice(0, 160)}`);
   }
 
   return (await response.json()) as T;
@@ -256,8 +258,11 @@ const normalizarEans = (codigo: string) => {
   const limpo = codigo.replace(/\s+/g, "");
   const candidatos = [limpo];
 
+  if (/^\d+$/.test(limpo) && limpo.length < 14) {
+    candidatos.push(limpo.padStart(14, "0"));
+  }
   if (/^\d{13}$/.test(limpo)) candidatos.push(`0${limpo}`);
-  if (/^0\d{13}$/.test(limpo)) candidatos.push(limpo.slice(1));
+  if (/^0+\d+$/.test(limpo)) candidatos.push(limpo.replace(/^0+/, ""));
 
   return [...new Set(candidatos.filter(Boolean))];
 };
@@ -396,18 +401,33 @@ const resolverImagemProduto = (imagem: string | undefined, produtoId: number, co
 
   if (/^data:image\//i.test(imagemOuProduto)) return imagemOuProduto;
 
-  if (import.meta.env.DEV) {
-    if (/^https?:\/\//i.test(imagemOuProduto)) return imagemOuProduto;
-    return `${resolveErpApiBase(contexto).replace(/\/api$/, "")}${imagemOuProduto.startsWith("/") ? imagemOuProduto : `/${imagemOuProduto}`}`;
-  }
-
-  return `/api/erp-image-proxy?empresa=${empresa.toLowerCase()}&produtoId=${produtoId}&src=${encodeURIComponent(imagemOuProduto)}`;
+  return `${getErpProxyEndpoint("erp-image-proxy")}?empresa=${empresa.toLowerCase()}&produtoId=${produtoId}&src=${encodeURIComponent(imagemOuProduto)}`;
 };
 
 const isReferenciaImagemErpValida = (imagem: string | undefined): boolean =>
   Boolean(imagem && !/^data:image\//i.test(imagem));
 
-export const buscarProdutoVarejoFacil = async (
+const buscarProdutoPorCodigoBarras = async (
+  codigo: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<{ produto: ErpProduto; ean: string } | null> => {
+  for (const candidato of normalizarEans(codigo)) {
+    try {
+      const data = await fetchJson<ErpProduto>(
+        `/v1/produto/codigos-auxiliares/${encodeURIComponent(candidato)}`,
+        contexto
+      );
+      const produtoId = (data as any)?.produtoId;
+      if (produtoId) {
+        const prod = await fetchJson<ErpProduto>(`/v1/produto/produtos/${produtoId}`, contexto);
+        if (prod?.id) return { produto: prod, ean: candidato };
+      }
+    } catch { /* continua */ }
+  }
+  return null;
+};
+
+const buscarProdutoVarejoFacilSemCache = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilProduct | null> => {
@@ -421,6 +441,14 @@ export const buscarProdutoVarejoFacil = async (
   if (codigoAuxiliarEncontrado?.codigoAuxiliar.produtoId) {
     produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${codigoAuxiliarEncontrado.codigoAuxiliar.produtoId}`, contexto);
     eanResolvido = codigoAuxiliarEncontrado.eanEncontrado;
+  }
+
+  if (!produto) {
+    const direto = await buscarProdutoPorCodigoBarras(codigo, contexto);
+    if (direto) {
+      produto = direto.produto;
+      eanResolvido = direto.ean;
+    }
   }
 
   if (!produto) {
@@ -489,6 +517,37 @@ export const buscarProdutoVarejoFacil = async (
   };
 };
 
+export const buscarProdutoVarejoFacil = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VarejoFacilProduct | null> => {
+  const codigo = codigoBarras.trim();
+  if (!codigo) return null;
+
+  const cacheKey = getProdutoLookupKey(codigo, contexto);
+  const cached = getProdutoLookupCached(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const pending = produtoLookupInFlight.get(cacheKey);
+  if (pending) return pending;
+
+  const lookup = buscarProdutoVarejoFacilSemCache(codigo, contexto)
+    .then((produto) => {
+      setProdutoLookupCached(cacheKey, produto);
+      return produto;
+    })
+    .catch((err) => {
+      setProdutoLookupCached(cacheKey, null);
+      throw err;
+    })
+    .finally(() => {
+      produtoLookupInFlight.delete(cacheKey);
+    });
+
+  produtoLookupInFlight.set(cacheKey, lookup);
+  return lookup;
+};
+
 export const consultarPrecoProdutoVarejoFacil = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {},
@@ -504,6 +563,14 @@ export const consultarPrecoProdutoVarejoFacil = async (
   if (codigoAuxiliarEncontrado?.codigoAuxiliar.produtoId) {
     produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${codigoAuxiliarEncontrado.codigoAuxiliar.produtoId}`, contexto);
     eanResolvido = codigoAuxiliarEncontrado.eanEncontrado;
+  }
+
+  if (!produto) {
+    const direto = await buscarProdutoPorCodigoBarras(codigo, contexto);
+    if (direto) {
+      produto = direto.produto;
+      eanResolvido = direto.ean;
+    }
   }
 
   if (!produto) {
@@ -534,3 +601,298 @@ export const sincronizarProduto = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilProduct | null> => buscarProdutoVarejoFacil(codigoBarras, contexto);
+
+// ── Velocidade de venda (unidades vendidas/dia) ───────────────────────────────
+// Agrega /v1/venda/cupons-fiscais dos ultimos N dias por produtoId. A API nao
+// permite filtrar cupons por produto (produtoId fica dentro de itensVenda[]),
+// entao a unica forma e paginar os cupons do periodo e somar no cliente.
+// Resultado fica em cache por empresa (nao por produto) para nao repetir a
+// paginacao inteira a cada item da tela.
+
+export interface VelocidadeVendaProduto {
+  unidades: number;
+  dias: number;
+  mediaPorDia: number;
+  cuponsAnalisados: number;
+  parcial: boolean; // true se bateu no limite de paginas antes de cobrir todo o periodo
+  erro: boolean; // true se a consulta ao ERP falhou (nao confundir "0" com "sem dados")
+}
+
+type ErpItemVenda = { produtoId?: number; quantidadeVenda?: number };
+type ErpCupomFiscal = { itensVenda?: ErpItemVenda[]; data?: string; dataVenda?: string; identificadorId?: number };
+
+const VELOCIDADE_DIAS = 90;
+const VELOCIDADE_PAGE_SIZE = 150;
+const VELOCIDADE_MAX_PAGINAS = 30; // limite de 4500 cupons/consulta para nao travar a tela
+const VELOCIDADE_CACHE_TTL_MS = 30 * 60 * 1000;
+const VELOCIDADE_CACHE_ERRO_TTL_MS = 60 * 1000; // erro nao fica em cache 30min — tenta de novo rapido
+
+type VelocidadeCacheEntry = {
+  mapa: Map<string, number>;
+  cuponsAnalisados: number;
+  parcial: boolean;
+  erro: boolean;
+  ts: number;
+};
+
+const velocidadeCache = new Map<string, VelocidadeCacheEntry>();
+const velocidadeEmAndamento = new Map<string, Promise<VelocidadeCacheEntry>>();
+
+function cupomDataKey(cupom: ErpCupomFiscal): string | null {
+  const valor = cupom.dataVenda || cupom.data;
+  if (!valor) return null;
+  // aceita "YYYY-MM-DD" ou ISO completo
+  return valor.slice(0, 10);
+}
+
+const buscarMapaVelocidadeVendas = async (contexto: VarejoFacilLookupContext = {}): Promise<VelocidadeCacheEntry> => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+
+  const cached = velocidadeCache.get(empresa);
+  if (cached) {
+    const ttl = cached.erro ? VELOCIDADE_CACHE_ERRO_TTL_MS : VELOCIDADE_CACHE_TTL_MS;
+    if (Date.now() - cached.ts < ttl) return Promise.resolve(cached);
+  }
+
+  const emAndamento = velocidadeEmAndamento.get(empresa);
+  if (emAndamento) return emAndamento;
+
+  const promessa = (async () => {
+    // Nao confiamos em nenhum nome de campo pra filtrar/ordenar por data: o swagger
+    // do ERP tem campos que nao existem de fato na API real (ja vimos "dataVenda"
+    // filtrar igual a query invalida retornando 200 vazio, e "identificadorId" dar
+    // 422 no sort). Em vez disso pedimos a ordem padrao da API (sem `sort`) e
+    // filtramos a data no cliente, sem assumir que vem ordenado por recencia —
+    // por isso so paramos por "ultima pagina" ou pelo limite de seguranca, nunca
+    // por "pagina toda fora do periodo" (essa heuristica exigiria ordem garantida).
+    const dataInicio = new Date();
+    dataInicio.setDate(dataInicio.getDate() - VELOCIDADE_DIAS);
+    const dataInicioStr = dataInicio.toISOString().slice(0, 10);
+
+    const mapa = new Map<string, number>();
+    let cuponsAnalisados = 0;
+    let parcial = false;
+    let erro = false;
+
+    for (let pagina = 0; pagina < VELOCIDADE_MAX_PAGINAS; pagina++) {
+      const start = pagina * VELOCIDADE_PAGE_SIZE;
+
+      let data: ErpListResponse<ErpCupomFiscal> | null = null;
+      try {
+        data = await fetchJson<ErpListResponse<ErpCupomFiscal>>(
+          `/v1/venda/cupons-fiscais?start=${start}&count=${VELOCIDADE_PAGE_SIZE}`,
+          contexto
+        );
+      } catch (err) {
+        console.error("[VarejoFacil][Velocidade] Falha ao buscar cupons fiscais — badge vai mostrar erro, nao 0", {
+          empresa,
+          pagina,
+          erro: err instanceof Error ? err.message : String(err),
+        });
+        erro = true;
+        break;
+      }
+
+      const cupons = data?.items ?? [];
+      if (cupons.length === 0) break;
+
+      cuponsAnalisados += cupons.length;
+
+      for (const cupom of cupons) {
+        const dataKey = cupomDataKey(cupom);
+        if (dataKey && dataKey < dataInicioStr) continue; // cupom fora do periodo de 90 dias
+
+        for (const item of cupom.itensVenda ?? []) {
+          if (!item.produtoId) continue;
+          const key = String(item.produtoId);
+          mapa.set(key, (mapa.get(key) ?? 0) + Number(item.quantidadeVenda ?? 0));
+        }
+      }
+
+      if (cupons.length < VELOCIDADE_PAGE_SIZE) break; // ultima pagina que existe
+      if (pagina === VELOCIDADE_MAX_PAGINAS - 1) parcial = true;
+    }
+
+    const entry: VelocidadeCacheEntry = { mapa, cuponsAnalisados, parcial, erro, ts: Date.now() };
+    velocidadeCache.set(empresa, entry);
+    return entry;
+  })();
+
+  velocidadeEmAndamento.set(empresa, promessa);
+  try {
+    return await promessa;
+  } finally {
+    velocidadeEmAndamento.delete(empresa);
+  }
+};
+
+export const buscarVelocidadeVendaProduto = async (
+  produtoId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VelocidadeVendaProduto | null> => {
+  if (!produtoId) return null;
+
+  const { mapa, cuponsAnalisados, parcial, erro } = await buscarMapaVelocidadeVendas(contexto);
+  const unidades = mapa.get(String(produtoId)) ?? 0;
+
+  return {
+    unidades,
+    dias: VELOCIDADE_DIAS,
+    mediaPorDia: unidades / VELOCIDADE_DIAS,
+    cuponsAnalisados,
+    erro,
+    parcial,
+  };
+};
+
+// ── Pedido de compra ja aberto pra esse produto/fornecedor ───────────────────
+// Evita duplicar pedido manual: busca os fornecedores do produto e ve se ja
+// existe um Pedido de Compra (ERP) em aberto contendo esse produtoId.
+
+export interface PedidoCompraAberto {
+  pedidoId: string;
+  fornecedorId: string;
+  status: string;
+  dataDeEmissao?: string;
+  quantidadePedida: number;
+}
+
+type ErpFornecedorProduto = { fornecedorId?: number; nivel?: "PRINCIPAL" | "SECUNDARIO" };
+type ErpItemPedidoCompra = { produtoId?: number; quantidade?: number; quantidadeCompleta?: number };
+type ErpPedidoCompra = {
+  id?: number;
+  fornecedorId?: number;
+  status?: string;
+  dataDeEmissao?: string;
+  itens?: ErpItemPedidoCompra[];
+};
+
+// Status que ainda representam pedido "em aberto" (nao cancelado/encerrado)
+const STATUS_PEDIDO_COMPRA_ABERTO = ["ABERTO", "ATENDIDO_PARCIALMENTE", "BLOQUEADO"];
+
+export const buscarPedidosCompraAbertosPorProduto = async (
+  produtoId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<PedidoCompraAberto[]> => {
+  if (!produtoId) return [];
+
+  let fornecedorIds: string[] = [];
+  try {
+    const data = await fetchJson<ErpListResponse<ErpFornecedorProduto>>(
+      `/v1/produto/produtos/${produtoId}/fornecedores`,
+      contexto
+    );
+    fornecedorIds = (data?.items ?? [])
+      .map((item) => item.fornecedorId)
+      .filter((id): id is number => typeof id === "number")
+      .map(String);
+  } catch (err) {
+    console.warn("[VarejoFacil][PedidoAberto] Falha ao buscar fornecedores do produto", {
+      produtoId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+  }
+
+  if (fornecedorIds.length === 0) return [];
+
+  const fornecedorFiql = fornecedorIds.map((id) => `fornecedorId==${id}`).join(",");
+  const statusFiql = STATUS_PEDIDO_COMPRA_ABERTO.map((status) => `status==${status}`).join(",");
+  const fiql = encodeURIComponent(`(${fornecedorFiql});(${statusFiql})`);
+
+  let pedidos: ErpPedidoCompra[] = [];
+  try {
+    const data = await fetchJson<ErpListResponse<ErpPedidoCompra>>(
+      `/v1/compra/pedidos?q=${fiql}&sort=-dataDeEmissao&count=50`,
+      contexto
+    );
+    pedidos = data?.items ?? [];
+  } catch (err) {
+    console.warn("[VarejoFacil][PedidoAberto] Falha ao buscar pedidos de compra", {
+      produtoId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    return [];
+  }
+
+  const resultado: PedidoCompraAberto[] = [];
+  for (const pedido of pedidos) {
+    const itemDoProduto = (pedido.itens ?? []).find((item) => String(item.produtoId) === String(produtoId));
+    if (!itemDoProduto || !pedido.id) continue;
+
+    resultado.push({
+      pedidoId: String(pedido.id),
+      fornecedorId: String(pedido.fornecedorId ?? ""),
+      status: pedido.status ?? "",
+      dataDeEmissao: pedido.dataDeEmissao,
+      quantidadePedida: Number(itemDoProduto.quantidadeCompleta ?? itemDoProduto.quantidade ?? 0),
+    });
+  }
+
+  return resultado;
+};
+
+// ── Fornecedor principal do produto (pra agrupar pedido em PDF por fornecedor) ───
+
+export interface FornecedorProduto {
+  fornecedorId: string;
+  nome: string;
+}
+
+type ErpFornecedor = { id?: number; nome?: string; fantasia?: string };
+
+const fornecedorNomeCache = new Map<string, string>();
+
+const buscarNomeFornecedor = async (
+  fornecedorId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<string> => {
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  const cacheKey = `${empresa}:${fornecedorId}`;
+  const cached = fornecedorNomeCache.get(cacheKey);
+  if (cached) return cached;
+
+  try {
+    const fornecedor = await fetchJson<ErpFornecedor>(`/v1/pessoa/fornecedores/${fornecedorId}`, contexto);
+    const nome = fornecedor?.fantasia || fornecedor?.nome || `Fornecedor ${fornecedorId}`;
+    fornecedorNomeCache.set(cacheKey, nome);
+    return nome;
+  } catch (err) {
+    console.warn("[VarejoFacil][Fornecedor] Falha ao buscar nome do fornecedor", {
+      fornecedorId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    return `Fornecedor ${fornecedorId}`;
+  }
+};
+
+// Busca o fornecedor PRINCIPAL cadastrado pro produto no ERP (cai pro primeiro
+// disponivel se nenhum estiver marcado como principal). Retorna null se o
+// produto nao tiver nenhum fornecedor cadastrado.
+export const buscarFornecedorPrincipalProduto = async (
+  produtoId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<FornecedorProduto | null> => {
+  if (!produtoId) return null;
+
+  let referencias: ErpFornecedorProduto[] = [];
+  try {
+    const data = await fetchJson<ErpListResponse<ErpFornecedorProduto>>(
+      `/v1/produto/produtos/${produtoId}/fornecedores`,
+      contexto
+    );
+    referencias = data?.items ?? [];
+  } catch (err) {
+    console.warn("[VarejoFacil][Fornecedor] Falha ao buscar fornecedores do produto", {
+      produtoId,
+      erro: err instanceof Error ? err.message : String(err),
+    });
+    return null;
+  }
+
+  const principal = referencias.find((ref) => ref.nivel === "PRINCIPAL") ?? referencias[0];
+  if (!principal?.fornecedorId) return null;
+
+  const fornecedorId = String(principal.fornecedorId);
+  const nome = await buscarNomeFornecedor(fornecedorId, contexto);
+  return { fornecedorId, nome };
+};

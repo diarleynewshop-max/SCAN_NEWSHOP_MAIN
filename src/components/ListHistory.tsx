@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { enviarParaClickUp, WebhookPayload } from "@/lib/webhookRouter";
+import { enviarListaParaSupabase, WebhookPayload } from "@/lib/webhookRouter";
 import { Product, ListData } from "@/components/ProductCard";
 import { Pencil, Trash2, Download, FileText, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
@@ -193,7 +193,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     toast({ title: "HTML gerado!" });
   };
 
-  const STORAGE_KEY = "clickup_sent_list_ids";
+  const STORAGE_KEY = "conferencia_sent_list_ids";
 
   const listaJaFoiEnviada = (listId: string): boolean => {
     try {
@@ -212,13 +212,13 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     } catch {}
   };
 
-  const enviarClickUp = async (list: ListData) => {
+  const enviarParaConferencia = async (list: ListData) => {
     // Verifica se a lista tem itens antes de enviar
     if (list.products.length === 0) {
-      toast({ 
-        title: "❌ Lista vazia", 
-        description: "Não é possível enviar listas com 0 itens para o ClickUp.", 
-        variant: "destructive" 
+      toast({
+        title: "❌ Lista vazia",
+        description: "Não é possível enviar listas com 0 itens para conferência.",
+        variant: "destructive"
       });
       return;
     }
@@ -232,9 +232,9 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       });
       return;
     }
-    
-    if (list.sentToClickUp || listaJaFoiEnviada(list.id)) {
-      toast({ title: "⚠️ Já enviado!", description: "Esta lista já foi enviada ao ClickUp.", variant: "destructive" });
+
+    if (list.sentToConference || listaJaFoiEnviada(list.id)) {
+      toast({ title: "⚠️ Já enviado!", description: "Esta lista já foi enviada para conferência.", variant: "destructive" });
       return;
     }
     if (sendingId === list.id) return;
@@ -268,14 +268,16 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           removeTag:  product.removeTag ?? false,
           secao:      product.secao || null,
           photo:      photoDataUrl,
+          erpProdutoId: product.erpProdutoId,
+          appPhotoWithoutErp: product.appPhotoWithoutErp,
         })),
       };
 
-      await enviarParaClickUp(payload);
+      await enviarListaParaSupabase(payload);
       marcarListaEnviada(listaParaEnviar.id);
-      onUpdateList({ ...listaParaEnviar, status: "green", sentToClickUp: true });
+      onUpdateList({ ...listaParaEnviar, status: "green", sentToConference: true });
       const dest = `${payload.flag.toUpperCase()} · ${payload.empresa}`;
-      toast({ title: `✅ Chegou no ClickUp! [${dest}]`, description: `Lista "${listaParaEnviar.title}" enviada com sucesso.` });
+      toast({ title: `✅ Enviado para conferência! [${dest}]`, description: `Lista "${listaParaEnviar.title}" enviada com sucesso.` });
     } catch {
       toast({ title: "❌ Falha no envio", description: "Verifique sua conexão e tente novamente.", variant: "destructive" });
     } finally {
@@ -460,11 +462,11 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
                 <Download style={{ width: modoDesktop ? 14 : 13, height: modoDesktop ? 14 : 13 }} /> Baixar
               </button>
               {(() => {
-                const jaEnviado = list.sentToClickUp || listaJaFoiEnviada(list.id);
+                const jaEnviado = list.sentToConference || listaJaFoiEnviada(list.id);
                 const enviando  = sendingId === list.id;
                 return (
                   <button
-                    onClick={() => enviarClickUp(list)}
+                    onClick={() => enviarParaConferencia(list)}
                     disabled={enviando || jaEnviado}
                     style={{
                       flex: 1, 
@@ -496,7 +498,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
                     }} />}
                     {jaEnviado && <span style={{ fontSize: modoDesktop ? 12 : 11 }}>✅</span>}
                     {!enviando && !jaEnviado && <Share2 style={{ width: modoDesktop ? 14 : 13, height: modoDesktop ? 14 : 13 }} />}
-                    {enviando ? "Enviando…" : jaEnviado ? "Enviado" : "ClickUp"}
+                    {enviando ? "Enviando…" : jaEnviado ? "Enviado" : "Enviar"}
                   </button>
                 );
               })()}

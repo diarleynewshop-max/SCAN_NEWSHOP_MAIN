@@ -9,6 +9,7 @@ export interface Product {
   photo: string | null;
   photoBlob?: Blob | null;
   photoAssetId?: string | null;
+  erpProdutoId?: string;
   erpPhotoMissing?: boolean;
   appPhotoWithoutErp?: boolean;
   quantity: number;
@@ -30,7 +31,7 @@ export interface ListData {
   closedAt?: Date;
   status: "open" | "yellow" | "green" | "red";
   flag: ListFlag; // "loja" | "cd"
-  sentToClickUp?: boolean; // true depois do primeiro envio bem-sucedido
+  sentToConference?: boolean; // true depois do primeiro envio bem-sucedido
 }
 
 interface ProductCardProps {

@@ -1,5 +1,25 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { obterLoginSalvo } from '@/hooks/useAuth';
+import {
+  upsertComprasFromClickup,
+  fetchComprasSupabase,
+  fetchPedidosFeitosSupabase,
+  subscribeComprasSupabase,
+  atualizarStatusPorId,
+  atualizarSecaoPorId,
+  atualizarSecaoPorClickup,
+  atualizarDescricaoPorId,
+  atualizarDescricaoPorClickup,
+  marcarPedidoFeitoPorId,
+  marcarPedidoFeitoPorClickup,
+  persistirFotoCompra,
+  isFotoStorage,
+  type PedidoFeitoCompraRow,
+} from '@/lib/comprasSupabase';
+import { lerComprasCache, salvarComprasCache } from '@/lib/comprasCache';
+
+// Fonte de dados da tela de Compras: 'clickup' (padrao atual) ou 'supabase' (piloto).
+export type CompraFonte = 'clickup' | 'supabase';
 
 export interface ProdutoComprar {
   id: string;
@@ -9,6 +29,11 @@ export interface ProdutoComprar {
   foto: string | null;
   status: CompraStatusApp;
   date_created: string;
+  vezesPedido: number;
+  // Secao do produto, quando ja persistida no Supabase (evita reconsultar o ERP).
+  secao?: string | null;
+  // true quando o pedido ao fornecedor ja foi feito (coluna pedido_feito).
+  pedidoFeito?: boolean;
 }
 
 export type CompraStatusApp =
@@ -26,6 +51,13 @@ interface UseProdutosComprarReturn {
   error: string | null;
   ultimaAtualizacao: Date | null;
   empresa: 'NEWSHOP' | 'SOYE' | 'FACIL';
+  fonte: CompraFonte;
+  setFonte: (fonte: CompraFonte) => void;
+  persistirSecao: (produtoId: string, secao: string) => void;
+  persistirDescricao: (produtoId: string, descricao: string) => void;
+  persistirFoto: (produtoId: string, dataUrl: string) => void;
+  marcarPedidoFeito: (produtoId: string) => Promise<void>;
+  atualizarStatus: (produtoId: string, status: CompraStatusApp) => Promise<void>;
   refetch: () => Promise<void>;
   like: (taskId: string) => Promise<void>;
   dislike: (taskId: string) => Promise<void>;
@@ -36,6 +68,21 @@ interface UseProdutosComprarReturn {
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
+const FONTE_KEY = 'compras:fonte';
+
+function getFonteSalva(): CompraFonte {
+  // ClickUp removido: Supabase e a unica fonte. Mantido como funcao (em vez de
+  // constante) so pra nao precisar tocar nos ~15 call-sites que chamam getFonteSalva().
+  return 'supabase';
+}
+
+function setFonteSalva(fonte: CompraFonte) {
+  try {
+    window.localStorage.setItem(FONTE_KEY, fonte);
+  } catch {
+    // preferencia opcional
+  }
+}
 
 function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
   const login = obterLoginSalvo();
@@ -45,15 +92,22 @@ function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
   return 'NEWSHOP';
 }
 
+// Prioridade de deduplicacao: quando o mesmo produto aparece em varias tasks,
+// mantemos a de maior prioridade. `todo` (Pendente) fica ABAIXO de qualquer status
+// que ja passou por analise — incluindo os finais (andamento/realizada/concluido) —
+// para que uma re-importacao da planilha nao ressuscite como "pendente" um produto
+// que ja foi analisado/comprado. So reaparece se nunca tiver sido analisado.
 const STATUS_DUPLICADO_PRIORITY: Record<CompraStatusApp, number> = {
   fazer_pedido: 400,
   produto_bom: 300,
   produto_ruim: 200,
+  pedido_andamento: 150,
+  compra_realizada: 140,
+  concluido: 130,
   todo: 100,
-  pedido_andamento: 90,
-  compra_realizada: 80,
-  concluido: 10,
 };
+
+const STATUS_FINAIS = new Set<CompraStatusApp>(['compra_realizada', 'concluido']);
 
 function normalizarProdutoKey(value: string | null | undefined): string {
   return String(value ?? '')
@@ -88,14 +142,21 @@ function deveSubstituirProduto(mantido: ProdutoComprar, candidato: ProdutoCompra
 
 function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
   const porProduto = new Map<string, ProdutoComprar>();
+  // Soma vezesPedido em vez de contar ocorrências brutas: o servidor já manda os
+  // produtos deduplicados com a contagem real, então essa passagem precisa ser
+  // idempotente (não pode "resetar" pra 1 quando já não há duplicado no array).
+  const somaPorChave = new Map<string, number>();
   const semChave: ProdutoComprar[] = [];
 
   for (const produto of produtos) {
     const key = getProdutoKey(produto);
+    const vezes = produto.vezesPedido ?? 1;
     if (!key) {
-      semChave.push(produto);
+      semChave.push({ ...produto, vezesPedido: vezes });
       continue;
     }
+
+    somaPorChave.set(key, (somaPorChave.get(key) ?? 0) + vezes);
 
     const mantido = porProduto.get(key);
     if (!mantido || deveSubstituirProduto(mantido, produto)) {
@@ -103,7 +164,40 @@ function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
     }
   }
 
-  return [...semChave, ...porProduto.values()];
+  const resultado = [...porProduto.entries()].map(([key, produto]) => ({
+    ...produto,
+    vezesPedido: somaPorChave.get(key) ?? 1,
+  }));
+
+  return [...semChave, ...resultado];
+}
+
+function aplicarPedidosFeitosSupabase(
+  produtos: ProdutoComprar[],
+  pedidosFeitos: PedidoFeitoCompraRow[]
+): ProdutoComprar[] {
+  if (pedidosFeitos.length === 0) return produtos;
+
+  const porTaskId = new Map<string, PedidoFeitoCompraRow>();
+  const porProdutoKey = new Map<string, PedidoFeitoCompraRow>();
+
+  for (const row of pedidosFeitos) {
+    if (row.clickup_task_id) porTaskId.set(row.clickup_task_id, row);
+    if (row.produto_key) porProdutoKey.set(row.produto_key, row);
+  }
+
+  return produtos.map((produto) => {
+    const row = porTaskId.get(produto.id) ?? porProdutoKey.get(getProdutoKey(produto));
+    if (!row || row.pedido_feito !== 1) return produto;
+
+    const status = STATUS_FINAIS.has(produto.status)
+      ? produto.status
+      : STATUS_FINAIS.has(row.status)
+        ? row.status
+        : 'pedido_andamento';
+
+    return { ...produto, pedidoFeito: true, status };
+  });
 }
 
 function isAbortError(err: unknown): boolean {
@@ -154,23 +248,54 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [error, setError] = useState<string | null>(null);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
   const [empresa, setEmpresa] = useState<'NEWSHOP' | 'SOYE' | 'FACIL'>(() => getEmpresaAtual());
+  const [fonte, setFonteState] = useState<CompraFonte>(() => getFonteSalva());
   const requestControllerRef = useRef<AbortController | null>(null);
 
   const fetchProdutos = useCallback(async (force = false) => {
     const empresaAtual = getEmpresaAtual();
     setEmpresa(empresaAtual);
+
+    // Fonte Supabase: mostra o cache IndexedDB na hora e revalida em segundo plano
+    // (stale-while-revalidate). Realtime atualiza depois via efeito abaixo.
+    if (fonte === 'supabase') {
+      const cacheKey = `supabase:${empresaAtual}`;
+      const cache = await lerComprasCache(cacheKey);
+      if (cache && cache.length > 0) {
+        setProdutos(cache);
+        setUltimaAtualizacao(new Date());
+        setLoading(false);
+      } else {
+        setLoading(true);
+      }
+      setError(null);
+      try {
+        const lista = await fetchComprasSupabase(empresaAtual);
+        setProdutos(lista);
+        setUltimaAtualizacao(new Date());
+        void salvarComprasCache(cacheKey, lista);
+      } catch (err: unknown) {
+        console.error('[useProdutosComprar][supabase] Erro ao buscar:', err);
+        if (!cache) setError(getErrorMessage(err, 'Falha ao carregar do Supabase'));
+      } finally {
+        setLoading(false);
+      }
+      return;
+    }
+
     const cache = readProdutosCache(empresaAtual);
 
-    if (cache) {
+    if (cache && !force) {
+      // Cache so substitui o estado em carga normal; num refetch forcado
+      // (apos mover status) ele e mais velho que a UI e revertia o status.
       setProdutos(cache.produtos);
       setUltimaAtualizacao(new Date(cache.updatedAt));
       setLoading(false);
 
-      if (!force && Date.now() - cache.updatedAt < CACHE_TTL_MS) {
+      if (Date.now() - cache.updatedAt < CACHE_TTL_MS) {
         setError(null);
         return;
       }
-    } else {
+    } else if (!cache) {
       setLoading(true);
     }
 
@@ -192,11 +317,19 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       }
 
       const data = await response.json();
-      const produtosAtualizados = deduplicarProdutos(data.produtos ?? []);
+      let produtosAtualizados = deduplicarProdutos(data.produtos ?? []);
+      try {
+        await upsertComprasFromClickup(produtosAtualizados, empresaAtual);
+        const pedidosFeitos = await fetchPedidosFeitosSupabase(empresaAtual);
+        produtosAtualizados = aplicarPedidosFeitosSupabase(produtosAtualizados, pedidosFeitos);
+      } catch (err) {
+        console.warn('[compras][supabase] pedido_feito/dual-write falhou (ignorado):', err);
+      }
       setProdutos(produtosAtualizados);
       const updatedAt = new Date();
       setUltimaAtualizacao(updatedAt);
       writeProdutosCache(empresaAtual, produtosAtualizados);
+
     } catch (err: unknown) {
       if (isAbortError(err)) {
         return;
@@ -208,7 +341,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
         setLoading(false);
       }
     }
-  }, []);
+  }, [fonte]);
 
   useEffect(() => {
     fetchProdutos();
@@ -218,10 +351,21 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     };
   }, [fetchProdutos]);
 
+  // Realtime: quando a fonte e Supabase, assina mudancas da tabela e recarrega.
+  useEffect(() => {
+    if (fonte !== 'supabase') return;
+    const empresaAtual = getEmpresaAtual();
+    const unsubscribe = subscribeComprasSupabase(empresaAtual, () => {
+      void fetchProdutos(true);
+    });
+    return unsubscribe;
+  }, [fonte, fetchProdutos]);
+
   const executarAcao = useCallback(async (taskId: string, acao: string) => {
     const empresaAtual = getEmpresaAtual();
     const produtoAtual = produtos.find((p) => p.id === taskId);
     const statusAnterior = produtoAtual?.status;
+    const pedidoFeitoAnterior = produtoAtual?.pedidoFeito;
     const previsao: Record<string, CompraStatusApp> = {
       LIKE: 'produto_bom',
       DISLIKE: 'produto_ruim',
@@ -230,11 +374,41 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       COMPRA_REALIZADA: 'compra_realizada',
       CONCLUIR: 'concluido',
     };
+    const marcaPedidoFeito = acao === 'FAZER_PEDIDO';
+    const statusPrevisto = marcaPedidoFeito ? 'pedido_andamento' : previsao[acao];
 
-    if (previsao[acao]) {
+    if (statusPrevisto) {
       setProdutos((prev) =>
-        prev.map((p) => (p.id === taskId ? { ...p, status: previsao[acao] } : p))
+        prev.map((p) => (
+          p.id === taskId
+            ? { ...p, status: statusPrevisto, pedidoFeito: marcaPedidoFeito ? true : p.pedidoFeito }
+            : p
+        ))
       );
+    }
+
+    // Fonte Supabase: atualiza o status pelo UUID da linha. O realtime propaga a
+    // mudanca; um refetch garante consistencia local.
+    if (fonte === 'supabase') {
+      try {
+        if (marcaPedidoFeito) {
+          await marcarPedidoFeitoPorId(taskId);
+        } else if (statusPrevisto) {
+          await atualizarStatusPorId(taskId, statusPrevisto);
+        }
+        await fetchProdutos(true);
+      } catch (err: unknown) {
+        if (statusAnterior) {
+          setProdutos((prev) =>
+            prev.map((p) => (
+              p.id === taskId ? { ...p, status: statusAnterior, pedidoFeito: pedidoFeitoAnterior } : p
+            ))
+          );
+        }
+        console.error('[useProdutosComprar][supabase] Erro na acao:', err);
+        throw err;
+      }
+      return;
     }
 
     try {
@@ -263,17 +437,142 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
         throw new Error((data.error ?? 'Erro ao executar acao') + detalhe + statusDisponiveis + statusTentados);
       }
 
+      if (marcaPedidoFeito) {
+        if (produtoAtual) {
+          await upsertComprasFromClickup([{ ...produtoAtual, status: 'fazer_pedido' }], empresaAtual);
+        }
+        await marcarPedidoFeitoPorClickup(empresaAtual, taskId);
+      }
+
       await fetchProdutos(true);
     } catch (err: unknown) {
       if (statusAnterior) {
         setProdutos((prev) =>
-          prev.map((p) => (p.id === taskId ? { ...p, status: statusAnterior } : p))
+          prev.map((p) => (
+            p.id === taskId ? { ...p, status: statusAnterior, pedidoFeito: pedidoFeitoAnterior } : p
+          ))
         );
       }
       console.error('[useProdutosComprar] Erro na acao:', err);
       throw err;
     }
-  }, [fetchProdutos, produtos]);
+  }, [fonte, fetchProdutos, produtos]);
+
+  const setFonte = useCallback((nova: CompraFonte) => {
+    setFonteSalva(nova);
+    setFonteState(nova);
+  }, []);
+
+  const atualizarStatus = useCallback(async (produtoId: string, status: CompraStatusApp) => {
+    const anterior = produtos.find((p) => p.id === produtoId);
+    if (!anterior) return;
+
+    setProdutos((prev) =>
+      prev.map((p) => (p.id === produtoId ? { ...p, status } : p))
+    );
+
+    try {
+      if (fonte !== 'supabase') {
+        throw new Error('Atualizacao direta de status so existe no modo Supabase.');
+      }
+      await atualizarStatusPorId(produtoId, status);
+      await fetchProdutos(true);
+    } catch (err) {
+      setProdutos((prev) =>
+        prev.map((p) => (p.id === produtoId ? { ...p, status: anterior.status } : p))
+      );
+      throw err;
+    }
+  }, [fonte, fetchProdutos, produtos]);
+
+  // Persiste a secao (vinda do ERP na primeira carga) no Supabase, para nao
+  // precisar reconsultar o ERP so pela secao nas proximas vezes. Best-effort.
+  const persistirSecao = useCallback((produtoId: string, secao: string) => {
+    if (!secao) return;
+    setProdutos((prev) =>
+      prev.map((p) => (p.id === produtoId && p.secao !== secao ? { ...p, secao } : p))
+    );
+    const empresaAtual = getEmpresaAtual();
+    const acao = fonte === 'supabase'
+      ? atualizarSecaoPorId(produtoId, secao)
+      : atualizarSecaoPorClickup(empresaAtual, produtoId, secao);
+    void acao.catch((err) => {
+      console.warn('[compras][supabase] persistir secao falhou (ignorado):', err);
+    });
+  }, [fonte]);
+
+  // Persiste a descricao real vinda do ERP. Alguns itens antigos entraram no banco
+  // com codigo de barras no lugar do nome do produto.
+  const persistirDescricao = useCallback((produtoId: string, descricao: string) => {
+    const descricaoLimpa = descricao.trim();
+    if (!descricaoLimpa) return;
+    setProdutos((prev) =>
+      prev.map((p) => (p.id === produtoId && p.descricao !== descricaoLimpa ? { ...p, descricao: descricaoLimpa } : p))
+    );
+    const empresaAtual = getEmpresaAtual();
+    const acao = fonte === 'supabase'
+      ? atualizarDescricaoPorId(produtoId, descricaoLimpa)
+      : atualizarDescricaoPorClickup(empresaAtual, produtoId, descricaoLimpa);
+    void acao.catch((err) => {
+      console.warn('[compras][supabase] persistir descricao falhou (ignorado):', err);
+    });
+  }, [fonte]);
+
+  // Sobe a foto (data URL do ERP) no Storage e guarda a URL no Supabase, uma vez
+  // por produto, para nao rebaixar do ERP nas proximas cargas. Best-effort.
+  const persistirFoto = useCallback((produtoId: string, dataUrl: string) => {
+    if (!dataUrl) return;
+    const produto = produtos.find((p) => p.id === produtoId);
+    if (!produto || isFotoStorage(produto.foto)) return;
+    const empresaAtual = getEmpresaAtual();
+    void persistirFotoCompra({
+      produtoId,
+      empresa: empresaAtual,
+      codigo: produto.codigo,
+      sku: produto.sku,
+      dataUrl,
+      porUuid: fonte === 'supabase',
+    })
+      .then((url) => {
+        if (url) {
+          setProdutos((prev) => prev.map((p) => (p.id === produtoId ? { ...p, foto: url } : p)));
+        }
+      })
+      .catch((err) => {
+        console.warn('[compras][supabase] persistir foto falhou (ignorado):', err);
+      });
+  }, [fonte, produtos]);
+
+  // Marca "pedido feito" no Supabase (substitui o anexo de PDF na task do ClickUp).
+  // O item vai automaticamente para 'pedido_andamento' (via trigger no banco),
+  // menos se ja estiver em compra_realizada/concluido. Update otimista + revert.
+  const marcarPedidoFeito = useCallback(async (produtoId: string) => {
+    const empresaAtual = getEmpresaAtual();
+    const anterior = produtos.find((p) => p.id === produtoId);
+    const statusFinal = anterior && (anterior.status === 'compra_realizada' || anterior.status === 'concluido')
+      ? anterior.status
+      : 'pedido_andamento';
+    setProdutos((prev) =>
+      prev.map((p) => (p.id === produtoId ? { ...p, pedidoFeito: true, status: statusFinal } : p))
+    );
+    try {
+      if (fonte === 'supabase') {
+        await marcarPedidoFeitoPorId(produtoId);
+      } else {
+        if (anterior) {
+          await upsertComprasFromClickup([anterior], empresaAtual);
+        }
+        await marcarPedidoFeitoPorClickup(empresaAtual, produtoId);
+      }
+    } catch (err) {
+      if (anterior) {
+        setProdutos((prev) =>
+          prev.map((p) => (p.id === produtoId ? { ...p, pedidoFeito: anterior.pedidoFeito, status: anterior.status } : p))
+        );
+      }
+      throw err;
+    }
+  }, [fonte, produtos]);
 
   const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
   const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
@@ -288,6 +587,13 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     error,
     ultimaAtualizacao,
     empresa,
+    fonte,
+    setFonte,
+    persistirSecao,
+    persistirDescricao,
+    persistirFoto,
+    marcarPedidoFeito,
+    atualizarStatus,
     refetch: () => fetchProdutos(true),
     like,
     dislike,
@@ -297,4 +603,3 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     concluir,
   };
 };
-

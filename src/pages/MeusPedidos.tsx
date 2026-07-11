@@ -1,513 +1,313 @@
-import { useState, useEffect, useCallback } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
-  ArrowLeft, RefreshCw, Package, CheckCircle2, Clock, AlertTriangle,
-  ChevronDown, ChevronUp, User, Calendar, Search, X, ScanBarcode,
+  CheckCircle2,
+  ClipboardList,
+  Clock3,
+  PackageCheck,
+  RefreshCw,
 } from "lucide-react";
-import { obterLoginSalvo } from "@/hooks/useAuth";
-import { lazy, Suspense } from "react";
-const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
-import KanbanAdmin from "@/components/KanbanAdmin";
+import { useAuth } from "@/hooks/useAuth";
+import {
+  listarMeusPedidos,
+  type MeuPedidoResumo,
+} from "@/lib/pedidosFila";
+import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 
-interface ItemConferencia {
-  codigo: string;
-  sku: string;
-  secao?: string | null;
-  quantidadePedida: number;
-  quantidadeReal: number | null;
-  status: "separado" | "nao_tem" | "nao_tem_tudo" | "pendente";
+type StatusKey = "pendente" | "analisado" | "em_andamento" | "concluido";
+
+const STATUS_META: Record<StatusKey, { label: string; classes: string }> = {
+  pendente: {
+    label: "Pendente",
+    classes: "border-slate-300 bg-slate-100 text-slate-700",
+  },
+  analisado: {
+    label: "Analisado",
+    classes: "border-sky-300 bg-sky-100 text-sky-800",
+  },
+  em_andamento: {
+    label: "Em andamento",
+    classes: "border-amber-300 bg-amber-100 text-amber-800",
+  },
+  concluido: {
+    label: "Concluido",
+    classes: "border-emerald-300 bg-emerald-100 text-emerald-800",
+  },
+};
+
+function getStatusMeta(status: string) {
+  return STATUS_META[(status as StatusKey) ?? "pendente"] ?? STATUS_META.pendente;
 }
 
-const ITEM_STATUS = {
-  separado:     { label: "Separado", color: "hsl(var(--success))",          emoji: "✅" },
-  nao_tem:      { label: "Não tem",  color: "hsl(var(--destructive))",       emoji: "❌" },
-  nao_tem_tudo: { label: "Parcial",  color: "hsl(var(--warning))",           emoji: "⚠️" },
-  pendente:     { label: "Pendente", color: "hsl(var(--muted-foreground))",  emoji: "⏳" },
-} as const;
-
-interface Resumo { separado: number; naoTem: number; parcial: number; pendente: number; }
-
-interface Pedido {
-  id: string;
-  nome: string;
-  titulo: string;
-  pessoa: string;
-  statusClickUp: string;
-  statusLabel: "pedido_no_cd" | "pronto_conferencia" | "concluido";
-  dataCriacao: string;
-  dataAtualizacao: string;
-  resumo: Resumo | null;
-  itens?: ItemConferencia[];
+function formatDateTime(value: string | null): string {
+  if (!value) return "-";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "-";
+  return new Intl.DateTimeFormat("pt-BR", {
+    dateStyle: "short",
+    timeStyle: "short",
+  }).format(date);
 }
 
-const PROXY_URL = "/api/clickup-proxy";
-
-const STATUS_CONFIG = {
-  pedido_no_cd:        { label: "Pedido chegou ao CD",             color: "hsl(var(--warning))",   bg: "hsl(var(--warning) / 0.1)",   border: "hsl(var(--warning) / 0.25)",   Icon: Package       },
-  pronto_conferencia:  { label: "Pedido pronto para Conferência",  color: "hsl(var(--primary))",   bg: "hsl(var(--primary) / 0.1)",   border: "hsl(var(--primary) / 0.25)",   Icon: Clock         },
-  concluido:           { label: "Pedido Concluído",                color: "hsl(var(--success))",   bg: "hsl(var(--success) / 0.1)",   border: "hsl(var(--success) / 0.25)",   Icon: CheckCircle2  },
-} as const;
-
-function formatarData(ts: string): string {
-  if (!ts) return "-";
-  const d = new Date(Number(ts));
-  if (isNaN(d.getTime())) return "-";
-  return d.toLocaleString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" });
-}
-
-function tsParaDate(ts: string): Date | null {
-  const n = Number(ts);
-  if (!n) return null;
-  return new Date(n);
+function ResumoChip(props: { label: string; value: number; classes: string }) {
+  return (
+    <div className={`rounded-xl border px-3 py-2 ${props.classes}`}>
+      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-80">
+        {props.label}
+      </div>
+      <div className="mt-1 text-lg font-bold">{props.value}</div>
+    </div>
+  );
 }
 
 export default function MeusPedidos() {
-  const navigate = useNavigate();
-  const loginSalvo = obterLoginSalvo();
-  const modoDesktop = localStorage.getItem("modoDesktop") === "true";
-  const isAdmin = loginSalvo?.role === "admin" || loginSalvo?.role === "super";
-  const pad = modoDesktop ? "20px 32px" : "12px 16px";
+  const { loginSalvo } = useAuth();
+  const [pedidos, setPedidos] = useState<MeuPedidoResumo[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const carregamentoRef = useRef(0);
+  const carregarRef = useRef<(silent?: boolean) => Promise<void>>(async () => undefined);
 
-  const CACHE_TTL = 10 * 60 * 1000;
-  const cacheKey = loginSalvo ? `meus_pedidos_${loginSalvo.empresa}_${loginSalvo.flag ?? "loja"}` : null;
+  const empresa = loginSalvo?.empresa ?? "NEWSHOP";
+  const flag = loginSalvo?.flag ?? "loja";
+  const nomeLogado = String(loginSalvo?.nomePessoa ?? "").trim();
 
-  function lerCache(): { pedidos: Pedido[]; pessoas: string[] } | null {
-    if (!cacheKey) return null;
-    try {
-      const raw = localStorage.getItem(cacheKey);
-      if (!raw) return null;
-      const parsed = JSON.parse(raw);
-      if (Date.now() - parsed.savedAt > CACHE_TTL) { localStorage.removeItem(cacheKey); return null; }
-      return { pedidos: parsed.pedidos, pessoas: parsed.pessoas };
-    } catch { return null; }
-  }
+  const carregar = async (silent = false) => {
+    const requestId = ++carregamentoRef.current;
 
-  function salvarCache(pedidos: Pedido[], pessoas: string[]) {
-    if (!cacheKey) return;
-    try { localStorage.setItem(cacheKey, JSON.stringify({ pedidos, pessoas, savedAt: Date.now() })); } catch { /**/ }
-  }
-
-  const [todosPedidos, setTodosPedidos]     = useState<Pedido[]>(() => lerCache()?.pedidos  ?? []);
-  const [pessoas,      setPessoas]          = useState<string[]>(() => lerCache()?.pessoas   ?? []);
-  const [loading,      setLoading]          = useState(false);
-  const [erro,         setErro]             = useState<string | null>(null);
-  const [expandidoId,  setExpandidoId]      = useState<string | null>(null);
-
-  // filtros
-  const [filtroPessoa,   setFiltroPessoa]   = useState("todos");
-  const [filtroDataDe,   setFiltroDataDe]   = useState("");
-  const [filtroDataAte,  setFiltroDataAte]  = useState("");
-  const [filtroProduto,  setFiltroProduto]  = useState("");
-  const [filtroAtivo,    setFiltroAtivo]    = useState<"pessoa" | "data" | "produto" | null>(null);
-  const [mostrarScanner, setMostrarScanner] = useState(false);
-  const [filtroPeriodo,  setFiltroPeriodo]  = useState<"dia" | "semana" | "mes">("semana");
-  const [viewMode,       setViewMode]       = useState<"lista" | "kanban">(isAdmin ? "kanban" : "lista");
-
-  const buscarPedidos = useCallback(async (forceFetch = false) => {
-    const login = obterLoginSalvo();
-    if (!login) return;
-    if (!forceFetch) {
-      const cache = lerCache();
-      if (cache) { setTodosPedidos(cache.pedidos); setPessoas(cache.pessoas); return; }
+    if (!loginSalvo) {
+      setPedidos([]);
+      setError("Login nao encontrado.");
+      setLoading(false);
+      setRefreshing(false);
+      return;
     }
-    setLoading(true); setErro(null);
+
+    if (!isSupabaseConfigured) {
+      setPedidos([]);
+      setError("Supabase nao configurado neste ambiente.");
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    if (!nomeLogado) {
+      setPedidos([]);
+      setError("Login sem nome de operador para filtrar meus pedidos.");
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
+
+    if (silent) {
+      setRefreshing(true);
+    } else {
+      setLoading(true);
+    }
+
     try {
-      const params = new URLSearchParams({ action: "buscar-meus-pedidos", empresa: login.empresa, flag: login.flag ?? "loja" });
-      const res = await fetch(`${PROXY_URL}?${params}`);
-      if (!res.ok) { const d = await res.json().catch(() => ({})); throw new Error(d.error ?? `Erro ${res.status}`); }
-      const data = await res.json();
-      const pedidos: Pedido[] = Array.isArray(data.pedidos) ? data.pedidos : [];
-      const pss: string[]     = Array.isArray(data.pessoas) ? data.pessoas : [];
-      setTodosPedidos(pedidos); setPessoas(pss); salvarCache(pedidos, pss);
-    } catch (e: any) { setErro(e.message ?? "Erro ao buscar pedidos"); }
-    finally { setLoading(false); }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+      const data = await listarMeusPedidos(empresa, flag, nomeLogado);
+      if (requestId !== carregamentoRef.current) return;
+      setPedidos(data);
+      setError(null);
+    } catch (err) {
+      if (requestId !== carregamentoRef.current) return;
+      console.error("[MeusPedidos] Falha ao listar pedidos:", err);
+      setError("Nao foi possivel carregar os pedidos agora.");
+    } finally {
+      if (requestId === carregamentoRef.current) {
+        setLoading(false);
+        setRefreshing(false);
+      }
+    }
+  };
 
-  // roda só uma vez no mount
-  useEffect(() => { buscarPedidos(false); }, []);
+  carregarRef.current = carregar;
 
-  const toggleExpansao = useCallback((id: string) => setExpandidoId((p) => p === id ? null : id), []);
-  const toggleFiltro   = (f: "pessoa" | "data" | "produto") => setFiltroAtivo((p) => p === f ? null : f);
-
-  // --- lógica de filtro ---
-  function matchPessoa(p: Pedido) {
-    return filtroPessoa === "todos" || p.pessoa.toLowerCase() === filtroPessoa.toLowerCase();
-  }
-  function matchData(p: Pedido) {
-    if (!filtroDataDe && !filtroDataAte) return true;
-    // usa a data mais relevante: atualização para concluídos, criação para abertos
-    const ts = p.statusLabel === "concluido"
-      ? (p.dataAtualizacao || p.dataCriacao)
-      : p.dataCriacao;
-    const d = tsParaDate(ts);
-    if (!d) return true;
-    // comparação por dia sem depender de timezone: extrai YYYY-MM-DD do timestamp
-    const ano  = d.getFullYear();
-    const mes  = String(d.getMonth() + 1).padStart(2, "0");
-    const dia  = String(d.getDate()).padStart(2, "0");
-    const dataStr = `${ano}-${mes}-${dia}`;
-    if (filtroDataDe && dataStr < filtroDataDe) return false;
-    if (filtroDataAte && dataStr > filtroDataAte) return false;
-    return true;
-  }
-  function matchProduto(p: Pedido) {
-    const q = filtroProduto.trim().toLowerCase();
-    if (!q) return true;
-    if (p.titulo.toLowerCase().includes(q)) return true;
-    return p.itens?.some(i => i.codigo.toLowerCase().includes(q) || i.sku.toLowerCase().includes(q)) ?? false;
-  }
-  function dentroDoperiodo(ts: string): boolean {
-    const diff = Date.now() - (Number(ts) || 0);
-    if (filtroPeriodo === "dia")    return diff <= 86400000;
-    if (filtroPeriodo === "semana") return diff <= 7 * 86400000;
-    return diff <= 30 * 86400000;
-  }
-
-  const filtrados       = todosPedidos.filter(matchPessoa).filter(matchData).filter(matchProduto);
-  const pedidosAbertos  = filtrados.filter(p => p.statusLabel !== "concluido");
-  const pedidosConcluidos = filtrados.filter(p => p.statusLabel === "concluido").filter(p => dentroDoperiodo(p.dataAtualizacao || p.dataCriacao));
-
-  // Auto-expandir e destacar quando busca por produto está ativa
   useEffect(() => {
-    const q = filtroProduto.trim();
-    if (!q) return;
-    // Expande o primeiro pedido que tem itens matching
-    const primeiro = filtrados.find(p => p.itens?.some(i => i.codigo.toLowerCase().includes(q.toLowerCase()) || i.sku.toLowerCase().includes(q.toLowerCase())));
-    if (primeiro) setExpandidoId(primeiro.id);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtroProduto]);
+    void carregar();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresa, flag, nomeLogado, loginSalvo]);
 
-  function itemDestacado(item: ItemConferencia): boolean {
-    const q = filtroProduto.trim().toLowerCase();
-    if (!q) return false;
-    return item.codigo.toLowerCase().includes(q) || item.sku.toLowerCase().includes(q);
-  }
+  useEffect(() => {
+    if (!loginSalvo || !isSupabaseConfigured || !nomeLogado) return;
 
-  const temFiltroAtivo = filtroPessoa !== "todos" || filtroDataDe || filtroDataAte || filtroProduto;
+    const channel = supabase
+      .channel(`meus-pedidos:${empresa}:${flag}:${nomeLogado}`)
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "pedidos", filter: `empresa=eq.${empresa}` },
+        () => {
+          void carregarRef.current(true);
+        }
+      )
+      .subscribe();
 
-  // chips de filtro
-  const chips = [
-    { key: "pessoa"  as const, Icon: User,       label: "Pessoa",  ativo: filtroPessoa !== "todos"       },
-    { key: "data"    as const, Icon: Calendar,   label: "Data",    ativo: !!(filtroDataDe || filtroDataAte) },
-    { key: "produto" as const, Icon: Search,     label: "Produto", ativo: !!filtroProduto                },
-  ];
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [empresa, flag, loginSalvo, nomeLogado]);
+
+  const stats = useMemo(
+    () => ({
+      total: pedidos.length,
+      abertos: pedidos.filter((pedido) => pedido.status !== "concluido").length,
+      concluidos: pedidos.filter((pedido) => pedido.status === "concluido").length,
+    }),
+    [pedidos]
+  );
 
   return (
-    <div className={`min-h-screen flex flex-col ${modoDesktop ? "max-w-3xl mx-auto" : "max-w-md mx-auto"}`} style={{ background: "hsl(var(--background))" }}>
-
-      {/* Scanner popup */}
-      {mostrarScanner && (
-        <Suspense fallback={null}>
-          <BarcodeScanner
-            onDetected={(code) => { setFiltroProduto(code); setMostrarScanner(false); setFiltroAtivo("produto"); }}
-            onClose={() => setMostrarScanner(false)}
-          />
-        </Suspense>
-      )}
-
-      {/* Header */}
-      <header style={{ padding: modoDesktop ? "20px 32px 24px" : "16px 20px 20px", background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))" }}>
-        <button onClick={() => navigate("/")} style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: "none", color: "inherit", cursor: "pointer", marginBottom: 12, opacity: 0.85, fontWeight: 600, fontSize: 14 }}>
-          <ArrowLeft style={{ width: 18, height: 18 }} /> Voltar
-        </button>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-            <div style={{ width: 48, height: 48, borderRadius: 14, background: "rgba(255,255,255,0.15)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-              <Package style={{ width: 24, height: 24 }} />
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-8">
+      <section className="rounded-3xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+          <div>
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              <ClipboardList className="h-4 w-4" />
+              Meus Pedidos
             </div>
-            <div>
-              <h1 style={{ fontSize: modoDesktop ? 24 : 20, fontWeight: 800, lineHeight: 1.1 }}>Meus Pedidos</h1>
-              <p style={{ fontSize: 12, opacity: 0.75, marginTop: 2 }}>{loginSalvo?.empresa} · {(loginSalvo?.flag ?? "loja").toUpperCase()}</p>
-            </div>
-          </div>
-          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-            {isAdmin && (
-              <div style={{ display: "flex", borderRadius: 10, overflow: "hidden", border: "1.5px solid rgba(255,255,255,0.25)" }}>
-                {(["lista", "kanban"] as const).map(m => (
-                  <button key={m} onClick={() => setViewMode(m)} style={{ height: 36, padding: "0 12px", border: "none", cursor: "pointer", fontSize: 11, fontWeight: 700, background: viewMode === m ? "rgba(255,255,255,0.25)" : "transparent", color: "rgba(255,255,255,0.9)", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                    {m === "lista" ? "Lista" : "Kanban"}
-                  </button>
-                ))}
-              </div>
-            )}
-            <button onClick={() => buscarPedidos(true)} disabled={loading} style={{ width: 40, height: 40, borderRadius: 10, background: "rgba(255,255,255,0.15)", border: "none", cursor: loading ? "not-allowed" : "pointer", display: "flex", alignItems: "center", justifyContent: "center" }}>
-              <RefreshCw style={{ width: 18, height: 18, animation: loading ? "spin 1s linear infinite" : "none" }} />
-            </button>
-          </div>
-        </div>
-      </header>
-
-      <style>{`@keyframes spin { to { transform: rotate(360deg); } }`}</style>
-
-      {/* Kanban para admin */}
-      {isAdmin && viewMode === "kanban" && (
-        <KanbanAdmin empresa={loginSalvo?.empresa ?? ""} flag={loginSalvo?.flag ?? "loja"} />
-      )}
-
-      {/* Lista view (operador ou admin em modo lista) */}
-      {(!isAdmin || viewMode === "lista") && <>
-
-      {!loading && todosPedidos.length > 0 && (
-        <div style={{ padding: `12px ${modoDesktop ? "32px" : "16px"} 0`, display: "flex", flexDirection: "column", gap: 0 }}>
-
-          {/* linha de chips */}
-          <div style={{ display: "flex", gap: 8 }}>
-            {chips.map(({ key, Icon, label, ativo }) => (
-              <button
-                key={key}
-                onClick={() => toggleFiltro(key)}
-                style={{
-                  flex: 1, height: 40, borderRadius: 10, border: "1.5px solid",
-                  borderColor: filtroAtivo === key ? "hsl(var(--primary))" : ativo ? "hsl(var(--primary) / 0.4)" : "hsl(var(--border))",
-                  background: filtroAtivo === key ? "hsl(var(--primary))" : ativo ? "hsl(var(--primary) / 0.08)" : "hsl(var(--card))",
-                  color: filtroAtivo === key ? "hsl(var(--primary-foreground))" : ativo ? "hsl(var(--primary))" : "hsl(var(--foreground))",
-                  cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 5,
-                  fontWeight: 700, fontSize: 12,
-                }}
-              >
-                <Icon style={{ width: 13, height: 13 }} />
-                {label}
-                {ativo && filtroAtivo !== key && <span style={{ width: 6, height: 6, borderRadius: "50%", background: "hsl(var(--primary))", display: "inline-block" }} />}
-              </button>
-            ))}
-            {/* limpar todos */}
-            {temFiltroAtivo && (
-              <button
-                onClick={() => { setFiltroPessoa("todos"); setFiltroDataDe(""); setFiltroDataAte(""); setFiltroProduto(""); setFiltroAtivo(null); }}
-                style={{ width: 40, height: 40, borderRadius: 10, border: "1.5px solid hsl(var(--border))", background: "hsl(var(--card))", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(var(--muted-foreground))", flexShrink: 0 }}
-                title="Limpar filtros"
-              >
-                <X style={{ width: 14, height: 14 }} />
-              </button>
-            )}
-          </div>
-
-          {/* Painel: Pessoa */}
-          {filtroAtivo === "pessoa" && (
-            <div style={{ marginTop: 8, background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, overflow: "hidden", boxShadow: "0 4px 16px rgba(0,0,0,0.1)" }}>
-              {[{ key: "todos", label: `Todos (${todosPedidos.length})` }, ...pessoas.map(p => ({ key: p, label: `${p} (${todosPedidos.filter(x => x.pessoa.toLowerCase() === p.toLowerCase()).length})` }))].map(({ key, label }) => (
-                <button key={key} onClick={() => { setFiltroPessoa(key); setFiltroAtivo(null); }} style={{ width: "100%", padding: "13px 16px", textAlign: "left", background: filtroPessoa === key ? "hsl(var(--primary) / 0.08)" : "transparent", border: "none", borderBottom: "1px solid hsl(var(--border))", cursor: "pointer", fontWeight: filtroPessoa === key ? 700 : 500, fontSize: 14, color: filtroPessoa === key ? "hsl(var(--primary))" : "hsl(var(--foreground))", display: "flex", alignItems: "center", gap: 8 }}>
-                  <User style={{ width: 13, height: 13, opacity: 0.5 }} /> {label}
-                </button>
-              ))}
-            </div>
-          )}
-
-          {/* Painel: Data */}
-          {filtroAtivo === "data" && (
-            <div style={{ marginTop: 8, background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, padding: "14px 16px", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", display: "flex", flexDirection: "column", gap: 10 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(var(--muted-foreground))", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 2 }}>Data do pedido</p>
-              <div style={{ display: "flex", gap: 10 }}>
-                <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>De</span>
-                  <input type="date" value={filtroDataDe} onChange={e => setFiltroDataDe(e.target.value)} style={{ height: 40, borderRadius: 8, border: "1.5px solid hsl(var(--border))", background: "hsl(var(--background))", color: "hsl(var(--foreground))", padding: "0 10px", fontSize: 13, width: "100%" }} />
-                </label>
-                <label style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4 }}>
-                  <span style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>Até</span>
-                  <input type="date" value={filtroDataAte} onChange={e => setFiltroDataAte(e.target.value)} style={{ height: 40, borderRadius: 8, border: "1.5px solid hsl(var(--border))", background: "hsl(var(--background))", color: "hsl(var(--foreground))", padding: "0 10px", fontSize: 13, width: "100%" }} />
-                </label>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => { setFiltroDataDe(""); setFiltroDataAte(""); }} style={{ flex: 1, height: 36, borderRadius: 8, border: "1.5px solid hsl(var(--border))", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "hsl(var(--muted-foreground))" }}>Limpar</button>
-                <button onClick={() => setFiltroAtivo(null)} style={{ flex: 1, height: 36, borderRadius: 8, border: "none", background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Aplicar</button>
-              </div>
-            </div>
-          )}
-
-          {/* Painel: Produto */}
-          {filtroAtivo === "produto" && (
-            <div style={{ marginTop: 8, background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 12, padding: "14px 16px", boxShadow: "0 4px 16px rgba(0,0,0,0.1)", display: "flex", flexDirection: "column", gap: 10 }}>
-              <p style={{ fontSize: 11, fontWeight: 700, color: "hsl(var(--muted-foreground))", textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 2 }}>Código ou Descrição</p>
-              <div style={{ display: "flex", gap: 8 }}>
-                <input
-                  type="text"
-                  value={filtroProduto}
-                  onChange={e => setFiltroProduto(e.target.value)}
-                  placeholder="Código ou descrição..."
-                  autoFocus
-                  style={{ flex: 1, height: 44, borderRadius: 10, border: "1.5px solid hsl(var(--border))", background: "hsl(var(--background))", color: "hsl(var(--foreground))", padding: "0 14px", fontSize: 14 }}
-                />
-                <button
-                  onClick={() => setMostrarScanner(true)}
-                  title="Escanear código de barras"
-                  style={{ width: 44, height: 44, borderRadius: 10, border: "1.5px solid hsl(var(--border))", background: "hsl(var(--card))", cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(var(--primary))", flexShrink: 0 }}
-                >
-                  <ScanBarcode style={{ width: 20, height: 20 }} />
-                </button>
-              </div>
-              <div style={{ display: "flex", gap: 8 }}>
-                <button onClick={() => setFiltroProduto("")} style={{ flex: 1, height: 36, borderRadius: 8, border: "1.5px solid hsl(var(--border))", background: "transparent", cursor: "pointer", fontSize: 12, fontWeight: 700, color: "hsl(var(--muted-foreground))" }}>Limpar</button>
-                <button onClick={() => setFiltroAtivo(null)} style={{ flex: 1, height: 36, borderRadius: 8, border: "none", background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", cursor: "pointer", fontSize: 12, fontWeight: 700 }}>Aplicar</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Conteúdo */}
-      <div style={{ flex: 1, padding: modoDesktop ? "16px 32px 32px" : "12px 16px 32px", display: "flex", flexDirection: "column", gap: 10 }} onClick={() => filtroAtivo === "pessoa" && setFiltroAtivo(null)}>
-
-        {loading && (
-          <div style={{ textAlign: "center", padding: "48px 16px", color: "hsl(var(--muted-foreground))" }}>
-            <RefreshCw style={{ width: 28, height: 28, margin: "0 auto 12px", animation: "spin 1s linear infinite" }} />
-            <p style={{ fontSize: 14, fontWeight: 600 }}>Carregando pedidos...</p>
-          </div>
-        )}
-
-        {!loading && erro && (
-          <div style={{ background: "hsl(var(--destructive) / 0.08)", border: "1px solid hsl(var(--destructive) / 0.25)", borderRadius: 12, padding: "16px", display: "flex", gap: 10 }}>
-            <AlertTriangle style={{ width: 18, height: 18, color: "hsl(var(--destructive))", flexShrink: 0, marginTop: 1 }} />
-            <div>
-              <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--destructive))" }}>Erro ao buscar</p>
-              <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>{erro}</p>
-            </div>
-          </div>
-        )}
-
-        {!loading && !erro && todosPedidos.length === 0 && (
-          <div style={{ textAlign: "center", padding: "48px 16px", color: "hsl(var(--muted-foreground))" }}>
-            <Package style={{ width: 36, height: 36, margin: "0 auto 12px", opacity: 0.4 }} />
-            <p style={{ fontSize: 15, fontWeight: 600 }}>Nenhum pedido encontrado</p>
-            <p style={{ fontSize: 13, marginTop: 4 }}>Nenhuma task na lista desta empresa/flag.</p>
-          </div>
-        )}
-
-        {!loading && !erro && todosPedidos.length > 0 && filtrados.length === 0 && (
-          <div style={{ textAlign: "center", padding: "32px 16px", color: "hsl(var(--muted-foreground))" }}>
-            <Search style={{ width: 28, height: 28, margin: "0 auto 10px", opacity: 0.35 }} />
-            <p style={{ fontSize: 14, fontWeight: 600 }}>Nenhum pedido com esses filtros</p>
-          </div>
-        )}
-
-        {/* Pedidos em andamento */}
-        {pedidosAbertos.length > 0 && (
-          <>
-            <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginTop: 4 }}>
-              Em aberto · {pedidosAbertos.length}
+            <h1 className="mt-2 text-2xl font-black text-foreground md:text-3xl">
+              Acompanhe os pedidos que voce enviou
+            </h1>
+            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+              Operador: <span className="font-semibold text-foreground">{nomeLogado || "-"}</span> | {empresa} | {flag.toUpperCase()}
             </p>
-            {pedidosAbertos.map((pedido) => {
-              const cfg = STATUS_CONFIG[pedido.statusLabel];
-              const { Icon } = cfg;
-              return (
-                <div key={pedido.id} style={{ background: cfg.bg, border: `1px solid ${cfg.border}`, borderRadius: 14, padding: "14px 16px", display: "flex", gap: 12 }}>
-                  <div style={{ width: 42, height: 42, borderRadius: 11, background: cfg.color + "25", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <Icon style={{ width: 20, height: 20, color: cfg.color }} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 2 }}>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pedido.titulo}</p>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: cfg.color, background: cfg.color + "20", borderRadius: 6, padding: "2px 8px", flexShrink: 0 }}>{pedido.pessoa}</span>
-                    </div>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: cfg.color }}>{cfg.label}</p>
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginTop: 3 }}>{formatarData(pedido.dataAtualizacao || pedido.dataCriacao)}</p>
-                  </div>
-                </div>
-              );
-            })}
-          </>
-        )}
-
-        {/* Pedidos concluídos */}
-        {filtrados.some(p => p.statusLabel === "concluido") && (
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: pedidosAbertos.length > 0 ? 8 : 4 }}>
-            <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 600, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", flexShrink: 0 }}>Concluídos</p>
-            <div style={{ display: "flex", gap: 4, marginLeft: "auto" }}>
-              {(["dia", "semana", "mes"] as const).map((p) => (
-                <button key={p} onClick={() => setFiltroPeriodo(p)} style={{ height: 28, padding: "0 10px", borderRadius: 8, fontSize: 11, fontWeight: 700, cursor: "pointer", border: "1.5px solid", background: filtroPeriodo === p ? "hsl(var(--foreground))" : "transparent", color: filtroPeriodo === p ? "hsl(var(--background))" : "hsl(var(--muted-foreground))", borderColor: filtroPeriodo === p ? "hsl(var(--foreground))" : "hsl(var(--border))", textTransform: "uppercase", letterSpacing: "0.05em" }}>
-                  {p === "dia" ? "Hoje" : p === "semana" ? "7 dias" : "30 dias"}
-                </button>
-              ))}
-            </div>
           </div>
-        )}
 
-        {filtrados.some(p => p.statusLabel === "concluido") && pedidosConcluidos.length === 0 && (
-          <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", textAlign: "center", padding: "16px 0" }}>Nenhum concluído no período selecionado.</p>
-        )}
+          <button
+            type="button"
+            onClick={() => void carregar(true)}
+            disabled={loading || refreshing}
+            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+            Atualizar
+          </button>
+        </div>
 
-        {pedidosConcluidos.map((pedido) => {
-          const cfg = STATUS_CONFIG.concluido;
-          const expandido = expandidoId === pedido.id;
-          const itens = pedido.itens ?? [];
-          const itensPorStatus = {
-            nao_tem: itens.filter(i => i.status === "nao_tem"),
-            nao_tem_tudo: itens.filter(i => i.status === "nao_tem_tudo"),
-            pendente: itens.filter(i => i.status === "pendente"),
-            separado: itens.filter(i => i.status === "separado"),
-          };
-          return (
-            <div key={pedido.id} style={{ background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 14, overflow: "hidden" }}>
-              <button onClick={() => toggleExpansao(pedido.id)} style={{ width: "100%", padding: "14px 16px", background: "none", border: "none", cursor: "pointer", textAlign: "left" }}>
-                <div style={{ display: "flex", gap: 12 }}>
-                  <div style={{ width: 42, height: 42, borderRadius: 11, background: cfg.color + "20", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                    <CheckCircle2 style={{ width: 20, height: 20, color: cfg.color }} />
-                  </div>
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 2 }}>
-                      <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{pedido.titulo}</p>
-                      <span style={{ fontSize: 11, fontWeight: 700, color: cfg.color, background: cfg.color + "20", borderRadius: 6, padding: "2px 8px", flexShrink: 0 }}>{pedido.pessoa}</span>
+        <div className="mt-4 grid gap-3 md:grid-cols-3">
+          <div className="rounded-2xl border border-border bg-background px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Total
+            </div>
+            <div className="mt-2 text-3xl font-black text-foreground">{stats.total}</div>
+          </div>
+          <div className="rounded-2xl border border-border bg-background px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Abertos
+            </div>
+            <div className="mt-2 text-3xl font-black text-sky-700">{stats.abertos}</div>
+          </div>
+          <div className="rounded-2xl border border-border bg-background px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Concluidos
+            </div>
+            <div className="mt-2 text-3xl font-black text-emerald-700">{stats.concluidos}</div>
+          </div>
+        </div>
+      </section>
+
+      {error && (
+        <section className="rounded-2xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive">
+          {error}
+        </section>
+      )}
+
+      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        {loading && pedidos.length === 0 ? (
+          Array.from({ length: 3 }).map((_, index) => (
+            <div key={index} className="rounded-3xl border border-border bg-card p-5 shadow-sm">
+              <div className="h-5 w-40 animate-pulse rounded bg-muted" />
+              <div className="mt-4 h-4 w-full animate-pulse rounded bg-muted" />
+              <div className="mt-2 h-4 w-2/3 animate-pulse rounded bg-muted" />
+            </div>
+          ))
+        ) : pedidos.length === 0 ? (
+          <div className="rounded-3xl border border-dashed border-border bg-card px-6 py-10 text-center shadow-sm">
+            <PackageCheck className="mx-auto h-10 w-10 text-muted-foreground" />
+            <h2 className="mt-4 text-lg font-bold text-foreground">Nenhum pedido encontrado</h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              Assim que voce enviar pedidos com este login, eles aparecem aqui.
+            </p>
+          </div>
+        ) : (
+          pedidos.map((pedido) => {
+            const status = getStatusMeta(pedido.status);
+
+            return (
+              <article key={pedido.id} className="rounded-3xl border border-border bg-card p-5 shadow-sm">
+                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+                  <div className="min-w-0">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <h2 className="truncate text-lg font-black text-foreground">{pedido.titulo}</h2>
+                      <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold ${status.classes}`}>
+                        {status.label}
+                      </span>
                     </div>
-                    <p style={{ fontSize: 12, fontWeight: 600, color: cfg.color }}>{cfg.label}</p>
-                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginTop: 3 }}>{formatarData(pedido.dataAtualizacao || pedido.dataCriacao)}</p>
+
+                    <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground">
+                      <span className="inline-flex items-center gap-2">
+                        <Clock3 className="h-4 w-4" />
+                        Criado em {formatDateTime(pedido.createdAt)}
+                      </span>
+                      {pedido.status === "concluido" && (
+                        <span className="inline-flex items-center gap-2">
+                          <CheckCircle2 className="h-4 w-4" />
+                          Conferido em {formatDateTime(pedido.dataConferencia)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                  <div style={{ alignSelf: "center", flexShrink: 0, color: "hsl(var(--muted-foreground))" }}>
-                    {expandido ? <ChevronUp style={{ width: 16, height: 16 }} /> : <ChevronDown style={{ width: 16, height: 16 }} />}
+
+                  <div className="rounded-2xl border border-border bg-background px-4 py-3 text-sm">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                      Itens
+                    </div>
+                    <div className="mt-1 text-2xl font-black text-foreground">{pedido.totalItens}</div>
                   </div>
                 </div>
-                {pedido.resumo && (
-                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr 1fr", gap: 6, marginTop: 12 }}>
-                    {[
-                      { label: "Separado", value: pedido.resumo.separado, color: "hsl(var(--success))" },
-                      { label: "Não tem",  value: pedido.resumo.naoTem,   color: "hsl(var(--destructive))" },
-                      { label: "Parcial",  value: pedido.resumo.parcial,  color: "hsl(var(--warning))" },
-                      { label: "Pendente", value: pedido.resumo.pendente, color: "hsl(var(--muted-foreground))" },
-                    ].map(({ label, value, color }) => (
-                      <div key={label} style={{ background: "hsl(var(--secondary))", borderRadius: 8, padding: "8px 6px", textAlign: "center" }}>
-                        <p style={{ fontSize: 9, color: "hsl(var(--muted-foreground))", marginBottom: 2, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</p>
-                        <p style={{ fontSize: 20, fontWeight: 900, color, lineHeight: 1 }}>{value}</p>
+
+                {pedido.status === "concluido" ? (
+                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                    <ResumoChip
+                      label="Separado"
+                      value={pedido.resumoSeparado}
+                      classes="border-emerald-200 bg-emerald-50 text-emerald-800"
+                    />
+                    <ResumoChip
+                      label="Nao tem"
+                      value={pedido.resumoNaoTem}
+                      classes="border-rose-200 bg-rose-50 text-rose-800"
+                    />
+                    <ResumoChip
+                      label="Parcial"
+                      value={pedido.resumoParcial}
+                      classes="border-amber-200 bg-amber-50 text-amber-800"
+                    />
+                    <ResumoChip
+                      label="Pendente"
+                      value={pedido.resumoPendente}
+                      classes="border-slate-200 bg-slate-50 text-slate-800"
+                    />
+                    <div className="rounded-xl border border-border bg-background px-3 py-2">
+                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        Conferente
                       </div>
-                    ))}
+                      <div className="mt-1 text-sm font-bold text-foreground">{pedido.conferente || "-"}</div>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="mt-4 rounded-2xl border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
+                    {pedido.status === "analisado" && "Pedido pronto para conferencia."}
+                    {pedido.status === "em_andamento" && "Pedido em conferencia agora."}
+                    {pedido.status === "pendente" && "Pedido ainda nao foi liberado para conferencia."}
                   </div>
                 )}
-              </button>
-              {expandido && (
-                <div style={{ borderTop: "1px solid hsl(var(--border))", padding: "12px 16px 14px" }}>
-                  {itens.length === 0 && <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))", textAlign: "center", padding: "8px 0" }}>Itens não disponíveis nesta task.</p>}
-                  {itens.length > 0 && (
-                    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
-                      {(["nao_tem", "nao_tem_tudo", "pendente", "separado"] as const).filter(s => itensPorStatus[s].length > 0).map((status) => {
-                        const { label, color, emoji } = ITEM_STATUS[status];
-                        return (
-                          <div key={status}>
-                            <p style={{ fontSize: 10, fontWeight: 700, color, textTransform: "uppercase", letterSpacing: "0.12em", marginBottom: 6 }}>{emoji} {label} ({itensPorStatus[status].length})</p>
-                            <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-                              {itensPorStatus[status].map((item) => (
-                                <div key={item.codigo} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 10px", borderRadius: 8, background: itemDestacado(item) ? "hsl(var(--warning) / 0.15)" : color + "0D", border: itemDestacado(item) ? "2px solid hsl(var(--warning))" : `1px solid ${color}22` }}>
-                                  <div style={{ minWidth: 0 }}>
-                                    <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))" }}>{item.codigo}</p>
-                                    {item.sku   && <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>SKU: {item.sku}</p>}
-                                    {item.secao && <p style={{ fontSize: 10, color: "hsl(var(--muted-foreground))" }}>{item.secao}</p>}
-                                  </div>
-                                  <div style={{ textAlign: "right", flexShrink: 0, marginLeft: 8 }}>
-                                    <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>Pedido: <strong>{item.quantidadePedida}</strong></p>
-                                    {item.quantidadeReal !== null && <p style={{ fontSize: 11, color }}>Real: <strong>{item.quantidadeReal}</strong></p>}
-                                  </div>
-                                </div>
-                              ))}
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-      </>}
+              </article>
+            );
+          })
+        )}
+      </section>
     </div>
   );
 }

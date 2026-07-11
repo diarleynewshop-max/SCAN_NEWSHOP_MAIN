@@ -18,30 +18,26 @@ import {
   Lock,
   RefreshCw,
   ClipboardList,
+  PackageSearch,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
-import { enviarConferenciaParaClickUp } from "@/lib/webhookRouter";
-import { obterLoginSalvo } from "@/hooks/useAuth";
 import {
-  obterSenhaPadrao,
-  validarSenha,
-  buscarTasksAnalisado,
-  baixarJsonDaTask,
-  buscarAttachmentsDaTask,
-  consolidarJsonsAnalisados,
-  gerarRelatorioDiario,
-  listarDatasRelatorio,
-  reservarTasksConferencia,
-  liberarTasksConferencia,
-  deletarTask,
-  type ClickUpTask,
+  carregarItensDoPedido,
+  dispararExpedicaoConferencia,
+  fecharConferenciaExistente,
+  liberarPedido,
+  liberarPedidoEmSegundoPlano,
+  listarPedidosParaConferencia,
+  reservarPedido,
   type EmpresaKey,
   type FlagKey,
-  type RelatorioDiario,
-  type RelatorioDataOption,
-} from "@/lib/clickupApi";
+  type PedidoParaConferencia,
+} from "@/lib/pedidosFila";
+import { enviarConferenciaParaSupabase } from "@/lib/pedidosSupabase";
+import { obterLoginSalvo } from "@/hooks/useAuth";
+import { obterSenhaPadrao, validarSenha } from "@/lib/senhaConferencia";
 import { z } from "zod";
 
 export type ConferenceStatus =
@@ -212,25 +208,21 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [sendStatus, setSendStatus] = useState<"idle" | "sending" | "sent" | "error">("idle");
   const [senha, setSenha] = useState(() => obterSenhaPadrao(empresaInicial as EmpresaKey, flagInicial as FlagKey));
   const [senhaErro, setSenhaErro] = useState(false);
-  const [tasks, setTasks] = useState<ClickUpTask[]>([]);
+  const [tasks, setTasks] = useState<PedidoParaConferencia[]>([]);
   const [loadingTasks, setLoadingTasks] = useState(false);
   const [tasksErro, setTasksErro] = useState<string | null>(null);
-  const [taskSelecionada, setTaskSelecionada] = useState<ClickUpTask | null>(null);
+  const [taskSelecionada, setTaskSelecionada] = useState<PedidoParaConferencia | null>(null);
   const [loadingJson, setLoadingJson] = useState(false);
-  const [consolidandoJson, setConsolidandoJson] = useState(false);
-  const [gerandoRelatorio, setGerandoRelatorio] = useState(false);
-  const [relatorioPopupOpen, setRelatorioPopupOpen] = useState(false);
-  const [relatorioDatas, setRelatorioDatas] = useState<RelatorioDataOption[]>([]);
-  const [loadingRelatorioDatas, setLoadingRelatorioDatas] = useState(false);
-  const [relatorioDatasErro, setRelatorioDatasErro] = useState<string | null>(null);
-  const [relatorioAtual, setRelatorioAtual] = useState<RelatorioDiario | null>(null);
-  const [relatorioFiltro, setRelatorioFiltro] = useState<"todos" | "separado" | "nao_tem" | "parcial" | "pendente">("todos");
+  const [pedidoOrigemIds, setPedidoOrigemIds] = useState<string[]>([]);
   const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
+  const pedidoOrigemIdsRef = useRef<string[]>([]);
+  const pedidoReservadoIdsRef = useRef<string[]>([]);
   const taskOrigemIdsRef = useRef<string[]>([]);
   const [listeiro, setListeiro] = useState<string>("");
   const [apenasVisualizar, setApenasVisualizar] = useState(false);
-  const [modalModoAberturaTask, setModalModoAberturaTask] = useState<ClickUpTask | null>(null);
-  const [modalConfirmAndamento, setModalConfirmAndamento] = useState<ClickUpTask | null>(null);
+  const [viewMode, setViewMode] = useState<"card" | "lista">("card");
+  const [modalModoAberturaTask, setModalModoAberturaTask] = useState<PedidoParaConferencia | null>(null);
+  const [modalConfirmAndamento, setModalConfirmAndamento] = useState<PedidoParaConferencia | null>(null);
   // true quando o usuario confirmou "continuar mesmo assim" no modal de andamento.
   // Faz o backend pular a verificacao de lock e aceitar a reserva.
   const [forcarReservaAndamento, setForcarReservaAndamento] = useState(false);
@@ -249,8 +241,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     try {
       const draft = {
         phase, empresa, flag, conferente, listeiro,
-        items: items.map(({ photo: _p, ...rest }) => rest), // sem foto — evita estourar localStorage
-        currentIndex, taskOrigemIds, elapsedSeconds, apenasVisualizar,
+        // Preserva URLs normais (proxy ERP, pequenas); strip apenas data: URLs (blobs grandes)
+        items: items.map(({ photo, ...rest }) => ({
+          ...rest,
+          photo: photo && !photo.startsWith("data:") ? photo : null,
+        })),
+        currentIndex, pedidoOrigemIds, taskOrigemIds, elapsedSeconds, apenasVisualizar,
         savedAt: Date.now(),
       };
       localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -275,6 +271,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       setListeiro(d.listeiro ?? "");
       setItems(d.items ?? []);
       setCurrentIndex(d.currentIndex ?? 0);
+      setPedidoOrigemIds(d.pedidoOrigemIds ?? []);
+      pedidoOrigemIdsRef.current = d.pedidoOrigemIds ?? [];
       setTaskOrigemIds(d.taskOrigemIds ?? []);
       taskOrigemIdsRef.current = d.taskOrigemIds ?? [];
       setElapsedSeconds(d.elapsedSeconds ?? 0);
@@ -306,16 +304,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
   const STORAGE_KEY = "clickup_sent_ids";
 
-  const gruposMesmoNome = Array.from(
-    tasks.reduce((map, task) => {
-      const nome = task.name.trim();
-      if (!nome) return map;
-      const grupo = map.get(nome) ?? [];
-      grupo.push(task);
-      map.set(nome, grupo);
-      return map;
-    }, new Map<string, ClickUpTask[]>())
-  ).filter(([, grupo]) => grupo.length > 1);
 
   const jaFoiEnviado = (): boolean => {
     try {
@@ -335,13 +323,17 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   };
 
   const liberarPedidoAtual = async () => {
-    const ids = taskOrigemIdsRef.current;
+    const ids = pedidoReservadoIdsRef.current;
     setApenasVisualizar(false);
     limparRascunho();
-    if (ids.length === 0) return;
+    if (ids.length > 0) {
+      await Promise.all(ids.map((pedidoId) => liberarPedido(pedidoId)));
+    }
 
-    await liberarTasksConferencia(empresaRef.current as EmpresaKey, ids);
+    pedidoReservadoIdsRef.current = [];
+    pedidoOrigemIdsRef.current = [];
     taskOrigemIdsRef.current = [];
+    setPedidoOrigemIds([]);
     setTaskOrigemIds([]);
   };
 
@@ -351,7 +343,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     } catch (e: any) {
       toast({
         title: "Nao foi possivel liberar o pedido",
-        description: e?.message ?? "Remova a etiqueta PEDIDO EM ANDAMENTO no ClickUp.",
+        description: e?.message ?? "Tente liberar o pedido novamente.",
         variant: "destructive",
       });
       return;
@@ -367,6 +359,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   }, []);
 
   useEffect(() => {
+    pedidoOrigemIdsRef.current = pedidoOrigemIds;
+  }, [pedidoOrigemIds]);
+
+  useEffect(() => {
     taskOrigemIdsRef.current = taskOrigemIds;
   }, [taskOrigemIds]);
 
@@ -376,13 +372,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
   useEffect(() => {
     const liberarAoFechar = () => {
-      const ids = taskOrigemIdsRef.current;
+      const ids = pedidoReservadoIdsRef.current;
       if (ids.length === 0) return;
 
-      navigator.sendBeacon?.(
-        `/api/clickup-proxy?action=liberar-conferencia&empresa=${empresaRef.current}`,
-        new Blob([JSON.stringify({ taskIds: ids })], { type: "application/json" })
-      );
+      ids.forEach((pedidoId) => liberarPedidoEmSegundoPlano(pedidoId));
     };
 
     window.addEventListener("beforeunload", liberarAoFechar);
@@ -401,7 +394,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     setLoadingTasks(true);
     setTasksErro(null);
     try {
-      const lista = await buscarTasksAnalisado(empresa as EmpresaKey, flag as FlagKey);
+      const lista = await listarPedidosParaConferencia(empresa, flag);
       setTasks(lista);
       setPhase("pickTask");
     } catch (e: any) {
@@ -415,7 +408,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     setLoadingTasks(true);
     setTasksErro(null);
     try {
-      const lista = await buscarTasksAnalisado(empresa as EmpresaKey, flag as FlagKey);
+      const lista = await listarPedidosParaConferencia(empresa, flag);
       setTasks(lista);
     } catch (e: any) {
       setTasksErro(e.message ?? "Erro ao buscar tasks");
@@ -424,187 +417,87 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
   };
 
-  const abrirTaskComModo = async (task: ClickUpTask, modo: "visualizar" | "separacao", forcar = false) => {
+  const abrirTaskComModo = async (task: PedidoParaConferencia, modo: "visualizar" | "separacao", forcar = false) => {
     setModalModoAberturaTask(null);
     setApenasVisualizar(modo === "visualizar");
     await abrirTask(task, modo === "visualizar", forcar);
   };
 
-  const abrirTask = async (task: ClickUpTask, soVisualizar = false, forcar = false) => {
+  const abrirTask = async (task: PedidoParaConferencia, soVisualizar = false, forcar = false) => {
     setLoadingJson(true);
     setTaskSelecionada(task);
     let reservouPedido = false;
     try {
       if (!soVisualizar) {
-        await reservarTasksConferencia(empresa as EmpresaKey, [task.id], forcar);
+        await reservarPedido(task.id, conferente || conferenteInicial, forcar);
         reservouPedido = true;
       }
 
-      let attachments = task.attachments;
-      if (!attachments || attachments.length === 0) {
-        attachments = await buscarAttachmentsDaTask(empresa as EmpresaKey, task.id, flag as FlagKey);
-      }
-      const taskComAnexos = { ...task, attachments };
-
-      let json: any = null;
-      try {
-        json = await baixarJsonDaTask(empresa as EmpresaKey, taskComAnexos);
-      } catch (errDownload) {
-        // baixarJsonDaTask lança quando 404. Captura silenciosa pra tentar o fallback abaixo.
-        console.warn("[abrirTask] baixarJsonDaTask falhou, tentando reconstruir:", errDownload);
-      }
-      // Fallback: task de PENDENTES antiga sem JSON → reconstroi a partir da descricao.
-      if (!json) {
-        const reconstruido = reconstruirJsonPendentesDeDescricao(task.description ?? "", task.name);
-        if (reconstruido) {
-          // Tenta enriquecer com fotos do ERP em paralelo (timeout curto pra nao travar).
-          try {
-            const empresaCtx = (reconstruido.empresa ?? empresa) as string;
-            const flagCtx = (reconstruido.flag ?? flag) as string;
-            const fotosPromises = reconstruido.itens.map(async (it) => {
-              try {
-                const p = buscarProdutoVarejoFacil(it.codigo, { empresa: empresaCtx, flag: flagCtx });
-                const timeout = new Promise<null>((resolve) => setTimeout(() => resolve(null), 4000));
-                const produto = await Promise.race([p, timeout]);
-                return produto?.imagem ?? null;
-              } catch { return null; }
-            });
-            const fotos = await Promise.all(fotosPromises);
-            (reconstruido.itens as any[]).forEach((it, i) => { it.photo = fotos[i] ?? null; });
-          } catch (e) {
-            console.warn("[abrirTask] enriquecimento de fotos do ERP falhou:", e);
-          }
-          json = reconstruido;
-          toast({ title: "JSON reconstruído da descrição (task antiga sem anexo)" });
-        }
-      }
-      if (!json) {
-        toast({ title: "Nenhum JSON encontrado nesta task", variant: "destructive" });
-        if (reservouPedido) await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
+      const itensPedido = await carregarItensDoPedido(task.id);
+      if (itensPedido.length === 0) {
+        if (reservouPedido) await liberarPedido(task.id).catch(() => undefined);
+        toast({ title: "Pedido sem itens no Supabase", variant: "destructive" });
         setLoadingJson(false);
         setTaskSelecionada(null);
         return;
       }
 
-      const result = ConferenceFileSchema.safeParse(json);
-      if (!result.success) {
-        if (reservouPedido) await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
-        toast({ title: "JSON inválido na task", description: result.error.issues[0]?.message, variant: "destructive" });
-        setLoadingJson(false);
-        setTaskSelecionada(null);
-        return;
-      }
-
-      if (result.data.empresa) setEmpresa(result.data.empresa);
-      if (result.data.flag)    setFlag(result.data.flag);
-
-      const digitoMap: Record<string, "S" | "M"> = (json as any)._meta?.digitoMap ?? {};
-      const parsed: ConferenceItem[] = result.data.items.map((item) => ({
-        id: crypto.randomUUID(),
+      const parsedSupabase: ConferenceItem[] = itensPedido.map((item) => ({
+        id: item.id || crypto.randomUUID(),
         codigo: item.codigo,
         sku: item.sku ?? "",
         secao: item.secao ?? null,
-        quantidadePedida: item.quantidade,
-        quantidadeReal: null,
-        status: "aguardando" as ConferenceStatus,
+        quantidadePedida: item.quantidadePedida,
+        quantidadeReal: item.quantidadeReal,
+        status: item.status === "pendente" && item.quantidadeReal == null ? "aguardando" : item.status,
         photo: item.photo ?? null,
-        digito: digitoMap[item.codigo] ?? null,
+        digito: null,
       }));
 
-      // Extrair listeiro do nome da task: "📦 Titulo — NOME"
-      const partes = task.name.split(" — ");
-      const nomeListeiro = partes.length >= 2 ? partes[partes.length - 1].trim() : "";
-      setListeiro(nomeListeiro);
-
-      setItems(parsed);
-      setTaskOrigemIds([task.id]);
-      taskOrigemIdsRef.current = [task.id];
+      setListeiro(task.listeiro || "");
+      setItems(parsedSupabase);
+      setPedidoOrigemIds([task.id]);
+      pedidoOrigemIdsRef.current = [task.id];
+      pedidoReservadoIdsRef.current = reservouPedido ? [task.id] : [];
+      const clickupOrigemIds = task.clickupTaskId ? [task.clickupTaskId] : [];
+      setTaskOrigemIds(clickupOrigemIds);
+      taskOrigemIdsRef.current = clickupOrigemIds;
       setPhase("ready");
-      toast({ title: `${parsed.length} itens carregados da task!` });
+      toast({ title: `${parsedSupabase.length} itens carregados do pedido!` });
+
+      const empresaCtxFoto = empresa;
+      const flagCtxFoto = flag;
+      const itensSemFoto = parsedSupabase.filter((it) => !it.photo);
+      if (itensSemFoto.length > 0) {
+        (async () => {
+          const enriched = await Promise.all(
+            itensSemFoto.map(async (it) => {
+              try {
+                const timeout4s = new Promise<null>((res) => setTimeout(() => res(null), 4000));
+                const produto = await Promise.race([
+                  buscarProdutoVarejoFacil(it.codigo, { empresa: empresaCtxFoto, flag: flagCtxFoto }),
+                  timeout4s,
+                ]);
+                return { id: it.id, photo: produto?.imagem ?? null };
+              } catch { return { id: it.id, photo: null }; }
+            })
+          );
+          const fotoMap = new Map(enriched.filter((e) => e.photo).map((e) => [e.id, e.photo!]));
+          if (fotoMap.size > 0) {
+            setItems((prev) => prev.map((it) => fotoMap.has(it.id) ? { ...it, photo: fotoMap.get(it.id)! } : it));
+          }
+        })().catch(() => undefined);
+      }
+
     } catch (e: any) {
       if (reservouPedido) {
-        await liberarTasksConferencia(empresa as EmpresaKey, [task.id]).catch(() => undefined);
+        await liberarPedido(task.id).catch(() => undefined);
       }
       toast({ title: "Erro ao carregar task", description: e.message, variant: "destructive" });
       await recarregarTasks().catch(() => undefined);
       setTaskSelecionada(null);
     } finally {
       setLoadingJson(false);
-    }
-  };
-
-  const juntarTasksPorNome = async (nome: string) => {
-    const grupo = tasks.filter((task) => task.name.trim() === nome.trim());
-    if (grupo.length < 2) {
-      toast({ title: "Precisa ter 2 ou mais tasks com o mesmo nome", variant: "destructive" });
-      return;
-    }
-
-    setConsolidandoJson(true);
-    const grupoIds = grupo.map((task) => task.id);
-    let reservouGrupo = false;
-    try {
-      await reservarTasksConferencia(empresa as EmpresaKey, grupoIds);
-      reservouGrupo = true;
-
-      const json = await consolidarJsonsAnalisados(empresa as EmpresaKey, flag as FlagKey, nome, grupoIds);
-      const result = ConferenceFileSchema.safeParse(json);
-
-      if (!result.success) {
-        await liberarTasksConferencia(empresa as EmpresaKey, grupoIds).catch(() => undefined);
-        toast({ title: "JSON consolidado invalido", description: result.error.issues[0]?.message, variant: "destructive" });
-        return;
-      }
-
-      if (result.data.empresa) setEmpresa(result.data.empresa);
-      if (result.data.flag) setFlag(result.data.flag);
-
-      const digitoMap: Record<string, "S" | "M"> = (json as any)._meta?.digitoMap ?? {};
-      const parsed: ConferenceItem[] = result.data.items.map((item) => ({
-        id: crypto.randomUUID(),
-        codigo: item.codigo,
-        sku: item.sku ?? "",
-        secao: item.secao ?? null,
-        quantidadePedida: item.quantidade,
-        quantidadeReal: null,
-        status: "aguardando" as ConferenceStatus,
-        photo: item.photo ?? null,
-        digito: digitoMap[item.codigo] ?? null,
-      }));
-
-      if (parsed.length === 0) {
-        await liberarTasksConferencia(empresa as EmpresaKey, grupoIds).catch(() => undefined);
-        toast({ title: "JSON consolidado vazio", variant: "destructive" });
-        return;
-      }
-
-      const meta = (json as any)._meta;
-      const origemIds = Array.isArray(meta?.pedidos)
-        ? meta.pedidos.map((pedido: any) => String(pedido?.taskId ?? "")).filter(Boolean)
-        : grupo.map((task) => task.id);
-
-      // Extrair listeiro do nome do grupo: "📦 Titulo — NOME"
-      const partesNome = nome.split(" — ");
-      const nomeListeiro = partesNome.length >= 2 ? partesNome[partesNome.length - 1].trim() : "";
-      setListeiro(nomeListeiro);
-
-      setItems(parsed);
-      setTaskOrigemIds(Array.from(new Set(origemIds)));
-      taskOrigemIdsRef.current = Array.from(new Set(origemIds));
-      setPhase("ready");
-      setCurrentIndex(0);
-      toast({
-        title: `${parsed.length} itens no JSON unico`,
-        description: `${meta?.totalPedidos ?? grupo.length} pedido(s) com o mesmo nome juntado(s).`,
-      });
-    } catch (e: any) {
-      if (reservouGrupo) {
-        await liberarTasksConferencia(empresa as EmpresaKey, grupoIds).catch(() => undefined);
-      }
-      toast({ title: "Erro ao juntar pedidos", description: e.message ?? "Falha ao consolidar JSONs", variant: "destructive" });
-      await recarregarTasks().catch(() => undefined);
-    } finally {
-      setConsolidandoJson(false);
     }
   };
 
@@ -640,6 +533,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         }));
 
         setItems(parsed);
+        setPedidoOrigemIds([]);
+        pedidoOrigemIdsRef.current = [];
+        pedidoReservadoIdsRef.current = [];
         setTaskOrigemIds([]);
         taskOrigemIdsRef.current = [];
         setPhase("ready");
@@ -672,6 +568,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       }));
 
       setItems(parsed);
+      setPedidoOrigemIds([]);
+      pedidoOrigemIdsRef.current = [];
+      pedidoReservadoIdsRef.current = [];
       setTaskOrigemIds([]);
       taskOrigemIdsRef.current = [];
       setPhase("ready");
@@ -749,6 +648,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       }
 
       setItems(parsed);
+      setPedidoOrigemIds([]);
+      pedidoOrigemIdsRef.current = [];
+      pedidoReservadoIdsRef.current = [];
       setTaskOrigemIds([]);
       taskOrigemIdsRef.current = [];
       setPhase("ready");
@@ -778,6 +680,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
 
     setItems(parsed);
+    setPedidoOrigemIds([]);
+    pedidoOrigemIdsRef.current = [];
+    pedidoReservadoIdsRef.current = [];
     setTaskOrigemIds([]);
     taskOrigemIdsRef.current = [];
     setPhase("ready");
@@ -957,7 +862,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     pendente: items.filter((i) => i.status === "pendente").length,
   });
 
-  const getPayloadClickUp = () => ({
+  const getPayloadConferencia = () => ({
     conferente,
     listeiro: listeiro || undefined,
     tempo: formatTime(elapsedSeconds),
@@ -975,46 +880,76 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     })),
   });
 
-  const enviarClickUp = async () => {
+  const fecharConferencia = async () => {
     // Verifica se a conferência tem itens antes de enviar
     if (items.length === 0) {
-      toast({ 
-        title: "❌ Conferência vazia", 
-        description: "Não é possível enviar conferências com 0 itens para o ClickUp.", 
-        variant: "destructive" 
+      toast({
+        title: "❌ Conferência vazia",
+        description: "Não é possível concluir conferências com 0 itens.",
+        variant: "destructive",
       });
       return;
     }
-    
+
     if (jaFoiEnviado() || sendStatus === "sent") {
-      toast({ title: "⚠️ Já enviado!", description: "Este pedido já foi compartilhado no ClickUp.", variant: "destructive" });
+      toast({ title: "⚠️ Já enviado!", description: "Esta conferência já foi concluída.", variant: "destructive" });
       return;
     }
     if (sendStatus === "sending") return;
 
     setSendStatus("sending");
+    const pedidoId = pedidoReservadoIdsRef.current[0];
+    const itensFechamento = items.map((i) => ({
+      codigo: i.codigo,
+      sku: i.sku,
+      secao: i.secao ?? null,
+      quantidadePedida: i.quantidadePedida,
+      quantidadeReal: i.quantidadeReal,
+      status: i.status,
+      photo: i.photo ?? null,
+    }));
+
     try {
-      await enviarConferenciaParaClickUp({
-        ...getPayloadClickUp(),
-        empresa,
-        flag,
-        conferenceId,
-      });
+      if (pedidoId) {
+        // Conferência veio da fila (Supabase): conclui o MESMO pedido reservado.
+        await fecharConferenciaExistente(pedidoId, {
+          empresa,
+          conferente,
+          tempoSegundos: elapsedSeconds,
+          itens: itensFechamento,
+        });
+      } else {
+        // Conferência veio de arquivo importado (sem pedido no banco): cria um já concluído.
+        await enviarConferenciaParaSupabase({
+          ...getPayloadConferencia(),
+          empresa,
+          flag,
+          conferenceId,
+          tempoSegundos: elapsedSeconds,
+          taskOrigemIds,
+        });
+      }
+
+      try {
+        await dispararExpedicaoConferencia({
+          conferente,
+          empresa,
+          dataConferencia: new Date().toISOString(),
+          itens: itensFechamento,
+        });
+      } catch (expedicaoErr) {
+        console.error("[conferencia] Falha ao disparar expedicao (nao bloqueia fechamento):", expedicaoErr);
+      }
+
       marcarComoEnviado();
       limparRascunho();
       setSendStatus("sent");
-      toast({ title: "✅ Chegou no ClickUp!", description: `Pedido de ${conferente} enviado com sucesso.` });
-
-      if (taskOrigemIds.length > 0) {
-        try {
-          await Promise.all(taskOrigemIds.map((taskId) => deletarTask(empresa as EmpresaKey, taskId)));
-          setTaskOrigemIds([]);
-          taskOrigemIdsRef.current = [];
-          toast({ title: "🗑️ Task de origem removida do Analisado." });
-        } catch {
-          toast({ title: "⚠️ Não foi possível deletar a task de origem", variant: "destructive" });
-        }
-      }
+      setPedidoOrigemIds([]);
+      pedidoOrigemIdsRef.current = [];
+      pedidoReservadoIdsRef.current = [];
+      setTaskOrigemIds([]);
+      taskOrigemIdsRef.current = [];
+      toast({ title: "✅ Conferência concluída!", description: `Pedido de ${conferente} enviado com sucesso.` });
     } catch (err) {
       setSendStatus("error");
       toast({
@@ -1042,7 +977,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     );
 
   const goNext = () => {
-    if (!isCurrentComplete) {
+    if (!apenasVisualizar && !isCurrentComplete) {
       toast({ title: "Defina o status antes de avançar", variant: "destructive" });
       return;
     }
@@ -1236,216 +1171,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
   };
 
-  const formatarDataRelatorio = (data: string) => {
-    const [ano, mes, dia] = data.split("-");
-    return `${dia}/${mes}/${ano}`;
-  };
-
-  const addRelatorioSection = (doc: jsPDF, title: string, y: number) => {
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(10);
-    doc.setTextColor(20, 20, 20);
-    doc.text(title, 14, y);
-    return y + 6;
-  };
-
-  const exportRelatorioDiarioPDF = (relatorio: RelatorioDiario) => {
-    const doc = new jsPDF();
-    const pageW = doc.internal.pageSize.getWidth();
-    const pageH = doc.internal.pageSize.getHeight();
-    const margem = 14;
-    let y = 36;
-
-    const ensureSpace = (height: number) => {
-      if (y + height <= pageH - 14) return;
-      doc.addPage();
-      y = 16;
-    };
-
-    const addTextLine = (text: string, size = 8, bold = false) => {
-      ensureSpace(6);
-      doc.setFont("helvetica", bold ? "bold" : "normal");
-      doc.setFontSize(size);
-      doc.setTextColor(55, 55, 55);
-      const lines = doc.splitTextToSize(text, pageW - margem * 2);
-      doc.text(lines, margem, y);
-      y += lines.length * 5;
-    };
-
-    doc.setFillColor(20, 20, 20);
-    doc.rect(0, 0, pageW, 28, "F");
-    doc.setTextColor(255, 255, 255);
-    doc.setFont("helvetica", "bold");
-    doc.setFontSize(16);
-    doc.text("Relatorio Diario", margem, 12);
-    doc.setFont("helvetica", "normal");
-    doc.setFontSize(8);
-    doc.text(`${relatorio.empresa} - ${relatorio.flag.toUpperCase()} - ${formatarDataRelatorio(relatorio.data)}`, margem, 20);
-    doc.text(`Conferencias: ${relatorio.totalConferencias} | Itens: ${relatorio.resumo.totalItens}`, pageW - margem, 20, { align: "right" });
-
-    const cards = [
-      { label: "Separado", val: relatorio.resumo.separado, color: [34, 197, 94] },
-      { label: "Parcial", val: relatorio.resumo.parcial, color: [234, 179, 8] },
-      { label: "Nao tem", val: relatorio.resumo.naoTem, color: [239, 68, 68] },
-      { label: "Pendente", val: relatorio.resumo.pendente, color: [156, 163, 175] },
-    ] as const;
-    const colW = (pageW - margem * 2) / cards.length;
-    cards.forEach((card, index) => {
-      const x = margem + index * colW;
-      doc.setFillColor(card.color[0], card.color[1], card.color[2]);
-      doc.roundedRect(x, y, colW - 4, 15, 2, 2, "F");
-      doc.setTextColor(255, 255, 255);
-      doc.setFont("helvetica", "bold");
-      doc.setFontSize(12);
-      doc.text(String(card.val), x + (colW - 4) / 2, y + 7, { align: "center" });
-      doc.setFont("helvetica", "normal");
-      doc.setFontSize(7);
-      doc.text(card.label, x + (colW - 4) / 2, y + 12, { align: "center" });
-    });
-    y += 24;
-
-    y = addRelatorioSection(doc, "Por conferente", y);
-    relatorio.porConferente.forEach((item) => {
-      addTextLine(`${item.nome}: ${item.conferencias} conferencia(s), ${item.totalItens} itens | Separado ${item.separado} | Parcial ${item.parcial} | Nao tem ${item.naoTem}`);
-    });
-
-    y += 3;
-    y = addRelatorioSection(doc, "Por secao - faltantes/parciais", y);
-    if (relatorio.porSecao.length === 0) {
-      addTextLine("Nenhum item faltante ou parcial.");
-    } else {
-      relatorio.porSecao.forEach((item) => {
-        addTextLine(`${item.nome}: ${item.total} item(ns) | Nao tem ${item.naoTem} | Parcial ${item.parcial}`);
-      });
-    }
-
-    y += 3;
-    y = addRelatorioSection(doc, "Itens faltantes/parciais", y);
-    if (relatorio.itensCriticos.length === 0) {
-      addTextLine("Nenhum item faltante ou parcial.");
-    } else {
-      relatorio.itensCriticos.forEach((item, index) => {
-        const status = item.status === "nao_tem" ? "Nao tem" : "Parcial";
-        addTextLine(`${index + 1}. ${item.codigo} | SKU: ${item.sku || "-"} | ${item.secao} | Pedido: ${item.pedido} | Real: ${item.real ?? "-"} | ${status} | ${item.conferente}`);
-      });
-    }
-
-    if (relatorio.ignoradas.length > 0) {
-      y += 3;
-      y = addRelatorioSection(doc, "Tasks ignoradas", y);
-      relatorio.ignoradas.forEach((item) => addTextLine(`${item.name}: ${item.motivo}`));
-    }
-
-    const totalPages = (doc as any).internal.getNumberOfPages();
-    for (let i = 1; i <= totalPages; i++) {
-      doc.setPage(i);
-      doc.setFillColor(240, 240, 240);
-      doc.rect(0, pageH - 10, pageW, 10, "F");
-      doc.setFontSize(7);
-      doc.setFont("helvetica", "normal");
-      doc.setTextColor(120, 120, 120);
-      doc.text(`Gerado em ${new Date(relatorio.geradoEm).toLocaleString("pt-BR")}`, margem, pageH - 3);
-      doc.text(`Pagina ${i} de ${totalPages}`, pageW - margem, pageH - 3, { align: "right" });
-    }
-
-    doc.save(`relatorio_diario_${relatorio.empresa}_${relatorio.data}.pdf`);
-  };
-
-  const escapeHtml = (value: unknown) =>
-    String(value ?? "")
-      .replace(/&/g, "&amp;")
-      .replace(/</g, "&lt;")
-      .replace(/>/g, "&gt;")
-      .replace(/"/g, "&quot;")
-      .replace(/'/g, "&#039;");
-
-  const statusRelatorioLabel = (status: string) => {
-    if (status === "nao_tem") return "Nao tem";
-    if (status === "parcial") return "Parcial";
-    if (status === "pendente") return "Pendente";
-    return "Separado";
-  };
-
-  const exportRelatorioDiarioHTML = (relatorio: RelatorioDiario) => {
-    const itensBase = relatorio.itens?.length ? relatorio.itens : relatorio.itensCriticos;
-
-    const cards = itensBase.map((itemBase) => {
-      const item = itemBase;
-      return `
-      <article class="card ${escapeHtml(item.status)}" data-status="${escapeHtml(item.status)}" data-code="${escapeHtml(item.codigo)}">
-        ${item.photo
-          ? `<img class="card-img" src="${item.photo}" alt="${escapeHtml(item.codigo)}" loading="lazy">`
-          : `<div class="card-no-img">📦</div>`}
-        <div class="card-body">
-          <div class="card-code">${escapeHtml(item.codigo)}</div>
-          <div class="card-sku">${escapeHtml(item.sku || "-")}</div>
-          <div class="card-meta">${escapeHtml(item.secao || "Sem categoria")} · ${escapeHtml(item.conferente)}</div>
-          <div class="card-footer">
-            <div class="card-qty"><strong>${item.pedido}</strong><span>pedido</span></div>
-            <div class="card-qty"><strong>${item.real ?? "-"}</strong><span>real</span></div>
-            <span class="tag ${escapeHtml(item.status)}">${escapeHtml(statusRelatorioLabel(item.status))}</span>
-          </div>
-        </div>
-      </article>
-    `;
-    }).join("");
-
-    const dataLabel = formatarDataRelatorio(relatorio.data);
-    const html = `<!DOCTYPE html><html lang="pt-BR"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>Relatorio ${relatorio.empresa} ${dataLabel}</title><link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=DM+Sans:wght@400;500;700;900&display=swap" rel="stylesheet"/><style>*,*::before,*::after{box-sizing:border-box;margin:0;padding:0;}body{font-family:'DM Sans',sans-serif;background:#f4f3f0;color:#1a1916;padding:32px 24px 60px;}header,.stats,.filters,.grid{max-width:1200px;margin-left:auto;margin-right:auto;}header{margin-bottom:18px;}header h1{font-size:26px;font-weight:900;}header p{font-family:'DM Mono',monospace;font-size:11px;color:#8a8780;margin-top:4px;}.stats{display:grid;grid-template-columns:repeat(4,minmax(120px,1fr));gap:10px;margin-bottom:14px}.stat{background:#fff;border:1.5px solid #e2e0da;border-radius:12px;padding:12px}.stat strong{display:block;font-size:24px;line-height:1;font-weight:900}.stat span{font-size:11px;color:#8a8780;font-family:'DM Mono',monospace}.filters{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:16px}.filters button{border:1.5px solid #e2e0da;background:#fff;border-radius:999px;padding:8px 12px;font-weight:800;cursor:pointer;font-size:12px}.filters button.active{background:#1a1916;color:#fff;border-color:#1a1916}.grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:14px}.card{background:#fff;border-radius:16px;border:1.5px solid #e2e0da;overflow:hidden;cursor:pointer;transition:transform .15s,box-shadow .15s;position:relative}.card:hover{transform:translateY(-3px);box-shadow:0 12px 32px rgba(0,0,0,.1)}.card::before{content:'';position:absolute;left:0;top:0;bottom:0;width:4px;background:#22c55e}.card.nao_tem::before{background:#ef4444}.card.parcial::before{background:#f0a500}.card.pendente::before{background:#9ca3af}.card-img{width:100%;aspect-ratio:1;object-fit:cover;display:block}.card-no-img{width:100%;aspect-ratio:1;background:#f0ede8;display:flex;align-items:center;justify-content:center;font-size:42px;color:#e2e0da}.card-body{padding:11px 13px 13px;border-top:1.5px solid #e2e0da}.card-code{font-family:'DM Mono',monospace;font-size:12px;font-weight:500;word-break:break-all}.card-sku{font-size:11px;color:#8a8780;margin-top:2px;line-height:1.25;min-height:28px}.card-meta,.card-stock{font-size:10px;color:#8a8780;margin-top:5px}.card-footer{display:flex;align-items:center;justify-content:space-between;gap:6px;margin-top:8px}.card-qty strong{font-size:20px;font-weight:900;display:block;line-height:1}.card-qty span{font-size:10px;color:#8a8780;font-family:'DM Mono',monospace}.tag{font-size:10px;font-weight:800;padding:3px 7px;border-radius:6px;font-family:'DM Mono',monospace;white-space:nowrap}.tag.separado{background:#e8f5ee;color:#1e7d4a}.tag.nao_tem{background:#fee2e2;color:#991b1b}.tag.parcial{background:#fff3e0;color:#a05c00}.tag.pendente{background:#e5e7eb;color:#374151}.toast{position:fixed;bottom:24px;left:50%;transform:translateX(-50%) translateY(80px);background:#1a1916;color:#fff;padding:12px 24px;border-radius:40px;font-size:13px;font-weight:600;opacity:0;transition:all .25s cubic-bezier(.34,1.56,.64,1);pointer-events:none;white-space:nowrap;z-index:999}.toast.show{opacity:1;transform:translateX(-50%) translateY(0)}@media(max-width:760px){body{padding:18px 12px 42px}.stats{grid-template-columns:repeat(2,1fr)}.grid{grid-template-columns:repeat(auto-fill,minmax(155px,1fr));gap:10px}}</style></head><body><header><h1>📦 Relatorio de conferencia</h1><p>👤 ${escapeHtml(relatorio.empresa)} · ${escapeHtml(relatorio.flag.toUpperCase())} · ${escapeHtml(dataLabel)} · Clique no card para copiar o codigo</p><p>Gerado em ${escapeHtml(new Date(relatorio.geradoEm).toLocaleString("pt-BR"))} · Conferencias: ${relatorio.totalConferencias}</p></header><section class="stats"><div class="stat"><strong>${relatorio.resumo.separado}</strong><span>Separado</span></div><div class="stat"><strong>${relatorio.resumo.naoTem}</strong><span>Nao tem</span></div><div class="stat"><strong>${relatorio.resumo.parcial}</strong><span>Parcial</span></div><div class="stat"><strong>${relatorio.resumo.pendente}</strong><span>Pendente</span></div></section><div class="filters"><button class="active" data-filter="todos">Todos</button><button data-filter="separado">Separado</button><button data-filter="nao_tem">Nao tem</button><button data-filter="parcial">Parcial</button><button data-filter="pendente">Pendente</button></div><main class="grid">${cards}</main><div class="toast" id="toast"></div><script>const buttons=document.querySelectorAll("[data-filter]");const cards=[...document.querySelectorAll(".grid .card")];buttons.forEach(btn=>btn.onclick=()=>{buttons.forEach(b=>b.classList.remove("active"));btn.classList.add("active");const f=btn.dataset.filter;cards.forEach(card=>{card.style.display=f==="todos"||card.dataset.status===f?"":"none";});});cards.forEach(card=>{card.onclick=()=>navigator.clipboard.writeText(card.dataset.code).then(()=>{const t=document.getElementById("toast");t.textContent="Copiado: "+card.dataset.code;t.classList.add("show");setTimeout(()=>t.classList.remove("show"),1800);});});</script></body></html>`;
-    const blob = new Blob([html], { type: "text/html;charset=utf-8;" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `relatorio_conferencia_${relatorio.empresa}_${relatorio.data}.html`;
-    document.body.appendChild(a);
-    a.click();
-    document.body.removeChild(a);
-    setTimeout(() => URL.revokeObjectURL(url), 1000);
-  };
-
-  const abrirRelatorioPopup = async () => {
-    setRelatorioPopupOpen(true);
-    setLoadingRelatorioDatas(true);
-    setRelatorioDatasErro(null);
-    try {
-      const datas = await listarDatasRelatorio(empresa as EmpresaKey, flag as FlagKey);
-      setRelatorioDatas(datas);
-    } catch (e: any) {
-      setRelatorioDatasErro(e.message ?? "Falha ao buscar datas");
-    } finally {
-      setLoadingRelatorioDatas(false);
-    }
-  };
-
-  const gerarRelatorioDaData = async (data: string) => {
-    if (gerandoRelatorio) return;
-
-    setGerandoRelatorio(true);
-    try {
-      const relatorio = await gerarRelatorioDiario(empresa as EmpresaKey, flag as FlagKey, data);
-
-      if (relatorio.totalConferencias === 0) {
-        toast({ title: "Nenhuma conferencia concluida nessa data", variant: "destructive" });
-        return;
-      }
-
-      setRelatorioDatas((prev) =>
-        prev.map((item) => (item.data === data ? { ...item, relatorioGerado: true } : item))
-      );
-      setRelatorioPopupOpen(false);
-      setRelatorioAtual(relatorio);
-      setRelatorioFiltro("todos");
-      toast({
-        title: "Relatorio carregado",
-        description: "Aberto no app com as fotos da conferencia.",
-      });
-    } catch (e: any) {
-      toast({ title: "Erro ao gerar relatorio", description: e.message ?? "Falha no relatorio diario", variant: "destructive" });
-    } finally {
-      setGerandoRelatorio(false);
-    }
-  };
-
   const EmpresaBadge = () => {
     const empresaColors: Record<string, { bg: string; border: string; text: string }> = {
       NEWSHOP: { bg: "hsl(var(--primary)/0.12)", border: "hsl(var(--primary)/0.4)", text: "hsl(var(--primary))" },
@@ -1462,24 +1187,17 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     );
   };
 
-  const itensRelatorioVisiveis = (() => {
-    const relatorio = relatorioAtual;
-    if (!relatorio) return [];
-    const base = relatorio.itens?.length ? relatorio.itens : relatorio.itensCriticos;
-    if (relatorioFiltro === "todos") return base;
-    return base.filter((item) => item.status === relatorioFiltro);
-  })();
-
   if (phase === "import") {
     const flagOptions: { value: string; label: string }[] = [
       { value: "loja", label: "LOJA" },
       { value: "cd", label: "CD" },
     ];
+    const empresasPermitidas = loginSalvo?.empresasPermitidas ?? [];
     const empresaOptions: { value: string; label: string; color: string }[] = [
       { value: "NEWSHOP", label: "NEWSHOP", color: "hsl(var(--primary))"  },
       { value: "SOYE",    label: "SOYE",    color: "hsl(142 72% 29%)"     },
       { value: "FACIL",   label: "FACIL",   color: "hsl(30 95% 50%)"      },
-    ];
+    ].filter((opt) => empresasPermitidas.length === 0 || empresasPermitidas.includes(opt.value as (typeof empresasPermitidas)[number]));
 
     return (
       <div className="p-4 space-y-4">
@@ -1523,21 +1241,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         })()}
 
         <div className="space-y-4 pt-2">
-          <div>
-            <p className="text-sm font-semibold text-foreground mb-2">Tipo</p>
-            <div className="flex gap-2">
-              {flagOptions.map((opt) => (
-                <button key={opt.value} onClick={() => setFlag(opt.value)}
-                  className="flex-1 h-11 rounded-xl font-bold text-sm transition-all active:scale-[0.98]"
-                  style={{
-                    background: flag === opt.value ? "hsl(var(--primary))" : "hsl(var(--muted))",
-                    color: flag === opt.value ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
-                    border: flag === opt.value ? "2px solid hsl(var(--primary))" : "2px solid transparent",
-                  }}>{opt.label}</button>
-              ))}
-            </div>
-          </div>
-
           <div>
             <p className="text-sm font-semibold text-foreground mb-2">Empresa</p>
             <div className="flex gap-2">
@@ -1596,7 +1299,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           >
             {loadingTasks
               ? <><span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin" /> Buscando...</>
-              : <><ClipboardList className="w-5 h-5" /> Buscar Pedidos do ClickUp</>}
+              : <><ClipboardList className="w-5 h-5" /> Buscar Pedidos do Supabase</>}
           </button>
 
           <div className="flex items-center gap-3">
@@ -1631,15 +1334,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <ArrowLeft className="w-4 h-4" /> Voltar
           </button>
           <div className="flex items-center gap-3">
-            <button onClick={abrirRelatorioPopup} disabled={gerandoRelatorio || loadingRelatorioDatas}
-              className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
-              {gerandoRelatorio || loadingRelatorioDatas ? (
-                <span className="w-3.5 h-3.5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-              ) : (
-                <FileText className="w-3.5 h-3.5" />
-              )}
-              Relatorio
-            </button>
             <button onClick={recarregarTasks} disabled={loadingTasks}
               className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
               <RefreshCw className={`w-3.5 h-3.5 ${loadingTasks ? "animate-spin" : ""}`} /> Atualizar
@@ -1650,234 +1344,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         <div className="flex items-center justify-between">
           <div>
             <p className="text-base font-bold text-foreground">Pedidos — Analisado</p>
-            <p className="text-xs text-muted-foreground">{tasks.length} task(s) encontrada(s)</p>
+            <p className="text-xs text-muted-foreground">{tasks.length} pedido(s) encontrado(s)</p>
           </div>
           <EmpresaBadge />
         </div>
-
-        {relatorioPopupOpen && (
-          <div className="fixed inset-0 z-50 bg-black/45 flex items-center justify-center p-4">
-            <div className="w-full max-w-md rounded-xl bg-background border border-border shadow-xl p-4 space-y-3">
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <p className="text-base font-bold text-foreground">Gerar relatorio</p>
-                  <p className="text-xs text-muted-foreground">Escolha a data concluida no ClickUp.</p>
-                </div>
-                <button onClick={() => setRelatorioPopupOpen(false)} className="h-8 px-3 rounded-lg bg-muted text-muted-foreground text-xs font-bold">
-                  Fechar
-                </button>
-              </div>
-
-              {loadingRelatorioDatas && (
-                <div className="flex items-center justify-center py-8 gap-3 text-muted-foreground">
-                  <span className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-                  <span className="text-sm">Buscando datas...</span>
-                </div>
-              )}
-
-              {relatorioDatasErro && (
-                <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{relatorioDatasErro}</div>
-              )}
-
-              {!loadingRelatorioDatas && !relatorioDatasErro && relatorioDatas.length === 0 && (
-                <div className="rounded-xl border border-border bg-muted/40 p-4 text-sm text-muted-foreground">
-                  Nenhuma conferencia concluida encontrada.
-                </div>
-              )}
-
-              <div className="space-y-2 max-h-[55vh] overflow-auto">
-                {relatorioDatas.map((item) => (
-                  <button
-                    key={item.data}
-                    onClick={() => gerarRelatorioDaData(item.data)}
-                    disabled={gerandoRelatorio}
-                    className="w-full rounded-xl border border-border bg-card p-3 text-left flex items-center justify-between gap-3 disabled:opacity-60"
-                  >
-                    <span>
-                      <span className="block text-sm font-bold text-foreground">{item.label}</span>
-                      <span className="block text-xs text-muted-foreground">{item.total} conferencia(s)</span>
-                    </span>
-                    <span className={`text-[11px] font-black rounded-full px-2 py-1 ${item.relatorioGerado ? "bg-[hsl(var(--success)/0.15)] text-[hsl(var(--success))]" : "bg-muted text-muted-foreground"}`}>
-                      {item.relatorioGerado ? "RELATORIO GERADO" : "GERAR"}
-                    </span>
-                  </button>
-                ))}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {relatorioAtual && (
-          <div className="fixed inset-0 z-50 bg-black/55 p-3 md:p-6 overflow-auto">
-            <div className="mx-auto w-full max-w-7xl rounded-2xl border border-border bg-background shadow-2xl">
-              <div className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-border bg-background/95 backdrop-blur px-4 py-4">
-                <div>
-                  <p className="text-lg font-black text-foreground">Relatorio de conferencia</p>
-                  <p className="text-xs text-muted-foreground">
-                    {relatorioAtual.empresa} · {relatorioAtual.flag.toUpperCase()} · {formatarDataRelatorio(relatorioAtual.data)} · {relatorioAtual.totalConferencias} conferencia(s)
-                  </p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <button
-                    onClick={() => exportRelatorioDiarioHTML(relatorioAtual)}
-                    className="h-9 px-3 rounded-lg bg-muted text-muted-foreground text-xs font-bold"
-                  >
-                    HTML
-                  </button>
-                  <button
-                    onClick={() => exportRelatorioDiarioPDF(relatorioAtual)}
-                    className="h-9 px-3 rounded-lg bg-muted text-muted-foreground text-xs font-bold"
-                  >
-                    PDF
-                  </button>
-                  <button
-                    onClick={() => setRelatorioAtual(null)}
-                    className="h-9 px-3 rounded-lg bg-primary text-primary-foreground text-xs font-bold"
-                  >
-                    Fechar
-                  </button>
-                </div>
-              </div>
-
-              <div className="p-4 space-y-4">
-                <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
-                  <div className="rounded-xl border border-border bg-card p-3">
-                    <p className="text-2xl font-black text-foreground">{relatorioAtual.resumo.totalItens}</p>
-                    <p className="text-[11px] font-mono text-muted-foreground">Total</p>
-                  </div>
-                  <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
-                    <p className="text-2xl font-black text-emerald-700">{relatorioAtual.resumo.separado}</p>
-                    <p className="text-[11px] font-mono text-emerald-700/70">Separado</p>
-                  </div>
-                  <div className="rounded-xl border border-amber-200 bg-amber-50 p-3">
-                    <p className="text-2xl font-black text-amber-700">{relatorioAtual.resumo.parcial}</p>
-                    <p className="text-[11px] font-mono text-amber-700/70">Parcial</p>
-                  </div>
-                  <div className="rounded-xl border border-red-200 bg-red-50 p-3">
-                    <p className="text-2xl font-black text-red-700">{relatorioAtual.resumo.naoTem}</p>
-                    <p className="text-[11px] font-mono text-red-700/70">Nao tem</p>
-                  </div>
-                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
-                    <p className="text-2xl font-black text-slate-700">{relatorioAtual.resumo.pendente}</p>
-                    <p className="text-[11px] font-mono text-slate-700/70">Pendente</p>
-                  </div>
-                </div>
-
-                <div className="flex flex-wrap gap-2">
-                  {[
-                    { key: "todos", label: "Todos" },
-                    { key: "separado", label: "Separado" },
-                    { key: "nao_tem", label: "Nao tem" },
-                    { key: "parcial", label: "Parcial" },
-                    { key: "pendente", label: "Pendente" },
-                  ].map((item) => (
-                    <button
-                      key={item.key}
-                      onClick={() => setRelatorioFiltro(item.key as typeof relatorioFiltro)}
-                      className={`h-9 px-4 rounded-full text-xs font-black border transition-colors ${
-                        relatorioFiltro === item.key
-                          ? "bg-foreground text-background border-foreground"
-                          : "bg-card text-muted-foreground border-border"
-                      }`}
-                    >
-                      {item.label}
-                    </button>
-                  ))}
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-4 gap-3">
-                  {itensRelatorioVisiveis.map((item, index) => (
-                    <button
-                      key={`${item.taskId}-${item.codigo}-${index}`}
-                      onClick={() => navigator.clipboard.writeText(item.codigo).then(() => {
-                        toast({ title: "Codigo copiado", description: item.codigo });
-                      }).catch(() => undefined)}
-                      className={`overflow-hidden rounded-2xl border bg-card text-left transition-all hover:-translate-y-0.5 ${
-                        item.status === "nao_tem"
-                          ? "border-red-200"
-                          : item.status === "parcial"
-                            ? "border-amber-200"
-                            : item.status === "pendente"
-                              ? "border-slate-200"
-                              : "border-emerald-200"
-                      }`}
-                    >
-                      {item.photo ? (
-                        <img src={item.photo} alt={item.codigo} className="block w-full aspect-square object-cover bg-muted" loading="lazy" />
-                      ) : (
-                        <div className="flex w-full aspect-square items-center justify-center bg-muted text-4xl text-muted-foreground/35">
-                          <Package className="w-10 h-10" />
-                        </div>
-                      )}
-                      <div className="space-y-2 p-3">
-                        <div>
-                          <p className="text-xs font-mono font-bold break-all text-foreground">{item.codigo}</p>
-                          <p className="text-[11px] text-muted-foreground line-clamp-2 min-h-8">{item.sku || "-"}</p>
-                        </div>
-                        <p className="text-[11px] text-muted-foreground">{item.secao || "Sem categoria"} · {item.conferente}</p>
-                        <div className="flex items-end justify-between gap-2">
-                          <div className="flex gap-3">
-                            <div>
-                              <p className="text-lg leading-none font-black text-foreground">{item.pedido}</p>
-                              <p className="text-[10px] font-mono text-muted-foreground">pedido</p>
-                            </div>
-                            <div>
-                              <p className="text-lg leading-none font-black text-foreground">{item.real ?? "-"}</p>
-                              <p className="text-[10px] font-mono text-muted-foreground">real</p>
-                            </div>
-                          </div>
-                          <span className={`rounded-md px-2 py-1 text-[10px] font-black ${
-                            item.status === "nao_tem"
-                              ? "bg-red-100 text-red-700"
-                              : item.status === "parcial"
-                                ? "bg-amber-100 text-amber-700"
-                                : item.status === "pendente"
-                                  ? "bg-slate-200 text-slate-700"
-                                  : "bg-emerald-100 text-emerald-700"
-                          }`}>
-                            {statusRelatorioLabel(item.status)}
-                          </span>
-                        </div>
-                      </div>
-                    </button>
-                  ))}
-                </div>
-
-                {itensRelatorioVisiveis.length === 0 && (
-                  <div className="rounded-xl border border-border bg-muted/40 p-6 text-sm text-muted-foreground">
-                    Nenhum item nesse filtro.
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-        )}
-
-        {!loadingTasks && gruposMesmoNome.length > 0 && (
-          <div className="space-y-2 rounded-xl border border-primary/20 bg-primary/5 p-3">
-            <p className="text-xs font-bold text-primary">Juntar somente pedidos com o mesmo nome</p>
-            {gruposMesmoNome.map(([nome, grupo]) => (
-              <button
-                key={nome}
-                onClick={() => juntarTasksPorNome(nome)}
-                disabled={loadingJson || consolidandoJson}
-                className="w-full min-h-12 bg-primary text-primary-foreground rounded-xl font-bold text-sm flex items-center justify-between gap-2 px-3 py-2 active:scale-[0.98] transition-transform shadow-sm disabled:opacity-60"
-              >
-                <span className="flex items-center gap-2 min-w-0">
-                  {consolidandoJson ? (
-                    <span className="w-4 h-4 border-2 border-current border-t-transparent rounded-full animate-spin flex-shrink-0" />
-                  ) : (
-                    <FileJson className="w-4 h-4 flex-shrink-0" />
-                  )}
-                  <span className="truncate">{nome}</span>
-                </span>
-                <span className="text-xs font-black bg-primary-foreground/20 rounded-full px-2 py-0.5 flex-shrink-0">
-                  {grupo.length}
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
 
         {tasksErro && (
           <div className="bg-destructive/10 border border-destructive/20 rounded-xl p-3 text-sm text-destructive">{tasksErro}</div>
@@ -1886,15 +1356,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         {loadingTasks && (
           <div className="flex items-center justify-center py-10 gap-3 text-muted-foreground">
             <span className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin" />
-            <span className="text-sm">Carregando tasks...</span>
+            <span className="text-sm">Carregando pedidos...</span>
           </div>
         )}
 
         {!loadingTasks && tasks.length === 0 && (
           <div className="text-center py-10">
             <ClipboardList className="w-10 h-10 text-muted-foreground/40 mx-auto mb-3" />
-            <p className="text-sm font-semibold text-muted-foreground">Nenhuma task no status Analisado</p>
-            <p className="text-xs text-muted-foreground mt-1">Verifique o ClickUp ou aguarde novas listas</p>
+            <p className="text-sm font-semibold text-muted-foreground">Nenhum pedido no status Analisado</p>
+            <p className="text-xs text-muted-foreground mt-1">Verifique o Supabase ou aguarde novas listas</p>
           </div>
         )}
 
@@ -1929,7 +1399,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                   className="w-full h-14 rounded-xl border-2 border-border bg-card text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
                 >
                   <span className="text-base">👁️ Apenas Visualizar</span>
-                  <span className="text-[11px] text-muted-foreground font-normal">Não reserva o pedido no ClickUp</span>
+                  <span className="text-[11px] text-muted-foreground font-normal">Abre sem reservar o pedido</span>
                 </button>
                 <button
                   onClick={() => { const f = forcarReservaAndamento; setForcarReservaAndamento(false); abrirTaskComModo(modalModoAberturaTask, "separacao", f); }}
@@ -1958,7 +1428,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                   if (emAndamento) setModalConfirmAndamento(task);
                   else setModalModoAberturaTask(task);
                 }}
-                disabled={loadingJson || consolidandoJson}
+                disabled={loadingJson}
                 className={`w-full text-left rounded-xl border p-4 flex items-center justify-between gap-3 active:scale-[0.99] transition-all disabled:opacity-60 ${emAndamento ? "border-warning/40 bg-warning/5 hover:border-warning/60" : "border-border bg-card hover:border-primary/40 hover:bg-primary/5"}`}
               >
                 <div className="flex-1 min-w-0">
@@ -2039,12 +1509,28 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <FileJson className="w-4 h-4" /> JSON
           </button>
           {apenasVisualizar && (
-            <div className="h-11 rounded-xl bg-warning/10 border border-warning/30 flex items-center justify-center gap-2 px-3 text-xs font-bold text-warning">
-              👁️ Modo Visualização
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-11 rounded-xl bg-warning/10 border border-warning/30 flex items-center justify-center gap-2 px-3 text-xs font-bold text-warning">
+                👁️ Modo Visualização
+              </div>
+              <div className="flex h-11 rounded-xl border border-border overflow-hidden text-xs font-bold">
+                <button
+                  onClick={() => setViewMode("card")}
+                  className={`px-3 flex items-center gap-1.5 transition-colors ${viewMode === "card" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent"}`}
+                >
+                  <span>1a1</span>
+                </button>
+                <button
+                  onClick={() => setViewMode("lista")}
+                  className={`px-3 flex items-center gap-1.5 border-l border-border transition-colors ${viewMode === "lista" ? "bg-primary text-primary-foreground" : "bg-card text-muted-foreground hover:bg-accent"}`}
+                >
+                  <span>Lista</span>
+                </button>
+              </div>
             </div>
           )}
           <button
-            onClick={enviarClickUp}
+            onClick={fecharConferencia}
             disabled={apenasVisualizar || sendStatus === "sending" || sendStatus === "sent"}
             title={apenasVisualizar ? "Abra em modo Separação para enviar" : undefined}
             className="h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed"
@@ -2135,7 +1621,34 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         </div>
       </div>
 
-      {currentItem && (
+      {/* Modo Lista (visualizar) */}
+      {apenasVisualizar && viewMode === "lista" && (
+        <div className="space-y-2">
+          {items.map((item, idx) => {
+            const lbl = getStatusLabel(item.status);
+            const LIcon = lbl.icon;
+            return (
+              <div key={item.id}
+                onClick={() => { setViewMode("card"); setCurrentIndex(idx); }}
+                className={`rounded-xl p-3 flex gap-3 items-center cursor-pointer active:scale-[0.99] transition-transform ${getStatusColor(item.status)}`}
+              >
+                {item.photo && <img src={item.photo} alt={item.codigo} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />}
+                <div className="flex-1 min-w-0">
+                  <p className="text-[10px] text-muted-foreground font-mono">#{idx + 1}</p>
+                  <p className="text-sm font-mono font-bold text-foreground truncate">{item.codigo}</p>
+                  {item.sku && <p className="text-[11px] text-muted-foreground">SKU: {item.sku}</p>}
+                  <p className="text-[11px] text-muted-foreground">Pedido: <strong>{item.quantidadePedida}</strong>{item.quantidadeReal !== null ? ` · Real: ${item.quantidadeReal}` : ""}</p>
+                </div>
+                <div className={`flex items-center gap-1 text-xs font-semibold flex-shrink-0 ${lbl.color}`}>
+                  <LIcon className="w-4 h-4" /> {lbl.text}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {(!apenasVisualizar || viewMode === "card") && currentItem && (
         <div className={`rounded-xl p-4 space-y-4 shadow-md ${getStatusColor(currentItem.status)}`}>
           {currentItem.photo ? (
             <div className="flex justify-center">
@@ -2164,6 +1677,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               )}
             </div>
           )}
+          {!apenasVisualizar && (
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setStatus(currentItem.id, "separado")}
               className={`flex-1 h-12 rounded-xl font-bold text-sm flex items-center justify-center gap-1.5 active:scale-[0.98] transition-all ${
@@ -2198,7 +1712,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               <Timer className="w-4 h-4" /> Pendente
             </button>
           </div>
-          {currentItem.status === "nao_tem_tudo" && (
+          )}
+          {!apenasVisualizar && currentItem.status === "nao_tem_tudo" && (
             <div className="flex items-center gap-3 bg-card/50 rounded-lg p-3 border border-border">
               <label className="text-sm text-muted-foreground whitespace-nowrap">Qtd disponível:</label>
               <input
@@ -2217,23 +1732,30 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         </div>
       )}
 
-      <div className="flex gap-2">
+      {(!apenasVisualizar || viewMode === "card") && <div className="flex gap-2">
         <button onClick={goPrev} disabled={currentIndex === 0}
           className="h-12 px-4 rounded-xl bg-accent text-accent-foreground font-semibold text-sm flex items-center justify-center gap-1 active:scale-[0.98] transition-transform disabled:opacity-30">
           <ChevronLeft className="w-5 h-5" /> Anterior
         </button>
         {isLastItem ? (
-          <button onClick={finishConference} disabled={!allDone}
-            className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40">
-            <Flag className="w-5 h-5" /> Finalizar
-          </button>
+          apenasVisualizar ? (
+            <button onClick={voltarLiberandoPedido}
+              className="flex-1 h-12 rounded-xl bg-accent text-accent-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform">
+              <ArrowLeft className="w-5 h-5" /> Sair
+            </button>
+          ) : (
+            <button onClick={finishConference} disabled={!allDone}
+              className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40">
+              <Flag className="w-5 h-5" /> Finalizar
+            </button>
+          )
         ) : (
-          <button onClick={goNext} disabled={!isCurrentComplete}
+          <button onClick={goNext} disabled={!apenasVisualizar && !isCurrentComplete}
             className="flex-1 h-12 rounded-xl bg-primary text-primary-foreground font-bold text-base flex items-center justify-center gap-2 active:scale-[0.98] transition-transform shadow-lg shadow-primary/25 disabled:opacity-40">
             Próximo <ChevronRight className="w-5 h-5" />
           </button>
         )}
-      </div>
+      </div>}
     </div>
   );
 };
