@@ -102,13 +102,16 @@ function isRelatorioTask(task) {
 }
 
 // conferência: status ClickUp da task -> status do pedido (migration 009)
+// NOTA: o app novo não usa pedido 'pendente' (a fila de conferência só lê
+// 'analisado'/'em_andamento'). Um pedido feito no ClickUp — inclusive "to do" —
+// deve ir DIRETO pra conferência, então tudo que não é concluído/andamento vira
+// 'analisado' (decisão do usuário 2026-07-11).
 function mapPedidoStatus(task) {
   const v = normalizeStatus(task?.status?.status);
   const temTag = Array.isArray(task?.tags) && task.tags.some((t) => normalizeText(t?.name ?? t).includes('andamento'));
   if (['complete','completed','concluido','done'].includes(v)) return 'concluido';
   if (temTag) return 'em_andamento';
-  if (v === 'analisado') return 'analisado';
-  return 'pendente';
+  return 'analisado';
 }
 
 // item de conferência: status texto -> enum pedido_itens (migration 009)
@@ -299,6 +302,22 @@ function makeSupabase() {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+async function withRetry(fn, label, tries = 4) {
+  let lastErr;
+  for (let i = 1; i <= tries; i++) {
+    try { return await fn(); }
+    catch (e) {
+      lastErr = e;
+      const msg = String(e?.message ?? e);
+      // só re-tenta erro de rede/transiente; erro de validação/constraint não adianta
+      if (!/fetch failed|ECONNRESET|ETIMEDOUT|network|socket|timeout|EAI_AGAIN|503|429/i.test(msg)) throw e;
+      if (i < tries) await sleep(300 * i * i); // backoff: 0.3s, 1.2s, 2.7s
+    }
+  }
+  throw lastErr;
+}
+
 async function upsertPedido(sb, pedido, itens) {
   // dedup por clickup_task_id: se já existe, atualiza e regrava itens
   const { data: existing, error: selErr } = await sb
@@ -355,9 +374,9 @@ async function main() {
       console.log(`[${empresa}] conferência: ${tasks.length} tasks (${pedidosTasks.length} pedidos, ${relatorios} relatórios ignorados)`);
       for (const task of pedidosTasks) {
         try {
-          const { pedido, itens } = await pedidoFromTask(empresa, task);
+          const { pedido, itens } = await withRetry(() => pedidoFromTask(empresa, task), `read ${task.id}`);
           totais.pedidos++; totais.itens += itens.length;
-          if (APPLY) await upsertPedido(sb, pedido, itens);
+          if (APPLY) await withRetry(() => upsertPedido(sb, pedido, itens), `upsert ${task.id}`);
           else console.log(`  · ${pedido.status.padEnd(12)} ${String(task.id).padEnd(10)} itens=${itens.length} ${pedido.conferente}`);
         } catch (e) { totais.erros++; console.error(`  ✗ task ${task.id}: ${e.message}`); }
       }
