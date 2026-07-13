@@ -278,8 +278,14 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       onUpdateList({ ...listaParaEnviar, status: "green", sentToConference: true });
       const dest = `${payload.flag.toUpperCase()} · ${payload.empresa}`;
       toast({ title: `✅ Enviado para conferência! [${dest}]`, description: `Lista "${listaParaEnviar.title}" enviada com sucesso.` });
-    } catch {
-      toast({ title: "❌ Falha no envio", description: "Verifique sua conexão e tente novamente.", variant: "destructive" });
+    } catch (err) {
+      // Mostra a causa real (antes ficava escondida num catch vazio) para dar pra
+      // diagnosticar falha de Storage/RPC/rede em vez de so "verifique a conexao".
+      console.error("[ListHistory] Falha ao enviar lista para conferencia:", err);
+      const motivo = err instanceof Error && err.message
+        ? err.message
+        : "Verifique sua conexão e tente novamente.";
+      toast({ title: "❌ Falha no envio", description: motivo, variant: "destructive" });
     } finally {
       setSendingId(null);
     }

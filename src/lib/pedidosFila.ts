@@ -498,12 +498,18 @@ const MEU_PEDIDO_SELECT_COLUMNS = [
 export async function listarPedidos(f: ListarPedidosFiltro): Promise<MeuPedidoResumo[]> {
   if (!isSupabaseConfigured) return [];
 
+  // Quem esta logado no CD tambem enxerga os pedidos da loja (o CD atende a loja).
+  // Quem esta na loja continua vendo apenas os pedidos da loja.
+  const flagFiltro = normalizarFlag(f.flag);
   let query = supabase
     .from('pedidos')
     .select(MEU_PEDIDO_SELECT_COLUMNS)
     .eq('empresa', normalizarEmpresa(f.empresa))
-    .eq('flag', normalizarFlag(f.flag))
     .order('created_at', { ascending: false });
+
+  query = flagFiltro === 'cd'
+    ? query.in('flag', ['cd', 'loja'])
+    : query.eq('flag', flagFiltro);
 
   const pessoa = String(f.pessoa ?? '').trim();
   if (pessoa) {
