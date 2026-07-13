@@ -34,6 +34,9 @@ const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
 const ONLY = (args.find((a) => a.startsWith('--only=')) || '').split('=')[1] || 'all';
 const EMPRESA_FILTER = (args.find((a) => a.startsWith('--empresa=')) || '').split('=')[1] || '';
+// --status=analisado limita o re-import aos pedidos AINDA em conferencia (nao mexe
+// nos concluidos que ja funcionam). Vazio = todos.
+const STATUS_FILTER = (args.find((a) => a.startsWith('--status=')) || '').split('=')[1] || '';
 
 // ── Config por empresa ────────────────────────────────────────────────────────
 const EMPRESAS = ['NEWSHOP', 'SOYE', 'FACIL'];
@@ -205,6 +208,20 @@ async function fetchTasksFromList(listId, token, includeClosed = true) {
   return all;
 }
 
+// Busca UMA task pelo endpoint individual — o unico que retorna `attachments`
+// (o endpoint de lista nao traz). Best-effort: devolve null se falhar.
+async function fetchTaskDetail(taskId, token) {
+  try {
+    const res = await fetch(`https://api.clickup.com/api/v2/task/${taskId}?include_subtasks=false`, {
+      headers: { Authorization: token },
+    });
+    if (!res.ok) return null;
+    return await res.json();
+  } catch {
+    return null;
+  }
+}
+
 function isJsonAttachment(att) {
   const title = String(att?.title ?? att?.file_name ?? '').toLowerCase();
   return title.endsWith('.json') || att?.mimetype === 'application/json';
@@ -231,26 +248,48 @@ async function baixarConferenceJson(task) {
 }
 
 // ── Transformações (task ClickUp -> linhas Supabase) ──────────────────────────
-async function pedidoFromTask(empresa, task) {
+async function pedidoFromTask(empresa, task, token) {
   const description = task.description ?? task.text_content ?? '';
-  const jsonConf = await baixarConferenceJson(task);
-  const rawItems = jsonConf?.items?.length ? jsonConf.items : parseConferenceItems(description);
+  let jsonConf = await baixarConferenceJson(task);
+  let rawItems = jsonConf?.items?.length ? jsonConf.items : parseConferenceItems(description);
+
+  // Pedidos ENVIADOS (ainda nao conferidos) guardam os itens SO no JSON anexado —
+  // a descricao tem apenas metadados. Como o endpoint de LISTA nao traz
+  // `attachments`, se nao achamos itens buscamos a task individual (que traz) e
+  // tentamos de novo pelo JSON. So dispara nos pedidos vazios (barato).
+  if (rawItems.length === 0 && token) {
+    const full = await fetchTaskDetail(task.id, token);
+    const jsonFull = full ? await baixarConferenceJson(full) : null;
+    if (jsonFull?.items?.length) {
+      jsonConf = jsonFull;
+      rawItems = jsonFull.items;
+    }
+  }
+
   const conferente = extractConferente(task, description);
   const listeiro = extractListeiro(description);
 
-  const itens = rawItems.map((it, idx) => ({
-    codigo: String(it.codigo ?? '').trim(),
-    sku: it.sku != null ? String(it.sku).trim() : null,
-    descricao: it.descricao ?? null,
-    secao: it.secao ?? null,
-    quantidade_pedida: Number(it.pedido ?? it.quantidadePedida ?? 0) || 0,
-    quantidade_real: (it.real === null || it.real === undefined) ? null : Number(it.real),
-    status: mapItemStatus(it.status),
-    foto_url: typeof it.photo === 'string' && it.photo.trim() ? it.photo.trim() : null,
-    ordem: idx,
-  })).filter((it) => it.codigo);
+  const itens = rawItems.map((it, idx) => {
+    // Item de lista enviada nao tem status nem `real` (ainda a conferir): entra
+    // como 'pendente'. Item ja conferido traz status/real do JSON/descricao.
+    const semStatus = it.status == null || String(it.status).trim() === '';
+    const semReal = it.real == null && it.quantidade_real == null;
+    return {
+      codigo: String(it.codigo ?? '').trim(),
+      sku: it.sku != null ? String(it.sku).trim() : null,
+      descricao: it.descricao ?? null,
+      secao: it.secao ?? null,
+      // listas enviadas usam `quantidade`; conferencias usam `pedido`/`quantidadePedida`.
+      quantidade_pedida: Number(it.pedido ?? it.quantidadePedida ?? it.quantidade ?? 0) || 0,
+      quantidade_real: (it.real === null || it.real === undefined) ? null : Number(it.real),
+      status: (semStatus && semReal) ? 'pendente' : mapItemStatus(it.status),
+      foto_url: typeof it.photo === 'string' && it.photo.trim() ? it.photo.trim() : null,
+      ordem: idx,
+    };
+  }).filter((it) => it.codigo);
 
   const status = mapPedidoStatus(task);
+  const pendentes = itens.filter((it) => it.status === 'pendente').length;
   const pedido = {
     empresa,
     flag: 'loja',
@@ -264,7 +303,8 @@ async function pedidoFromTask(empresa, task) {
     resumo_separado: extractResumoValue(description, 'separado'),
     resumo_nao_tem: extractResumoValue(description, 'nao tem'),
     resumo_parcial: extractResumoValue(description, 'parcial'),
-    resumo_pendente: extractResumoValue(description, 'pendente'),
+    // pedido enviado nao tem resumo na descricao: usa a contagem real de pendentes.
+    resumo_pendente: extractResumoValue(description, 'pendente') || pendentes,
     tags: (task.tags ?? []).map((t) => String(t?.name ?? t ?? '')).filter(Boolean),
     clickup_task_id: String(task.id),
   };
@@ -370,11 +410,15 @@ async function main() {
         continue;
       }
       const relatorios = tasks.filter(isRelatorioTask).length;
-      const pedidosTasks = tasks.filter((t) => !isRelatorioTask(t));
+      let pedidosTasks = tasks.filter((t) => !isRelatorioTask(t));
+      if (STATUS_FILTER) {
+        pedidosTasks = pedidosTasks.filter((t) => mapPedidoStatus(t) === STATUS_FILTER);
+        console.log(`[${empresa}] filtro --status=${STATUS_FILTER}: ${pedidosTasks.length} pedidos`);
+      }
       console.log(`[${empresa}] conferência: ${tasks.length} tasks (${pedidosTasks.length} pedidos, ${relatorios} relatórios ignorados)`);
       for (const task of pedidosTasks) {
         try {
-          const { pedido, itens } = await withRetry(() => pedidoFromTask(empresa, task), `read ${task.id}`);
+          const { pedido, itens } = await withRetry(() => pedidoFromTask(empresa, task, token), `read ${task.id}`);
           totais.pedidos++; totais.itens += itens.length;
           if (APPLY) await withRetry(() => upsertPedido(sb, pedido, itens), `upsert ${task.id}`);
           else console.log(`  · ${pedido.status.padEnd(12)} ${String(task.id).padEnd(10)} itens=${itens.length} ${pedido.conferente}`);
