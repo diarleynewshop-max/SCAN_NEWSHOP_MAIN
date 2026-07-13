@@ -17,6 +17,7 @@ interface PedidoFilaRow {
   listeiro: string | null;
   pessoa: string | null;
   status: string;
+  observacao: string | null;
   created_at: string | null;
   clickup_task_id: string | null;
 }
@@ -82,8 +83,31 @@ export interface PedidoParaConferencia {
   date_created: string;
   emAndamento: boolean;
   clickupTaskId: string | null;
+  undoMergeDisponivel?: boolean;
   description?: string;
   attachments?: any[];
+}
+
+interface PedidoMergeUndoMeta {
+  version: 1;
+  mergedAt: string;
+  target: {
+    id: string;
+    titulo: string | null;
+    pessoa: string | null;
+    listeiro: string | null;
+    status: string;
+    created_at: string | null;
+  };
+  sources: Array<{
+    id: string;
+    titulo: string | null;
+    pessoa: string | null;
+    listeiro: string | null;
+    status: string;
+    created_at: string | null;
+    itemIds: string[];
+  }>;
 }
 
 export interface PedidoFilaItem {
@@ -206,6 +230,46 @@ function normalizarEmpresa(value: unknown): EmpresaKey {
 
 function normalizarFlag(value: unknown): FlagKey {
   return String(value ?? 'loja').trim().toLowerCase() === 'cd' ? 'cd' : 'loja';
+}
+
+const MERGE_UNDO_PREFIX = 'mergeUndo=';
+
+function splitObservacaoTokens(value: string | null | undefined): string[] {
+  return String(value ?? '')
+    .split('|')
+    .map((part) => part.trim())
+    .filter(Boolean);
+}
+
+function encodeMergeUndoMeta(meta: PedidoMergeUndoMeta): string {
+  return `${MERGE_UNDO_PREFIX}${JSON.stringify(meta)}`;
+}
+
+function extrairMergeUndoMeta(observacao: string | null | undefined): PedidoMergeUndoMeta | null {
+  const token = splitObservacaoTokens(observacao).find((part) => part.startsWith(MERGE_UNDO_PREFIX));
+  if (!token) return null;
+  const raw = token.slice(MERGE_UNDO_PREFIX.length).trim();
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw) as PedidoMergeUndoMeta;
+    if (parsed?.version !== 1 || !Array.isArray(parsed.sources) || !parsed.target?.id) return null;
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function upsertMergeUndoMetaInObservacao(
+  observacao: string | null | undefined,
+  meta: PedidoMergeUndoMeta
+): string {
+  const semMerge = splitObservacaoTokens(observacao).filter((part) => !part.startsWith(MERGE_UNDO_PREFIX));
+  return [...semMerge, encodeMergeUndoMeta(meta)].join(' | ');
+}
+
+function removerMergeUndoMetaDaObservacao(observacao: string | null | undefined): string | null {
+  const semMerge = splitObservacaoTokens(observacao).filter((part) => !part.startsWith(MERGE_UNDO_PREFIX));
+  return semMerge.length > 0 ? semMerge.join(' | ') : null;
 }
 
 function isStorageUrl(value: string | null | undefined): boolean {
@@ -525,7 +589,7 @@ export async function listarPedidosParaConferencia(
 
   const { data, error } = await supabase
     .from('pedidos')
-    .select('id,titulo,listeiro,pessoa,status,created_at,clickup_task_id')
+    .select('id,titulo,listeiro,pessoa,status,observacao,created_at,clickup_task_id')
     .eq('empresa', normalizarEmpresa(empresa))
     .eq('flag', normalizarFlag(flag))
     .in('status', ['analisado', 'em_andamento'])
@@ -540,6 +604,7 @@ export async function listarPedidosParaConferencia(
     date_created: pedido.created_at ? String(new Date(pedido.created_at).getTime()) : '',
     emAndamento: pedido.status === 'em_andamento',
     clickupTaskId: pedido.clickup_task_id ?? null,
+    undoMergeDisponivel: Boolean(extrairMergeUndoMeta(pedido.observacao)),
   }));
 }
 
@@ -933,13 +998,13 @@ export async function juntarPedidos(
 
   const { data, error } = await supabase
     .from('pedidos')
-    .select('id,empresa,flag,listeiro,pessoa,titulo,status,created_at')
+    .select('id,empresa,flag,listeiro,pessoa,titulo,status,observacao,created_at')
     .in('id', ids);
   if (error) throw error;
 
   type PedidoMeta = {
     id: string; empresa: string; flag: string; listeiro: string | null;
-    pessoa: string | null; titulo: string | null; status: string; created_at: string | null;
+    pessoa: string | null; titulo: string | null; status: string; observacao: string | null; created_at: string | null;
   };
   const pedidos = (data ?? []) as PedidoMeta[];
   if (pedidos.length < 2) throw new Error('Pedidos nao encontrados para juntar.');
@@ -960,6 +1025,16 @@ export async function juntarPedidos(
   );
   const alvo = ordenados[0];
   const fontes = ordenados.slice(1);
+
+  const itemIdsPorPedido = new Map<string, string[]>();
+  for (const pedido of ordenados) {
+    const { data: itensPedido, error: itensError } = await supabase
+      .from('pedido_itens')
+      .select('id')
+      .eq('pedido_id', pedido.id);
+    if (itensError) throw itensError;
+    itemIdsPorPedido.set(pedido.id, ((itensPedido ?? []) as Array<{ id: string }>).map((item) => item.id));
+  }
 
   // move os itens de cada fonte para o alvo
   for (const fonte of fontes) {
@@ -987,9 +1062,35 @@ export async function juntarPedidos(
 
   const pessoa = String(alvo.listeiro ?? alvo.pessoa ?? '').trim();
   const novoTitulo = `${pessoa || String(alvo.titulo ?? '').trim() || 'Lista'} (juntado ${pedidos.length})`;
+  const mergeUndoMeta: PedidoMergeUndoMeta = {
+    version: 1,
+    mergedAt: new Date().toISOString(),
+    target: {
+      id: alvo.id,
+      titulo: alvo.titulo,
+      pessoa: alvo.pessoa,
+      listeiro: alvo.listeiro,
+      status: alvo.status,
+      created_at: alvo.created_at,
+    },
+    sources: ordenados.map((pedido) => ({
+      id: pedido.id,
+      titulo: pedido.titulo,
+      pessoa: pedido.pessoa,
+      listeiro: pedido.listeiro,
+      status: pedido.status,
+      created_at: pedido.created_at,
+      itemIds: itemIdsPorPedido.get(pedido.id) ?? [],
+    })),
+  };
   const { error: updErr } = await supabase
     .from('pedidos')
-    .update({ titulo: novoTitulo, total_itens: totalItens, status: 'analisado' })
+    .update({
+      titulo: novoTitulo,
+      total_itens: totalItens,
+      status: 'analisado',
+      observacao: upsertMergeUndoMetaInObservacao(alvo.observacao, mergeUndoMeta),
+    })
     .eq('id', alvo.id);
   if (updErr) throw updErr;
 
@@ -998,6 +1099,96 @@ export async function juntarPedidos(
   });
 
   return { pedidoId: alvo.id, totalItens, juntados: pedidos.length };
+}
+
+export async function desfazerJuntarPedidos(pedidoId: string): Promise<{ restaurados: number }> {
+  if (!isSupabaseConfigured) throw new Error('Supabase nao configurado.');
+  const id = String(pedidoId ?? '').trim();
+  if (!id) throw new Error('Pedido invalido para desfazer o juntar.');
+
+  const { data, error } = await supabase
+    .from('pedidos')
+    .select('id,empresa,flag,titulo,listeiro,pessoa,status,observacao,created_at')
+    .eq('id', id)
+    .maybeSingle();
+  if (error) throw error;
+  if (!data) throw new Error('Pedido nao encontrado para desfazer o juntar.');
+
+  const pedidoAtual = data as {
+    id: string;
+    empresa: string;
+    flag: string;
+    titulo: string | null;
+    listeiro: string | null;
+    pessoa: string | null;
+    status: string;
+    observacao: string | null;
+    created_at: string | null;
+  };
+
+  const mergeUndo = extrairMergeUndoMeta(pedidoAtual.observacao);
+  if (!mergeUndo) {
+    throw new Error('Este pedido nao tem historico suficiente para desfazer o juntar.');
+  }
+  if (pedidoAtual.status === 'concluido' || pedidoAtual.status === 'em_andamento') {
+    throw new Error('So da para desfazer juntar com o pedido parado em analisado.');
+  }
+
+  const targetOriginal = mergeUndo.sources.find((source) => source.id === mergeUndo.target.id);
+  if (!targetOriginal) {
+    throw new Error('Historico de juntar corrompido: alvo original ausente.');
+  }
+
+  for (const source of mergeUndo.sources) {
+    if (source.id === mergeUndo.target.id) continue;
+
+    const { error: insertError } = await supabase.from('pedidos').insert({
+      id: source.id,
+      empresa: pedidoAtual.empresa,
+      flag: pedidoAtual.flag,
+      titulo: source.titulo,
+      pessoa: source.pessoa,
+      listeiro: source.listeiro,
+      conferente: null,
+      status: source.status,
+      total_itens: source.itemIds.length,
+      resumo_separado: 0,
+      resumo_nao_tem: 0,
+      resumo_parcial: 0,
+      resumo_pendente: source.itemIds.length,
+      observacao: null,
+      created_at: source.created_at,
+    });
+    if (insertError) throw insertError;
+
+    if (source.itemIds.length > 0) {
+      const { error: moveError } = await supabase
+        .from('pedido_itens')
+        .update({ pedido_id: source.id })
+        .in('id', source.itemIds);
+      if (moveError) throw moveError;
+    }
+  }
+
+  const { error: restoreTargetError } = await supabase
+    .from('pedidos')
+    .update({
+      titulo: targetOriginal.titulo,
+      pessoa: targetOriginal.pessoa,
+      listeiro: targetOriginal.listeiro,
+      status: targetOriginal.status,
+      total_itens: targetOriginal.itemIds.length,
+      observacao: removerMergeUndoMetaDaObservacao(pedidoAtual.observacao),
+    })
+    .eq('id', mergeUndo.target.id);
+  if (restoreTargetError) throw restoreTargetError;
+
+  for (const source of mergeUndo.sources) {
+    const { error: rpcError } = await supabase.rpc('recalcular_resumo_pedido', { p_pedido_id: source.id });
+    if (rpcError) throw rpcError;
+  }
+
+  return { restaurados: mergeUndo.sources.length };
 }
 
 export async function enviarListaParaConferencia(

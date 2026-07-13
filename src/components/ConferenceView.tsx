@@ -26,6 +26,7 @@ import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import {
+  desfazerJuntarPedidos,
   carregarItensDoPedido,
   dispararExpedicaoConferencia,
   fecharConferenciaExistente,
@@ -449,6 +450,24 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       setTasksErro(e?.message ?? "Erro ao juntar pedidos");
     } finally {
       setJuntando(false);
+    }
+  };
+
+  const handleDesfazerJuntar = async (task: PedidoParaConferencia) => {
+    try {
+      const resultado = await desfazerJuntarPedidos(task.id);
+      toast({
+        title: "Juntar desfeito",
+        description: `${resultado.restaurados} pedidos restaurados.`,
+      });
+      setModalModoAberturaTask(null);
+      await recarregarTasks();
+    } catch (err) {
+      toast({
+        title: "Erro ao desfazer juntar",
+        description: err instanceof Error ? err.message : "Nao foi possivel desfazer o juntar agora.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -1472,6 +1491,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                   <span className="text-base text-primary">📦 Fazer Separação</span>
                   <span className="text-[11px] text-muted-foreground font-normal">Reserva o pedido para separação</span>
                 </button>
+                {isAdminPlus && modalModoAberturaTask.undoMergeDisponivel && (
+                  <button
+                    onClick={() => void handleDesfazerJuntar(modalModoAberturaTask)}
+                    className="w-full h-14 rounded-xl border-2 border-amber-300 bg-amber-50 text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
+                  >
+                    <span className="text-base text-amber-800">Desfazer juntar</span>
+                    <span className="text-[11px] text-amber-700 font-normal">Restaura os pedidos originais deste merge</span>
+                  </button>
+                )}
               </div>
               <button onClick={() => { setModalModoAberturaTask(null); setForcarReservaAndamento(false); }} className="w-full text-xs text-muted-foreground underline cursor-pointer bg-transparent border-none pt-1">Cancelar</button>
             </div>
