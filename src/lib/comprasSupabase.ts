@@ -121,6 +121,89 @@ export async function fetchPedidosFeitosSupabase(empresa: Empresa): Promise<Pedi
   return (data as PedidoFeitoCompraRow[] | null) ?? [];
 }
 
+// ── Enriquecimento de itens (foto + info de Compras) ─────────────────────────
+// Cruza itens de um pedido com o catalogo por `produto_key`: a tabela `compras`
+// traz vezes_pedido/status/foto (produtos que foram para compra) e `produtos`
+// completa foto/descricao dos demais. Usado em Meus Pedidos (fotos nao migraram
+// para pedido_itens) e no modal de detalhe do item.
+export interface CatalogoItemInfo {
+  fotoUrl: string | null;
+  descricao: string | null;
+  secao: string | null;
+  vezesPedido: number | null;
+  statusCompra: CompraStatusApp | null;
+}
+
+function empresaComprasDeString(empresa: string): EmpresaCompras {
+  const e = String(empresa ?? '').toUpperCase();
+  return e.includes('SOYE') || e.includes('FACIL') ? 'SF' : 'NEWSHOP';
+}
+
+export async function buscarCatalogoItens(
+  empresa: string,
+  produtoKeys: string[]
+): Promise<Map<string, CatalogoItemInfo>> {
+  const mapa = new Map<string, CatalogoItemInfo>();
+  if (!isSupabaseConfigured) return mapa;
+
+  const chaves = [...new Set((produtoKeys ?? []).filter(Boolean))];
+  if (chaves.length === 0) return mapa;
+
+  const emp = empresaComprasDeString(empresa);
+
+  try {
+    const { data: compras, error } = await supabase
+      .from('compras')
+      .select('produto_key,descricao,secao,status,vezes_pedido,foto_url')
+      .eq('empresa', emp)
+      .in('produto_key', chaves);
+    if (error) throw error;
+    for (const r of (compras ?? []) as CompraRow[]) {
+      mapa.set(r.produto_key, {
+        fotoUrl: r.foto_url ?? null,
+        descricao: r.descricao ?? null,
+        secao: r.secao ?? null,
+        vezesPedido: r.vezes_pedido ?? null,
+        statusCompra: r.status ?? null,
+      });
+    }
+  } catch (error) {
+    console.warn('[comprasSupabase] buscarCatalogoItens: falha ao ler compras (best-effort):', error);
+  }
+
+  // Completa com o catalogo global `produtos` (foto/descricao) onde faltou.
+  const faltam = chaves.filter((k) => !mapa.get(k)?.fotoUrl);
+  if (faltam.length > 0) {
+    try {
+      const { data: produtos, error } = await supabase
+        .from('produtos')
+        .select('produto_key,descricao,secao,foto_url')
+        .in('produto_key', faltam);
+      if (error) throw error;
+      for (const r of (produtos ?? []) as Array<{ produto_key: string; descricao: string | null; secao: string | null; foto_url: string | null }>) {
+        const atual = mapa.get(r.produto_key);
+        if (atual) {
+          if (!atual.fotoUrl) atual.fotoUrl = r.foto_url ?? null;
+          if (!atual.descricao) atual.descricao = r.descricao ?? null;
+          if (!atual.secao) atual.secao = r.secao ?? null;
+        } else {
+          mapa.set(r.produto_key, {
+            fotoUrl: r.foto_url ?? null,
+            descricao: r.descricao ?? null,
+            secao: r.secao ?? null,
+            vezesPedido: null,
+            statusCompra: null,
+          });
+        }
+      }
+    } catch (error) {
+      console.warn('[comprasSupabase] buscarCatalogoItens: falha ao ler produtos (best-effort):', error);
+    }
+  }
+
+  return mapa;
+}
+
 // Espelha no Supabase os produtos ja deduplicados vindos do ClickUp (dual-write).
 // Upsert por (empresa, produto_key): re-importar nao duplica, so atualiza.
 export async function upsertComprasFromClickup(

@@ -5,6 +5,7 @@ import {
   ChevronUp,
   ClipboardList,
   Clock3,
+  MoreVertical,
   Package,
   PackageCheck,
   RefreshCw,
@@ -19,6 +20,12 @@ import {
   type MeuPedidoResumo,
   type PedidoFilaItem,
 } from "@/lib/pedidosFila";
+import {
+  buscarCatalogoItens,
+  produtoKey,
+  type CatalogoItemInfo,
+} from "@/lib/comprasSupabase";
+import { ItemPedidoModal } from "@/components/ItemPedidoModal";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 
 const ITEM_STATUS_META: Record<string, { label: string; classes: string }> = {
@@ -89,6 +96,10 @@ export default function MeusPedidos() {
   const [expandido, setExpandido] = useState<Set<string>>(new Set());
   const [itensPorPedido, setItensPorPedido] = useState<Record<string, PedidoFilaItem[]>>({});
   const [carregandoItens, setCarregandoItens] = useState<Set<string>>(new Set());
+  // Catalogo (foto + vezes_pedido + status de compra) por produto_key, compartilhado.
+  const [catalogo, setCatalogo] = useState<Record<string, CatalogoItemInfo>>({});
+  // Item aberto no modal de tela cheia.
+  const [itemModal, setItemModal] = useState<{ item: PedidoFilaItem; nomePedido: string } | null>(null);
 
   const toggleItens = async (pedidoId: string) => {
     const abrindo = !expandido.has(pedidoId);
@@ -105,6 +116,17 @@ export default function MeusPedidos() {
     try {
       const itens = await carregarItensDoPedido(pedidoId);
       setItensPorPedido((prev) => ({ ...prev, [pedidoId]: itens }));
+
+      // Enriquece com foto + info de Compras (as fotos nao ficam em pedido_itens).
+      const keys = itens.map((it) => produtoKey(it.codigo, it.sku)).filter(Boolean);
+      const info = await buscarCatalogoItens(empresa, keys);
+      if (info.size > 0) {
+        setCatalogo((prev) => {
+          const next = { ...prev };
+          info.forEach((valor, chave) => { next[chave] = valor; });
+          return next;
+        });
+      }
     } catch (err) {
       console.error("[MeusPedidos] Falha ao carregar itens do pedido:", err);
       setItensPorPedido((prev) => ({ ...prev, [pedidoId]: [] }));
@@ -447,15 +469,18 @@ export default function MeusPedidos() {
                     ) : itens && itens.length > 0 ? (
                       itens.map((item) => {
                         const st = itemStatusMeta(item.status);
+                        const info = catalogo[produtoKey(item.codigo, item.sku)];
+                        const foto = item.photo || info?.fotoUrl || null;
+                        const descricao = item.descricao || info?.descricao || item.sku || item.codigo;
                         return (
                           <div
                             key={item.id}
                             className="flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-2"
                           >
-                            {item.photo ? (
+                            {foto ? (
                               <img
-                                src={item.photo}
-                                alt={item.descricao || item.codigo}
+                                src={foto}
+                                alt={descricao}
                                 className="h-12 w-12 shrink-0 rounded-lg object-cover"
                                 loading="lazy"
                               />
@@ -466,7 +491,7 @@ export default function MeusPedidos() {
                             )}
                             <div className="min-w-0 flex-1">
                               <div className="truncate text-sm font-semibold text-foreground">
-                                {item.descricao || item.sku || item.codigo}
+                                {descricao}
                               </div>
                               <div className="truncate font-mono text-xs text-muted-foreground">
                                 {item.codigo}
@@ -482,6 +507,15 @@ export default function MeusPedidos() {
                                 {st.label}
                               </span>
                             </div>
+                            <button
+                              type="button"
+                              onClick={() => setItemModal({ item, nomePedido: nome })}
+                              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent"
+                              aria-label="Mais informacoes do item"
+                              title="Mais informacoes"
+                            >
+                              <MoreVertical className="h-4 w-4" />
+                            </button>
                           </div>
                         );
                       })
@@ -509,6 +543,18 @@ export default function MeusPedidos() {
           </button>
         </div>
       )}
+
+      <ItemPedidoModal
+        item={itemModal?.item ?? null}
+        info={itemModal ? catalogo[produtoKey(itemModal.item.codigo, itemModal.item.sku)] ?? null : null}
+        nomePedido={itemModal?.nomePedido ?? ""}
+        fotoUrl={
+          itemModal
+            ? itemModal.item.photo || catalogo[produtoKey(itemModal.item.codigo, itemModal.item.sku)]?.fotoUrl || null
+            : null
+        }
+        onClose={() => setItemModal(null)}
+      />
     </div>
   );
 }
