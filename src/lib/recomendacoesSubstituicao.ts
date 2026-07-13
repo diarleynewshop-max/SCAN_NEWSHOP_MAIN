@@ -167,14 +167,23 @@ function shouldReplaceStatus(current: CompraStatusApp, next: CompraStatusApp) {
   return (STATUS_COMPRA_PRIORITY[next] ?? 0) > (STATUS_COMPRA_PRIORITY[current] ?? 0);
 }
 
+function empresasComprasCandidatas(empresa: string): string[] {
+  const atual = String(empresa ?? "").trim().toUpperCase();
+  if (atual === "NEWSHOP") return ["NEWSHOP"];
+  if (atual === "SOYE") return ["SF", "SOYE"];
+  if (atual === "FACIL") return ["SF", "FACIL"];
+  return [atual].filter(Boolean);
+}
+
 async function registrarOriginalEmCompras(rec: RecomendacaoSubstituicao) {
   const key = produtoKey(rec.codigoOriginal, rec.skuOriginal);
   if (!key) return;
+  const empresas = empresasComprasCandidatas(rec.empresa);
 
   const { data, error } = await supabase
     .from("compras")
     .select("id,empresa,produto_key,codigo,sku,descricao,secao,status,vezes_pedido,foto_url,tags")
-    .eq("empresa", rec.empresa)
+    .in("empresa", empresas)
     .eq("produto_key", key)
     .maybeSingle();
 
@@ -211,19 +220,25 @@ async function registrarOriginalEmCompras(rec: RecomendacaoSubstituicao) {
     return;
   }
 
-  const { error: insertError } = await supabase.from("compras").insert({
-    empresa: rec.empresa,
-    produto_key: key,
-    codigo: rec.codigoOriginal,
-    sku: rec.skuOriginal || null,
-    descricao: rec.descricaoOriginal || null,
-    secao: null,
-    status: "todo",
-    vezes_pedido: 1,
-    foto_url: rec.fotoOriginal || null,
-    tags: Array.from(tagsBase),
-  });
-  if (insertError) throw insertError;
+  let lastError: unknown = null;
+  for (const empresaCandidata of empresas) {
+    const { error: insertError } = await supabase.from("compras").insert({
+      empresa: empresaCandidata,
+      produto_key: key,
+      codigo: rec.codigoOriginal,
+      sku: rec.skuOriginal || null,
+      descricao: rec.descricaoOriginal || null,
+      secao: null,
+      status: "todo",
+      vezes_pedido: 1,
+      foto_url: rec.fotoOriginal || null,
+      tags: Array.from(tagsBase),
+    });
+    if (!insertError) return;
+    lastError = insertError;
+  }
+
+  if (lastError) throw lastError;
 }
 
 export async function criarRecomendacaoSubstituicao(
@@ -308,17 +323,65 @@ export async function responderRecomendacaoSubstituicao(
   actor: string
 ): Promise<void> {
   ensureSupabase();
-  const { error } = await supabase
+  const agora = new Date().toISOString();
+
+  if (decisao === "recusada") {
+    const { error } = await supabase
+      .from("recomendacoes_substituicao")
+      .update({
+        status: "recusada",
+        respondido_por: actor,
+        respondido_em: agora,
+        resultado_visto_sugerente: false,
+      })
+      .eq("id", id)
+      .eq("status", "pendente");
+    if (error) throw error;
+    return;
+  }
+
+  const { data, error } = await supabase
+    .from("recomendacoes_substituicao")
+    .select("*")
+    .eq("id", id)
+    .single();
+  if (error) throw error;
+
+  const recomendacao = mapRow(data as RecomendacaoRow);
+  if (recomendacao.status !== "pendente") {
+    throw new Error("Essa recomendacao ja foi respondida.");
+  }
+
+  await registrarOriginalEmCompras(recomendacao);
+
+  const { error: itemError } = await supabase
+    .from("pedido_itens")
+    .update({
+      codigo: recomendacao.codigoSugerido,
+      sku: recomendacao.skuSugerido || null,
+      descricao: recomendacao.descricaoSugerida || null,
+      secao: recomendacao.secaoSugerida || null,
+      foto_url: recomendacao.fotoSugerida || null,
+      quantidade_pedida: Math.max(1, Number(recomendacao.quantidadeSugerida || 1)),
+      quantidade_real: null,
+      status: "pendente",
+    })
+    .eq("id", recomendacao.pedidoItemId);
+  if (itemError) throw itemError;
+
+  const { error: updateError } = await supabase
     .from("recomendacoes_substituicao")
     .update({
-      status: decisao,
+      status: "aplicada",
       respondido_por: actor,
-      respondido_em: new Date().toISOString(),
+      respondido_em: agora,
+      aplicado_por: actor,
+      aplicado_em: agora,
       resultado_visto_sugerente: false,
     })
     .eq("id", id)
     .eq("status", "pendente");
-  if (error) throw error;
+  if (updateError) throw updateError;
 }
 
 export async function aplicarRecomendacaoSubstituicao(

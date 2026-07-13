@@ -51,7 +51,6 @@ import { supabase } from "@/lib/supabaseClient";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import { obterSenhaPadrao, validarSenha } from "@/lib/senhaConferencia";
 import {
-  aplicarRecomendacaoSubstituicao,
   criarRecomendacaoSubstituicao,
   listarRecomendacoesDoPedido,
   listarResultadosRecomendacaoPorSugerente,
@@ -495,6 +494,27 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
   };
 
+  const carregarItensTaskAtual = async (pedidoId: string) => {
+    try {
+      const itensPedido = await carregarItensDoPedido(pedidoId);
+      const parsedSupabase: ConferenceItem[] = itensPedido.map((item) => ({
+        id: item.id || crypto.randomUUID(),
+        codigo: item.codigo,
+        sku: item.sku ?? "",
+        secao: item.secao ?? null,
+        quantidadePedida: item.quantidadePedida,
+        quantidadeReal: item.quantidadeReal,
+        status: item.status === "pendente" && item.quantidadeReal == null ? "aguardando" : item.status,
+        photo: item.photo ?? null,
+        digito: null,
+      }));
+      setItems(parsedSupabase);
+      setItensDetalheTask(parsedSupabase);
+    } catch (err) {
+      console.error("[conferencia] Falha ao recarregar itens da task:", err);
+    }
+  };
+
   const abrirDetalhamentoTask = async (task: PedidoParaConferencia) => {
     setModalAcoesTask(null);
     setModalDetalharTask(task);
@@ -704,6 +724,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         },
         () => {
           void carregarRecomendacoesPedido(taskSelecionada.id);
+          void carregarItensTaskAtual(taskSelecionada.id);
         }
       )
       .subscribe();
@@ -1193,9 +1214,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const recomendacaoPendenteAtual = currentItem
     ? recomendacoesPedido.find((item) => item.pedidoItemId === currentItem.id && item.status === "pendente") ?? null
     : null;
-  const recomendacaoAceitaAtual = currentItem
-    ? recomendacoesPedido.find((item) => item.pedidoItemId === currentItem.id && item.status === "aceita") ?? null
-    : null;
   const recomendacaoAplicadaAtual = currentItem
     ? recomendacoesPedido.find((item) => item.pedidoItemId === currentItem.id && item.status === "aplicada") ?? null
     : null;
@@ -1613,42 +1631,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       });
     } finally {
       setSalvandoRecomendacao(false);
-    }
-  };
-
-  const aplicarRecomendacaoAtual = async (recomendacao: RecomendacaoSubstituicao) => {
-    try {
-      const aplicada = await aplicarRecomendacaoSubstituicao(
-        recomendacao.id,
-        conferente || loginSalvo?.nomePessoa || "Sistema"
-      );
-
-      setItems((prev) =>
-        prev.map((item) =>
-          item.id === recomendacao.pedidoItemId
-            ? {
-                ...item,
-                codigo: aplicada.codigoSugerido,
-                sku: aplicada.skuSugerido,
-                secao: aplicada.secaoSugerida || null,
-                photo: aplicada.fotoSugerida ?? null,
-                quantidadeReal: null,
-                status: "pendente",
-              }
-            : item
-        )
-      );
-      setRecomendacoesPedido((prev) => prev.map((item) => (item.id === aplicada.id ? aplicada : item)));
-      toast({
-        title: "Troca aplicada",
-        description: `${aplicada.codigoOriginal} virou ${aplicada.codigoSugerido}.`,
-      });
-    } catch (err) {
-      toast({
-        title: "Falha ao aplicar troca",
-        description: err instanceof Error ? err.message : "Nao foi possivel aplicar a troca agora.",
-        variant: "destructive",
-      });
     }
   };
 
@@ -2363,21 +2345,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               <p className="mt-1 text-xs text-sky-800">
                 Pendente de resposta: {recomendacaoPendenteAtual.codigoSugerido} por {recomendacaoPendenteAtual.destinatario}.
               </p>
-            </div>
-          )}
-          {recomendacaoAceitaAtual && isAdminPlus && (
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
-              <p className="font-bold">Troca aprovada</p>
-              <p className="mt-1 text-xs text-emerald-800">
-                {recomendacaoAceitaAtual.respondidoPor || recomendacaoAceitaAtual.destinatario} aceitou trocar por {recomendacaoAceitaAtual.codigoSugerido}.
-              </p>
-              <button
-                type="button"
-                onClick={() => void aplicarRecomendacaoAtual(recomendacaoAceitaAtual)}
-                className="mt-3 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white"
-              >
-                Aplicar troca
-              </button>
             </div>
           )}
           {recomendacaoAplicadaAtual && (
