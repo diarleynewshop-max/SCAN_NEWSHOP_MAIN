@@ -1,5 +1,8 @@
 import { useState, useRef, useEffect } from "react";
-import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
+import {
+  buscarProdutoVarejoFacil,
+  type VarejoFacilProduct,
+} from "@/lib/varejoFacilIntegration";
 import {
   FileInput,
   ArrowLeft,
@@ -41,8 +44,17 @@ import {
   type PedidoParaConferencia,
 } from "@/lib/pedidosFila";
 import { enviarConferenciaParaSupabase } from "@/lib/pedidosSupabase";
+import { supabase } from "@/lib/supabaseClient";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import { obterSenhaPadrao, validarSenha } from "@/lib/senhaConferencia";
+import {
+  aplicarRecomendacaoSubstituicao,
+  criarRecomendacaoSubstituicao,
+  listarRecomendacoesDoPedido,
+  listarResultadosRecomendacaoPorSugerente,
+  marcarResultadosRecomendacaoComoVistos,
+  type RecomendacaoSubstituicao,
+} from "@/lib/recomendacoesSubstituicao";
 import { z } from "zod";
 
 export type ConferenceStatus =
@@ -241,6 +253,13 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const isAdminPlus = !!loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ["admin", "super"]);
+  const [recomendacoesPedido, setRecomendacoesPedido] = useState<RecomendacaoSubstituicao[]>([]);
+  const [modalRecomendacaoAberto, setModalRecomendacaoAberto] = useState(false);
+  const [codigoRecomendado, setCodigoRecomendado] = useState("");
+  const [observacaoRecomendacao, setObservacaoRecomendacao] = useState("");
+  const [produtoRecomendado, setProdutoRecomendado] = useState<VarejoFacilProduct | null>(null);
+  const [buscandoProdutoRecomendado, setBuscandoProdutoRecomendado] = useState(false);
+  const [salvandoRecomendacao, setSalvandoRecomendacao] = useState(false);
 
   // ── Rascunho automático ────────────────────────────────────────────────────
   const DRAFT_KEY = "conferencia_draft_v1";
@@ -453,6 +472,44 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
   };
 
+  const carregarRecomendacoesPedido = async (pedidoId: string) => {
+    try {
+      const lista = await listarRecomendacoesDoPedido(pedidoId);
+      setRecomendacoesPedido(lista);
+    } catch (err) {
+      console.error("[conferencia] Falha ao carregar recomendacoes:", err);
+      setRecomendacoesPedido([]);
+    }
+  };
+
+  const checarResultadosRecomendacoes = async () => {
+    if (!loginSalvo?.nomePessoa) return;
+    try {
+      const resultados = await listarResultadosRecomendacaoPorSugerente(
+        empresa,
+        flag,
+        loginSalvo.nomePessoa
+      );
+      if (resultados.length === 0) return;
+
+      resultados.forEach((item) => {
+        toast({
+          title:
+            item.status === "aceita"
+              ? `${item.destinatario} aceitou a troca`
+              : item.status === "recusada"
+                ? `${item.destinatario} recusou a troca`
+                : "Troca aplicada",
+          description: `${item.codigoOriginal} -> ${item.codigoSugerido}`,
+        });
+      });
+
+      await marcarResultadosRecomendacaoComoVistos(resultados.map((item) => item.id));
+    } catch (err) {
+      console.error("[conferencia] Falha ao checar resultados de recomendacao:", err);
+    }
+  };
+
   const handleDesfazerJuntar = async (task: PedidoParaConferencia) => {
     try {
       const resultado = await desfazerJuntarPedidos(task.id);
@@ -516,6 +573,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       const clickupOrigemIds = task.clickupTaskId ? [task.clickupTaskId] : [];
       setTaskOrigemIds(clickupOrigemIds);
       taskOrigemIdsRef.current = clickupOrigemIds;
+      await carregarRecomendacoesPedido(task.id);
       setPhase("ready");
       toast({ title: `${parsedSupabase.length} itens carregados do pedido!` });
 
@@ -554,6 +612,35 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       setLoadingJson(false);
     }
   };
+
+  useEffect(() => {
+    void checarResultadosRecomendacoes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresa, flag, loginSalvo?.nomePessoa]);
+
+  useEffect(() => {
+    if (!taskSelecionada?.id) return;
+
+    const channel = supabase
+      .channel(`recomendacoes-pedido:${taskSelecionada.id}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "recomendacoes_substituicao",
+          filter: `pedido_id=eq.${taskSelecionada.id}`,
+        },
+        () => {
+          void carregarRecomendacoesPedido(taskSelecionada.id);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [taskSelecionada?.id]);
 
   const processJsonText = (text: string): boolean => {
     try {
@@ -1032,6 +1119,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   };
 
   const currentItem = items[currentIndex];
+  const recomendacaoPendenteAtual = currentItem
+    ? recomendacoesPedido.find((item) => item.pedidoItemId === currentItem.id && item.status === "pendente") ?? null
+    : null;
+  const recomendacaoAceitaAtual = currentItem
+    ? recomendacoesPedido.find((item) => item.pedidoItemId === currentItem.id && item.status === "aceita") ?? null
+    : null;
+  const recomendacaoAplicadaAtual = currentItem
+    ? recomendacoesPedido.find((item) => item.pedidoItemId === currentItem.id && item.status === "aplicada") ?? null
+    : null;
   const isCurrentComplete =
     currentItem &&
     currentItem.status !== "aguardando" &&
@@ -1198,6 +1294,132 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
     doc.save(`conferencia_${empresa}_${new Date().toISOString().slice(0, 10)}.pdf`);
     toast({ title: "PDF exportado!" });
+  };
+
+  const abrirModalRecomendacao = () => {
+    setCodigoRecomendado("");
+    setObservacaoRecomendacao("");
+    setProdutoRecomendado(null);
+    setModalRecomendacaoAberto(true);
+  };
+
+  const buscarProdutoRecomendadoAtual = async () => {
+    const codigo = codigoRecomendado.trim();
+    if (!codigo) {
+      toast({ title: "Informe o codigo do substituto", variant: "destructive" });
+      return;
+    }
+
+    setBuscandoProdutoRecomendado(true);
+    try {
+      const produto = await buscarProdutoVarejoFacil(codigo, { empresa, flag });
+      if (!produto) {
+        toast({ title: "Produto nao encontrado no ERP", variant: "destructive" });
+        setProdutoRecomendado(null);
+        return;
+      }
+      setProdutoRecomendado(produto);
+    } catch (err) {
+      toast({
+        title: "Falha ao buscar produto",
+        description: err instanceof Error ? err.message : "Nao foi possivel consultar o ERP.",
+        variant: "destructive",
+      });
+      setProdutoRecomendado(null);
+    } finally {
+      setBuscandoProdutoRecomendado(false);
+    }
+  };
+
+  const salvarRecomendacaoAtual = async () => {
+    if (!currentItem || !taskSelecionada) return;
+    if (!listeiro.trim()) {
+      toast({ title: "Pedido sem pessoa para recomendar", variant: "destructive" });
+      return;
+    }
+    if (!produtoRecomendado) {
+      toast({ title: "Busque o item substituto antes de salvar", variant: "destructive" });
+      return;
+    }
+
+    setSalvandoRecomendacao(true);
+    try {
+      const criada = await criarRecomendacaoSubstituicao({
+        empresa,
+        flag,
+        pedidoId: taskSelecionada.id,
+        pedidoItemId: currentItem.id,
+        pedidoTitulo: taskSelecionada.name,
+        pedidoPessoa: listeiro,
+        codigoOriginal: currentItem.codigo,
+        skuOriginal: currentItem.sku,
+        descricaoOriginal: currentItem.sku || currentItem.codigo,
+        fotoOriginal: currentItem.photo ?? null,
+        codigoSugerido: produtoRecomendado.codigo_barras,
+        skuSugerido: "",
+        descricaoSugerida: produtoRecomendado.descricao,
+        secaoSugerida: produtoRecomendado.secao ?? null,
+        fotoSugerida: produtoRecomendado.imagem ?? null,
+        erpIdSugerido: produtoRecomendado.id,
+        sugeridoPor: conferente || loginSalvo?.nomePessoa || "Sistema",
+        destinatario: listeiro,
+        observacao: observacaoRecomendacao.trim() || null,
+      });
+
+      setRecomendacoesPedido((prev) => [
+        criada,
+        ...prev.filter((item) => item.pedidoItemId !== criada.pedidoItemId || item.id === criada.id),
+      ]);
+      setModalRecomendacaoAberto(false);
+      toast({
+        title: "Recomendacao enviada",
+        description: `${listeiro} pode aprovar ou recusar no app.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Falha ao salvar recomendacao",
+        description: err instanceof Error ? err.message : "Nao foi possivel salvar a recomendacao.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvandoRecomendacao(false);
+    }
+  };
+
+  const aplicarRecomendacaoAtual = async (recomendacao: RecomendacaoSubstituicao) => {
+    try {
+      const aplicada = await aplicarRecomendacaoSubstituicao(
+        recomendacao.id,
+        conferente || loginSalvo?.nomePessoa || "Sistema"
+      );
+
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === recomendacao.pedidoItemId
+            ? {
+                ...item,
+                codigo: aplicada.codigoSugerido,
+                sku: aplicada.skuSugerido,
+                secao: aplicada.secaoSugerida || null,
+                photo: aplicada.fotoSugerida ?? null,
+                quantidadeReal: null,
+                status: "pendente",
+              }
+            : item
+        )
+      );
+      setRecomendacoesPedido((prev) => prev.map((item) => (item.id === aplicada.id ? aplicada : item)));
+      toast({
+        title: "Troca aplicada",
+        description: `${aplicada.codigoOriginal} virou ${aplicada.codigoSugerido}.`,
+      });
+    } catch (err) {
+      toast({
+        title: "Falha ao aplicar troca",
+        description: err instanceof Error ? err.message : "Nao foi possivel aplicar a troca agora.",
+        variant: "destructive",
+      });
+    }
   };
 
   const exportJSON = async () => {
@@ -1797,6 +2019,50 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               )}
             </div>
           )}
+          {!apenasVisualizar && currentItem.status === "pendente" && isAdminPlus && (
+            <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="font-bold">Recomendacao interna</p>
+                  <p className="mt-1 text-xs text-sky-800">
+                    Avise o {listeiro || "responsavel"} com um item parecido para ele aprovar.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  onClick={abrirModalRecomendacao}
+                  className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white"
+                >
+                  Recomendar troca
+                </button>
+              </div>
+              {recomendacaoPendenteAtual && (
+                <p className="mt-2 text-xs text-sky-800">
+                  Pendente de resposta: {recomendacaoPendenteAtual.codigoSugerido} por {recomendacaoPendenteAtual.destinatario}.
+                </p>
+              )}
+            </div>
+          )}
+          {recomendacaoAceitaAtual && isAdminPlus && (
+            <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3 text-sm text-emerald-900">
+              <p className="font-bold">Troca aprovada</p>
+              <p className="mt-1 text-xs text-emerald-800">
+                {recomendacaoAceitaAtual.respondidoPor || recomendacaoAceitaAtual.destinatario} aceitou trocar por {recomendacaoAceitaAtual.codigoSugerido}.
+              </p>
+              <button
+                type="button"
+                onClick={() => void aplicarRecomendacaoAtual(recomendacaoAceitaAtual)}
+                className="mt-3 rounded-lg bg-emerald-600 px-3 py-2 text-xs font-bold text-white"
+              >
+                Aplicar troca
+              </button>
+            </div>
+          )}
+          {recomendacaoAplicadaAtual && (
+            <div className="rounded-xl border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900">
+              Troca aplicada neste item: {recomendacaoAplicadaAtual.codigoOriginal} para {recomendacaoAplicadaAtual.codigoSugerido}.
+            </div>
+          )}
           {!apenasVisualizar && (
           <div className="grid grid-cols-2 gap-2">
             <button onClick={() => setStatus(currentItem.id, "separado")}
@@ -1876,6 +2142,117 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           </button>
         )}
       </div>}
+
+      {modalRecomendacaoAberto && currentItem && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-card p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Recomendacao interna
+                </p>
+                <h3 className="mt-1 text-lg font-black text-foreground">
+                  {currentItem.codigo}
+                </h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Destinatario: {listeiro || "sem pessoa"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setModalRecomendacaoAberto(false)}
+                className="rounded-full bg-muted p-2 text-muted-foreground"
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Codigo substituto
+                </span>
+                <div className="mt-1 flex gap-2">
+                  <input
+                    value={codigoRecomendado}
+                    onChange={(event) => setCodigoRecomendado(event.target.value)}
+                    placeholder="Ex: abc-124"
+                    className="h-11 flex-1 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void buscarProdutoRecomendadoAtual()}
+                    disabled={buscandoProdutoRecomendado}
+                    className="inline-flex h-11 items-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground"
+                  >
+                    {buscandoProdutoRecomendado ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    ) : (
+                      <PackageSearch className="h-4 w-4" />
+                    )}
+                    Buscar
+                  </button>
+                </div>
+              </label>
+
+              {produtoRecomendado && (
+                <div className="rounded-xl border border-border bg-background p-3">
+                  <div className="flex gap-3">
+                    {produtoRecomendado.imagem ? (
+                      <img
+                        src={produtoRecomendado.imagem}
+                        alt={produtoRecomendado.descricao}
+                        className="h-20 w-20 rounded-xl object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-muted text-xs text-muted-foreground">
+                        sem foto
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-foreground">{produtoRecomendado.descricao}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{produtoRecomendado.codigo_barras}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Secao: {produtoRecomendado.secao || "-"} | Estoque: {produtoRecomendado.estoque}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Observacao
+                </span>
+                <textarea
+                  value={observacaoRecomendacao}
+                  onChange={(event) => setObservacaoRecomendacao(event.target.value)}
+                  placeholder="Ex: mesmo modelo, muda so o acabamento."
+                  className="mt-1 min-h-24 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground outline-none"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => setModalRecomendacaoAberto(false)}
+                className="h-11 flex-1 rounded-xl border border-border bg-background text-sm font-semibold text-foreground"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void salvarRecomendacaoAtual()}
+                disabled={salvandoRecomendacao || !produtoRecomendado}
+                className="h-11 flex-1 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-60"
+              >
+                {salvandoRecomendacao ? "Salvando..." : "Enviar recomendacao"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

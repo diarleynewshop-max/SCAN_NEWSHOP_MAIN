@@ -14,6 +14,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
 import {
   carregarItensDoPedido,
   listarPedidos,
@@ -27,6 +28,11 @@ import {
 } from "@/lib/comprasSupabase";
 import { ItemPedidoModal } from "@/components/ItemPedidoModal";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
+import {
+  listarRecomendacoesPendentesPorDestinatario,
+  responderRecomendacaoSubstituicao,
+  type RecomendacaoSubstituicao,
+} from "@/lib/recomendacoesSubstituicao";
 
 const ITEM_STATUS_META: Record<string, { label: string; classes: string }> = {
   separado: { label: "Separado", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
@@ -74,6 +80,7 @@ function ResumoChip(props: { label: string; value: number; classes: string }) {
 
 export default function MeusPedidos() {
   const { loginSalvo } = useAuth();
+  const { toast } = useToast();
   const [pedidos, setPedidos] = useState<MeuPedidoResumo[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -100,6 +107,9 @@ export default function MeusPedidos() {
   const [catalogo, setCatalogo] = useState<Record<string, CatalogoItemInfo>>({});
   // Item aberto no modal de tela cheia.
   const [itemModal, setItemModal] = useState<{ item: PedidoFilaItem; nomePedido: string } | null>(null);
+  const [recomendacoesPendentes, setRecomendacoesPendentes] = useState<RecomendacaoSubstituicao[]>([]);
+  const [popupRecomendacaoAberto, setPopupRecomendacaoAberto] = useState(false);
+  const [respondendoRecomendacaoId, setRespondendoRecomendacaoId] = useState<string | null>(null);
 
   const toggleItens = async (pedidoId: string) => {
     const abrindo = !expandido.has(pedidoId);
@@ -143,6 +153,20 @@ export default function MeusPedidos() {
   const flag = loginSalvo?.flag ?? "loja";
 
   const temFiltro = Boolean(produtoBusca || pessoaBusca || dataInicio || dataFim);
+
+  const carregarRecomendacoesPendentes = async () => {
+    if (!loginSalvo?.nomePessoa || !isSupabaseConfigured) {
+      setRecomendacoesPendentes([]);
+      return;
+    }
+
+    try {
+      const data = await listarRecomendacoesPendentesPorDestinatario(empresa, flag, loginSalvo.nomePessoa);
+      setRecomendacoesPendentes(data);
+    } catch (err) {
+      console.error("[MeusPedidos] Falha ao carregar recomendacoes:", err);
+    }
+  };
 
   const carregar = async (silent = false) => {
     const requestId = ++carregamentoRef.current;
@@ -226,6 +250,47 @@ export default function MeusPedidos() {
     };
   }, [empresa, flag, loginSalvo]);
 
+  useEffect(() => {
+    void carregarRecomendacoesPendentes();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [empresa, flag, loginSalvo?.nomePessoa]);
+
+  useEffect(() => {
+    if (!loginSalvo?.nomePessoa || !isSupabaseConfigured) return;
+
+    const channel = supabase
+      .channel(`recomendacoes-destinatario:${empresa}:${flag}:${loginSalvo.nomePessoa}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "recomendacoes_substituicao",
+          filter: `empresa=eq.${empresa}`,
+        },
+        () => {
+          void carregarRecomendacoesPendentes();
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [empresa, flag, loginSalvo?.nomePessoa]);
+
+  useEffect(() => {
+    if (recomendacoesPendentes.length === 0) {
+      setPopupRecomendacaoAberto(false);
+      return;
+    }
+
+    const t = setTimeout(() => {
+      setPopupRecomendacaoAberto(true);
+    }, 5000);
+    return () => clearTimeout(t);
+  }, [recomendacoesPendentes.length]);
+
   const stats = useMemo(
     () => ({
       total: pedidos.length,
@@ -245,6 +310,31 @@ export default function MeusPedidos() {
     setPessoaBusca("");
     setDataInicio("");
     setDataFim("");
+  };
+
+  const responderRecomendacao = async (
+    recomendacao: RecomendacaoSubstituicao,
+    decisao: "aceita" | "recusada"
+  ) => {
+    if (!loginSalvo?.nomePessoa) return;
+
+    setRespondendoRecomendacaoId(recomendacao.id);
+    try {
+      await responderRecomendacaoSubstituicao(recomendacao.id, decisao, loginSalvo.nomePessoa);
+      setRecomendacoesPendentes((prev) => prev.filter((item) => item.id !== recomendacao.id));
+      toast({
+        title: decisao === "aceita" ? "Troca aprovada" : "Troca recusada",
+        description: `${recomendacao.codigoOriginal} -> ${recomendacao.codigoSugerido}`,
+      });
+    } catch (err) {
+      toast({
+        title: "Falha ao responder recomendacao",
+        description: err instanceof Error ? err.message : "Nao foi possivel responder agora.",
+        variant: "destructive",
+      });
+    } finally {
+      setRespondendoRecomendacaoId(null);
+    }
   };
 
   return (
@@ -274,6 +364,28 @@ export default function MeusPedidos() {
             Atualizar
           </button>
         </div>
+
+        {recomendacoesPendentes.length > 0 && (
+          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+            <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">
+                  Recomendacao interna
+                </div>
+                <div className="mt-1 text-sm font-bold text-amber-950">
+                  Voce tem {recomendacoesPendentes.length} troca(s) pendente(s) para aprovar ou recusar.
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPopupRecomendacaoAberto(true)}
+                className="inline-flex items-center justify-center rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white"
+              >
+                Ver recomendacoes
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Filtros */}
         <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -555,6 +667,100 @@ export default function MeusPedidos() {
         }
         onClose={() => setItemModal(null)}
       />
+
+      {popupRecomendacaoAberto && recomendacoesPendentes.length > 0 && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onClick={() => setPopupRecomendacaoAberto(false)}
+        >
+          <div
+            className="w-full max-w-3xl rounded-3xl border border-border bg-card p-5 shadow-2xl"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Recomendacao de item
+                </div>
+                <h2 className="mt-1 text-2xl font-black text-foreground">
+                  Pendencias para decidir
+                </h2>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPopupRecomendacaoAberto(false)}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 max-h-[70vh] space-y-3 overflow-y-auto pr-1">
+              {recomendacoesPendentes.map((item) => (
+                <article key={item.id} className="rounded-2xl border border-border bg-background p-4">
+                  <div className="flex flex-col gap-4 md:flex-row md:items-start">
+                    <div className="flex-1">
+                      <div className="text-xs font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                        Pedido
+                      </div>
+                      <div className="mt-1 text-sm font-bold text-foreground">
+                        {item.pedidoPessoa || item.destinatario}
+                      </div>
+                      <div className="mt-1 text-xs text-muted-foreground">
+                        Recomendado por {item.sugeridoPor}
+                      </div>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        <div className="rounded-xl border border-rose-200 bg-rose-50 p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-rose-700">
+                            Original
+                          </div>
+                          <div className="mt-2 text-sm font-bold text-rose-950">{item.codigoOriginal}</div>
+                          <div className="mt-1 text-xs text-rose-800">
+                            {item.descricaoOriginal || item.skuOriginal || "-"}
+                          </div>
+                        </div>
+                        <div className="rounded-xl border border-emerald-200 bg-emerald-50 p-3">
+                          <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-emerald-700">
+                            Sugerido
+                          </div>
+                          <div className="mt-2 text-sm font-bold text-emerald-950">{item.codigoSugerido}</div>
+                          <div className="mt-1 text-xs text-emerald-800">
+                            {item.descricaoSugerida || item.skuSugerido || "-"}
+                          </div>
+                        </div>
+                      </div>
+                      {item.observacao && (
+                        <div className="mt-3 rounded-xl border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+                          {item.observacao}
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="flex w-full gap-2 md:w-52 md:flex-col">
+                      <button
+                        type="button"
+                        onClick={() => void responderRecomendacao(item, "aceita")}
+                        disabled={respondendoRecomendacaoId === item.id}
+                        className="flex-1 rounded-xl bg-emerald-600 px-4 py-3 text-sm font-bold text-white disabled:opacity-60"
+                      >
+                        Aprovar troca
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void responderRecomendacao(item, "recusada")}
+                        disabled={respondendoRecomendacaoId === item.id}
+                        className="flex-1 rounded-xl border border-rose-300 bg-rose-50 px-4 py-3 text-sm font-bold text-rose-800 disabled:opacity-60"
+                      >
+                        Recusar
+                      </button>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
