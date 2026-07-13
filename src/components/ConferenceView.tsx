@@ -27,6 +27,7 @@ import {
   carregarItensDoPedido,
   dispararExpedicaoConferencia,
   fecharConferenciaExistente,
+  gerarPedidoPendentes,
   liberarPedido,
   liberarPedidoEmSegundoPlano,
   listarPedidosParaConferencia,
@@ -969,6 +970,23 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         });
       } catch (expedicaoErr) {
         console.error("[conferencia] Falha ao disparar expedicao (nao bloqueia fechamento):", expedicaoErr);
+      }
+
+      try {
+        const pedidoPendentesId = await gerarPedidoPendentes({
+          empresa,
+          flag,
+          pessoa: listeiro || conferente,
+          itens: itensFechamento,
+        });
+        if (pedidoPendentesId) {
+          toast({
+            title: "Pendentes gerados",
+            description: "Novo pedido PENDENTES criado para revisao.",
+          });
+        }
+      } catch (pendentesErr) {
+        console.error("[conferencia] Falha ao gerar pedido de pendentes (nao bloqueia fechamento):", pendentesErr);
       }
 
       marcarComoEnviado();

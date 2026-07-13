@@ -1018,6 +1018,75 @@ export async function fecharConferenciaExistente(
   }
 }
 
+// Regra do negocio: ao concluir uma conferencia, todo item marcado como
+// 'pendente' gera um NOVO pedido (status 'analisado') so com esses itens, para
+// ser revisto/reconferido depois. Aparece na fila de conferencia como "PENDENTES".
+// Best-effort: retorna o id do pedido criado, ou null se nao havia pendentes.
+export async function gerarPedidoPendentes(params: {
+  empresa: string;
+  flag: string;
+  pessoa: string;
+  itens: FecharConferenciaItemPayload[];
+}): Promise<string | null> {
+  if (!isSupabaseConfigured) return null;
+
+  const pendentes = (params.itens ?? []).filter((item) => item.status === 'pendente');
+  if (pendentes.length === 0) return null;
+
+  const empresa = normalizarEmpresa(params.empresa);
+  const flag = normalizarFlag(params.flag);
+  const pessoa = String(params.pessoa ?? '').trim();
+  const dataLabel = new Intl.DateTimeFormat('pt-BR', {
+    timeZone: 'America/Sao_Paulo',
+    dateStyle: 'short',
+    timeStyle: 'short',
+  }).format(new Date());
+  const titulo = `⏳ ${pessoa || 'Sem nome'} — ${dataLabel} — PENDENTES`;
+
+  const { data: pedido, error: pedidoError } = await supabase
+    .from('pedidos')
+    .insert({
+      empresa,
+      flag,
+      titulo,
+      pessoa: pessoa || null,
+      listeiro: pessoa || null,
+      conferente: null,
+      status: 'analisado',
+      total_itens: pendentes.length,
+      resumo_separado: 0,
+      resumo_nao_tem: 0,
+      resumo_parcial: 0,
+      resumo_pendente: pendentes.length,
+      observacao: 'origem=pendentes-conferencia',
+    })
+    .select('id')
+    .single();
+
+  if (pedidoError) throw pedidoError;
+  const pedidoId = String(pedido?.id ?? '').trim();
+  if (!pedidoId) return null;
+
+  try {
+    // Reentram como itens 'pendente' (a conferir de novo), sem quantidade real.
+    const rows = await buildPedidoItemRows(
+      empresa,
+      pedidoId,
+      pendentes.map((item) => ({ ...item, quantidadeReal: null, status: 'pendente' as const }))
+    );
+    for (const lote of chunk(rows, 500)) {
+      const { error } = await supabase.from('pedido_itens').insert(lote);
+      if (error) throw error;
+    }
+    const { error: rpcError } = await supabase.rpc('recalcular_resumo_pedido', { p_pedido_id: pedidoId });
+    if (rpcError) throw rpcError;
+    return pedidoId;
+  } catch (error) {
+    await supabase.from('pedidos').delete().eq('id', pedidoId);
+    throw error;
+  }
+}
+
 export async function dispararExpedicaoConferencia(params: {
   conferente: string;
   empresa: string;
