@@ -1128,6 +1128,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const recomendacaoAplicadaAtual = currentItem
     ? recomendacoesPedido.find((item) => item.pedidoItemId === currentItem.id && item.status === "aplicada") ?? null
     : null;
+  const podeRecomendarAtual =
+    !apenasVisualizar &&
+    isAdminPlus &&
+    currentItem?.status === "pendente";
   const isCurrentComplete =
     currentItem &&
     currentItem.status !== "aguardando" &&
@@ -1940,9 +1944,21 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
-        <div className="flex items-center gap-2 text-sm font-mono font-bold text-foreground bg-card border border-border rounded-lg px-3 py-1.5">
-          <Timer className="w-4 h-4 text-primary" />
-          {formatTime(elapsedSeconds)}
+        <div className="flex items-center gap-2">
+          {podeRecomendarAtual && (
+            <button
+              type="button"
+              onClick={abrirModalRecomendacao}
+              className="inline-flex items-center gap-2 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800"
+            >
+              <PackageSearch className="h-3.5 w-3.5" />
+              Recomendar troca
+            </button>
+          )}
+          <div className="flex items-center gap-2 text-sm font-mono font-bold text-foreground bg-card border border-border rounded-lg px-3 py-1.5">
+            <Timer className="w-4 h-4 text-primary" />
+            {formatTime(elapsedSeconds)}
+          </div>
         </div>
       </div>
 
@@ -2019,28 +2035,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               )}
             </div>
           )}
-          {!apenasVisualizar && currentItem.status === "pendente" && isAdminPlus && (
+          {recomendacaoPendenteAtual && (
             <div className="rounded-xl border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="font-bold">Recomendacao interna</p>
-                  <p className="mt-1 text-xs text-sky-800">
-                    Avise o {listeiro || "responsavel"} com um item parecido para ele aprovar.
-                  </p>
-                </div>
-                <button
-                  type="button"
-                  onClick={abrirModalRecomendacao}
-                  className="rounded-lg bg-sky-600 px-3 py-2 text-xs font-bold text-white"
-                >
-                  Recomendar troca
-                </button>
-              </div>
-              {recomendacaoPendenteAtual && (
-                <p className="mt-2 text-xs text-sky-800">
-                  Pendente de resposta: {recomendacaoPendenteAtual.codigoSugerido} por {recomendacaoPendenteAtual.destinatario}.
-                </p>
-              )}
+              <p className="font-bold">Recomendacao enviada</p>
+              <p className="mt-1 text-xs text-sky-800">
+                Pendente de resposta: {recomendacaoPendenteAtual.codigoSugerido} por {recomendacaoPendenteAtual.destinatario}.
+              </p>
             </div>
           )}
           {recomendacaoAceitaAtual && isAdminPlus && (

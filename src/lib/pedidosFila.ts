@@ -1061,7 +1061,7 @@ export async function juntarPedidos(
   const totalItens = count ?? 0;
 
   const pessoa = String(alvo.listeiro ?? alvo.pessoa ?? '').trim();
-  const novoTitulo = `${pessoa || String(alvo.titulo ?? '').trim() || 'Lista'} (juntado ${pedidos.length})`;
+  const novoTitulo = `${pessoa || String(alvo.titulo ?? '').trim() || 'Lista'} (pendentes)`;
   const mergeUndoMeta: PedidoMergeUndoMeta = {
     version: 1,
     mergedAt: new Date().toISOString(),
