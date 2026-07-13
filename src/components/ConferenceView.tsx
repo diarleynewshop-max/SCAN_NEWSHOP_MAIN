@@ -21,6 +21,8 @@ import {
   PackageSearch,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
+import { EditarPendentesModal } from "@/components/EditarPendentesModal";
+import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import {
@@ -228,6 +230,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [viewMode, setViewMode] = useState<"card" | "lista">("card");
   const [modalModoAberturaTask, setModalModoAberturaTask] = useState<PedidoParaConferencia | null>(null);
   const [modalConfirmAndamento, setModalConfirmAndamento] = useState<PedidoParaConferencia | null>(null);
+  const [editarPendentesAberto, setEditarPendentesAberto] = useState(false);
   // true quando o usuario confirmou "continuar mesmo assim" no modal de andamento.
   // Faz o backend pular a verificacao de lock e aceitar a reserva.
   const [forcarReservaAndamento, setForcarReservaAndamento] = useState(false);
@@ -236,6 +239,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
+  const isAdminPlus = !!loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ["admin", "super"]);
 
   // ── Rascunho automático ────────────────────────────────────────────────────
   const DRAFT_KEY = "conferencia_draft_v1";
@@ -1388,6 +1392,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                 {modoJuntar ? "✕ Cancelar" : "🔀 Juntar"}
               </button>
             )}
+            {isAdminPlus && (
+              <button onClick={() => setEditarPendentesAberto(true)} disabled={loadingTasks || modoJuntar}
+                className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
+                <PackageSearch className="w-3.5 h-3.5" /> Editar Pendentes
+              </button>
+            )}
             <button onClick={recarregarTasks} disabled={loadingTasks || modoJuntar}
               className="flex items-center gap-1.5 text-xs font-semibold text-primary disabled:opacity-50">
               <RefreshCw className={`w-3.5 h-3.5 ${loadingTasks ? "animate-spin" : ""}`} /> Atualizar
@@ -1520,6 +1530,14 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               <p className="text-[11px] text-muted-foreground text-center mt-1.5">Selecione ao menos 2 pedidos da mesma pessoa.</p>
             )}
           </div>
+        )}
+        {isAdminPlus && (
+          <EditarPendentesModal
+            open={editarPendentesAberto}
+            onClose={() => setEditarPendentesAberto(false)}
+            empresa={empresa}
+            flag={flag}
+          />
         )}
       </div>
     );

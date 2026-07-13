@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown, MoreVertical, Barcode } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, TrendingUp, FileDown, MoreVertical, Barcode } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
@@ -24,7 +24,6 @@ import {
   baixarPdfNoNavegador,
   type ItemPedidoPdf,
 } from "@/lib/pedidoFornecedorPdf";
-import { EditarPendentesModal } from "@/components/EditarPendentesModal";
 import {
   ConferenciaGalpaoModal,
   type ConferenciaGalpaoItemView,
@@ -355,7 +354,6 @@ const Compras = () => {
   const [gerandoPedidos, setGerandoPedidos] = useState(false);
   const [baixandoPdfPedido, setBaixandoPdfPedido] = useState<string | null>(null);
   const [analiseAberta, setAnaliseAberta] = useState(false);
-  const [editarPendentesAberto, setEditarPendentesAberto] = useState(false);
   const [galpaoAberto, setGalpaoAberto] = useState(false);
   const [filtroSecaoGalpao, setFiltroSecaoGalpao] = useState(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
   // Item aberto no modal de detalhes (mostra codigo de barras + acoes).
@@ -1132,14 +1130,6 @@ const Compras = () => {
             </Button>
             <Button
               variant="outline"
-              onClick={() => setEditarPendentesAberto(true)}
-              disabled={loading}
-            >
-              <Filter className="h-4 w-4 mr-2" />
-              Editar Pendentes
-            </Button>
-            <Button
-              variant="outline"
               onClick={() => {
                 setFiltroSecaoGalpao(filtroSecao);
                 setGalpaoAberto(true);
@@ -1477,13 +1467,6 @@ const Compras = () => {
           <p>{"Fluxo Compras: PENDENTE -> PRODUTOS RUIM | PODE SER QUE TEM NO GALPAO -> FAZER PEDIDO -> PEDIDO EM ANDAMENTO -> COMPRA REALIZADA -> CONCLUIDO"}</p>
         </div>
       </div>
-
-      <EditarPendentesModal
-        open={editarPendentesAberto}
-        onClose={() => setEditarPendentesAberto(false)}
-        empresa={empresa}
-        flag={flagAtual}
-      />
 
       <ConferenciaGalpaoModal
         open={galpaoAberto}
