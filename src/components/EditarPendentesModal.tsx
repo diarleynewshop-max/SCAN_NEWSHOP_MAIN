@@ -1,6 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { PackageCheck, RefreshCw, X } from "lucide-react";
+import { useToast } from "@/hooks/use-toast";
 import {
+  analisarPendentesAbertos,
+  juntarPedidosPendentesAbertos,
   listarPendentesConsolidados,
   type PendenteConsolidado,
 } from "@/lib/pedidosFila";
@@ -25,9 +28,12 @@ export function EditarPendentesModal({
   empresa,
   flag,
 }: EditarPendentesModalProps) {
+  const { toast } = useToast();
   const [itens, setItens] = useState<PendenteConsolidado[]>([]);
   const [loading, setLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
+  const [analisando, setAnalisando] = useState(false);
+  const [juntandoTudo, setJuntandoTudo] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   const carregar = async (silent = false) => {
@@ -58,7 +64,66 @@ export function EditarPendentesModal({
   const resumo = useMemo(() => ({
     produtos: itens.length,
     unidades: itens.reduce((acc, item) => acc + item.quantidadePendente, 0),
+    primeiraData: itens
+      .map((item) => item.ultimaData)
+      .filter((value): value is string => Boolean(value))
+      .sort()[0] ?? null,
+    ultimaData: [...itens]
+      .map((item) => item.ultimaData)
+      .filter((value): value is string => Boolean(value))
+      .sort()
+      .at(-1) ?? null,
   }), [itens]);
+
+  const handleAnalisar = async () => {
+    setAnalisando(true);
+    try {
+      const resultado = await analisarPendentesAbertos(empresa, flag);
+      const periodo =
+        resultado.periodoInicio && resultado.periodoFim
+          ? `Periodo ${formatarDia(resultado.periodoInicio)} a ${formatarDia(resultado.periodoFim)}.`
+          : undefined;
+
+      toast({
+        title: resultado.itensRemovidos > 0 ? "Analise concluida" : "Nada para limpar",
+        description:
+          resultado.itensRemovidos > 0
+            ? `${resultado.itensRemovidos} item(ns) removido(s), ${resultado.produtosResolvidos} produto(s) resolvido(s), ${resultado.pedidosExcluidos} pedido(s) vazio(s) excluido(s). ${periodo ?? ""}`.trim()
+            : periodo ?? "Nenhum item pendente ja resolvido em pedido concluido posterior.",
+      });
+      await carregar(true);
+    } catch (err) {
+      console.error("[EditarPendentesModal] Falha ao analisar pendentes:", err);
+      toast({
+        title: "Falha na analise",
+        description: err instanceof Error ? err.message : "Nao foi possivel analisar os pendentes agora.",
+        variant: "destructive",
+      });
+    } finally {
+      setAnalisando(false);
+    }
+  };
+
+  const handleJuntarTudo = async () => {
+    setJuntandoTudo(true);
+    try {
+      const resultado = await juntarPedidosPendentesAbertos(empresa, flag);
+      toast({
+        title: "Pendentes juntados",
+        description: `${resultado.juntados} pedidos viraram 1 lista com ${resultado.totalItens} item(ns).`,
+      });
+      await carregar(true);
+    } catch (err) {
+      console.error("[EditarPendentesModal] Falha ao juntar pendentes:", err);
+      toast({
+        title: "Falha ao juntar",
+        description: err instanceof Error ? err.message : "Nao foi possivel juntar os pedidos pendentes agora.",
+        variant: "destructive",
+      });
+    } finally {
+      setJuntandoTudo(false);
+    }
+  };
 
   if (!open) return null;
 
@@ -82,12 +147,35 @@ export function EditarPendentesModal({
             <p className="mt-1 text-sm text-gray-500">
               {empresa} | {flag.toUpperCase()} | {resumo.produtos} produto(s) | {resumo.unidades} un.
             </p>
+            {resumo.primeiraData && resumo.ultimaData && (
+              <p className="mt-1 text-xs text-gray-500">
+                Periodo base: {formatarDia(resumo.primeiraData)} a {formatarDia(resumo.ultimaData)}
+              </p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <button
               type="button"
+              onClick={() => void handleAnalisar()}
+              disabled={loading || refreshing || analisando || juntandoTudo}
+              className="inline-flex items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800 transition hover:bg-amber-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <PackageCheck className={`h-4 w-4 ${analisando ? "animate-pulse" : ""}`} />
+              {analisando ? "Analisando..." : "Analisar"}
+            </button>
+            <button
+              type="button"
+              onClick={() => void handleJuntarTudo()}
+              disabled={loading || refreshing || analisando || juntandoTudo}
+              className="inline-flex items-center gap-2 rounded-lg border border-indigo-200 bg-indigo-50 px-3 py-2 text-sm font-semibold text-indigo-700 transition hover:bg-indigo-100 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${juntandoTudo ? "animate-spin" : ""}`} />
+              {juntandoTudo ? "Juntando..." : "Juntar tudo"}
+            </button>
+            <button
+              type="button"
               onClick={() => void carregar(true)}
-              disabled={loading || refreshing}
+              disabled={loading || refreshing || analisando || juntandoTudo}
               className="inline-flex items-center gap-2 rounded-lg border border-gray-200 px-3 py-2 text-sm font-semibold text-gray-700 transition hover:bg-gray-50 disabled:cursor-not-allowed disabled:opacity-60"
             >
               <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
@@ -128,7 +216,7 @@ export function EditarPendentesModal({
                 Nenhum pendente consolidado
               </p>
               <p className="mt-2 text-sm">
-                Os itens que ja foram tratados em pedido posterior saem desta lista automaticamente.
+                Os itens ja resolvidos em pedido concluido posterior somem daqui apos a analise.
               </p>
             </div>
           ) : (

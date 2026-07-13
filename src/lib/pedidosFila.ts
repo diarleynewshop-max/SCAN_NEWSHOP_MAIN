@@ -55,8 +55,12 @@ interface PedidoFilaItemRow {
 interface PedidoBaseResumoRow {
   id: string;
   titulo: string | null;
+  status: string;
+  observacao: string | null;
   created_at: string | null;
+  updated_at: string | null;
   data_conferencia: string | null;
+  concluido_at: string | null;
 }
 
 interface PedidoItemHistoricoRow {
@@ -124,6 +128,16 @@ export interface PendenteConsolidado {
   ocorrencias: number;
   ultimaData: string | null;
   pedidoTitulos: string[];
+}
+
+export interface AnalisePendentesResult {
+  pedidosPendentes: number;
+  itensPendentes: number;
+  itensRemovidos: number;
+  produtosResolvidos: number;
+  pedidosExcluidos: number;
+  periodoInicio: string | null;
+  periodoFim: string | null;
 }
 
 export interface ListarPedidosFiltro {
@@ -306,6 +320,74 @@ function getPedidoDiaReferencia(row: PedidoBaseResumoRow): string | null {
   return formatDateKeySaoPaulo(createdAt);
 }
 
+function parseDateOnlyToMs(value: string): number | null {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const ms = new Date(`${text}T23:59:59-03:00`).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function parseDateTimeToMs(value: string | null | undefined): number | null {
+  const text = String(value ?? '').trim();
+  if (!text) return null;
+  const ms = new Date(text).getTime();
+  return Number.isNaN(ms) ? null : ms;
+}
+
+function getPedidoMomentoPendenteMs(row: PedidoBaseResumoRow): number | null {
+  const createdMs = parseDateTimeToMs(row.created_at);
+  if (createdMs != null) return createdMs;
+  const dia = getPedidoDiaReferencia(row);
+  return dia ? parseDateOnlyToMs(dia) : null;
+}
+
+function getPedidoMomentoResolvidoMs(row: PedidoBaseResumoRow): number | null {
+  const concluidoMs = parseDateTimeToMs(row.concluido_at);
+  if (concluidoMs != null) return concluidoMs;
+  const updatedMs = parseDateTimeToMs(row.updated_at);
+  if (updatedMs != null) return updatedMs;
+  const dia = String(row.data_conferencia ?? '').trim();
+  if (dia) return parseDateOnlyToMs(dia);
+  return parseDateTimeToMs(row.created_at);
+}
+
+function isPedidoPendenteAberto(row: PedidoBaseResumoRow): boolean {
+  if (row.status !== 'analisado') return false;
+
+  const observacao = String(row.observacao ?? '').toLowerCase();
+  if (observacao.includes('origem=pendentes-conferencia')) return true;
+
+  const titulo = String(row.titulo ?? '').toUpperCase();
+  return titulo.includes('PENDENTES');
+}
+
+function buildUltimoResolvidoConcluidoPorProduto(
+  pedidosPorId: Map<string, PedidoBaseResumoRow>,
+  itens: PedidoItemHistoricoRow[]
+): Map<string, number> {
+  const ultimoResolvidoPorProduto = new Map<string, number>();
+
+  for (const item of itens) {
+    if (item.status === 'pendente') continue;
+
+    const pedido = pedidosPorId.get(item.pedido_id);
+    if (!pedido || pedido.status !== 'concluido') continue;
+
+    const key = produtoKey(item.codigo, item.sku);
+    if (!key) continue;
+
+    const momento = getPedidoMomentoResolvidoMs(pedido);
+    if (momento == null) continue;
+
+    const anterior = ultimoResolvidoPorProduto.get(key);
+    if (anterior == null || momento > anterior) {
+      ultimoResolvidoPorProduto.set(key, momento);
+    }
+  }
+
+  return ultimoResolvidoPorProduto;
+}
+
 async function fetchPedidosResumoAll(
   empresa: string,
   flag: string
@@ -316,7 +398,7 @@ async function fetchPedidosResumoAll(
   while (true) {
     const { data, error } = await supabase
       .from('pedidos')
-      .select('id,titulo,created_at,data_conferencia')
+      .select('id,titulo,status,observacao,created_at,updated_at,data_conferencia,concluido_at')
       .eq('empresa', normalizarEmpresa(empresa))
       .eq('flag', normalizarFlag(flag))
       .order('created_at', { ascending: false })
@@ -583,25 +665,7 @@ export async function listarPendentesConsolidados(
   const itens = await fetchPedidoItensAll(pedidos.map((pedido) => pedido.id));
   if (itens.length === 0) return [];
 
-  const ultimoResolvidoPorProduto = new Map<string, string>();
-
-  for (const item of itens) {
-    if (item.status === 'pendente') continue;
-
-    const key = produtoKey(item.codigo, item.sku);
-    if (!key) continue;
-
-    const pedido = pedidosPorId.get(item.pedido_id);
-    if (!pedido) continue;
-
-    const dia = getPedidoDiaReferencia(pedido);
-    if (!dia) continue;
-
-    const anterior = ultimoResolvidoPorProduto.get(key);
-    if (!anterior || dia > anterior) {
-      ultimoResolvidoPorProduto.set(key, dia);
-    }
-  }
+  const ultimoResolvidoPorProduto = buildUltimoResolvidoConcluidoPorProduto(pedidosPorId, itens);
 
   const agrupados = new Map<string, PendenteConsolidado>();
 
@@ -614,11 +678,16 @@ export async function listarPendentesConsolidados(
     const pedido = pedidosPorId.get(item.pedido_id);
     if (!pedido) continue;
 
+    if (!isPedidoPendenteAberto(pedido)) continue;
+
     const dia = getPedidoDiaReferencia(pedido);
     if (!dia) continue;
 
+    const momentoPendente = getPedidoMomentoPendenteMs(pedido);
+    if (momentoPendente == null) continue;
+
     const ultimoResolvido = ultimoResolvidoPorProduto.get(key);
-    if (ultimoResolvido && ultimoResolvido > dia) continue;
+    if (ultimoResolvido != null && ultimoResolvido > momentoPendente) continue;
 
     const existente = agrupados.get(key);
     if (existente) {
@@ -656,6 +725,130 @@ export async function listarPendentesConsolidados(
     if (a.quantidadePendente !== b.quantidadePendente) return b.quantidadePendente - a.quantidadePendente;
     return a.descricao.localeCompare(b.descricao, 'pt-BR');
   });
+}
+
+async function recalcularOuExcluirPedido(pedidoId: string): Promise<boolean> {
+  const { count, error: countError } = await supabase
+    .from('pedido_itens')
+    .select('id', { count: 'exact', head: true })
+    .eq('pedido_id', pedidoId);
+  if (countError) throw countError;
+
+  if ((count ?? 0) === 0) {
+    const { error: deleteError } = await supabase.from('pedidos').delete().eq('id', pedidoId);
+    if (deleteError) throw deleteError;
+    return true;
+  }
+
+  const { error: rpcError } = await supabase.rpc('recalcular_resumo_pedido', { p_pedido_id: pedidoId });
+  if (rpcError) throw rpcError;
+  return false;
+}
+
+export async function analisarPendentesAbertos(
+  empresa: string,
+  flag: string
+): Promise<AnalisePendentesResult> {
+  if (!isSupabaseConfigured) {
+    return {
+      pedidosPendentes: 0,
+      itensPendentes: 0,
+      itensRemovidos: 0,
+      produtosResolvidos: 0,
+      pedidosExcluidos: 0,
+      periodoInicio: null,
+      periodoFim: null,
+    };
+  }
+
+  const pedidos = await fetchPedidosResumoAll(empresa, flag);
+  const pedidosPendentesAbertos = pedidos.filter(isPedidoPendenteAberto);
+
+  if (pedidosPendentesAbertos.length === 0) {
+    return {
+      pedidosPendentes: 0,
+      itensPendentes: 0,
+      itensRemovidos: 0,
+      produtosResolvidos: 0,
+      pedidosExcluidos: 0,
+      periodoInicio: null,
+      periodoFim: null,
+    };
+  }
+
+  const pedidosPorId = new Map(pedidos.map((pedido) => [pedido.id, pedido] as const));
+  const itens = await fetchPedidoItensAll(pedidos.map((pedido) => pedido.id));
+  const ultimoResolvidoPorProduto = buildUltimoResolvidoConcluidoPorProduto(pedidosPorId, itens);
+
+  const datasPendentes = pedidosPendentesAbertos
+    .map((pedido) => getPedidoDiaReferencia(pedido))
+    .filter((value): value is string => Boolean(value))
+    .sort();
+
+  const itensPendentesAbertos = itens.filter((item) => {
+    if (item.status !== 'pendente') return false;
+    const pedido = pedidosPorId.get(item.pedido_id);
+    return Boolean(pedido && isPedidoPendenteAberto(pedido));
+  });
+
+  const itemIdsParaExcluir: string[] = [];
+  const pedidoIdsAfetados = new Set<string>();
+  const produtosResolvidos = new Set<string>();
+
+  for (const item of itensPendentesAbertos) {
+    const key = produtoKey(item.codigo, item.sku);
+    if (!key) continue;
+
+    const pedido = pedidosPorId.get(item.pedido_id);
+    if (!pedido) continue;
+
+    const momentoPendente = getPedidoMomentoPendenteMs(pedido);
+    if (momentoPendente == null) continue;
+
+    const ultimoResolvido = ultimoResolvidoPorProduto.get(key);
+    if (ultimoResolvido == null || ultimoResolvido <= momentoPendente) continue;
+
+    itemIdsParaExcluir.push(item.id);
+    pedidoIdsAfetados.add(item.pedido_id);
+    produtosResolvidos.add(key);
+  }
+
+  for (const ids of chunk(itemIdsParaExcluir, 200)) {
+    const { error } = await supabase.from('pedido_itens').delete().in('id', ids);
+    if (error) throw error;
+  }
+
+  let pedidosExcluidos = 0;
+  for (const pedidoId of pedidoIdsAfetados) {
+    const excluido = await recalcularOuExcluirPedido(pedidoId);
+    if (excluido) pedidosExcluidos += 1;
+  }
+
+  return {
+    pedidosPendentes: pedidosPendentesAbertos.length,
+    itensPendentes: itensPendentesAbertos.length,
+    itensRemovidos: itemIdsParaExcluir.length,
+    produtosResolvidos: produtosResolvidos.size,
+    pedidosExcluidos,
+    periodoInicio: datasPendentes[0] ?? null,
+    periodoFim: datasPendentes[datasPendentes.length - 1] ?? null,
+  };
+}
+
+export async function juntarPedidosPendentesAbertos(
+  empresa: string,
+  flag: string
+): Promise<{ pedidoId: string; totalItens: number; juntados: number }> {
+  if (!isSupabaseConfigured) throw new Error('Supabase nao configurado.');
+
+  const pedidos = await fetchPedidosResumoAll(empresa, flag);
+  const ids = pedidos.filter(isPedidoPendenteAberto).map((pedido) => pedido.id);
+
+  if (ids.length < 2) {
+    throw new Error('Nao ha ao menos 2 pedidos pendentes em aberto para juntar.');
+  }
+
+  return juntarPedidos(ids);
 }
 
 export async function reservarPedido(
