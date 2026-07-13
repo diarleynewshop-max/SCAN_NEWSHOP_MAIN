@@ -1,8 +1,8 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Check, Eye, EyeOff, Pencil, Plus, RefreshCw, RotateCcw, Save, Users } from "lucide-react";
 import { useAuth, type Empresa, type LoginFlag, type UserRole } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
-import { getSecoesFixasPorEmpresa } from "@/lib/secoesCompras";
+import { buscarSecoesComprasDisponiveis, getSecoesFixasPorEmpresa } from "@/lib/secoesCompras";
 import {
   atualizarUsuario,
   criarUsuario,
@@ -57,13 +57,45 @@ export default function Usuarios() {
     ? { login: loginSalvo.login, senha: actorSenha }
     : null;
 
-  const secoesDisponiveis = useMemo(() => {
-    const set = new Set<string>();
-    for (const empresa of form.empresas) {
-      getSecoesFixasPorEmpresa(empresa).forEach((secao) => set.add(secao));
-    }
-    return [...set];
+  // Secoes reais vindas do banco (tabela compras) para as empresas do formulario.
+  // Best-effort: se falhar, secoesDisponiveis cai na lista fixa.
+  const [secoesBanco, setSecoesBanco] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelado = false;
+    void (async () => {
+      try {
+        const secoes = await buscarSecoesComprasDisponiveis(form.empresas);
+        if (!cancelado) setSecoesBanco(secoes);
+      } catch (err) {
+        console.warn("[Usuarios] falha ao buscar secoes de compras (usando lista fixa):", err);
+        if (!cancelado) setSecoesBanco([]);
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
   }, [form.empresas]);
+
+  const secoesDisponiveis = useMemo(() => {
+    // Dedup por chave normalizada (maiuscula/acento) — o Compras compara assim,
+    // entao "Eletronico" e "ELETRONICO" sao a mesma secao.
+    const chave = (s: string) => s.normalize("NFD").replace(/[̀-ͯ]/g, "").trim().toUpperCase();
+    const porChave = new Map<string, string>();
+    const adicionar = (arr: string[]) =>
+      arr.forEach((s) => {
+        const k = chave(s);
+        if (k && !porChave.has(k)) porChave.set(k, s);
+      });
+
+    // Banco e a fonte principal; sem ele, cai na lista fixa por empresa.
+    if (secoesBanco.length > 0) adicionar(secoesBanco);
+    else for (const empresa of form.empresas) adicionar(getSecoesFixasPorEmpresa(empresa));
+    // Garante que as secoes ja atribuidas ao usuario continuem aparecendo.
+    adicionar(form.secoesCompras);
+
+    return [...porChave.values()].sort((a, b) => a.localeCompare(b, "pt-BR"));
+  }, [form.empresas, secoesBanco, form.secoesCompras]);
 
   async function carregarUsuarios(senha = actorSenha) {
     if (!loginSalvo?.login) {
