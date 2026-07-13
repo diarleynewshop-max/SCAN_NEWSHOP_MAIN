@@ -18,6 +18,7 @@ import {
   Package,
   FileInput as FileJson,
   Share2,
+  MoreVertical,
   Lock,
   RefreshCw,
   ClipboardList,
@@ -29,6 +30,7 @@ import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import {
+  atualizarQuantidadePedidoItem,
   desfazerJuntarPedidos,
   carregarItensDoPedido,
   dispararExpedicaoConferencia,
@@ -243,6 +245,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [viewMode, setViewMode] = useState<"card" | "lista">("card");
   const [modalModoAberturaTask, setModalModoAberturaTask] = useState<PedidoParaConferencia | null>(null);
   const [modalConfirmAndamento, setModalConfirmAndamento] = useState<PedidoParaConferencia | null>(null);
+  const [modalAcoesTask, setModalAcoesTask] = useState<PedidoParaConferencia | null>(null);
+  const [modalDetalharTask, setModalDetalharTask] = useState<PedidoParaConferencia | null>(null);
   const [editarPendentesAberto, setEditarPendentesAberto] = useState(false);
   // true quando o usuario confirmou "continuar mesmo assim" no modal de andamento.
   // Faz o backend pular a verificacao de lock e aceitar a reserva.
@@ -255,11 +259,16 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const isAdminPlus = !!loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ["admin", "super"]);
   const [recomendacoesPedido, setRecomendacoesPedido] = useState<RecomendacaoSubstituicao[]>([]);
   const [modalRecomendacaoAberto, setModalRecomendacaoAberto] = useState(false);
+  const [itemSelecionadoRecomendacao, setItemSelecionadoRecomendacao] = useState<ConferenceItem | null>(null);
   const [codigoRecomendado, setCodigoRecomendado] = useState("");
+  const [quantidadeRecomendada, setQuantidadeRecomendada] = useState("1");
   const [observacaoRecomendacao, setObservacaoRecomendacao] = useState("");
   const [produtoRecomendado, setProdutoRecomendado] = useState<VarejoFacilProduct | null>(null);
   const [buscandoProdutoRecomendado, setBuscandoProdutoRecomendado] = useState(false);
   const [salvandoRecomendacao, setSalvandoRecomendacao] = useState(false);
+  const [itensDetalheTask, setItensDetalheTask] = useState<ConferenceItem[]>([]);
+  const [loadingDetalheTask, setLoadingDetalheTask] = useState(false);
+  const [salvandoQuantidadeItemId, setSalvandoQuantidadeItemId] = useState<string | null>(null);
 
   // ── Rascunho automático ────────────────────────────────────────────────────
   const DRAFT_KEY = "conferencia_draft_v1";
@@ -479,6 +488,64 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     } catch (err) {
       console.error("[conferencia] Falha ao carregar recomendacoes:", err);
       setRecomendacoesPedido([]);
+    }
+  };
+
+  const abrirDetalhamentoTask = async (task: PedidoParaConferencia) => {
+    setModalAcoesTask(null);
+    setModalDetalharTask(task);
+    setLoadingDetalheTask(true);
+    try {
+      const [itensPedido, recomendacoes] = await Promise.all([
+        carregarItensDoPedido(task.id),
+        listarRecomendacoesDoPedido(task.id),
+      ]);
+
+      setItensDetalheTask(
+        itensPedido.map((item) => ({
+          id: item.id,
+          codigo: item.codigo,
+          sku: item.sku ?? "",
+          secao: item.secao ?? null,
+          quantidadePedida: item.quantidadePedida,
+          quantidadeReal: item.quantidadeReal,
+          status: item.status,
+          photo: item.photo ?? null,
+          digito: null,
+        }))
+      );
+      setRecomendacoesPedido(recomendacoes);
+    } catch (err) {
+      toast({
+        title: "Falha ao abrir detalhamento",
+        description: err instanceof Error ? err.message : "Nao foi possivel carregar este pedido.",
+        variant: "destructive",
+      });
+      setModalDetalharTask(null);
+      setItensDetalheTask([]);
+    } finally {
+      setLoadingDetalheTask(false);
+    }
+  };
+
+  const salvarQuantidadeDetalhe = async (itemId: string, quantidadePedida: number) => {
+    setSalvandoQuantidadeItemId(itemId);
+    try {
+      await atualizarQuantidadePedidoItem(itemId, quantidadePedida);
+      setItensDetalheTask((prev) =>
+        prev.map((item) =>
+          item.id === itemId ? { ...item, quantidadePedida } : item
+        )
+      );
+      toast({ title: "Quantidade atualizada" });
+    } catch (err) {
+      toast({
+        title: "Falha ao salvar quantidade",
+        description: err instanceof Error ? err.message : "Nao foi possivel salvar a quantidade.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvandoQuantidadeItemId(null);
     }
   };
 
@@ -1128,10 +1195,6 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const recomendacaoAplicadaAtual = currentItem
     ? recomendacoesPedido.find((item) => item.pedidoItemId === currentItem.id && item.status === "aplicada") ?? null
     : null;
-  const podeRecomendarAtual =
-    !apenasVisualizar &&
-    isAdminPlus &&
-    currentItem?.status === "pendente";
   const isCurrentComplete =
     currentItem &&
     currentItem.status !== "aguardando" &&
@@ -1300,8 +1363,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     toast({ title: "PDF exportado!" });
   };
 
-  const abrirModalRecomendacao = () => {
+  const abrirModalRecomendacao = (item?: ConferenceItem | null) => {
+    const alvo = item ?? currentItem ?? null;
+    if (!alvo) return;
+    setItemSelecionadoRecomendacao(alvo);
     setCodigoRecomendado("");
+    setQuantidadeRecomendada(String(Math.max(1, alvo.quantidadePedida)));
     setObservacaoRecomendacao("");
     setProdutoRecomendado(null);
     setModalRecomendacaoAberto(true);
@@ -1336,13 +1403,24 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   };
 
   const salvarRecomendacaoAtual = async () => {
-    if (!currentItem || !taskSelecionada) return;
-    if (!listeiro.trim()) {
+    if (!itemSelecionadoRecomendacao) {
+      toast({ title: "Selecione um item para recomendar", variant: "destructive" });
+      return;
+    }
+    const pedidoBase = modalDetalharTask ?? taskSelecionada;
+    const pessoaDestino = modalDetalharTask?.listeiro || listeiro;
+    if (!pedidoBase) return;
+    if (!pessoaDestino.trim()) {
       toast({ title: "Pedido sem pessoa para recomendar", variant: "destructive" });
       return;
     }
     if (!produtoRecomendado) {
       toast({ title: "Busque o item substituto antes de salvar", variant: "destructive" });
+      return;
+    }
+    const quantidade = Number(quantidadeRecomendada);
+    if (!Number.isFinite(quantidade) || quantidade <= 0) {
+      toast({ title: "Quantidade sugerida invalida", variant: "destructive" });
       return;
     }
 
@@ -1351,22 +1429,23 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       const criada = await criarRecomendacaoSubstituicao({
         empresa,
         flag,
-        pedidoId: taskSelecionada.id,
-        pedidoItemId: currentItem.id,
-        pedidoTitulo: taskSelecionada.name,
-        pedidoPessoa: listeiro,
-        codigoOriginal: currentItem.codigo,
-        skuOriginal: currentItem.sku,
-        descricaoOriginal: currentItem.sku || currentItem.codigo,
-        fotoOriginal: currentItem.photo ?? null,
+        pedidoId: pedidoBase.id,
+        pedidoItemId: itemSelecionadoRecomendacao.id,
+        pedidoTitulo: pedidoBase.name,
+        pedidoPessoa: pessoaDestino,
+        codigoOriginal: itemSelecionadoRecomendacao.codigo,
+        skuOriginal: itemSelecionadoRecomendacao.sku,
+        descricaoOriginal: itemSelecionadoRecomendacao.sku || itemSelecionadoRecomendacao.codigo,
+        fotoOriginal: itemSelecionadoRecomendacao.photo ?? null,
         codigoSugerido: produtoRecomendado.codigo_barras,
         skuSugerido: "",
         descricaoSugerida: produtoRecomendado.descricao,
         secaoSugerida: produtoRecomendado.secao ?? null,
         fotoSugerida: produtoRecomendado.imagem ?? null,
         erpIdSugerido: produtoRecomendado.id,
+        quantidadeSugerida: quantidade,
         sugeridoPor: conferente || loginSalvo?.nomePessoa || "Sistema",
-        destinatario: listeiro,
+        destinatario: pessoaDestino,
         observacao: observacaoRecomendacao.trim() || null,
       });
 
@@ -1375,9 +1454,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         ...prev.filter((item) => item.pedidoItemId !== criada.pedidoItemId || item.id === criada.id),
       ]);
       setModalRecomendacaoAberto(false);
+      setItemSelecionadoRecomendacao(null);
       toast({
         title: "Recomendacao enviada",
-        description: `${listeiro} pode aprovar ou recusar no app.`,
+        description: `${pessoaDestino} pode aprovar ou recusar no app.`,
       });
     } catch (err) {
       toast({
@@ -1732,6 +1812,25 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           </div>
         )}
 
+        {modalAcoesTask && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+            <div className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
+              <p className="font-bold text-foreground text-base text-center">Acoes do pedido</p>
+              <p className="text-xs text-muted-foreground text-center truncate">{modalAcoesTask.name}</p>
+              <div className="flex flex-col gap-3 pt-1">
+                <button
+                  onClick={() => void abrirDetalhamentoTask(modalAcoesTask)}
+                  className="w-full h-14 rounded-xl border-2 border-primary bg-primary/5 text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
+                >
+                  <span className="text-base text-primary">Detalhando</span>
+                  <span className="text-[11px] text-muted-foreground font-normal">Ver itens, editar quantidade e recomendar troca</span>
+                </button>
+              </div>
+              <button onClick={() => setModalAcoesTask(null)} className="w-full text-xs text-muted-foreground underline cursor-pointer bg-transparent border-none pt-1">Cancelar</button>
+            </div>
+          </div>
+        )}
+
         <div className="space-y-2">
           {tasks.map((task) => {
             const isLoading = loadingJson && taskSelecionada?.id === task.id;
@@ -1740,15 +1839,18 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               ? new Date(Number(task.date_created)).toLocaleString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
               : "";
             return (
-              <button
+              <div
                 key={task.id}
+                className={`w-full rounded-xl border p-4 flex items-center justify-between gap-3 transition-all ${selecionadosJuntar.has(task.id) ? "border-primary ring-2 ring-primary/50 bg-primary/5" : emAndamento ? "border-warning/40 bg-warning/5 hover:border-warning/60" : "border-border bg-card hover:border-primary/40 hover:bg-primary/5"}`}
+              >
+              <button
                 onClick={() => {
                   if (modoJuntar) { toggleSelecionadoJuntar(task.id); return; }
                   if (emAndamento) setModalConfirmAndamento(task);
                   else setModalModoAberturaTask(task);
                 }}
                 disabled={loadingJson || juntando}
-                className={`w-full text-left rounded-xl border p-4 flex items-center justify-between gap-3 active:scale-[0.99] transition-all disabled:opacity-60 ${selecionadosJuntar.has(task.id) ? "border-primary ring-2 ring-primary/50 bg-primary/5" : emAndamento ? "border-warning/40 bg-warning/5 hover:border-warning/60" : "border-border bg-card hover:border-primary/40 hover:bg-primary/5"}`}
+                className="flex flex-1 items-center justify-between gap-3 text-left active:scale-[0.99] transition-all disabled:opacity-60"
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
@@ -1765,6 +1867,17 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                     ? <span className="w-5 h-5 border-2 border-primary border-t-transparent rounded-full animate-spin flex-shrink-0" />
                     : <Play className={`w-4 h-4 flex-shrink-0 ${emAndamento ? "text-warning" : "text-primary"}`} />}
               </button>
+              {!modoJuntar && isAdminPlus && (
+                <button
+                  type="button"
+                  onClick={() => setModalAcoesTask(task)}
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-border bg-background text-muted-foreground hover:bg-accent"
+                  aria-label="Acoes do pedido"
+                >
+                  <MoreVertical className="h-4 w-4" />
+                </button>
+              )}
+              </div>
             );
           })}
         </div>
@@ -1792,6 +1905,80 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             empresa={empresa}
             flag={flag}
           />
+        )}
+        {modalDetalharTask && (
+          <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4" onClick={() => setModalDetalharTask(null)}>
+            <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl" onClick={(e) => e.stopPropagation()}>
+              <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
+                <div className="min-w-0">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Detalhando</p>
+                  <h2 className="mt-1 truncate text-xl font-black text-foreground">{modalDetalharTask.name}</h2>
+                  <p className="mt-1 text-sm text-muted-foreground">Ver itens, editar quantidade e recomendar troca.</p>
+                </div>
+                <button type="button" onClick={() => setModalDetalharTask(null)} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition hover:bg-accent">
+                  <XCircle className="h-4 w-4" />
+                </button>
+              </div>
+              <div className="overflow-y-auto px-5 py-4">
+                {loadingDetalheTask ? (
+                  <div className="py-10 text-center text-sm text-muted-foreground">Carregando itens...</div>
+                ) : (
+                  <div className="space-y-3">
+                    {itensDetalheTask.map((item) => {
+                      const rec = recomendacoesPedido.find((r) => r.pedidoItemId === item.id && ["pendente", "aceita", "aplicada"].includes(r.status));
+                      return (
+                        <div key={item.id} className="rounded-2xl border border-border bg-background p-4">
+                          <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
+                            <div className="min-w-0 flex-1">
+                              <div className="text-sm font-bold text-foreground">{item.codigo}</div>
+                              <div className="mt-1 text-xs text-muted-foreground">
+                                SKU: {item.sku || "-"} | Status: {item.status} | Qtd atual: {item.quantidadePedida}
+                              </div>
+                              {rec && (
+                                <div className="mt-2 text-xs text-sky-700">
+                                  Troca {rec.status}: {rec.codigoOriginal} por {rec.codigoSugerido} | Qtd sugerida {rec.quantidadeSugerida}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex w-full gap-2 lg:w-auto">
+                              <input
+                                type="number"
+                                min="1"
+                                value={item.quantidadePedida}
+                                onChange={(event) => {
+                                  const valor = Number(event.target.value);
+                                  setItensDetalheTask((prev) => prev.map((it) => it.id === item.id ? { ...it, quantidadePedida: Number.isFinite(valor) && valor > 0 ? valor : it.quantidadePedida } : it));
+                                }}
+                                className="h-11 w-24 rounded-xl border border-input bg-card px-3 text-sm font-bold text-foreground outline-none"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => void salvarQuantidadeDetalhe(item.id, item.quantidadePedida)}
+                                disabled={salvandoQuantidadeItemId === item.id}
+                                className="h-11 rounded-xl border border-border bg-card px-3 text-xs font-bold text-foreground disabled:opacity-60"
+                              >
+                                {salvandoQuantidadeItemId === item.id ? "Salvando..." : "Salvar qtd"}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => abrirModalRecomendacao(item)}
+                                className="h-11 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground"
+                              >
+                                Recomendar troca
+                              </button>
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {itensDetalheTask.length === 0 && (
+                      <div className="py-10 text-center text-sm text-muted-foreground">Este pedido nao tem itens gravados.</div>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
         )}
       </div>
     );
@@ -1944,21 +2131,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
-        <div className="flex items-center gap-2">
-          {podeRecomendarAtual && (
-            <button
-              type="button"
-              onClick={abrirModalRecomendacao}
-              className="inline-flex items-center gap-2 rounded-lg border border-sky-300 bg-sky-50 px-3 py-1.5 text-xs font-bold text-sky-800"
-            >
-              <PackageSearch className="h-3.5 w-3.5" />
-              Recomendar troca
-            </button>
-          )}
-          <div className="flex items-center gap-2 text-sm font-mono font-bold text-foreground bg-card border border-border rounded-lg px-3 py-1.5">
-            <Timer className="w-4 h-4 text-primary" />
-            {formatTime(elapsedSeconds)}
-          </div>
+        <div className="flex items-center gap-2 text-sm font-mono font-bold text-foreground bg-card border border-border rounded-lg px-3 py-1.5">
+          <Timer className="w-4 h-4 text-primary" />
+          {formatTime(elapsedSeconds)}
         </div>
       </div>
 
@@ -2143,7 +2318,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         )}
       </div>}
 
-      {modalRecomendacaoAberto && currentItem && (
+      {modalRecomendacaoAberto && itemSelecionadoRecomendacao && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-card p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
@@ -2152,15 +2327,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                   Recomendacao interna
                 </p>
                 <h3 className="mt-1 text-lg font-black text-foreground">
-                  {currentItem.codigo}
+                  {itemSelecionadoRecomendacao.codigo}
                 </h3>
                 <p className="mt-1 text-sm text-muted-foreground">
-                  Destinatario: {listeiro || "sem pessoa"}
+                  Destinatario: {modalDetalharTask?.listeiro || listeiro || "sem pessoa"}
                 </p>
               </div>
               <button
                 type="button"
-                onClick={() => setModalRecomendacaoAberto(false)}
+                onClick={() => { setModalRecomendacaoAberto(false); setItemSelecionadoRecomendacao(null); }}
                 className="rounded-full bg-muted p-2 text-muted-foreground"
               >
                 <XCircle className="h-4 w-4" />
@@ -2222,6 +2397,19 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
               <label className="block">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Quantidade sugerida
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  value={quantidadeRecomendada}
+                  onChange={(event) => setQuantidadeRecomendada(event.target.value)}
+                  className="mt-1 h-11 w-full rounded-xl border border-input bg-background px-3 text-sm font-bold text-foreground outline-none"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                   Observacao
                 </span>
                 <textarea
@@ -2236,7 +2424,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <div className="mt-5 flex gap-3">
               <button
                 type="button"
-                onClick={() => setModalRecomendacaoAberto(false)}
+                onClick={() => { setModalRecomendacaoAberto(false); setItemSelecionadoRecomendacao(null); }}
                 className="h-11 flex-1 rounded-xl border border-border bg-background text-sm font-semibold text-foreground"
               >
                 Cancelar

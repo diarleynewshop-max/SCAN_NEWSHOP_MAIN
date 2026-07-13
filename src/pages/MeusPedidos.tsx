@@ -727,6 +727,9 @@ export default function MeusPedidos() {
                           <div className="mt-1 text-xs text-emerald-800">
                             {item.descricaoSugerida || item.skuSugerido || "-"}
                           </div>
+                          <div className="mt-1 text-xs text-emerald-800">
+                            Quantidade sugerida: {item.quantidadeSugerida}
+                          </div>
                         </div>
                       </div>
                       {item.observacao && (

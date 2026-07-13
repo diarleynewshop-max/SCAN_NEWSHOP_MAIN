@@ -40,6 +40,7 @@ interface RecomendacaoRow {
   secao_sugerida: string | null;
   foto_sugerida: string | null;
   erp_id_sugerido: string | null;
+  quantidade_sugerida: number | null;
   sugerido_por: string;
   destinatario: string;
   observacao: string | null;
@@ -85,6 +86,7 @@ export interface RecomendacaoSubstituicao {
   secaoSugerida: string;
   fotoSugerida: string | null;
   erpIdSugerido: string;
+  quantidadeSugerida: number;
   sugeridoPor: string;
   destinatario: string;
   observacao: string;
@@ -115,6 +117,7 @@ export interface CriarRecomendacaoSubstituicaoInput {
   secaoSugerida?: string | null;
   fotoSugerida?: string | null;
   erpIdSugerido?: string | null;
+  quantidadeSugerida?: number | null;
   sugeridoPor: string;
   destinatario: string;
   observacao?: string | null;
@@ -139,6 +142,7 @@ function mapRow(row: RecomendacaoRow): RecomendacaoSubstituicao {
     secaoSugerida: row.secao_sugerida ?? "",
     fotoSugerida: row.foto_sugerida ?? null,
     erpIdSugerido: row.erp_id_sugerido ?? "",
+    quantidadeSugerida: Math.max(1, Number(row.quantidade_sugerida ?? 1)),
     sugeridoPor: row.sugerido_por,
     destinatario: row.destinatario,
     observacao: row.observacao ?? "",
@@ -255,6 +259,7 @@ export async function criarRecomendacaoSubstituicao(
       secao_sugerida: input.secaoSugerida ?? null,
       foto_sugerida: input.fotoSugerida ?? null,
       erp_id_sugerido: input.erpIdSugerido ?? null,
+      quantidade_sugerida: Math.max(1, Number(input.quantidadeSugerida ?? 1)),
       sugerido_por: input.sugeridoPor,
       destinatario,
       observacao: input.observacao ?? null,
@@ -344,6 +349,7 @@ export async function aplicarRecomendacaoSubstituicao(
       descricao: recomendacao.descricaoSugerida || null,
       secao: recomendacao.secaoSugerida || null,
       foto_url: recomendacao.fotoSugerida || null,
+      quantidade_pedida: Math.max(1, Number(recomendacao.quantidadeSugerida || 1)),
       quantidade_real: null,
       status: "pendente",
     })

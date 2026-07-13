@@ -1101,6 +1101,25 @@ export async function juntarPedidos(
   return { pedidoId: alvo.id, totalItens, juntados: pedidos.length };
 }
 
+export async function atualizarQuantidadePedidoItem(
+  pedidoItemId: string,
+  quantidadePedida: number
+): Promise<void> {
+  if (!isSupabaseConfigured) return;
+
+  const quantidade = toInt(quantidadePedida);
+  if (quantidade <= 0) {
+    throw new Error("Quantidade deve ser maior que 0.");
+  }
+
+  const { error } = await supabase
+    .from("pedido_itens")
+    .update({ quantidade_pedida: quantidade })
+    .eq("id", pedidoItemId);
+
+  if (error) throw error;
+}
+
 export async function desfazerJuntarPedidos(pedidoId: string): Promise<{ restaurados: number }> {
   if (!isSupabaseConfigured) throw new Error('Supabase nao configurado.');
   const id = String(pedidoId ?? '').trim();
