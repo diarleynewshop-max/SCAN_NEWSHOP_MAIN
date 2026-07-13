@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
+  ChevronDown,
+  ChevronUp,
   ClipboardList,
   Clock3,
+  Package,
   PackageCheck,
   RefreshCw,
   Search,
@@ -11,10 +14,35 @@ import {
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
+  carregarItensDoPedido,
   listarPedidos,
   type MeuPedidoResumo,
+  type PedidoFilaItem,
 } from "@/lib/pedidosFila";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
+
+const ITEM_STATUS_META: Record<string, { label: string; classes: string }> = {
+  separado: { label: "Separado", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
+  nao_tem: { label: "Nao tem", classes: "border-rose-200 bg-rose-50 text-rose-700" },
+  nao_tem_tudo: { label: "Parcial", classes: "border-amber-200 bg-amber-50 text-amber-700" },
+  pendente: { label: "Pendente", classes: "border-slate-200 bg-slate-50 text-slate-600" },
+};
+
+function itemStatusMeta(status: string) {
+  return ITEM_STATUS_META[status] ?? ITEM_STATUS_META.pendente;
+}
+
+// Nome de quem fez o pedido: prioriza pessoa/listeiro; nas conferencias antigas
+// (migradas) so existe o conferente, entao ele e o fallback.
+function nomePessoaPedido(pedido: MeuPedidoResumo): string {
+  return (
+    String(pedido.pessoa ?? "").trim() ||
+    String(pedido.listeiro ?? "").trim() ||
+    String(pedido.conferente ?? "").trim() ||
+    String(pedido.titulo ?? "").trim() ||
+    "Sem nome"
+  );
+}
 
 function formatDateTime(value: string | null): string {
   if (!value) return "-";
@@ -56,6 +84,38 @@ export default function MeusPedidos() {
   // renderizamos um lote por vez (concluidos podem passar de 1000).
   const LOTE = 60;
   const [visiveis, setVisiveis] = useState(LOTE);
+
+  // Itens de cada pedido, carregados sob demanda ao expandir o card.
+  const [expandido, setExpandido] = useState<Set<string>>(new Set());
+  const [itensPorPedido, setItensPorPedido] = useState<Record<string, PedidoFilaItem[]>>({});
+  const [carregandoItens, setCarregandoItens] = useState<Set<string>>(new Set());
+
+  const toggleItens = async (pedidoId: string) => {
+    const abrindo = !expandido.has(pedidoId);
+    setExpandido((prev) => {
+      const next = new Set(prev);
+      if (abrindo) next.add(pedidoId);
+      else next.delete(pedidoId);
+      return next;
+    });
+
+    if (!abrindo || itensPorPedido[pedidoId]) return;
+
+    setCarregandoItens((prev) => new Set(prev).add(pedidoId));
+    try {
+      const itens = await carregarItensDoPedido(pedidoId);
+      setItensPorPedido((prev) => ({ ...prev, [pedidoId]: itens }));
+    } catch (err) {
+      console.error("[MeusPedidos] Falha ao carregar itens do pedido:", err);
+      setItensPorPedido((prev) => ({ ...prev, [pedidoId]: [] }));
+    } finally {
+      setCarregandoItens((prev) => {
+        const next = new Set(prev);
+        next.delete(pedidoId);
+        return next;
+      });
+    }
+  };
 
   const empresa = loginSalvo?.empresa ?? "NEWSHOP";
   const flag = loginSalvo?.flag ?? "loja";
@@ -302,24 +362,24 @@ export default function MeusPedidos() {
           </div>
         ) : (
           pedidos.slice(0, visiveis).map((pedido) => {
-            const pessoa = pedido.pessoa || pedido.listeiro || "-";
+            const nome = nomePessoaPedido(pedido);
+            const aberto = expandido.has(pedido.id);
+            const itens = itensPorPedido[pedido.id];
+            const carregando = carregandoItens.has(pedido.id);
 
             return (
               <article key={pedido.id} className="rounded-3xl border border-border bg-card p-5 shadow-sm">
                 <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="truncate text-lg font-black text-foreground">{pedido.titulo}</h2>
+                      <User className="h-5 w-5 shrink-0 text-muted-foreground" />
+                      <h2 className="truncate text-lg font-black text-foreground">{nome}</h2>
                       <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
                         Concluido
                       </span>
                     </div>
 
                     <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground">
-                      <span className="inline-flex items-center gap-2">
-                        <User className="h-4 w-4" />
-                        {pessoa}
-                      </span>
                       <span className="inline-flex items-center gap-2">
                         <Clock3 className="h-4 w-4" />
                         Criado em {formatDateTime(pedido.createdAt)}
@@ -367,6 +427,71 @@ export default function MeusPedidos() {
                     <div className="mt-1 text-sm font-bold text-foreground">{pedido.conferente || "-"}</div>
                   </div>
                 </div>
+
+                <button
+                  type="button"
+                  onClick={() => void toggleItens(pedido.id)}
+                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-accent"
+                >
+                  <Package className="h-4 w-4" />
+                  {aberto ? "Ocultar itens" : `Ver itens (${pedido.totalItens})`}
+                  {aberto ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                </button>
+
+                {aberto && (
+                  <div className="mt-3 space-y-2">
+                    {carregando && !itens ? (
+                      <div className="rounded-xl border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
+                        Carregando itens...
+                      </div>
+                    ) : itens && itens.length > 0 ? (
+                      itens.map((item) => {
+                        const st = itemStatusMeta(item.status);
+                        return (
+                          <div
+                            key={item.id}
+                            className="flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-2"
+                          >
+                            {item.photo ? (
+                              <img
+                                src={item.photo}
+                                alt={item.descricao || item.codigo}
+                                className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                                loading="lazy"
+                              />
+                            ) : (
+                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-muted text-[10px] text-muted-foreground">
+                                sem foto
+                              </div>
+                            )}
+                            <div className="min-w-0 flex-1">
+                              <div className="truncate text-sm font-semibold text-foreground">
+                                {item.descricao || item.sku || item.codigo}
+                              </div>
+                              <div className="truncate font-mono text-xs text-muted-foreground">
+                                {item.codigo}
+                                {item.sku ? ` · ${item.sku}` : ""}
+                              </div>
+                            </div>
+                            <div className="shrink-0 text-right">
+                              <div className="text-xs text-muted-foreground">
+                                Ped: <span className="font-bold text-foreground">{item.quantidadePedida}</span>
+                                {item.quantidadeReal != null && ` · Real: ${item.quantidadeReal}`}
+                              </div>
+                              <span className={`mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${st.classes}`}>
+                                {st.label}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })
+                    ) : (
+                      <div className="rounded-xl border border-dashed border-border bg-background px-4 py-3 text-sm text-muted-foreground">
+                        Este pedido nao tem itens gravados.
+                      </div>
+                    )}
+                  </div>
+                )}
               </article>
             );
           })
