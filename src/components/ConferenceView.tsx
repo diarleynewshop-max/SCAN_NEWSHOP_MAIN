@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { lazy, Suspense, useState, useRef, useEffect } from "react";
 import {
   buscarProdutoVarejoFacil,
   type VarejoFacilProduct,
@@ -26,6 +26,7 @@ import {
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { EditarPendentesModal } from "@/components/EditarPendentesModal";
+import BarcodeInput from "@/components/BarcodeInput";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
@@ -58,6 +59,8 @@ import {
   type RecomendacaoSubstituicao,
 } from "@/lib/recomendacoesSubstituicao";
 import { z } from "zod";
+
+const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
 
 export type ConferenceStatus =
   | "separado"
@@ -266,6 +269,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [produtoRecomendado, setProdutoRecomendado] = useState<VarejoFacilProduct | null>(null);
   const [buscandoProdutoRecomendado, setBuscandoProdutoRecomendado] = useState(false);
   const [salvandoRecomendacao, setSalvandoRecomendacao] = useState(false);
+  const [showScannerRecomendacao, setShowScannerRecomendacao] = useState(false);
   const [itensDetalheTask, setItensDetalheTask] = useState<ConferenceItem[]>([]);
   const [loadingDetalheTask, setLoadingDetalheTask] = useState(false);
   const [salvandoQuantidadeItemId, setSalvandoQuantidadeItemId] = useState<string | null>(null);
@@ -1371,7 +1375,13 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     setQuantidadeRecomendada(String(Math.max(1, alvo.quantidadePedida)));
     setObservacaoRecomendacao("");
     setProdutoRecomendado(null);
+    setShowScannerRecomendacao(false);
     setModalRecomendacaoAberto(true);
+  };
+
+  const handleCodigoRecomendadoDetectado = (code: string) => {
+    setCodigoRecomendado(code);
+    setShowScannerRecomendacao(false);
   };
 
   const buscarProdutoRecomendadoAtual = async () => {
@@ -2347,25 +2357,25 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                 <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
                   Codigo substituto
                 </span>
-                <div className="mt-1 flex gap-2">
-                  <input
+                <div className="mt-1 space-y-2">
+                  <BarcodeInput
                     value={codigoRecomendado}
-                    onChange={(event) => setCodigoRecomendado(event.target.value)}
-                    placeholder="Ex: abc-124"
-                    className="h-11 flex-1 rounded-xl border border-input bg-background px-3 text-sm text-foreground outline-none"
+                    onChange={setCodigoRecomendado}
+                    onScanPress={() => setShowScannerRecomendacao(true)}
+                    onEnterPress={() => void buscarProdutoRecomendadoAtual()}
                   />
                   <button
                     type="button"
                     onClick={() => void buscarProdutoRecomendadoAtual()}
                     disabled={buscandoProdutoRecomendado}
-                    className="inline-flex h-11 items-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground"
+                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground"
                   >
                     {buscandoProdutoRecomendado ? (
                       <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
                     ) : (
                       <PackageSearch className="h-4 w-4" />
                     )}
-                    Buscar
+                    Buscar no ERP
                   </button>
                 </div>
               </label>
@@ -2440,6 +2450,14 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             </div>
           </div>
         </div>
+      )}
+      {showScannerRecomendacao && (
+        <Suspense fallback={<div className="fixed inset-0 z-[80] bg-background p-6">Carregando scanner...</div>}>
+          <BarcodeScanner
+            onDetected={handleCodigoRecomendadoDetectado}
+            onClose={() => setShowScannerRecomendacao(false)}
+          />
+        </Suspense>
       )}
     </div>
   );
