@@ -192,9 +192,9 @@ export function ErpDashboard({ loginSalvo }: { loginSalvo: LoginData | null }) {
   const saudacao = hora < 12 ? "Bom dia" : hora < 18 ? "Boa tarde" : "Boa noite";
   const nome = loginSalvo?.nomePessoa || "usuário";
 
-  const empresasResumo = (loginSalvo?.empresasPermitidas && loginSalvo.empresasPermitidas.length > 0)
-    ? loginSalvo.empresasPermitidas
-    : (loginSalvo?.empresa ? [loginSalvo.empresa] : []);
+  // Home deve refletir a empresa ATIVA do login atual. Usar empresasPermitidas
+  // aqui mistura SOYE e FACIL para usuarios que podem alternar entre as duas.
+  const empresasResumo = loginSalvo?.empresa ? [loginSalvo.empresa] : [];
   const flagResumo = loginSalvo?.flag ?? "loja";
   const empresasKey = empresasResumo.join(",");
 
