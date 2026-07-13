@@ -5,38 +5,16 @@ import {
   Clock3,
   PackageCheck,
   RefreshCw,
+  Search,
+  User,
+  X,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import {
-  listarMeusPedidos,
+  listarPedidos,
   type MeuPedidoResumo,
 } from "@/lib/pedidosFila";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
-
-type StatusKey = "pendente" | "analisado" | "em_andamento" | "concluido";
-
-const STATUS_META: Record<StatusKey, { label: string; classes: string }> = {
-  pendente: {
-    label: "Pendente",
-    classes: "border-slate-300 bg-slate-100 text-slate-700",
-  },
-  analisado: {
-    label: "Analisado",
-    classes: "border-sky-300 bg-sky-100 text-sky-800",
-  },
-  em_andamento: {
-    label: "Em andamento",
-    classes: "border-amber-300 bg-amber-100 text-amber-800",
-  },
-  concluido: {
-    label: "Concluido",
-    classes: "border-emerald-300 bg-emerald-100 text-emerald-800",
-  },
-};
-
-function getStatusMeta(status: string) {
-  return STATUS_META[(status as StatusKey) ?? "pendente"] ?? STATUS_META.pendente;
-}
 
 function formatDateTime(value: string | null): string {
   if (!value) return "-";
@@ -68,9 +46,21 @@ export default function MeusPedidos() {
   const carregamentoRef = useRef(0);
   const carregarRef = useRef<(silent?: boolean) => Promise<void>>(async () => undefined);
 
+  // Filtros da tela
+  const [produtoBusca, setProdutoBusca] = useState("");
+  const [pessoaBusca, setPessoaBusca] = useState("");
+  const [dataInicio, setDataInicio] = useState("");
+  const [dataFim, setDataFim] = useState("");
+
+  // Render incremental: todos os pedidos ficam carregados/filtraveis, mas so
+  // renderizamos um lote por vez (concluidos podem passar de 1000).
+  const LOTE = 60;
+  const [visiveis, setVisiveis] = useState(LOTE);
+
   const empresa = loginSalvo?.empresa ?? "NEWSHOP";
   const flag = loginSalvo?.flag ?? "loja";
-  const nomeLogado = String(loginSalvo?.nomePessoa ?? "").trim();
+
+  const temFiltro = Boolean(produtoBusca || pessoaBusca || dataInicio || dataFim);
 
   const carregar = async (silent = false) => {
     const requestId = ++carregamentoRef.current;
@@ -91,14 +81,6 @@ export default function MeusPedidos() {
       return;
     }
 
-    if (!nomeLogado) {
-      setPedidos([]);
-      setError("Login sem nome de operador para filtrar meus pedidos.");
-      setLoading(false);
-      setRefreshing(false);
-      return;
-    }
-
     if (silent) {
       setRefreshing(true);
     } else {
@@ -106,7 +88,17 @@ export default function MeusPedidos() {
     }
 
     try {
-      const data = await listarMeusPedidos(empresa, flag, nomeLogado);
+      // Todos os pedidos CONCLUIDOS (o antigo "complete" do ClickUp), de todas as
+      // pessoas, filtraveis por produto / pessoa / periodo.
+      const data = await listarPedidos({
+        empresa,
+        flag,
+        status: "concluido",
+        produtoBusca: produtoBusca.trim(),
+        pessoaBusca: pessoaBusca.trim(),
+        dataInicio,
+        dataFim,
+      });
       if (requestId !== carregamentoRef.current) return;
       setPedidos(data);
       setError(null);
@@ -124,16 +116,20 @@ export default function MeusPedidos() {
 
   carregarRef.current = carregar;
 
+  // Recarrega quando muda empresa/flag ou os filtros (com debounce leve nos filtros).
   useEffect(() => {
-    void carregar();
+    const t = setTimeout(() => {
+      void carregar();
+    }, 300);
+    return () => clearTimeout(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [empresa, flag, nomeLogado, loginSalvo]);
+  }, [empresa, flag, loginSalvo, produtoBusca, pessoaBusca, dataInicio, dataFim]);
 
   useEffect(() => {
-    if (!loginSalvo || !isSupabaseConfigured || !nomeLogado) return;
+    if (!loginSalvo || !isSupabaseConfigured) return;
 
     const channel = supabase
-      .channel(`meus-pedidos:${empresa}:${flag}:${nomeLogado}`)
+      .channel(`pedidos-concluidos:${empresa}:${flag}`)
       .on(
         "postgres_changes",
         { event: "*", schema: "public", table: "pedidos", filter: `empresa=eq.${empresa}` },
@@ -146,16 +142,28 @@ export default function MeusPedidos() {
     return () => {
       void supabase.removeChannel(channel);
     };
-  }, [empresa, flag, loginSalvo, nomeLogado]);
+  }, [empresa, flag, loginSalvo]);
 
   const stats = useMemo(
     () => ({
       total: pedidos.length,
-      abertos: pedidos.filter((pedido) => pedido.status !== "concluido").length,
-      concluidos: pedidos.filter((pedido) => pedido.status === "concluido").length,
+      itens: pedidos.reduce((acc, p) => acc + (p.totalItens || 0), 0),
+      naoTem: pedidos.reduce((acc, p) => acc + (p.resumoNaoTem || 0), 0),
     }),
     [pedidos]
   );
+
+  // Volta pro primeiro lote sempre que a lista muda (novo filtro/refresh).
+  useEffect(() => {
+    setVisiveis(LOTE);
+  }, [pedidos]);
+
+  const limparFiltros = () => {
+    setProdutoBusca("");
+    setPessoaBusca("");
+    setDataInicio("");
+    setDataFim("");
+  };
 
   return (
     <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-8">
@@ -164,13 +172,13 @@ export default function MeusPedidos() {
           <div>
             <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
               <ClipboardList className="h-4 w-4" />
-              Meus Pedidos
+              Pedidos concluidos
             </div>
             <h1 className="mt-2 text-2xl font-black text-foreground md:text-3xl">
-              Acompanhe os pedidos que voce enviou
+              Todos os pedidos finalizados
             </h1>
             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              Operador: <span className="font-semibold text-foreground">{nomeLogado || "-"}</span> | {empresa} | {flag.toUpperCase()}
+              {empresa} | {flag.toUpperCase()} — filtre por produto, pessoa ou periodo.
             </p>
           </div>
 
@@ -185,24 +193,84 @@ export default function MeusPedidos() {
           </button>
         </div>
 
+        {/* Filtros */}
+        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Produto</span>
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
+              <Search className="h-4 w-4 text-muted-foreground" />
+              <input
+                value={produtoBusca}
+                onChange={(e) => setProdutoBusca(e.target.value)}
+                placeholder="Codigo, nome ou SKU"
+                className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Pessoa</span>
+            <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
+              <User className="h-4 w-4 text-muted-foreground" />
+              <input
+                value={pessoaBusca}
+                onChange={(e) => setPessoaBusca(e.target.value)}
+                placeholder="Nome do listeiro/pessoa"
+                className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">De</span>
+            <input
+              type="date"
+              value={dataInicio}
+              onChange={(e) => setDataInicio(e.target.value)}
+              className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none"
+            />
+          </label>
+
+          <label className="flex flex-col gap-1">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Ate</span>
+            <input
+              type="date"
+              value={dataFim}
+              onChange={(e) => setDataFim(e.target.value)}
+              className="rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none"
+            />
+          </label>
+        </div>
+
+        {temFiltro && (
+          <button
+            type="button"
+            onClick={limparFiltros}
+            className="mt-3 inline-flex items-center gap-1.5 rounded-lg border border-border bg-background px-3 py-1.5 text-xs font-semibold text-muted-foreground transition hover:bg-accent"
+          >
+            <X className="h-3.5 w-3.5" />
+            Limpar filtros
+          </button>
+        )}
+
         <div className="mt-4 grid gap-3 md:grid-cols-3">
           <div className="rounded-2xl border border-border bg-background px-4 py-3">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              Total
+              Pedidos
             </div>
             <div className="mt-2 text-3xl font-black text-foreground">{stats.total}</div>
           </div>
           <div className="rounded-2xl border border-border bg-background px-4 py-3">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              Abertos
+              Itens
             </div>
-            <div className="mt-2 text-3xl font-black text-sky-700">{stats.abertos}</div>
+            <div className="mt-2 text-3xl font-black text-sky-700">{stats.itens}</div>
           </div>
           <div className="rounded-2xl border border-border bg-background px-4 py-3">
             <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-              Concluidos
+              Nao tem
             </div>
-            <div className="mt-2 text-3xl font-black text-emerald-700">{stats.concluidos}</div>
+            <div className="mt-2 text-3xl font-black text-rose-700">{stats.naoTem}</div>
           </div>
         </div>
       </section>
@@ -223,16 +291,18 @@ export default function MeusPedidos() {
             </div>
           ))
         ) : pedidos.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-border bg-card px-6 py-10 text-center shadow-sm">
+          <div className="rounded-3xl border border-dashed border-border bg-card px-6 py-10 text-center shadow-sm md:col-span-2 xl:col-span-3">
             <PackageCheck className="mx-auto h-10 w-10 text-muted-foreground" />
             <h2 className="mt-4 text-lg font-bold text-foreground">Nenhum pedido encontrado</h2>
             <p className="mt-2 text-sm text-muted-foreground">
-              Assim que voce enviar pedidos com este login, eles aparecem aqui.
+              {temFiltro
+                ? "Nenhum pedido concluido bate com os filtros aplicados."
+                : "Ainda nao ha pedidos concluidos para esta empresa."}
             </p>
           </div>
         ) : (
-          pedidos.map((pedido) => {
-            const status = getStatusMeta(pedido.status);
+          pedidos.slice(0, visiveis).map((pedido) => {
+            const pessoa = pedido.pessoa || pedido.listeiro || "-";
 
             return (
               <article key={pedido.id} className="rounded-3xl border border-border bg-card p-5 shadow-sm">
@@ -240,22 +310,24 @@ export default function MeusPedidos() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <h2 className="truncate text-lg font-black text-foreground">{pedido.titulo}</h2>
-                      <span className={`inline-flex items-center rounded-full border px-3 py-1 text-xs font-bold ${status.classes}`}>
-                        {status.label}
+                      <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
+                        Concluido
                       </span>
                     </div>
 
                     <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground">
                       <span className="inline-flex items-center gap-2">
+                        <User className="h-4 w-4" />
+                        {pessoa}
+                      </span>
+                      <span className="inline-flex items-center gap-2">
                         <Clock3 className="h-4 w-4" />
                         Criado em {formatDateTime(pedido.createdAt)}
                       </span>
-                      {pedido.status === "concluido" && (
-                        <span className="inline-flex items-center gap-2">
-                          <CheckCircle2 className="h-4 w-4" />
-                          Conferido em {formatDateTime(pedido.dataConferencia)}
-                        </span>
-                      )}
+                      <span className="inline-flex items-center gap-2">
+                        <CheckCircle2 className="h-4 w-4" />
+                        Conferido em {formatDateTime(pedido.dataConferencia)}
+                      </span>
                     </div>
                   </div>
 
@@ -267,47 +339,51 @@ export default function MeusPedidos() {
                   </div>
                 </div>
 
-                {pedido.status === "concluido" ? (
-                  <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
-                    <ResumoChip
-                      label="Separado"
-                      value={pedido.resumoSeparado}
-                      classes="border-emerald-200 bg-emerald-50 text-emerald-800"
-                    />
-                    <ResumoChip
-                      label="Nao tem"
-                      value={pedido.resumoNaoTem}
-                      classes="border-rose-200 bg-rose-50 text-rose-800"
-                    />
-                    <ResumoChip
-                      label="Parcial"
-                      value={pedido.resumoParcial}
-                      classes="border-amber-200 bg-amber-50 text-amber-800"
-                    />
-                    <ResumoChip
-                      label="Pendente"
-                      value={pedido.resumoPendente}
-                      classes="border-slate-200 bg-slate-50 text-slate-800"
-                    />
-                    <div className="rounded-xl border border-border bg-background px-3 py-2">
-                      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                        Conferente
-                      </div>
-                      <div className="mt-1 text-sm font-bold text-foreground">{pedido.conferente || "-"}</div>
+                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                  <ResumoChip
+                    label="Separado"
+                    value={pedido.resumoSeparado}
+                    classes="border-emerald-200 bg-emerald-50 text-emerald-800"
+                  />
+                  <ResumoChip
+                    label="Nao tem"
+                    value={pedido.resumoNaoTem}
+                    classes="border-rose-200 bg-rose-50 text-rose-800"
+                  />
+                  <ResumoChip
+                    label="Parcial"
+                    value={pedido.resumoParcial}
+                    classes="border-amber-200 bg-amber-50 text-amber-800"
+                  />
+                  <ResumoChip
+                    label="Pendente"
+                    value={pedido.resumoPendente}
+                    classes="border-slate-200 bg-slate-50 text-slate-800"
+                  />
+                  <div className="rounded-xl border border-border bg-background px-3 py-2">
+                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                      Conferente
                     </div>
+                    <div className="mt-1 text-sm font-bold text-foreground">{pedido.conferente || "-"}</div>
                   </div>
-                ) : (
-                  <div className="mt-4 rounded-2xl border border-border bg-background px-4 py-3 text-sm text-muted-foreground">
-                    {pedido.status === "analisado" && "Pedido pronto para conferencia."}
-                    {pedido.status === "em_andamento" && "Pedido em conferencia agora."}
-                    {pedido.status === "pendente" && "Pedido ainda nao foi liberado para conferencia."}
-                  </div>
-                )}
+                </div>
               </article>
             );
           })
         )}
       </section>
+
+      {pedidos.length > visiveis && (
+        <div className="flex justify-center">
+          <button
+            type="button"
+            onClick={() => setVisiveis((v) => v + LOTE)}
+            className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-5 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-accent"
+          >
+            Carregar mais ({pedidos.length - visiveis} restantes)
+          </button>
+        </div>
+      )}
     </div>
   );
 }

@@ -129,7 +129,9 @@ export interface PendenteConsolidado {
 export interface ListarPedidosFiltro {
   empresa: string;
   flag: string;
-  pessoa?: string;
+  pessoa?: string;          // match EXATO (usado por listarMeusPedidos)
+  pessoaBusca?: string;     // match PARCIAL (ilike) — filtro da tela
+  status?: string;          // ex.: 'concluido' para so os finalizados
   dataInicio?: string;
   dataFim?: string;
   produtoBusca?: string;
@@ -498,55 +500,59 @@ const MEU_PEDIDO_SELECT_COLUMNS = [
 export async function listarPedidos(f: ListarPedidosFiltro): Promise<MeuPedidoResumo[]> {
   if (!isSupabaseConfigured) return [];
 
-  // Quem esta logado no CD tambem enxerga os pedidos da loja (o CD atende a loja).
-  // Quem esta na loja continua vendo apenas os pedidos da loja.
-  const flagFiltro = normalizarFlag(f.flag);
-  let query = supabase
-    .from('pedidos')
-    .select(MEU_PEDIDO_SELECT_COLUMNS)
-    .eq('empresa', normalizarEmpresa(f.empresa))
-    .order('created_at', { ascending: false });
-
-  query = flagFiltro === 'cd'
-    ? query.in('flag', ['cd', 'loja'])
-    : query.eq('flag', flagFiltro);
-
-  const pessoa = String(f.pessoa ?? '').trim();
-  if (pessoa) {
-    query = query.or(`pessoa.eq.${pessoa},listeiro.eq.${pessoa}`);
-  }
-
-  const dataInicio = String(f.dataInicio ?? '').trim();
-  if (dataInicio) {
-    query = query.gte('created_at', `${dataInicio}T00:00:00`);
-  }
-
-  const dataFim = String(f.dataFim ?? '').trim();
-  if (dataFim) {
-    query = query.lte('created_at', `${dataFim}T23:59:59`);
-  }
-
+  // produtoBusca: primeiro acha os pedidos que tem algum item batendo a busca
+  // (codigo/nome/sku/secao, parcial). Em .or() o curinga do ilike e '*'.
+  let idsPorProduto: string[] | null = null;
   const produtoBusca = String(f.produtoBusca ?? '').trim();
   if (produtoBusca) {
-    // Em .or() o curinga do ilike e '*' (nao '%'). Busca por codigo, nome e sku, parcial.
     const like = `*${produtoBusca}*`;
     const { data: itens, error: errItens } = await supabase
       .from('pedido_itens')
       .select('pedido_id')
       .or(`codigo.ilike.${like},descricao.ilike.${like},sku.ilike.${like},secao.ilike.${like}`);
-
     if (errItens) throw errItens;
-
-    const ids = [...new Set((itens ?? []).map((item: { pedido_id: string }) => item.pedido_id).filter(Boolean))];
-    if (ids.length === 0) return [];
-
-    query = query.in('id', ids);
+    idsPorProduto = [...new Set((itens ?? []).map((item: { pedido_id: string }) => item.pedido_id).filter(Boolean))];
+    if (idsPorProduto.length === 0) return [];
   }
 
-  const { data, error } = await query;
-  if (error) throw error;
+  const flagFiltro = normalizarFlag(f.flag);
+  const pessoa = String(f.pessoa ?? '').trim();
+  const pessoaBusca = String(f.pessoaBusca ?? '').trim();
+  const status = String(f.status ?? '').trim();
+  const dataInicio = String(f.dataInicio ?? '').trim();
+  const dataFim = String(f.dataFim ?? '').trim();
 
-  return ((data ?? []) as unknown as MeuPedidoRow[]).map(mapMeuPedido);
+  // Quem esta logado no CD tambem enxerga os pedidos da loja (o CD atende a loja).
+  // Quem esta na loja continua vendo apenas os pedidos da loja.
+  const buildQuery = () => {
+    let q = supabase
+      .from('pedidos')
+      .select(MEU_PEDIDO_SELECT_COLUMNS)
+      .eq('empresa', normalizarEmpresa(f.empresa))
+      .order('created_at', { ascending: false });
+    q = flagFiltro === 'cd' ? q.in('flag', ['cd', 'loja']) : q.eq('flag', flagFiltro);
+    if (status) q = q.eq('status', status);
+    if (pessoa) q = q.or(`pessoa.eq.${pessoa},listeiro.eq.${pessoa}`);
+    if (pessoaBusca) q = q.or(`pessoa.ilike.*${pessoaBusca}*,listeiro.ilike.*${pessoaBusca}*`);
+    if (dataInicio) q = q.gte('created_at', `${dataInicio}T00:00:00`);
+    if (dataFim) q = q.lte('created_at', `${dataFim}T23:59:59`);
+    if (idsPorProduto) q = q.in('id', idsPorProduto);
+    return q;
+  };
+
+  // Pagina de 1000 em 1000 para trazer TODOS os pedidos que batem o filtro
+  // (o "todos os concluidos" pode passar de 1000).
+  const pageSize = 1000;
+  const rows: MeuPedidoRow[] = [];
+  for (let from = 0; ; from += pageSize) {
+    const { data, error } = await buildQuery().range(from, from + pageSize - 1);
+    if (error) throw error;
+    const page = (data ?? []) as unknown as MeuPedidoRow[];
+    rows.push(...page);
+    if (page.length < pageSize) break;
+  }
+
+  return rows.map(mapMeuPedido);
 }
 
 export async function listarMeusPedidos(
