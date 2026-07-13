@@ -1223,6 +1223,142 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   };
   const goPrev = () => { if (currentIndex > 0) setCurrentIndex((i) => i - 1); };
 
+  const recomendacaoOverlay = (
+    <>
+      {modalRecomendacaoAberto && itemSelecionadoRecomendacao && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4">
+          <div className="w-full max-w-lg rounded-2xl bg-card p-5 shadow-2xl">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  Recomendacao interna
+                </p>
+                <h3 className="mt-1 text-lg font-black text-foreground">
+                  {itemSelecionadoRecomendacao.codigo}
+                </h3>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  Destinatario: {modalDetalharTask?.listeiro || listeiro || "sem pessoa"}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => { setModalRecomendacaoAberto(false); setItemSelecionadoRecomendacao(null); }}
+                className="rounded-full bg-muted p-2 text-muted-foreground"
+              >
+                <XCircle className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="mt-4 space-y-3">
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Codigo substituto
+                </span>
+                <div className="mt-1 space-y-2">
+                  <BarcodeInput
+                    value={codigoRecomendado}
+                    onChange={setCodigoRecomendado}
+                    onScanPress={() => setShowScannerRecomendacao(true)}
+                    onEnterPress={() => void buscarProdutoRecomendadoAtual()}
+                  />
+                  <button
+                    type="button"
+                    onClick={() => void buscarProdutoRecomendadoAtual()}
+                    disabled={buscandoProdutoRecomendado}
+                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground"
+                  >
+                    {buscandoProdutoRecomendado ? (
+                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
+                    ) : (
+                      <PackageSearch className="h-4 w-4" />
+                    )}
+                    Buscar no ERP
+                  </button>
+                </div>
+              </label>
+
+              {produtoRecomendado && (
+                <div className="rounded-xl border border-border bg-background p-3">
+                  <div className="flex gap-3">
+                    {produtoRecomendado.imagem ? (
+                      <img
+                        src={produtoRecomendado.imagem}
+                        alt={produtoRecomendado.descricao}
+                        className="h-20 w-20 rounded-xl object-cover"
+                      />
+                    ) : (
+                      <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-muted text-xs text-muted-foreground">
+                        sem foto
+                      </div>
+                    )}
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-bold text-foreground">{produtoRecomendado.descricao}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">{produtoRecomendado.codigo_barras}</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Secao: {produtoRecomendado.secao || "-"} | Estoque: {produtoRecomendado.estoque}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Quantidade sugerida
+                </span>
+                <input
+                  type="number"
+                  min="1"
+                  value={quantidadeRecomendada}
+                  onChange={(event) => setQuantidadeRecomendada(event.target.value)}
+                  className="mt-1 h-11 w-full rounded-xl border border-input bg-background px-3 text-sm font-bold text-foreground outline-none"
+                />
+              </label>
+
+              <label className="block">
+                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  Observacao
+                </span>
+                <textarea
+                  value={observacaoRecomendacao}
+                  onChange={(event) => setObservacaoRecomendacao(event.target.value)}
+                  placeholder="Ex: mesmo modelo, muda so o acabamento."
+                  className="mt-1 min-h-24 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground outline-none"
+                />
+              </label>
+            </div>
+
+            <div className="mt-5 flex gap-3">
+              <button
+                type="button"
+                onClick={() => { setModalRecomendacaoAberto(false); setItemSelecionadoRecomendacao(null); }}
+                className="h-11 flex-1 rounded-xl border border-border bg-background text-sm font-semibold text-foreground"
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={() => void salvarRecomendacaoAtual()}
+                disabled={salvandoRecomendacao || !produtoRecomendado}
+                className="h-11 flex-1 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-60"
+              >
+                {salvandoRecomendacao ? "Salvando..." : "Enviar recomendacao"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+      {showScannerRecomendacao && (
+        <Suspense fallback={<div className="fixed inset-0 z-[100] bg-background p-6">Carregando scanner...</div>}>
+          <BarcodeScanner
+            onDetected={handleCodigoRecomendadoDetectado}
+            onClose={() => setShowScannerRecomendacao(false)}
+          />
+        </Suspense>
+      )}
+    </>
+  );
+
   const getStatusColor = (status: ConferenceStatus) => {
     switch (status) {
       case "separado": return "border-l-4 border-l-[hsl(var(--success))] bg-[hsl(var(--success)/0.08)]";
@@ -1990,6 +2126,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             </div>
           </div>
         )}
+        {recomendacaoOverlay}
       </div>
     );
   }
@@ -2328,137 +2465,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         )}
       </div>}
 
-      {modalRecomendacaoAberto && itemSelecionadoRecomendacao && (
-        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4">
-          <div className="w-full max-w-lg rounded-2xl bg-card p-5 shadow-2xl">
-            <div className="flex items-start justify-between gap-3">
-              <div>
-                <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                  Recomendacao interna
-                </p>
-                <h3 className="mt-1 text-lg font-black text-foreground">
-                  {itemSelecionadoRecomendacao.codigo}
-                </h3>
-                <p className="mt-1 text-sm text-muted-foreground">
-                  Destinatario: {modalDetalharTask?.listeiro || listeiro || "sem pessoa"}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => { setModalRecomendacaoAberto(false); setItemSelecionadoRecomendacao(null); }}
-                className="rounded-full bg-muted p-2 text-muted-foreground"
-              >
-                <XCircle className="h-4 w-4" />
-              </button>
-            </div>
-
-            <div className="mt-4 space-y-3">
-              <label className="block">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Codigo substituto
-                </span>
-                <div className="mt-1 space-y-2">
-                  <BarcodeInput
-                    value={codigoRecomendado}
-                    onChange={setCodigoRecomendado}
-                    onScanPress={() => setShowScannerRecomendacao(true)}
-                    onEnterPress={() => void buscarProdutoRecomendadoAtual()}
-                  />
-                  <button
-                    type="button"
-                    onClick={() => void buscarProdutoRecomendadoAtual()}
-                    disabled={buscandoProdutoRecomendado}
-                    className="inline-flex h-11 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground"
-                  >
-                    {buscandoProdutoRecomendado ? (
-                      <span className="h-4 w-4 animate-spin rounded-full border-2 border-current border-t-transparent" />
-                    ) : (
-                      <PackageSearch className="h-4 w-4" />
-                    )}
-                    Buscar no ERP
-                  </button>
-                </div>
-              </label>
-
-              {produtoRecomendado && (
-                <div className="rounded-xl border border-border bg-background p-3">
-                  <div className="flex gap-3">
-                    {produtoRecomendado.imagem ? (
-                      <img
-                        src={produtoRecomendado.imagem}
-                        alt={produtoRecomendado.descricao}
-                        className="h-20 w-20 rounded-xl object-cover"
-                      />
-                    ) : (
-                      <div className="flex h-20 w-20 items-center justify-center rounded-xl bg-muted text-xs text-muted-foreground">
-                        sem foto
-                      </div>
-                    )}
-                    <div className="min-w-0 flex-1">
-                      <p className="text-sm font-bold text-foreground">{produtoRecomendado.descricao}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{produtoRecomendado.codigo_barras}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Secao: {produtoRecomendado.secao || "-"} | Estoque: {produtoRecomendado.estoque}
-                      </p>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <label className="block">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Quantidade sugerida
-                </span>
-                <input
-                  type="number"
-                  min="1"
-                  value={quantidadeRecomendada}
-                  onChange={(event) => setQuantidadeRecomendada(event.target.value)}
-                  className="mt-1 h-11 w-full rounded-xl border border-input bg-background px-3 text-sm font-bold text-foreground outline-none"
-                />
-              </label>
-
-              <label className="block">
-                <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Observacao
-                </span>
-                <textarea
-                  value={observacaoRecomendacao}
-                  onChange={(event) => setObservacaoRecomendacao(event.target.value)}
-                  placeholder="Ex: mesmo modelo, muda so o acabamento."
-                  className="mt-1 min-h-24 w-full rounded-xl border border-input bg-background px-3 py-2 text-sm text-foreground outline-none"
-                />
-              </label>
-            </div>
-
-            <div className="mt-5 flex gap-3">
-              <button
-                type="button"
-                onClick={() => { setModalRecomendacaoAberto(false); setItemSelecionadoRecomendacao(null); }}
-                className="h-11 flex-1 rounded-xl border border-border bg-background text-sm font-semibold text-foreground"
-              >
-                Cancelar
-              </button>
-              <button
-                type="button"
-                onClick={() => void salvarRecomendacaoAtual()}
-                disabled={salvandoRecomendacao || !produtoRecomendado}
-                className="h-11 flex-1 rounded-xl bg-primary text-sm font-bold text-primary-foreground disabled:opacity-60"
-              >
-                {salvandoRecomendacao ? "Salvando..." : "Enviar recomendacao"}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
-      {showScannerRecomendacao && (
-        <Suspense fallback={<div className="fixed inset-0 z-[100] bg-background p-6">Carregando scanner...</div>}>
-          <BarcodeScanner
-            onDetected={handleCodigoRecomendadoDetectado}
-            onClose={() => setShowScannerRecomendacao(false)}
-          />
-        </Suspense>
-      )}
+      {recomendacaoOverlay}
     </div>
   );
 };
