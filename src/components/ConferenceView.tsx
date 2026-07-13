@@ -2329,7 +2329,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       </div>}
 
       {modalRecomendacaoAberto && itemSelecionadoRecomendacao && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4">
+        <div className="fixed inset-0 z-[90] flex items-center justify-center bg-black/70 p-4">
           <div className="w-full max-w-lg rounded-2xl bg-card p-5 shadow-2xl">
             <div className="flex items-start justify-between gap-3">
               <div>
@@ -2452,7 +2452,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         </div>
       )}
       {showScannerRecomendacao && (
-        <Suspense fallback={<div className="fixed inset-0 z-[80] bg-background p-6">Carregando scanner...</div>}>
+        <Suspense fallback={<div className="fixed inset-0 z-[100] bg-background p-6">Carregando scanner...</div>}>
           <BarcodeScanner
             onDetected={handleCodigoRecomendadoDetectado}
             onClose={() => setShowScannerRecomendacao(false)}
