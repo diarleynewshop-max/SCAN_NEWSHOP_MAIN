@@ -1,6 +1,8 @@
 import { lazy, Suspense, useState, useRef, useEffect } from "react";
 import {
+  buscarEstoquesConferenciaVarejoFacil,
   buscarProdutoVarejoFacil,
+  type VarejoFacilEstoqueConferencia,
   type VarejoFacilProduct,
 } from "@/lib/varejoFacilIntegration";
 import {
@@ -32,6 +34,8 @@ import jsPDF from "jspdf";
 import JSZip from "jszip";
 import {
   atualizarQuantidadePedidoItem,
+  atualizarTituloPedido,
+  removerItemPedido,
   desfazerJuntarPedidos,
   carregarItensDoPedido,
   dispararExpedicaoConferencia,
@@ -276,6 +280,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [itensDetalheTask, setItensDetalheTask] = useState<ConferenceItem[]>([]);
   const [loadingDetalheTask, setLoadingDetalheTask] = useState(false);
   const [salvandoQuantidadeItemId, setSalvandoQuantidadeItemId] = useState<string | null>(null);
+  const [nomeEditPedido, setNomeEditPedido] = useState("");
+  const [salvandoNomePedido, setSalvandoNomePedido] = useState(false);
+  const [removendoItemId, setRemovendoItemId] = useState<string | null>(null);
+  const [estoquesItemAtual, setEstoquesItemAtual] = useState<VarejoFacilEstoqueConferencia[]>([]);
+  const [loadingEstoquesItemAtual, setLoadingEstoquesItemAtual] = useState(false);
+  const [erroEstoquesItemAtual, setErroEstoquesItemAtual] = useState<string | null>(null);
 
   // ── Rascunho automático ────────────────────────────────────────────────────
   const DRAFT_KEY = "conferencia_draft_v1";
@@ -542,6 +552,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const abrirDetalhamentoTask = async (task: PedidoParaConferencia) => {
     setModalAcoesTask(null);
     setModalDetalharTask(task);
+    setNomeEditPedido(task.name ?? "");
     setLoadingDetalheTask(true);
     try {
       const [itensPedido, recomendacoes] = await Promise.all([
@@ -594,6 +605,53 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       });
     } finally {
       setSalvandoQuantidadeItemId(null);
+    }
+  };
+
+  // Editar pedido (admin/super): renomear o pedido.
+  const salvarNomePedidoDetalhe = async () => {
+    const task = modalDetalharTask;
+    if (!task) return;
+    const nome = nomeEditPedido.trim();
+    if (!nome) {
+      toast({ title: "Informe um nome", variant: "destructive" });
+      return;
+    }
+    if (nome === task.name) return;
+    setSalvandoNomePedido(true);
+    try {
+      await atualizarTituloPedido(task.id, nome);
+      setModalDetalharTask({ ...task, name: nome });
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, name: nome } : t)));
+      toast({ title: "Nome do pedido atualizado" });
+    } catch (err) {
+      toast({
+        title: "Falha ao renomear",
+        description: err instanceof Error ? err.message : "Nao foi possivel renomear o pedido.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvandoNomePedido(false);
+    }
+  };
+
+  // Editar pedido (admin/super): excluir um item do pedido.
+  const excluirItemDetalhe = async (itemId: string) => {
+    const task = modalDetalharTask;
+    if (!task) return;
+    setRemovendoItemId(itemId);
+    try {
+      await removerItemPedido(task.id, itemId);
+      setItensDetalheTask((prev) => prev.filter((it) => it.id !== itemId));
+      toast({ title: "Item removido" });
+    } catch (err) {
+      toast({
+        title: "Falha ao remover item",
+        description: err instanceof Error ? err.message : "Nao foi possivel remover o item.",
+        variant: "destructive",
+      });
+    } finally {
+      setRemovendoItemId(null);
     }
   };
 
@@ -1247,6 +1305,37 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     (currentItem.status !== "nao_tem_tudo" ||
       (currentItem.quantidadeReal !== null && currentItem.quantidadeReal > 0));
   const isLastItem = currentIndex === items.length - 1;
+  useEffect(() => {
+    if (!currentItem?.codigo) {
+      setEstoquesItemAtual([]);
+      setErroEstoquesItemAtual(null);
+      setLoadingEstoquesItemAtual(false);
+      return;
+    }
+
+    let ativo = true;
+    setLoadingEstoquesItemAtual(true);
+    setErroEstoquesItemAtual(null);
+
+    buscarEstoquesConferenciaVarejoFacil(currentItem.codigo, { empresa, flag })
+      .then((estoques) => {
+        if (!ativo) return;
+        setEstoquesItemAtual(estoques);
+      })
+      .catch((err) => {
+        if (!ativo) return;
+        setEstoquesItemAtual([]);
+        setErroEstoquesItemAtual(err instanceof Error ? err.message : "Nao foi possivel consultar o estoque no ERP.");
+      })
+      .finally(() => {
+        if (!ativo) return;
+        setLoadingEstoquesItemAtual(false);
+      });
+
+    return () => {
+      ativo = false;
+    };
+  }, [currentItem?.codigo, empresa, flag]);
   const allDone =
     items.length > 0 &&
     items.every(
@@ -1974,8 +2063,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                   onClick={() => void abrirDetalhamentoTask(modalAcoesTask)}
                   className="w-full h-14 rounded-xl border-2 border-primary bg-primary/5 text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
                 >
-                  <span className="text-base text-primary">Detalhando</span>
-                  <span className="text-[11px] text-muted-foreground font-normal">Ver itens, editar quantidade e recomendar troca</span>
+                  <span className="text-base text-primary">✏️ Editar pedido</span>
+                  <span className="text-[11px] text-muted-foreground font-normal">Nome, quantidade, excluir item e recomendar troca</span>
                 </button>
                 <button
                   onClick={() => { const t = modalAcoesTask; setModalAcoesTask(null); setTextoConfirmExcluir(""); setModalExcluirTask(t); }}
@@ -2110,10 +2199,25 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           <div className="fixed inset-0 z-[70] flex items-center justify-center bg-black/70 p-4" onClick={() => setModalDetalharTask(null)}>
             <div className="flex max-h-[calc(100vh-2rem)] w-full max-w-5xl flex-col overflow-hidden rounded-2xl border border-border bg-card shadow-2xl" onClick={(e) => e.stopPropagation()}>
               <div className="flex items-start justify-between gap-4 border-b border-border px-5 py-4">
-                <div className="min-w-0">
-                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Detalhando</p>
-                  <h2 className="mt-1 truncate text-xl font-black text-foreground">{modalDetalharTask.name}</h2>
-                  <p className="mt-1 text-sm text-muted-foreground">Ver itens, editar quantidade e recomendar troca.</p>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Editar pedido</p>
+                  <div className="mt-1 flex items-center gap-2">
+                    <input
+                      value={nomeEditPedido}
+                      onChange={(e) => setNomeEditPedido(e.target.value)}
+                      placeholder="Nome do pedido"
+                      className="min-w-0 flex-1 rounded-xl border border-input bg-background px-3 py-2 text-lg font-black text-foreground outline-none focus:border-primary"
+                    />
+                    <button
+                      type="button"
+                      onClick={() => void salvarNomePedidoDetalhe()}
+                      disabled={salvandoNomePedido || !nomeEditPedido.trim() || nomeEditPedido.trim() === modalDetalharTask.name}
+                      className="shrink-0 rounded-xl border border-border bg-card px-3 py-2 text-xs font-bold text-foreground disabled:opacity-50"
+                    >
+                      {salvandoNomePedido ? "Salvando..." : "Salvar nome"}
+                    </button>
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">Renomear, editar quantidade, excluir item e recomendar troca.</p>
                 </div>
                 <button type="button" onClick={() => setModalDetalharTask(null)} className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground transition hover:bg-accent">
                   <XCircle className="h-4 w-4" />
@@ -2165,6 +2269,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                                 className="h-11 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground"
                               >
                                 Recomendar troca
+                              </button>
+                              <button
+                                type="button"
+                                onClick={() => void excluirItemDetalhe(item.id)}
+                                disabled={removendoItemId === item.id}
+                                title="Excluir item"
+                                className="h-11 rounded-xl border border-destructive/40 bg-destructive/5 px-3 text-xs font-bold text-destructive disabled:opacity-60"
+                              >
+                                {removendoItemId === item.id ? "..." : "🗑️ Excluir"}
                               </button>
                             </div>
                           </div>
@@ -2402,6 +2515,23 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <p className="text-sm text-muted-foreground">
               Quantidade pedida: <strong className="text-foreground text-lg">{currentItem.quantidadePedida}</strong>
             </p>
+          </div>
+          <div className="rounded-xl border border-border bg-card/70 p-3">
+            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Estoque ERP</p>
+            {loadingEstoquesItemAtual ? (
+              <p className="mt-2 text-sm text-muted-foreground">Consultando estoque...</p>
+            ) : erroEstoquesItemAtual ? (
+              <p className="mt-2 text-sm text-destructive">{erroEstoquesItemAtual}</p>
+            ) : (
+              <div className="mt-2 space-y-1.5 text-sm">
+                {estoquesItemAtual.map((estoque) => (
+                  <div key={estoque.lojaId} className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2">
+                    <span className="font-semibold text-foreground">{estoque.loja}</span>
+                    <span className="font-mono font-black text-foreground">{estoque.quantidade}</span>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
           {currentItem.status !== "aguardando" && label && StatusIcon && (
             <div className={`flex items-center justify-center gap-2 text-sm font-bold ${label.color}`}>

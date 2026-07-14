@@ -1120,6 +1120,36 @@ export async function atualizarQuantidadePedidoItem(
   if (error) throw error;
 }
 
+// Renomeia o pedido (titulo). Usado no "Editar pedido" (admin/super).
+export async function atualizarTituloPedido(pedidoId: string, titulo: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const nome = String(titulo ?? "").trim();
+  if (!nome) throw new Error("O nome do pedido nao pode ficar vazio.");
+  const { error } = await supabase.from("pedidos").update({ titulo: nome }).eq("id", pedidoId);
+  if (error) throw error;
+}
+
+// Remove UM item do pedido e recalcula o resumo. Nao deixa o pedido sem itens
+// (nesse caso o certo e excluir o pedido inteiro).
+export async function removerItemPedido(pedidoId: string, itemId: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+
+  const { count, error: countError } = await supabase
+    .from("pedido_itens")
+    .select("id", { count: "exact", head: true })
+    .eq("pedido_id", pedidoId);
+  if (countError) throw countError;
+  if ((count ?? 0) <= 1) {
+    throw new Error("O pedido ficaria sem itens. Exclua o pedido inteiro em vez disso.");
+  }
+
+  const { error } = await supabase.from("pedido_itens").delete().eq("id", itemId);
+  if (error) throw error;
+
+  const { error: rpcError } = await supabase.rpc("recalcular_resumo_pedido", { p_pedido_id: pedidoId });
+  if (rpcError) throw rpcError;
+}
+
 export async function desfazerJuntarPedidos(pedidoId: string): Promise<{ restaurados: number }> {
   if (!isSupabaseConfigured) throw new Error('Supabase nao configurado.');
   const id = String(pedidoId ?? '').trim();
