@@ -759,13 +759,52 @@ const Compras = () => {
   const getFornecedoresProduto = (produto: ProdutoComprar) =>
     fornecedoresPorProdutoKey.get(getProdutoKeyCompra(produto)) ?? [];
 
-  const sincronizarFornecedorProdutoIndividual = async (produto: ProdutoComprar) => {
-    const produtoErpId = produtosErp[produto.id]?.id;
+  const registrarProdutoErpLocal = (produto: ProdutoComprar, dados: VarejoFacilProduct | null) => {
+    if (!dados) return;
+
+    setProdutosErp((prev) => {
+      const next = { ...prev, [produto.id]: dados };
+      produtosErpRef.current = next;
+      salvarCacheLocal(getComprasCacheKey(empresa, "erp"), next);
+      return next;
+    });
+
+    const secaoErp = dados.secao?.trim();
+    const descricaoErp = dados.descricao?.trim();
+    if (secaoErp) persistirSecao(produto.id, secaoErp);
+    if (descricaoErp) persistirDescricao(produto.id, descricaoErp);
+    if (dados.imagem && dados.imagem.startsWith("data:")) persistirFoto(produto.id, dados.imagem);
+  };
+
+  const sincronizarFornecedorProdutoIndividual = async (
+    produto: ProdutoComprar,
+    produtoErpOverride?: VarejoFacilProduct | null,
+    options: { force?: boolean } = {}
+  ) => {
     const key = getProdutoKeyCompra(produto);
-    if (!produtoErpId || !key) return false;
+    if (!key) return false;
+    if (!options.force && fornecedoresPorProdutoKey.has(key)) return false;
+    if (fornecedoresSyncRef.current.has(key)) return false;
 
     fornecedoresSyncRef.current.add(key);
     try {
+      let produtoErp = produtoErpOverride ?? produtosErpRef.current[produto.id] ?? produtosErp[produto.id] ?? null;
+
+      if (!produtoErp?.id) {
+        const codigo = getCodigoConsulta(produto.codigo).trim();
+        if (!codigo || isErpMissBloqueado(empresa, codigo)) return false;
+
+        produtoErp = await buscarProdutoVarejoFacil(codigo, { empresa, flag: "loja" });
+        if (!produtoErp?.id) {
+          marcarErpMiss(empresa, codigo);
+          return false;
+        }
+
+        limparErpMiss(empresa, codigo);
+        registrarProdutoErpLocal(produto, produtoErp);
+      }
+
+      const produtoErpId = produtoErp.id;
       const fornecedoresErp = await buscarFornecedoresProduto(produtoErpId, { empresa, flag: "loja" });
       const sincronizados = await sincronizarFornecedoresProdutoCompras({
         empresa,
@@ -1019,11 +1058,21 @@ const Compras = () => {
 
       // Grava dados do ERP no Supabase (uma vez) para nao reconsultar depois.
       for (const [id, dados] of resultados) {
+        const produto = origem.find((item) => item.id === id);
         const secaoErp = dados?.secao?.trim();
         const descricaoErp = dados?.descricao?.trim();
         if (secaoErp) persistirSecao(id, secaoErp);
         if (descricaoErp) persistirDescricao(id, descricaoErp);
         if (dados?.imagem && dados.imagem.startsWith("data:")) persistirFoto(id, dados.imagem);
+        if (produto && dados?.id) {
+          void sincronizarFornecedorProdutoIndividual(produto, dados).catch((err) => {
+            console.error("[Compras][Fornecedor] Falha ao salvar fornecedor apos ERP", {
+              produtoId: produto.id,
+              produtoErpId: dados.id,
+              erro: err instanceof Error ? err.message : String(err),
+            });
+          });
+        }
       }
     };
 
@@ -1059,8 +1108,6 @@ const Compras = () => {
         : produtosPaginados;
 
       const pendentes = origemBase.filter((produto) => {
-        const produtoErpId = produtosErp[produto.id]?.id;
-        if (!produtoErpId) return false;
         const key = getProdutoKeyCompra(produto);
         if (!key) return false;
         if (fornecedoresPorProdutoKey.has(key)) return false;
@@ -1070,9 +1117,8 @@ const Compras = () => {
 
       for (const produto of pendentes) {
         if (cancelado) return;
-        const produtoErpId = produtosErp[produto.id]?.id;
         const key = getProdutoKeyCompra(produto);
-        if (!produtoErpId || !key) continue;
+        if (!key) continue;
 
         try {
           const sincronizou = await sincronizarFornecedorProdutoIndividual(produto);
@@ -1081,7 +1127,7 @@ const Compras = () => {
         } catch (err) {
           console.error("[Compras][Fornecedor] Falha ao sincronizar fornecedores do produto", {
             produtoId: produto.id,
-            produtoErpId,
+            produtoErpId: produtosErpRef.current[produto.id]?.id ?? null,
             erro: err instanceof Error ? err.message : String(err),
           });
         }
@@ -1106,9 +1152,9 @@ const Compras = () => {
       ).values()
     );
 
-    const candidatos = produtosUnicos.filter((produto) => produtosErp[produto.id]?.id);
+    const candidatos = produtosUnicos;
     if (candidatos.length === 0) {
-      toast({ title: "Nenhum produto com ERP carregado para sincronizar." });
+      toast({ title: "Nenhum produto para sincronizar." });
       return;
     }
 
@@ -1119,13 +1165,13 @@ const Compras = () => {
     try {
       for (const produto of candidatos) {
         try {
-          const ok = await sincronizarFornecedorProdutoIndividual(produto);
+          const ok = await sincronizarFornecedorProdutoIndividual(produto, null, { force: true });
           if (ok) sincronizados += 1;
         } catch (err) {
           erros += 1;
           console.error("[Compras][Fornecedor] Falha na sincronizacao manual", {
             produtoId: produto.id,
-            produtoErpId: produtosErp[produto.id]?.id,
+            produtoErpId: produtosErpRef.current[produto.id]?.id ?? null,
             erro: err instanceof Error ? err.message : String(err),
           });
         }
