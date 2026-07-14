@@ -41,6 +41,7 @@ import {
   liberarPedidoEmSegundoPlano,
   listarPedidosParaConferencia,
   juntarPedidos,
+  removerListaDaConferencia,
   reservarPedido,
   type EmpresaKey,
   type FlagKey,
@@ -248,6 +249,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [modalModoAberturaTask, setModalModoAberturaTask] = useState<PedidoParaConferencia | null>(null);
   const [modalConfirmAndamento, setModalConfirmAndamento] = useState<PedidoParaConferencia | null>(null);
   const [modalAcoesTask, setModalAcoesTask] = useState<PedidoParaConferencia | null>(null);
+  const [modalExcluirTask, setModalExcluirTask] = useState<PedidoParaConferencia | null>(null);
+  const [textoConfirmExcluir, setTextoConfirmExcluir] = useState("");
+  const [excluindoTask, setExcluindoTask] = useState(false);
   const [modalDetalharTask, setModalDetalharTask] = useState<PedidoParaConferencia | null>(null);
   const [editarPendentesAberto, setEditarPendentesAberto] = useState(false);
   // true quando o usuario confirmou "continuar mesmo assim" no modal de andamento.
@@ -467,6 +471,26 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   };
 
   const sairModoJuntar = () => { setModoJuntar(false); setSelecionadosJuntar(new Set()); };
+
+  // Exclui a lista (pedido) do Supabase — apaga o pedido e, por cascade, os itens.
+  // So admin/super, com confirmacao digitando "EXCLUIR".
+  const handleExcluirTask = async () => {
+    const task = modalExcluirTask;
+    if (!task) return;
+    if (textoConfirmExcluir.trim().toUpperCase() !== "EXCLUIR") return;
+    setExcluindoTask(true);
+    try {
+      await removerListaDaConferencia(task.id);
+      setModalExcluirTask(null);
+      setTextoConfirmExcluir("");
+      await recarregarTasks();
+      toast({ title: "🗑️ Lista excluída", description: `"${task.name}" foi removida do Supabase.` });
+    } catch (e: any) {
+      toast({ title: "Erro ao excluir", description: e?.message ?? "Falha ao excluir a lista.", variant: "destructive" });
+    } finally {
+      setExcluindoTask(false);
+    }
+  };
 
   const handleJuntar = async () => {
     const ids = Array.from(selecionadosJuntar);
@@ -1953,8 +1977,56 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                   <span className="text-base text-primary">Detalhando</span>
                   <span className="text-[11px] text-muted-foreground font-normal">Ver itens, editar quantidade e recomendar troca</span>
                 </button>
+                <button
+                  onClick={() => { const t = modalAcoesTask; setModalAcoesTask(null); setTextoConfirmExcluir(""); setModalExcluirTask(t); }}
+                  className="w-full h-14 rounded-xl border-2 border-destructive/40 bg-destructive/5 text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
+                >
+                  <span className="text-base text-destructive">🗑️ Excluir lista</span>
+                  <span className="text-[11px] text-muted-foreground font-normal">Remove o pedido e os itens do Supabase (irreversível)</span>
+                </button>
               </div>
               <button onClick={() => setModalAcoesTask(null)} className="w-full text-xs text-muted-foreground underline cursor-pointer bg-transparent border-none pt-1">Cancelar</button>
+            </div>
+          </div>
+        )}
+
+        {/* Modal: confirmar exclusao digitando EXCLUIR */}
+        {modalExcluirTask && (
+          <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 p-4" onClick={() => { if (!excluindoTask) { setModalExcluirTask(null); setTextoConfirmExcluir(""); } }}>
+            <div className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
+              <div className="text-center space-y-1">
+                <p className="text-base font-bold text-destructive">Excluir lista</p>
+                <p className="text-xs text-muted-foreground truncate">{modalExcluirTask.name}</p>
+              </div>
+              <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-foreground">
+                Isso apaga o pedido e todos os itens dele do Supabase. <b>Não dá pra desfazer.</b>
+              </div>
+              <div>
+                <label className="text-xs font-semibold text-muted-foreground">Digite <b>EXCLUIR</b> para confirmar</label>
+                <input
+                  value={textoConfirmExcluir}
+                  onChange={(e) => setTextoConfirmExcluir(e.target.value)}
+                  placeholder="EXCLUIR"
+                  autoFocus
+                  className="mt-1 w-full h-11 rounded-xl border border-border bg-background px-3 text-sm text-foreground outline-none focus:border-destructive"
+                />
+              </div>
+              <div className="flex gap-3">
+                <button
+                  onClick={() => { setModalExcluirTask(null); setTextoConfirmExcluir(""); }}
+                  disabled={excluindoTask}
+                  className="flex-1 h-11 rounded-xl border border-border bg-transparent text-sm font-bold cursor-pointer disabled:opacity-60"
+                >
+                  Cancelar
+                </button>
+                <button
+                  onClick={() => void handleExcluirTask()}
+                  disabled={excluindoTask || textoConfirmExcluir.trim().toUpperCase() !== "EXCLUIR"}
+                  className="flex-1 h-11 rounded-xl bg-destructive text-destructive-foreground border-none text-sm font-bold cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed"
+                >
+                  {excluindoTask ? "Excluindo..." : "Excluir"}
+                </button>
+              </div>
             </div>
           </div>
         )}
