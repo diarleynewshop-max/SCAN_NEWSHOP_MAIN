@@ -890,7 +890,22 @@ export interface FornecedorProduto {
   nome: string;
 }
 
-type ErpFornecedor = { id?: number; nome?: string; fantasia?: string };
+export interface FornecedorProdutoDetalhe extends FornecedorProduto {
+  fantasia?: string | null;
+  documento?: string | null;
+  principal?: boolean;
+}
+
+type ErpFornecedor = {
+  id?: number;
+  nome?: string;
+  fantasia?: string;
+  cnpj?: string;
+  cpfCnpj?: string;
+  cnpjCpf?: string;
+  cpfcnpj?: string;
+  documento?: string;
+};
 
 const fornecedorNomeCache = new Map<string, string>();
 
@@ -917,14 +932,25 @@ const buscarNomeFornecedor = async (
   }
 };
 
-// Busca o fornecedor PRINCIPAL cadastrado pro produto no ERP (cai pro primeiro
-// disponivel se nenhum estiver marcado como principal). Retorna null se o
-// produto nao tiver nenhum fornecedor cadastrado.
-export const buscarFornecedorPrincipalProduto = async (
+function extrairDocumentoFornecedor(fornecedor: ErpFornecedor | null | undefined): string | null {
+  if (!fornecedor) return null;
+  return (
+    String(
+      fornecedor.cnpj ??
+      fornecedor.cpfCnpj ??
+      fornecedor.cnpjCpf ??
+      fornecedor.cpfcnpj ??
+      fornecedor.documento ??
+      ""
+    ).trim() || null
+  );
+}
+
+export const buscarFornecedoresProduto = async (
   produtoId: string,
   contexto: VarejoFacilLookupContext = {}
-): Promise<FornecedorProduto | null> => {
-  if (!produtoId) return null;
+): Promise<FornecedorProdutoDetalhe[]> => {
+  if (!produtoId) return [];
 
   let referencias: ErpFornecedorProduto[] = [];
   try {
@@ -938,13 +964,53 @@ export const buscarFornecedorPrincipalProduto = async (
       produtoId,
       erro: err instanceof Error ? err.message : String(err),
     });
-    return null;
+    return [];
   }
 
-  const principal = referencias.find((ref) => ref.nivel === "PRINCIPAL") ?? referencias[0];
-  if (!principal?.fornecedorId) return null;
+  const ids = referencias
+    .map((ref) => ref.fornecedorId)
+    .filter((id): id is number => typeof id === "number");
 
-  const fornecedorId = String(principal.fornecedorId);
-  const nome = await buscarNomeFornecedor(fornecedorId, contexto);
-  return { fornecedorId, nome };
+  const detalhes = await Promise.all(ids.map(async (id) => {
+    try {
+      const fornecedor = await fetchJson<ErpFornecedor>(`/v1/pessoa/fornecedores/${id}`, contexto);
+      return {
+        fornecedorId: String(id),
+        nome: fornecedor?.fantasia || fornecedor?.nome || `Fornecedor ${id}`,
+        fantasia: fornecedor?.fantasia?.trim() || null,
+        documento: extrairDocumentoFornecedor(fornecedor),
+      };
+    } catch (err) {
+      console.warn("[VarejoFacil][Fornecedor] Falha ao buscar detalhes do fornecedor", {
+        produtoId,
+        fornecedorId: id,
+        erro: err instanceof Error ? err.message : String(err),
+      });
+      return {
+        fornecedorId: String(id),
+        nome: `Fornecedor ${id}`,
+        fantasia: null,
+        documento: null,
+      };
+    }
+  }));
+
+  return detalhes.map((detalhe) => ({
+    ...detalhe,
+    principal: referencias.some((ref) => String(ref.fornecedorId ?? "") === detalhe.fornecedorId && ref.nivel === "PRINCIPAL"),
+  }));
+};
+
+// Busca o fornecedor PRINCIPAL cadastrado pro produto no ERP (cai pro primeiro
+// disponivel se nenhum estiver marcado como principal). Retorna null se o
+// produto nao tiver nenhum fornecedor cadastrado.
+export const buscarFornecedorPrincipalProduto = async (
+  produtoId: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<FornecedorProduto | null> => {
+  if (!produtoId) return null;
+  const fornecedores = await buscarFornecedoresProduto(produtoId, contexto);
+  const principal = fornecedores.find((item) => item.principal) ?? fornecedores[0];
+  if (!principal) return null;
+  return { fornecedorId: principal.fornecedorId, nome: principal.nome };
 };

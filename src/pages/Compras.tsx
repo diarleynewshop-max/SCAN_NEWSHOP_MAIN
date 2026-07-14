@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown, MoreVertical, Barcode } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown, MoreVertical, Barcode, Tags, Link2, Building2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
@@ -11,10 +11,12 @@ import { getSecoesFixasPorEmpresa } from "@/lib/secoesCompras";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { useToast } from "@/hooks/use-toast";
 import {
+  buscarFornecedoresProduto,
   buscarProdutoVarejoFacil,
   buscarVelocidadeVendaProduto,
   buscarPedidosCompraAbertosPorProduto,
   buscarFornecedorPrincipalProduto,
+  type FornecedorProdutoDetalhe,
   type VarejoFacilProduct,
   type VelocidadeVendaProduto,
   type PedidoCompraAberto,
@@ -28,6 +30,19 @@ import {
   ConferenciaGalpaoModal,
   type ConferenciaGalpaoItemView,
 } from "@/components/ConferenciaGalpaoModal";
+import { produtoKey } from "@/lib/comprasSupabase";
+import {
+  criarMarcaFornecedorCompras,
+  listarFornecedoresCacheCompras,
+  listarMarcasFornecedorCompras,
+  listarVinculosMarcaFornecedorCompras,
+  removerVinculoMarcaFornecedorCompras,
+  sincronizarFornecedoresProdutoCompras,
+  vincularFornecedorMarcaCompras,
+  type FornecedorCacheItem,
+  type MarcaFornecedor,
+  type MarcaFornecedorVinculo,
+} from "@/lib/comprasFornecedoresSupabase";
 
 const PAGE_SIZE = 10;
 const ERP_BATCH_SIZE = 5;
@@ -300,6 +315,10 @@ function produtoCombinaSecao(
   return secaoCombinaFiltro(secao, filtro);
 }
 
+function getProdutoKeyCompra(produto: Pick<ProdutoComprar, "codigo" | "sku">): string {
+  return produtoKey(produto.codigo, produto.sku) || String(produto.codigo ?? "").trim();
+}
+
 function getImagemErroKey(produtoId: string, fonte: FotoFonte, foto: string | null): string {
   return `${produtoId}:${fonte}:${foto || "sem-foto"}`;
 }
@@ -339,6 +358,8 @@ const Compras = () => {
   const secoesCompras = useMemo(() => obterLoginSalvo()?.secoesCompras ?? [], []);
   const temSecoesCompras = secoesCompras.length > 0;
   const [searchTerm, setSearchTerm] = useState("");
+  const [filtroFornecedor, setFiltroFornecedor] = useState("");
+  const [filtroMarca, setFiltroMarca] = useState("todos");
   const [filtroStatus, setFiltroStatus] = useState<StatusFiltro>("todos");
   const [filtroSecao, setFiltroSecao] = useState(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
   const [filtroSecaoAnalise, setFiltroSecaoAnalise] = useState(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
@@ -350,6 +371,9 @@ const Compras = () => {
   const [produtosErp, setProdutosErp] = useState<Record<string, VarejoFacilProduct | null>>({});
   const [velocidadeVendas, setVelocidadeVendas] = useState<Record<string, VelocidadeVendaProduto | null>>({});
   const [fotosClickUp, setFotosClickUp] = useState<Record<string, string | null>>({});
+  const [fornecedoresCache, setFornecedoresCache] = useState<FornecedorCacheItem[]>([]);
+  const [marcasFornecedor, setMarcasFornecedor] = useState<MarcaFornecedor[]>([]);
+  const [vinculosMarcaFornecedor, setVinculosMarcaFornecedor] = useState<MarcaFornecedorVinculo[]>([]);
   const [itensSelecionadosPedido, setItensSelecionadosPedido] = useState<Set<string>>(new Set());
   const [gerandoPedidos, setGerandoPedidos] = useState(false);
   const [baixandoPdfPedido, setBaixandoPdfPedido] = useState<string | null>(null);
@@ -358,11 +382,17 @@ const Compras = () => {
   const [filtroSecaoGalpao, setFiltroSecaoGalpao] = useState(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
   // Item aberto no modal de detalhes (mostra codigo de barras + acoes).
   const [produtoDetalhe, setProdutoDetalhe] = useState<ProdutoComprar | null>(null);
+  const [modalMarcasAberto, setModalMarcasAberto] = useState(false);
+  const [novaMarca, setNovaMarca] = useState("");
+  const [marcaSelecionadaId, setMarcaSelecionadaId] = useState("");
+  const [fornecedorSelecionadoId, setFornecedorSelecionadoId] = useState("");
+  const [aliasFornecedorMarca, setAliasFornecedorMarca] = useState("");
   const [escolhaDireita, setEscolhaDireita] = useState(false);
   const [dragX, setDragX] = useState(0);
   const dragStartRef = useRef<number | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const produtosErpRef = useRef<Record<string, VarejoFacilProduct | null>>({});
+  const fornecedoresSyncRef = useRef<Set<string>>(new Set());
   const {
     produtos,
     loading,
@@ -394,6 +424,35 @@ const Compras = () => {
     setFotosClickUp(lerCacheLocal<Record<string, string | null>>(getComprasCacheKey(empresa, "fotos")) ?? {});
     setVelocidadeVendas({});
     setImagemComErro({});
+  }, [empresa]);
+
+  useEffect(() => {
+    let cancelado = false;
+
+    const carregarFornecedoresEMarcas = async () => {
+      try {
+        const [fornecedores, marcas, vinculos] = await Promise.all([
+          listarFornecedoresCacheCompras(empresa),
+          listarMarcasFornecedorCompras(empresa),
+          listarVinculosMarcaFornecedorCompras(empresa),
+        ]);
+        if (cancelado) return;
+        setFornecedoresCache(fornecedores);
+        setMarcasFornecedor(marcas);
+        setVinculosMarcaFornecedor(vinculos);
+        setMarcaSelecionadaId((prev) => prev || marcas[0]?.id || "");
+      } catch (err) {
+        if (cancelado) return;
+        console.error("[Compras][Fornecedor] Falha ao carregar cache/marcas", err);
+      }
+    };
+
+    fornecedoresSyncRef.current = new Set();
+    void carregarFornecedoresEMarcas();
+
+    return () => {
+      cancelado = true;
+    };
   }, [empresa]);
 
   const executarAcao = async (
@@ -642,11 +701,86 @@ const Compras = () => {
     return Array.from(secoes.values()).sort((a, b) => a.localeCompare(b, "pt-BR"));
   }, [empresa, produtosErp, produtos]);
 
+  const fornecedoresPorProdutoKey = useMemo(() => {
+    const mapa = new Map<string, FornecedorCacheItem[]>();
+    for (const fornecedor of fornecedoresCache) {
+      const key = fornecedor.produtoKey;
+      const lista = mapa.get(key) ?? [];
+      lista.push(fornecedor);
+      mapa.set(key, lista);
+    }
+    return mapa;
+  }, [fornecedoresCache]);
+
+  const vinculosPorFornecedorId = useMemo(() => {
+    const mapa = new Map<string, MarcaFornecedorVinculo[]>();
+    for (const vinculo of vinculosMarcaFornecedor) {
+      const lista = mapa.get(vinculo.fornecedorId) ?? [];
+      lista.push(vinculo);
+      mapa.set(vinculo.fornecedorId, lista);
+    }
+    return mapa;
+  }, [vinculosMarcaFornecedor]);
+
+  const fornecedoresDisponiveis = useMemo(() => {
+    const mapa = new Map<string, { id: string; nome: string; documento: string | null }>();
+    for (const fornecedor of fornecedoresCache) {
+      if (fornecedor.placeholder) continue;
+      const nome = fornecedor.fornecedorFantasia || fornecedor.fornecedorNome || `Fornecedor ${fornecedor.fornecedorId}`;
+      if (!mapa.has(fornecedor.fornecedorId)) {
+        mapa.set(fornecedor.fornecedorId, {
+          id: fornecedor.fornecedorId,
+          nome,
+          documento: fornecedor.fornecedorDocumento,
+        });
+      }
+    }
+    return Array.from(mapa.values()).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
+  }, [fornecedoresCache]);
+
+  const fornecedorSelecionado = useMemo(
+    () => fornecedoresDisponiveis.find((fornecedor) => fornecedor.id === fornecedorSelecionadoId) ?? null,
+    [fornecedorSelecionadoId, fornecedoresDisponiveis]
+  );
+
+  const getFornecedoresProduto = (produto: ProdutoComprar) =>
+    fornecedoresPorProdutoKey.get(getProdutoKeyCompra(produto)) ?? [];
+
+  const getMarcasProduto = (produto: ProdutoComprar) => {
+    const marcas = new Map<string, string>();
+    for (const fornecedor of getFornecedoresProduto(produto)) {
+      const vinculos = vinculosPorFornecedorId.get(fornecedor.fornecedorId) ?? [];
+      for (const vinculo of vinculos) {
+        marcas.set(vinculo.marcaId, vinculo.marcaNome);
+      }
+    }
+    return Array.from(marcas.entries()).map(([id, nome]) => ({ id, nome }));
+  };
+
+  const produtoCombinaFornecedorMarca = (produto: ProdutoComprar) => {
+    const fornecedores = getFornecedoresProduto(produto);
+    const marcas = getMarcasProduto(produto);
+
+    if (filtroMarca !== "todos" && !marcas.some((marca) => marca.id === filtroMarca)) {
+      return false;
+    }
+
+    const termoFornecedor = normalizarFiltro(filtroFornecedor);
+    if (!termoFornecedor) return true;
+
+    return fornecedores.some((fornecedor) => {
+      const nome = normalizarFiltro(fornecedor.fornecedorFantasia || fornecedor.fornecedorNome);
+      const documento = normalizarFiltro(fornecedor.fornecedorDocumento);
+      return nome.includes(termoFornecedor) || documento.includes(termoFornecedor);
+    });
+  };
+
   const filteredProdutos = useMemo(() => {
     return produtosPorBuscaStatus.filter((p) => (
-      produtoCombinaSecao(p.secao ?? produtosErp[p.id]?.secao, filtroSecao, secoesCompras)
+      produtoCombinaSecao(p.secao ?? produtosErp[p.id]?.secao, filtroSecao, secoesCompras) &&
+      produtoCombinaFornecedorMarca(p)
     ));
-  }, [filtroSecao, produtosErp, produtosPorBuscaStatus, secoesCompras]);
+  }, [filtroFornecedor, filtroMarca, filtroSecao, produtosErp, produtosPorBuscaStatus, secoesCompras, fornecedoresPorProdutoKey, vinculosPorFornecedorId]);
 
   const produtosOrdenados = useMemo(() => {
     if (ordenarMaisPedidos) {
@@ -870,6 +1004,72 @@ const Compras = () => {
     persistirFoto,
   ]);
 
+  useEffect(() => {
+    let cancelado = false;
+
+    const sincronizarFornecedoresPendentes = async () => {
+      const origemBase = (filtroFornecedor || filtroMarca !== "todos")
+        ? produtosPorBuscaStatus.slice(0, 30)
+        : produtosPaginados;
+
+      const pendentes = origemBase.filter((produto) => {
+        const produtoErpId = produtosErp[produto.id]?.id;
+        if (!produtoErpId) return false;
+        const key = getProdutoKeyCompra(produto);
+        if (!key) return false;
+        if (fornecedoresPorProdutoKey.has(key)) return false;
+        if (fornecedoresSyncRef.current.has(key)) return false;
+        return true;
+      });
+
+      for (const produto of pendentes) {
+        if (cancelado) return;
+        const produtoErpId = produtosErp[produto.id]?.id;
+        const key = getProdutoKeyCompra(produto);
+        if (!produtoErpId || !key) continue;
+
+        fornecedoresSyncRef.current.add(key);
+        try {
+          const fornecedoresErp = await buscarFornecedoresProduto(produtoErpId, { empresa, flag: "loja" });
+          const sincronizados = await sincronizarFornecedoresProdutoCompras({
+            empresa,
+            produtoKey: key,
+            codigo: produto.codigo,
+            sku: produto.sku,
+            produtoErpId,
+            fornecedores: fornecedoresErp.map((fornecedor: FornecedorProdutoDetalhe) => ({
+              fornecedorId: fornecedor.fornecedorId,
+              nome: fornecedor.nome,
+              fantasia: fornecedor.fantasia,
+              documento: fornecedor.documento,
+              principal: fornecedor.principal,
+            })),
+          });
+
+          if (cancelado) return;
+          setFornecedoresCache((prev) => {
+            const semProduto = prev.filter((item) => !(item.empresa === sincronizados[0]?.empresa && item.produtoKey === key));
+            return [...semProduto, ...sincronizados];
+          });
+        } catch (err) {
+          console.error("[Compras][Fornecedor] Falha ao sincronizar fornecedores do produto", {
+            produtoId: produto.id,
+            produtoErpId,
+            erro: err instanceof Error ? err.message : String(err),
+          });
+        } finally {
+          fornecedoresSyncRef.current.delete(key);
+        }
+      }
+    };
+
+    void sincronizarFornecedoresPendentes();
+
+    return () => {
+      cancelado = true;
+    };
+  }, [empresa, filtroFornecedor, filtroMarca, fornecedoresPorProdutoKey, produtos, produtosErp, produtosPaginados, produtosPorBuscaStatus]);
+
   // Fallback de foto via ClickUp removido (endpoint nao existe mais). fotosClickUp
   // fica sempre vazio; montarOpcoesFoto ja cai pra SUPABASE/ERP nesse caso.
 
@@ -949,10 +1149,63 @@ const Compras = () => {
     }
   };
 
-  const filtrosAtivos = Boolean(searchTerm || filtroStatus !== "todos" || filtroSecao !== "todos" || ordenarMaisPedidos || ordenarMaisVendidos);
+  const filtrosAtivos = Boolean(
+    searchTerm ||
+    filtroFornecedor ||
+    filtroMarca !== "todos" ||
+    filtroStatus !== "todos" ||
+    filtroSecao !== "todos" ||
+    ordenarMaisPedidos ||
+    ordenarMaisVendidos
+  );
   const carregandoFiltroSecao = filtroSecao !== "todos" && produtosPorBuscaStatus.some((produto) => !produto.secao && !(produto.id in produtosErp));
   const carregandoFiltroSecaoAnalise = analiseAberta && filtroSecaoAnalise !== "todos" && produtosPendentesAnalise.some((produto) => !produto.secao && !(produto.id in produtosErp));
   const carregandoFiltroSecaoGalpao = galpaoAberto && filtroSecaoGalpao !== "todos" && produtosGalpaoBase.some((produto) => !produto.secao && !(produto.id in produtosErp));
+  const carregandoFiltroFornecedor = Boolean((filtroFornecedor || filtroMarca !== "todos") && filteredProdutos.length === 0 && produtosPorBuscaStatus.length > 0);
+
+  const criarMarca = async () => {
+    try {
+      const criada = await criarMarcaFornecedorCompras(empresa, novaMarca);
+      const marcasAtualizadas = await listarMarcasFornecedorCompras(empresa);
+      setMarcasFornecedor(marcasAtualizadas);
+      setMarcaSelecionadaId(criada.id);
+      setNovaMarca("");
+      toast({ title: "Marca criada", description: criada.nome });
+    } catch (err) {
+      toast({ title: "Erro ao criar marca", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    }
+  };
+
+  const vincularFornecedorNaMarca = async () => {
+    if (!marcaSelecionadaId || !fornecedorSelecionado) {
+      toast({ title: "Selecione marca e fornecedor", variant: "destructive" });
+      return;
+    }
+    try {
+      await vincularFornecedorMarcaCompras({
+        marcaId: marcaSelecionadaId,
+        fornecedorId: fornecedorSelecionado.id,
+        fornecedorNome: fornecedorSelecionado.nome,
+        fornecedorDocumento: fornecedorSelecionado.documento,
+        alias: aliasFornecedorMarca,
+      });
+      setVinculosMarcaFornecedor(await listarVinculosMarcaFornecedorCompras(empresa));
+      setFornecedorSelecionadoId("");
+      setAliasFornecedorMarca("");
+      toast({ title: "Fornecedor vinculado" });
+    } catch (err) {
+      toast({ title: "Erro ao vincular fornecedor", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    }
+  };
+
+  const removerVinculoMarca = async (vinculoId: string) => {
+    try {
+      await removerVinculoMarcaFornecedorCompras(vinculoId);
+      setVinculosMarcaFornecedor(await listarVinculosMarcaFornecedorCompras(empresa));
+    } catch (err) {
+      toast({ title: "Erro ao remover vinculo", description: err instanceof Error ? err.message : String(err), variant: "destructive" });
+    }
+  };
 
   const executarAnalise = async (
     acao: "DISLIKE" | "LIKE" | "FAZER_PEDIDO",
@@ -1230,7 +1483,7 @@ const Compras = () => {
 
         <Card className="mb-6">
           <CardContent className="pt-6">
-            <div className="grid grid-cols-1 lg:grid-cols-[1.4fr_1fr_1fr_auto] gap-3">
+            <div className="grid grid-cols-1 lg:grid-cols-[1.15fr_1fr_1fr_1fr_1fr_auto] gap-3">
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 text-gray-400 h-4 w-4" />
                 <Input
@@ -1271,10 +1524,31 @@ const Compras = () => {
                 ))}
               </select>
 
+              <Input
+                placeholder="Fornecedor ou CNPJ..."
+                value={filtroFornecedor}
+                onChange={(e) => setFiltroFornecedor(e.target.value)}
+              />
+
+              <select
+                value={filtroMarca}
+                onChange={(e) => setFiltroMarca(e.target.value)}
+                className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+              >
+                <option value="todos">Todas as marcas</option>
+                {marcasFornecedor.map((marca) => (
+                  <option key={marca.id} value={marca.id}>
+                    {marca.nome}
+                  </option>
+                ))}
+              </select>
+
               <Button
                 variant="outline"
                 onClick={() => {
                   setSearchTerm("");
+                  setFiltroFornecedor("");
+                  setFiltroMarca("todos");
                   setFiltroSecao(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
                   setFiltroStatus("todos");
                   setOrdenarMaisPedidos(false);
@@ -1298,6 +1572,10 @@ const Compras = () => {
                   <TrendingUp className="h-4 w-4 mr-2" />
                   Mais Pedidos
                 </Button>
+                <Button size="sm" variant="outline" onClick={() => setModalMarcasAberto(true)}>
+                  <Link2 className="h-4 w-4 mr-2" />
+                  Marcas / Fornecedores
+                </Button>
                 {VELOCIDADE_VENDA_ATIVA && (
                   <Button
                     size="sm"
@@ -1317,6 +1595,12 @@ const Compras = () => {
                 <span className="inline-flex items-center gap-1">
                   <Loader2 className="h-3 w-3 animate-spin" />
                   Carregando secoes
+                </span>
+              )}
+              {carregandoFiltroFornecedor && (
+                <span className="inline-flex items-center gap-1 text-xs text-gray-500">
+                  <Loader2 className="h-3 w-3 animate-spin" />
+                  Sincronizando fornecedores do ERP
                 </span>
               )}
             </div>
@@ -1378,6 +1662,9 @@ const Compras = () => {
                   const descricaoCurta = truncarDescricao(descricao);
                   const precoVenda = formatarPreco(produtoErp?.precoVarejo);
                   const secaoFormatada = formatarSecao(produto.secao ?? produtoErp?.secao);
+                  const fornecedoresProduto = getFornecedoresProduto(produto).filter((item) => !item.placeholder);
+                  const fornecedorPrincipal = fornecedoresProduto.find((item) => item.principal) ?? fornecedoresProduto[0] ?? null;
+                  const marcasProduto = getMarcasProduto(produto);
                   const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
                   const foto = fotoSelecionada?.src ?? null;
                   const podeMostrarImagem = Boolean(fotoSelecionada);
@@ -1422,6 +1709,21 @@ const Compras = () => {
                             {getStatusBadge(produto.status)}
                           </div>
                           {secaoFormatada && <div className="text-xs text-indigo-600 mt-0.5">{secaoFormatada}</div>}
+                          {fornecedorPrincipal && (
+                            <div className="text-xs text-slate-600 mt-0.5">
+                              Forn: {fornecedorPrincipal.fornecedorFantasia || fornecedorPrincipal.fornecedorNome}
+                              {fornecedorPrincipal.fornecedorDocumento ? ` · ${fornecedorPrincipal.fornecedorDocumento}` : ""}
+                            </div>
+                          )}
+                          {marcasProduto.length > 0 && (
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {marcasProduto.map((marca) => (
+                                <span key={marca.id} className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-800">
+                                  {marca.nome}
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           {precoVenda && <div className="text-xs font-semibold text-emerald-700">{precoVenda}</div>}
                         </div>
                       </div>
@@ -1661,12 +1963,118 @@ const Compras = () => {
         </div>
       )}
 
+      {modalMarcasAberto && (
+        <div className="fixed inset-0 z-50 bg-black/70 backdrop-blur-sm flex items-center justify-center p-4" onClick={() => setModalMarcasAberto(false)}>
+          <div className="w-full max-w-3xl max-h-[92vh] overflow-y-auto rounded-2xl bg-white shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-start justify-between gap-3 border-b p-4">
+              <div>
+                <h2 className="text-lg font-bold text-gray-900">Marcas e Fornecedores</h2>
+                <p className="text-sm text-gray-500">Cadastre marcas manuais e vincule um ou mais fornecedores do ERP.</p>
+              </div>
+              <button type="button" className="h-9 w-9 rounded-full bg-gray-100 flex items-center justify-center" onClick={() => setModalMarcasAberto(false)}>
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="grid gap-4 p-4 md:grid-cols-2">
+              <div className="space-y-4">
+                <div className="rounded-xl border p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                    <Tags className="h-4 w-4" />
+                    Nova marca
+                  </div>
+                  <div className="mt-3 flex gap-2">
+                    <Input value={novaMarca} onChange={(e) => setNovaMarca(e.target.value)} placeholder="Ex.: Bmax" />
+                    <Button onClick={() => void criarMarca()}>Adicionar</Button>
+                  </div>
+                </div>
+
+                <div className="rounded-xl border p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                    <Link2 className="h-4 w-4" />
+                    Vincular fornecedor
+                  </div>
+                  <div className="mt-3 space-y-3">
+                    <select
+                      value={marcaSelecionadaId}
+                      onChange={(e) => setMarcaSelecionadaId(e.target.value)}
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Selecione a marca</option>
+                      {marcasFornecedor.map((marca) => (
+                        <option key={marca.id} value={marca.id}>
+                          {marca.nome}
+                        </option>
+                      ))}
+                    </select>
+
+                    <select
+                      value={fornecedorSelecionadoId}
+                      onChange={(e) => setFornecedorSelecionadoId(e.target.value)}
+                      className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                    >
+                      <option value="">Selecione o fornecedor</option>
+                      {fornecedoresDisponiveis.map((fornecedor) => (
+                        <option key={fornecedor.id} value={fornecedor.id}>
+                          {fornecedor.nome}{fornecedor.documento ? ` · ${fornecedor.documento}` : ""}
+                        </option>
+                      ))}
+                    </select>
+
+                    <Input
+                      value={aliasFornecedorMarca}
+                      onChange={(e) => setAliasFornecedorMarca(e.target.value)}
+                      placeholder="Alias opcional para lembrar esse vinculo"
+                    />
+
+                    <Button className="w-full" onClick={() => void vincularFornecedorNaMarca()}>
+                      Vincular
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-4">
+                <div className="rounded-xl border p-4">
+                  <div className="flex items-center gap-2 text-sm font-semibold text-gray-700">
+                    <Building2 className="h-4 w-4" />
+                    Vinculos atuais
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {vinculosMarcaFornecedor.length === 0 ? (
+                      <div className="text-sm text-gray-500">Nenhum vinculo cadastrado ainda.</div>
+                    ) : (
+                      vinculosMarcaFornecedor.map((vinculo) => (
+                        <div key={vinculo.id} className="flex items-center justify-between gap-3 rounded-lg border bg-gray-50 px-3 py-2">
+                          <div className="min-w-0">
+                            <div className="text-sm font-semibold text-gray-900">{vinculo.marcaNome}</div>
+                            <div className="text-xs text-gray-600">
+                              {vinculo.alias || vinculo.fornecedorNome || vinculo.fornecedorId}
+                              {vinculo.fornecedorDocumento ? ` · ${vinculo.fornecedorDocumento}` : ""}
+                            </div>
+                          </div>
+                          <Button variant="ghost" size="sm" className="text-red-600" onClick={() => void removerVinculoMarca(vinculo.id)}>
+                            Remover
+                          </Button>
+                        </div>
+                      ))
+                    )}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+
       {produtoDetalhe && (() => {
         const produtoErp = produtosErp[produtoDetalhe.id];
         const descricao = getDescricaoExibicao(produtoDetalhe, produtoErp);
         const precoVenda = formatarPreco(produtoErp?.precoVarejo);
         const secaoFormatada = formatarSecao(produtoDetalhe.secao ?? produtoErp?.secao);
         const velocidadeVenda = formatarVelocidadeVenda(velocidadeVendas[produtoDetalhe.id]);
+        const fornecedoresProduto = getFornecedoresProduto(produtoDetalhe).filter((item) => !item.placeholder);
+        const marcasProduto = getMarcasProduto(produtoDetalhe);
         const fotoSelecionada = selecionarFotoProduto(produtoDetalhe, produtoErp, fotosClickUp, imagemComErro);
         const foto = fotoSelecionada?.src ?? null;
 
@@ -1711,6 +2119,29 @@ const Compras = () => {
                 )}
                 {secaoFormatada && (
                   <div className="text-sm text-indigo-600">Secao: {secaoFormatada}</div>
+                )}
+                {fornecedoresProduto.length > 0 && (
+                  <div className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                    <div className="text-xs font-semibold text-slate-700">Fornecedores ERP</div>
+                    <div className="mt-2 space-y-1">
+                      {fornecedoresProduto.map((fornecedor) => (
+                        <div key={fornecedor.id} className="text-xs text-slate-700">
+                          {fornecedor.principal ? "Principal: " : ""}
+                          {fornecedor.fornecedorFantasia || fornecedor.fornecedorNome}
+                          {fornecedor.fornecedorDocumento ? ` · ${fornecedor.fornecedorDocumento}` : ""}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+                {marcasProduto.length > 0 && (
+                  <div className="flex flex-wrap gap-1">
+                    {marcasProduto.map((marca) => (
+                      <span key={marca.id} className="rounded bg-amber-100 px-2 py-1 text-xs font-semibold text-amber-800">
+                        {marca.nome}
+                      </span>
+                    ))}
+                  </div>
                 )}
                 {precoVenda && (
                   <div className="text-sm font-semibold text-emerald-700">{precoVenda}</div>
