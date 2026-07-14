@@ -19,6 +19,12 @@ export interface VarejoFacilProduct {
   hasErpImage?: boolean;
 }
 
+export interface VarejoFacilEstoqueConferencia {
+  loja: "Loja" | "CD" | "Deposito";
+  lojaId: number;
+  quantidade: number;
+}
+
 export interface ConsultaPrecoVarejoFacilProduto {
   id: string;
   codigo_barras: string;
@@ -91,6 +97,12 @@ const ERP_LOJA_BY_EMPRESA: Record<VarejoFacilEmpresa, number> = {
   NEWSHOP: 2,
   SOYE: 1,
 };
+
+const ERP_LOJAS_CONFERENCIA: ReadonlyArray<{ loja: VarejoFacilEstoqueConferencia["loja"]; lojaId: number }> = [
+  { loja: "Loja", lojaId: 1 },
+  { loja: "CD", lojaId: 3 },
+  { loja: "Deposito", lojaId: 2 },
+];
 
 // Cache em memória + localStorage (TTL 24h) para evitar re-consultar seção/grupo a cada reload
 const MERCADOLOGICO_LS_KEY = "vf_mercadologico_v1";
@@ -427,10 +439,10 @@ const buscarProdutoPorCodigoBarras = async (
   return null;
 };
 
-const buscarProdutoVarejoFacilSemCache = async (
+const resolverProdutoErp = async (
   codigoBarras: string,
   contexto: VarejoFacilLookupContext = {}
-): Promise<VarejoFacilProduct | null> => {
+): Promise<{ produto: ErpProduto; eanResolvido: string } | null> => {
   const codigo = codigoBarras.trim();
   if (!codigo) return null;
 
@@ -456,6 +468,21 @@ const buscarProdutoVarejoFacilSemCache = async (
   }
 
   if (!produto?.id) return null;
+
+  return { produto, eanResolvido };
+};
+
+const buscarProdutoVarejoFacilSemCache = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VarejoFacilProduct | null> => {
+  const codigo = codigoBarras.trim();
+  if (!codigo) return null;
+
+  const resolvido = await resolverProdutoErp(codigo, contexto);
+  if (!resolvido) return null;
+
+  const { produto, eanResolvido } = resolvido;
 
   const [precosResult, estoqueResult, secaoResult] = await Promise.allSettled([
     fetchJson<ErpPreco[]>(`/v1/produto/produtos/${produto.id}/precos`, contexto),
@@ -515,6 +542,31 @@ const buscarProdutoVarejoFacilSemCache = async (
     imagem,
     hasErpImage,
   };
+};
+
+export const buscarEstoquesConferenciaVarejoFacil = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VarejoFacilEstoqueConferencia[]> => {
+  const codigo = codigoBarras.trim();
+  if (!codigo) return ERP_LOJAS_CONFERENCIA.map(({ loja, lojaId }) => ({ loja, lojaId, quantidade: 0 }));
+
+  const resolvido = await resolverProdutoErp(codigo, contexto);
+  if (!resolvido?.produto.id) {
+    return ERP_LOJAS_CONFERENCIA.map(({ loja, lojaId }) => ({ loja, lojaId, quantidade: 0 }));
+  }
+
+  const fiql = encodeURIComponent(`produtoId==${resolvido.produto.id}`);
+  const data = await fetchJson<ErpListResponse<ErpResumoEstoque>>(`/v1/estoque/saldos?q=${fiql}&count=100`, contexto);
+  const itens = data?.items || [];
+
+  return ERP_LOJAS_CONFERENCIA.map(({ loja, lojaId }) => ({
+    loja,
+    lojaId,
+    quantidade: itens
+      .filter((item) => item.lojaId === lojaId)
+      .reduce((total, item) => total + Number(item?.saldo || 0), 0),
+  }));
 };
 
 export const buscarProdutoVarejoFacil = async (
