@@ -1,10 +1,11 @@
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Barcode,
   Boxes,
   CheckCircle2,
   Loader2,
   Package,
+  Plus,
   RefreshCw,
   Send,
   Trash2,
@@ -48,6 +49,7 @@ export default function SugestaoCd() {
   const [codigo, setCodigo] = useState("");
   const [scannerAberto, setScannerAberto] = useState(false);
   const [loading, setLoading] = useState(true);
+  const [atualizando, setAtualizando] = useState(false);
   const [salvandoCodigo, setSalvandoCodigo] = useState(false);
   const [gerandoLista, setGerandoLista] = useState(false);
   const [filtroSecao, setFiltroSecao] = useState("todos");
@@ -55,9 +57,28 @@ export default function SugestaoCd() {
   const [editandoDesejadaId, setEditandoDesejadaId] = useState<string | null>(null);
   const [valorDesejada, setValorDesejada] = useState("1");
   const [ajustandoId, setAjustandoId] = useState<string | null>(null);
+  const [draftContada, setDraftContada] = useState<Record<string, string>>({});
+  const carregouRef = useRef(false);
+  const refreshTimerRef = useRef<number | null>(null);
 
-  const carregar = useCallback(async () => {
-    setLoading(true);
+  const aplicarItemLocal = useCallback((itemAtualizado: SugestaoCdItem) => {
+    setItens((prev) => {
+      const semDuplicado = prev.filter(
+        (item) => item.id !== itemAtualizado.id && item.produtoKey !== itemAtualizado.produtoKey
+      );
+      return [itemAtualizado, ...semDuplicado];
+    });
+  }, []);
+
+  const atualizarItemLocal = useCallback((id: string, patch: Partial<SugestaoCdItem>) => {
+    setItens((prev) => prev.map((item) => (item.id === id ? { ...item, ...patch } : item)));
+  }, []);
+
+  const carregar = useCallback(async (silencioso = false) => {
+    const usarRefreshSilencioso = silencioso || carregouRef.current;
+    if (usarRefreshSilencioso) setAtualizando(true);
+    else setLoading(true);
+
     try {
       setItens(await listarSugestaoCdItens(empresa));
     } catch (err) {
@@ -67,7 +88,9 @@ export default function SugestaoCd() {
         variant: "destructive",
       });
     } finally {
+      carregouRef.current = true;
       setLoading(false);
+      setAtualizando(false);
     }
   }, [empresa, toast]);
 
@@ -77,9 +100,20 @@ export default function SugestaoCd() {
 
   useEffect(() => {
     return subscribeSugestaoCdItens(empresa, () => {
-      void carregar();
+      if (refreshTimerRef.current != null) {
+        window.clearTimeout(refreshTimerRef.current);
+      }
+      refreshTimerRef.current = window.setTimeout(() => {
+        void carregar(true);
+      }, 350);
     });
   }, [carregar, empresa]);
+
+  useEffect(() => {
+    return () => {
+      if (refreshTimerRef.current != null) window.clearTimeout(refreshTimerRef.current);
+    };
+  }, []);
 
   const secoes = useMemo(
     () => ["todos", ...new Set(itens.map((item) => formatarSecao(item.secao)).sort((a, b) => a.localeCompare(b)))],
@@ -121,7 +155,7 @@ export default function SugestaoCd() {
       const cd = estoques.find((item) => item.loja === "CD")?.quantidade ?? 0;
       const deposito = estoques.find((item) => item.loja === "Deposito")?.quantidade ?? 0;
 
-      await upsertSugestaoCdItem({
+      const salvo = await upsertSugestaoCdItem({
         empresa,
         codigo: produto.codigo_barras || codigoLimpo,
         descricao: produto.descricao,
@@ -134,6 +168,7 @@ export default function SugestaoCd() {
         createdBy: nomePessoa,
       });
 
+      aplicarItemLocal(salvo);
       setCodigo("");
       toast({ title: "Item adicionado", description: `${produto.descricao || produto.codigo_barras} entrou na sugestao do CD.` });
     } catch (err) {
@@ -145,12 +180,29 @@ export default function SugestaoCd() {
     } finally {
       setSalvandoCodigo(false);
     }
-  }, [codigo, empresa, nomePessoa, toast]);
+  }, [aplicarItemLocal, codigo, empresa, nomePessoa, toast]);
 
   const atualizarContada = useCallback(async (item: SugestaoCdItem, novaQtd: number) => {
+    const qtdContada = toInt(novaQtd, item.qtdContada);
+    if (qtdContada === item.qtdContada) {
+      setDraftContada((prev) => {
+        const next = { ...prev };
+        delete next[item.id];
+        return next;
+      });
+      return;
+    }
+
     setAjustandoId(item.id);
+    atualizarItemLocal(item.id, { qtdContada });
+    setDraftContada((prev) => {
+      const next = { ...prev };
+      delete next[item.id];
+      return next;
+    });
+
     try {
-      await upsertSugestaoCdItem({
+      const salvo = await upsertSugestaoCdItem({
         empresa: item.empresa,
         codigo: item.codigo,
         sku: item.sku,
@@ -160,11 +212,13 @@ export default function SugestaoCd() {
         qtdErpLoja: item.qtdErpLoja,
         qtdErpCd: item.qtdErpCd,
         qtdErpDeposito: item.qtdErpDeposito,
-        qtdContada: novaQtd,
+        qtdContada,
         qtdDesejada: item.qtdDesejada,
         createdBy: item.createdBy ?? nomePessoa,
       });
+      aplicarItemLocal(salvo);
     } catch (err) {
+      atualizarItemLocal(item.id, { qtdContada: item.qtdContada });
       toast({
         title: "Falha ao salvar",
         description: err instanceof Error ? err.message : "Nao foi possivel atualizar a quantidade contada.",
@@ -173,7 +227,13 @@ export default function SugestaoCd() {
     } finally {
       setAjustandoId(null);
     }
-  }, [nomePessoa, toast]);
+  }, [aplicarItemLocal, atualizarItemLocal, nomePessoa, toast]);
+
+  const confirmarDraftContada = useCallback((item: SugestaoCdItem) => {
+    const valor = draftContada[item.id];
+    if (valor == null) return;
+    void atualizarContada(item, toInt(valor, item.qtdContada));
+  }, [atualizarContada, draftContada]);
 
   const abrirQuero = useCallback((item: SugestaoCdItem) => {
     setEditandoDesejadaId(item.id);
@@ -188,8 +248,9 @@ export default function SugestaoCd() {
     }
 
     setAjustandoId(item.id);
+    atualizarItemLocal(item.id, { qtdDesejada });
     try {
-      await upsertSugestaoCdItem({
+      const salvo = await upsertSugestaoCdItem({
         empresa: item.empresa,
         codigo: item.codigo,
         sku: item.sku,
@@ -203,10 +264,12 @@ export default function SugestaoCd() {
         qtdDesejada,
         createdBy: item.createdBy ?? nomePessoa,
       });
+      aplicarItemLocal(salvo);
       setEditandoDesejadaId(null);
       setValorDesejada("1");
       toast({ title: "Marcado como quero", description: `Quantidade desejada: ${qtdDesejada}.` });
     } catch (err) {
+      atualizarItemLocal(item.id, { qtdDesejada: item.qtdDesejada });
       toast({
         title: "Falha ao salvar",
         description: err instanceof Error ? err.message : "Nao foi possivel salvar a quantidade desejada.",
@@ -215,14 +278,16 @@ export default function SugestaoCd() {
     } finally {
       setAjustandoId(null);
     }
-  }, [nomePessoa, toast, valorDesejada]);
+  }, [aplicarItemLocal, atualizarItemLocal, nomePessoa, toast, valorDesejada]);
 
   const naoQuero = useCallback(async (item: SugestaoCdItem) => {
     setAjustandoId(item.id);
+    setItens((prev) => prev.filter((atual) => atual.id !== item.id));
     try {
       await removerSugestaoCdItem(item.id);
       toast({ title: "Removido", description: `${item.codigo} saiu da sugestao.` });
     } catch (err) {
+      aplicarItemLocal(item);
       toast({
         title: "Falha ao remover",
         description: err instanceof Error ? err.message : "Nao foi possivel remover o item.",
@@ -231,7 +296,7 @@ export default function SugestaoCd() {
     } finally {
       setAjustandoId(null);
     }
-  }, [toast]);
+  }, [aplicarItemLocal, toast]);
 
   const gerarLista = useCallback(async () => {
     if (itensProntos.length === 0) {
@@ -289,13 +354,24 @@ export default function SugestaoCd() {
             <h2 className="text-lg font-bold text-foreground">Adicionar item</h2>
           </div>
 
-          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_220px_180px_180px]">
+          <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_160px_220px_180px_190px]">
             <BarcodeInput
               value={codigo}
               onChange={setCodigo}
               onScanPress={() => setScannerAberto(true)}
               onEnterPress={() => void adicionarCodigo()}
             />
+
+            <button
+              onClick={() => void adicionarCodigo()}
+              disabled={salvandoCodigo || !codigo.trim()}
+              className="h-12 rounded-xl bg-emerald-600 px-4 text-sm font-bold text-white disabled:opacity-60"
+            >
+              <span className="inline-flex items-center gap-2">
+                {salvandoCodigo ? <Loader2 className="h-4 w-4 animate-spin" /> : <Plus className="h-4 w-4" />}
+                Adicionar
+              </span>
+            </button>
 
             <select
               value={filtroSecao}
@@ -311,23 +387,23 @@ export default function SugestaoCd() {
 
             <button
               onClick={() => void carregar()}
-              disabled={loading}
+              disabled={loading || atualizando}
               className="h-12 rounded-xl border border-border bg-background px-4 text-sm font-bold text-foreground hover:bg-accent disabled:opacity-60"
             >
               <span className="inline-flex items-center gap-2">
-                <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} />
+                <RefreshCw className={`h-4 w-4 ${loading || atualizando ? "animate-spin" : ""}`} />
                 Atualizar
               </span>
             </button>
 
             <button
               onClick={() => void gerarLista()}
-              disabled={gerandoLista}
+              disabled={gerandoLista || itensProntos.length === 0}
               className="h-12 rounded-xl bg-primary px-4 text-sm font-bold text-primary-foreground disabled:opacity-60"
             >
               <span className="inline-flex items-center gap-2">
                 {gerandoLista ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                Gerar lista
+                Gerar lista ({itensProntos.length})
               </span>
             </button>
           </div>
@@ -335,6 +411,12 @@ export default function SugestaoCd() {
           {salvandoCodigo && (
             <div className="rounded-2xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">
               Consultando ERP e adicionando item...
+            </div>
+          )}
+
+          {atualizando && !loading && (
+            <div className="rounded-2xl border border-border bg-muted/40 px-4 py-2 text-xs font-bold text-muted-foreground">
+              Atualizando em segundo plano...
             </div>
           )}
         </section>
@@ -357,9 +439,10 @@ export default function SugestaoCd() {
                 const totalErp = item.qtdErpLoja + item.qtdErpCd + item.qtdErpDeposito;
                 const editando = editandoDesejadaId === item.id;
                 const busy = ajustandoId === item.id;
+                const valorContada = draftContada[item.id] ?? String(item.qtdContada);
 
                 return (
-                  <article key={item.id} className="rounded-3xl border border-border bg-card p-4 shadow-sm">
+                  <article key={item.id} className={`rounded-3xl border bg-card p-4 shadow-sm ${busy ? "border-primary/30" : "border-border"}`}>
                     <div className="flex gap-4">
                       {item.fotoUrl ? (
                         <img src={item.fotoUrl} alt={item.codigo} className="h-24 w-24 rounded-2xl object-cover border border-border" />
@@ -401,7 +484,7 @@ export default function SugestaoCd() {
                       <p className="text-[11px] font-mono uppercase tracking-[0.18em] text-muted-foreground">Quantidade contada</p>
                       <div className="mt-2 flex items-center gap-2">
                         <button
-                          onClick={() => void atualizarContada(item, Math.max(0, item.qtdContada - 1))}
+                          onClick={() => void atualizarContada(item, Math.max(0, toInt(valorContada, item.qtdContada) - 1))}
                           disabled={busy}
                           className="h-10 w-10 rounded-xl border border-border bg-background text-lg font-black text-foreground disabled:opacity-50"
                         >
@@ -410,12 +493,30 @@ export default function SugestaoCd() {
                         <input
                           type="number"
                           min={0}
-                          value={item.qtdContada}
-                          onChange={(event) => void atualizarContada(item, toInt(event.target.value))}
+                          value={valorContada}
+                          onChange={(event) => {
+                            const valor = event.target.value;
+                            setDraftContada((prev) => ({ ...prev, [item.id]: valor }));
+                          }}
+                          onBlur={() => confirmarDraftContada(item)}
+                          onKeyDown={(event) => {
+                            if (event.key === "Enter") {
+                              event.preventDefault();
+                              event.currentTarget.blur();
+                            }
+                            if (event.key === "Escape") {
+                              setDraftContada((prev) => {
+                                const next = { ...prev };
+                                delete next[item.id];
+                                return next;
+                              });
+                              event.currentTarget.blur();
+                            }
+                          }}
                           className="h-10 flex-1 rounded-xl border border-border bg-background px-3 text-center text-base font-black text-foreground"
                         />
                         <button
-                          onClick={() => void atualizarContada(item, item.qtdContada + 1)}
+                          onClick={() => void atualizarContada(item, toInt(valorContada, item.qtdContada) + 1)}
                           disabled={busy}
                           className="h-10 w-10 rounded-xl border border-border bg-background text-lg font-black text-foreground disabled:opacity-50"
                         >
@@ -433,6 +534,16 @@ export default function SugestaoCd() {
                             min={1}
                             value={valorDesejada}
                             onChange={(event) => setValorDesejada(event.target.value)}
+                            onKeyDown={(event) => {
+                              if (event.key === "Enter") {
+                                event.preventDefault();
+                                void confirmarQuero(item);
+                              }
+                              if (event.key === "Escape") {
+                                setEditandoDesejadaId(null);
+                                setValorDesejada("1");
+                              }
+                            }}
                             className="h-11 flex-1 rounded-xl border border-primary/20 bg-background px-3 text-center text-base font-black text-foreground"
                           />
                           <button
