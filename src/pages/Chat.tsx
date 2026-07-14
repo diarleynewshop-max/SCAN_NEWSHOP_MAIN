@@ -1,6 +1,6 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ArrowLeft, Camera, ImageIcon, ScanBarcode, Send, Users } from "lucide-react";
+import { ArrowLeft, ImageIcon, RefreshCw, ScanBarcode, Send, Users } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import {
@@ -48,6 +48,7 @@ export default function Chat() {
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [texto, setTexto] = useState("");
   const [enviando, setEnviando] = useState(false);
+  const [atualizando, setAtualizando] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const fimRef = useRef<HTMLDivElement>(null);
@@ -63,6 +64,15 @@ export default function Chat() {
         console.error("[Chat] falha ao listar usuarios:", err);
       }
     })();
+  }, [empresa, meuNome]);
+
+  const carregarUsuarios = useCallback(async () => {
+    if (!meuNome) return;
+    try {
+      setUsuarios(await listarUsuariosChat(empresa, meuNome));
+    } catch (err) {
+      console.error("[Chat] falha ao listar usuarios:", err);
+    }
   }, [empresa, meuNome]);
 
   const carregarConversa = useCallback(async () => {
@@ -94,6 +104,20 @@ export default function Chat() {
       if (total === 0) setNaoLidasPorNome({});
     } catch { /* ignore */ }
   }, [empresa, meuNome]);
+
+  const atualizarTudo = useCallback(async () => {
+    if (!meuNome) return;
+    setAtualizando(true);
+    try {
+      await Promise.all([
+        carregarUsuarios(),
+        carregarConversaRef.current(),
+        atualizarContadores(),
+      ]);
+    } finally {
+      setAtualizando(false);
+    }
+  }, [atualizarContadores, carregarUsuarios, meuNome]);
 
   useEffect(() => {
     if (!meuNome) return;
@@ -180,9 +204,19 @@ export default function Chat() {
   // Lista de contatos (quando nenhum selecionado no mobile)
   if (!ativo) {
     return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-4 pb-8">
-        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-          <Users className="h-4 w-4" /> Chat · {empresa}
+      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-4 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
+        <div className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+          <div className="flex items-center gap-2">
+            <Users className="h-4 w-4" /> Chat - {empresa}
+          </div>
+          <button
+            onClick={() => void atualizarTudo()}
+            disabled={atualizando}
+            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground disabled:opacity-50"
+            title="Atualizar"
+          >
+            <RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} />
+          </button>
         </div>
         <h1 className="text-2xl font-black text-foreground">Com quem voce quer falar?</h1>
         <div className="mt-2 flex flex-col gap-2">
@@ -216,21 +250,29 @@ export default function Chat() {
   }
 
   return (
-    <div className="mx-auto flex h-[calc(100vh-1rem)] w-full max-w-3xl flex-col">
-      <header className="flex items-center gap-3 border-b border-border bg-card px-4 py-3">
+    <div className="mx-auto flex h-[calc(100dvh-0.5rem)] min-h-0 w-full max-w-3xl flex-col overflow-hidden bg-background sm:h-[calc(100vh-1rem)] sm:rounded-2xl sm:border sm:border-border">
+      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-3 sm:px-4">
         <button onClick={() => { setAtivo(""); setParams({}); }} className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
           <ArrowLeft className="h-4 w-4" />
         </button>
         <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-black text-primary">
           {ativo.slice(0, 2).toUpperCase()}
         </div>
-        <div className="min-w-0">
+        <div className="min-w-0 flex-1">
           <p className="truncate text-sm font-bold text-foreground">{ativo}</p>
           {usuarioAtivo && <p className="truncate text-xs text-muted-foreground">{usuarioAtivo.role}</p>}
         </div>
+        <button
+          onClick={() => void atualizarTudo()}
+          disabled={atualizando}
+          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground disabled:opacity-50"
+          title="Atualizar"
+        >
+          <RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} />
+        </button>
       </header>
 
-      <div className="flex-1 space-y-2 overflow-y-auto bg-background px-4 py-4">
+      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-background px-3 py-4 sm:px-4">
         {mensagens.length === 0 ? (
           <p className="py-10 text-center text-sm text-muted-foreground">Sem mensagens ainda. Diga oi!</p>
         ) : (
@@ -268,7 +310,7 @@ export default function Chat() {
         <div ref={fimRef} />
       </div>
 
-      <div className="border-t border-border bg-card px-3 py-2">
+      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
         <div className="flex items-end gap-2">
           <button
             onClick={() => fileRef.current?.click()}
