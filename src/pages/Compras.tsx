@@ -387,6 +387,7 @@ const Compras = () => {
   const [marcaSelecionadaId, setMarcaSelecionadaId] = useState("");
   const [fornecedorSelecionadoId, setFornecedorSelecionadoId] = useState("");
   const [aliasFornecedorMarca, setAliasFornecedorMarca] = useState("");
+  const [sincronizandoFornecedoresManual, setSincronizandoFornecedoresManual] = useState(false);
   const [escolhaDireita, setEscolhaDireita] = useState(false);
   const [dragX, setDragX] = useState(0);
   const dragStartRef = useRef<number | null>(null);
@@ -454,6 +455,18 @@ const Compras = () => {
       cancelado = true;
     };
   }, [empresa]);
+
+  const recarregarFornecedoresEMarcas = async () => {
+    const [fornecedores, marcas, vinculos] = await Promise.all([
+      listarFornecedoresCacheCompras(empresa),
+      listarMarcasFornecedorCompras(empresa),
+      listarVinculosMarcaFornecedorCompras(empresa),
+    ]);
+    setFornecedoresCache(fornecedores);
+    setMarcasFornecedor(marcas);
+    setVinculosMarcaFornecedor(vinculos);
+    setMarcaSelecionadaId((prev) => prev || marcas[0]?.id || "");
+  };
 
   const executarAcao = async (
     actionKey: string,
@@ -746,6 +759,39 @@ const Compras = () => {
   const getFornecedoresProduto = (produto: ProdutoComprar) =>
     fornecedoresPorProdutoKey.get(getProdutoKeyCompra(produto)) ?? [];
 
+  const sincronizarFornecedorProdutoIndividual = async (produto: ProdutoComprar) => {
+    const produtoErpId = produtosErp[produto.id]?.id;
+    const key = getProdutoKeyCompra(produto);
+    if (!produtoErpId || !key) return false;
+
+    fornecedoresSyncRef.current.add(key);
+    try {
+      const fornecedoresErp = await buscarFornecedoresProduto(produtoErpId, { empresa, flag: "loja" });
+      const sincronizados = await sincronizarFornecedoresProdutoCompras({
+        empresa,
+        produtoKey: key,
+        codigo: produto.codigo,
+        sku: produto.sku,
+        produtoErpId,
+        fornecedores: fornecedoresErp.map((fornecedor: FornecedorProdutoDetalhe) => ({
+          fornecedorId: fornecedor.fornecedorId,
+          nome: fornecedor.nome,
+          fantasia: fornecedor.fantasia,
+          documento: fornecedor.documento,
+          principal: fornecedor.principal,
+        })),
+      });
+
+      setFornecedoresCache((prev) => {
+        const semProduto = prev.filter((item) => item.produtoKey !== key);
+        return [...semProduto, ...sincronizados];
+      });
+      return true;
+    } finally {
+      fornecedoresSyncRef.current.delete(key);
+    }
+  };
+
   const getMarcasProduto = (produto: ProdutoComprar) => {
     const marcas = new Map<string, string>();
     for (const fornecedor of getFornecedoresProduto(produto)) {
@@ -1028,37 +1074,16 @@ const Compras = () => {
         const key = getProdutoKeyCompra(produto);
         if (!produtoErpId || !key) continue;
 
-        fornecedoresSyncRef.current.add(key);
         try {
-          const fornecedoresErp = await buscarFornecedoresProduto(produtoErpId, { empresa, flag: "loja" });
-          const sincronizados = await sincronizarFornecedoresProdutoCompras({
-            empresa,
-            produtoKey: key,
-            codigo: produto.codigo,
-            sku: produto.sku,
-            produtoErpId,
-            fornecedores: fornecedoresErp.map((fornecedor: FornecedorProdutoDetalhe) => ({
-              fornecedorId: fornecedor.fornecedorId,
-              nome: fornecedor.nome,
-              fantasia: fornecedor.fantasia,
-              documento: fornecedor.documento,
-              principal: fornecedor.principal,
-            })),
-          });
-
+          const sincronizou = await sincronizarFornecedorProdutoIndividual(produto);
           if (cancelado) return;
-          setFornecedoresCache((prev) => {
-            const semProduto = prev.filter((item) => !(item.empresa === sincronizados[0]?.empresa && item.produtoKey === key));
-            return [...semProduto, ...sincronizados];
-          });
+          if (!sincronizou) continue;
         } catch (err) {
           console.error("[Compras][Fornecedor] Falha ao sincronizar fornecedores do produto", {
             produtoId: produto.id,
             produtoErpId,
             erro: err instanceof Error ? err.message : String(err),
           });
-        } finally {
-          fornecedoresSyncRef.current.delete(key);
         }
       }
     };
@@ -1069,6 +1094,52 @@ const Compras = () => {
       cancelado = true;
     };
   }, [empresa, filtroFornecedor, filtroMarca, fornecedoresPorProdutoKey, produtos, produtosErp, produtosPaginados, produtosPorBuscaStatus]);
+
+  const puxarFornecedoresDoErp = async () => {
+    if (sincronizandoFornecedoresManual) return;
+
+    const produtosUnicos = Array.from(
+      new Map(
+        produtosPorBuscaStatus
+          .map((produto) => [getProdutoKeyCompra(produto), produto] as const)
+          .filter(([key]) => Boolean(key))
+      ).values()
+    );
+
+    const candidatos = produtosUnicos.filter((produto) => produtosErp[produto.id]?.id);
+    if (candidatos.length === 0) {
+      toast({ title: "Nenhum produto com ERP carregado para sincronizar." });
+      return;
+    }
+
+    setSincronizandoFornecedoresManual(true);
+    let sincronizados = 0;
+    let erros = 0;
+
+    try {
+      for (const produto of candidatos) {
+        try {
+          const ok = await sincronizarFornecedorProdutoIndividual(produto);
+          if (ok) sincronizados += 1;
+        } catch (err) {
+          erros += 1;
+          console.error("[Compras][Fornecedor] Falha na sincronizacao manual", {
+            produtoId: produto.id,
+            produtoErpId: produtosErp[produto.id]?.id,
+            erro: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      await recarregarFornecedoresEMarcas();
+      toast({
+        title: "Fornecedores atualizados do ERP",
+        description: `${sincronizados} produto(s) sincronizado(s)${erros > 0 ? ` · ${erros} com erro` : ""}.`,
+      });
+    } finally {
+      setSincronizandoFornecedoresManual(false);
+    }
+  };
 
   // Fallback de foto via ClickUp removido (endpoint nao existe mais). fotosClickUp
   // fica sempre vazio; montarOpcoesFoto ja cai pra SUPABASE/ERP nesse caso.
@@ -1995,6 +2066,32 @@ const Compras = () => {
                     Vincular fornecedor
                   </div>
                   <div className="mt-3 space-y-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="w-full"
+                      onClick={() => void puxarFornecedoresDoErp()}
+                      disabled={sincronizandoFornecedoresManual}
+                    >
+                      {sincronizandoFornecedoresManual ? (
+                        <>
+                          <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                          Puxando fornecedores do ERP...
+                        </>
+                      ) : (
+                        <>
+                          <RefreshCw className="mr-2 h-4 w-4" />
+                          Puxar fornecedores do ERP
+                        </>
+                      )}
+                    </Button>
+
+                    {fornecedoresDisponiveis.length === 0 && (
+                      <p className="text-xs text-amber-700">
+                        Nenhum fornecedor salvo ainda. Use o botao acima para buscar no ERP.
+                      </p>
+                    )}
+
                     <select
                       value={marcaSelecionadaId}
                       onChange={(e) => setMarcaSelecionadaId(e.target.value)}

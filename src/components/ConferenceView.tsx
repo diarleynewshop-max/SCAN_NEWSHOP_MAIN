@@ -285,6 +285,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [nomeEditPedido, setNomeEditPedido] = useState("");
   const [salvandoNomePedido, setSalvandoNomePedido] = useState(false);
   const [removendoItemId, setRemovendoItemId] = useState<string | null>(null);
+  const [liberandoPedidoId, setLiberandoPedidoId] = useState<string | null>(null);
   const [estoquesItemAtual, setEstoquesItemAtual] = useState<VarejoFacilEstoqueConferencia[]>([]);
   const [loadingEstoquesItemAtual, setLoadingEstoquesItemAtual] = useState(false);
   const [erroEstoquesItemAtual, setErroEstoquesItemAtual] = useState<string | null>(null);
@@ -654,6 +655,26 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       });
     } finally {
       setRemovendoItemId(null);
+    }
+  };
+
+  const liberarEmConferenciaManual = async (task: PedidoParaConferencia) => {
+    setLiberandoPedidoId(task.id);
+    try {
+      await liberarPedido(task.id);
+      setTasks((prev) => prev.map((t) => (t.id === task.id ? { ...t, emAndamento: false } : t)));
+      if (modalAcoesTask?.id === task.id) setModalAcoesTask(null);
+      if (modalDetalharTask?.id === task.id) setModalDetalharTask({ ...modalDetalharTask, emAndamento: false });
+      await recarregarTasks();
+      toast({ title: "Pedido liberado", description: "O status em conferencia foi removido." });
+    } catch (err) {
+      toast({
+        title: "Falha ao liberar pedido",
+        description: err instanceof Error ? err.message : "Nao foi possivel tirar o status em conferencia.",
+        variant: "destructive",
+      });
+    } finally {
+      setLiberandoPedidoId(null);
     }
   };
 
@@ -2102,6 +2123,16 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                   <span className="text-base text-primary">✏️ Editar pedido</span>
                   <span className="text-[11px] text-muted-foreground font-normal">Nome, quantidade, excluir item e recomendar troca</span>
                 </button>
+                {isAdminPlus && modalAcoesTask.emAndamento && (
+                  <button
+                    onClick={() => void liberarEmConferenciaManual(modalAcoesTask)}
+                    disabled={liberandoPedidoId === modalAcoesTask.id}
+                    className="w-full h-14 rounded-xl border-2 border-amber-300 bg-amber-50 text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5 disabled:opacity-60"
+                  >
+                    <span className="text-base text-amber-800">{liberandoPedidoId === modalAcoesTask.id ? "Liberando..." : "Liberar em conferencia"}</span>
+                    <span className="text-[11px] text-amber-700 font-normal">Tira o lock para outra pessoa abrir</span>
+                  </button>
+                )}
                 <button
                   onClick={() => { const t = modalAcoesTask; setModalAcoesTask(null); setTextoConfirmExcluir(""); setModalExcluirTask(t); }}
                   className="w-full h-14 rounded-xl border-2 border-destructive/40 bg-destructive/5 text-sm font-bold cursor-pointer flex flex-col items-center justify-center gap-0.5"
@@ -2252,6 +2283,16 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                     >
                       {salvandoNomePedido ? "Salvando..." : "Salvar nome"}
                     </button>
+                    {isAdminPlus && modalDetalharTask.emAndamento && (
+                      <button
+                        type="button"
+                        onClick={() => void liberarEmConferenciaManual(modalDetalharTask)}
+                        disabled={liberandoPedidoId === modalDetalharTask.id}
+                        className="shrink-0 rounded-xl border border-amber-300 bg-amber-50 px-3 py-2 text-xs font-bold text-amber-800 disabled:opacity-60"
+                      >
+                        {liberandoPedidoId === modalDetalharTask.id ? "Liberando..." : "Tirar em conferencia"}
+                      </button>
+                    )}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">Renomear, editar quantidade, excluir item e recomendar troca.</p>
                 </div>
