@@ -19,9 +19,12 @@ const NotFound = lazy(() => import("./pages/NotFound"));
 const Analytics = lazy(() => import("./pages/Analytics"));
 const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Compras = lazy(() => import("./pages/Compras"));
+const SugestaoCd = lazy(() => import("./pages/SugestaoCd"));
 const ConsultaPreco = lazy(() => import("./pages/ConsultaPreco"));
 const MeusPedidos = lazy(() => import("./pages/MeusPedidos"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
+const Chat = lazy(() => import("./pages/Chat"));
+const Notificacoes = lazy(() => import("./pages/Notificacoes"));
 
 const queryClient = new QueryClient();
 
@@ -60,6 +63,18 @@ const App = () => (
               </ProtectedRoute>
             } />
 
+            <Route path="/chat" element={
+              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+                <DesktopShell pageTitle="Chat"><Chat /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/notificacoes" element={
+              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+                <DesktopShell pageTitle="Notificacoes"><Notificacoes /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
             {/* Rotas protegidas por role */}
             <Route path="/analytics" element={
               <ProtectedRoute requiredRole={['admin', 'super']}>
@@ -70,6 +85,12 @@ const App = () => (
             <Route path="/compras" element={
               <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
                 <DesktopShell pageTitle="Compras"><Compras /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/sugestao-cd" element={
+              <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
+                <DesktopShell pageTitle="Sugestao do CD"><SugestaoCd /></DesktopShell>
               </ProtectedRoute>
             } />
 

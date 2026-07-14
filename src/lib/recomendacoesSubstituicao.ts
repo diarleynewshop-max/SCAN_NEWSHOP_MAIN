@@ -304,6 +304,17 @@ export async function listarRecomendacoesPendentesPorDestinatario(
   return ((data as RecomendacaoRow[] | null) ?? []).map(mapRow);
 }
 
+export async function buscarRecomendacaoPorId(id: string): Promise<RecomendacaoSubstituicao | null> {
+  ensureSupabase();
+  const { data, error } = await supabase
+    .from("recomendacoes_substituicao")
+    .select("*")
+    .eq("id", id)
+    .maybeSingle();
+  if (error) throw error;
+  return data ? mapRow(data as RecomendacaoRow) : null;
+}
+
 export async function listarRecomendacoesDoPedido(
   pedidoId: string
 ): Promise<RecomendacaoSubstituicao[]> {

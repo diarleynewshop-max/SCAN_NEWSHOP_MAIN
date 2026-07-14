@@ -2,8 +2,9 @@ import { useState } from "react";
 import { useNavigate, useLocation } from "react-router-dom";
 import {
   ScanBarcode, ClipboardList, GitCompare, BadgeDollarSign,
-  Package, ShoppingCart, BarChart3, Users, User, Settings,
+  Package, ShoppingCart, BarChart3, Users, User, Settings, Boxes,
   ChevronDown, ChevronRight, LogOut, Menu, Home as HomeIcon,
+  MessageSquare, Bell,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
@@ -71,6 +72,8 @@ export function ErpLayout({
         ...((flag === 'loja' || isPriv) ? [{ icon: Package, label: "Meus Pedidos", path: "/meus-pedidos" }] : []),
         ...((flag === 'cd' || isPriv) ? [{ icon: GitCompare, label: "Conferência", path: "/scanner?tab=conference" }] : []),
         { icon: BadgeDollarSign, label: "Consulta Preço", path: "/consulta-preco" },
+        { icon: MessageSquare, label: "Chat", path: "/chat" },
+        { icon: Bell, label: "Notificações", path: "/notificacoes" },
       ],
     },
     ...(isPriv ? [{
@@ -78,6 +81,7 @@ export function ErpLayout({
       label: "Gestão",
       items: [
         { icon: ShoppingCart, label: "Compras", path: "/compras" },
+        { icon: Boxes, label: "Sugestao do CD", path: "/sugestao-cd" },
         { icon: BarChart3, label: "Dashboard", path: "/dashboard" },
       ],
     }] : []),

@@ -62,6 +62,8 @@ import {
   marcarResultadosRecomendacaoComoVistos,
   type RecomendacaoSubstituicao,
 } from "@/lib/recomendacoesSubstituicao";
+import { criarNotificacao } from "@/lib/notificacoes";
+import { enviarMensagem } from "@/lib/chat";
 import { z } from "zod";
 
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
@@ -1273,6 +1275,19 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         console.error("[conferencia] Falha ao gerar pedido de pendentes (nao bloqueia fechamento):", pendentesErr);
       }
 
+      // Notifica a pessoa que fez o pedido que a conferencia foi concluida.
+      if (listeiro && listeiro.trim() && listeiro.trim() !== conferente) {
+        void criarNotificacao({
+          empresa,
+          destinatario: listeiro.trim(),
+          tipo: "pedido_concluido",
+          titulo: "Seu pedido foi conferido",
+          corpo: `Conferido por ${conferente || "conferente"}.`,
+          refTipo: "pedido",
+          refId: pedidoId ?? null,
+        });
+      }
+
       marcarComoEnviado();
       limparRascunho();
       setSendStatus("sent");
@@ -1730,6 +1745,27 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         criada,
         ...prev.filter((item) => item.pedidoItemId !== criada.pedidoItemId || item.id === criada.id),
       ]);
+
+      // Notifica a pessoa do pedido e manda a recomendacao para o chat dela
+      // (best-effort: nao bloqueia o fluxo se falhar).
+      const sugerente = conferente || loginSalvo?.nomePessoa || "Sistema";
+      void criarNotificacao({
+        empresa,
+        destinatario: pessoaDestino,
+        tipo: "recomendacao",
+        titulo: `${sugerente} recomendou uma troca`,
+        corpo: `${criada.codigoOriginal} → ${criada.codigoSugerido}`,
+        refTipo: "recomendacao",
+        refId: criada.id,
+      });
+      void enviarMensagem({
+        empresa,
+        remetente: sugerente,
+        destinatario: pessoaDestino,
+        recomendacaoId: criada.id,
+        conteudo: `Troca sugerida: ${criada.codigoOriginal} → ${criada.descricaoSugerida || criada.codigoSugerido}${criada.observacao ? `\n${criada.observacao}` : ""}`,
+      }).catch((e) => console.warn("[conferencia] falha ao mandar recomendacao pro chat:", e));
+
       setModalRecomendacaoAberto(false);
       setItemSelecionadoRecomendacao(null);
       toast({
