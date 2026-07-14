@@ -9,6 +9,7 @@ import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
 import { getHistoricoComprasEnabled } from "@/lib/historicoCompras";
+import { consultarHistoricoItem } from "@/lib/historicoItem";
 interface HistoricoItemOcorrencia {
   data: string;
   dataFormatada: string;
@@ -152,7 +153,15 @@ const Index = () => {
     return typeof window !== "undefined" && window.innerWidth >= 1024;
   });
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
-  const [popupCompras, setPopupCompras] = useState<{ ocorrencias: HistoricoItemOcorrencia[]; carregando: boolean } | null>(null);
+  const [popupCompras, setPopupCompras] = useState<{
+    ocorrencias: HistoricoItemOcorrencia[];
+    carregando: boolean;
+    emConferencia: { titulo: string; pessoa: string; status: string } | null;
+    conferidoRecente: { dataFormatada: string; diasAtras: number } | null;
+  } | null>(null);
+  // Bloqueio persistente (independe do popup estar aberto): item em pedido nao
+  // concluido barra a inclusao no novo pedido.
+  const [bloqueioConferencia, setBloqueioConferencia] = useState<{ titulo: string; pessoa: string } | null>(null);
   const popupMostradoParaRef = useRef<string | null>(null);
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
@@ -167,13 +176,50 @@ const Index = () => {
     flag: lookupFlag,
   });
 
+  // Consulta o historico do item no Supabase (em paralelo com o ERP) e decide
+  // barrar (item em pedido nao concluido) / avisar (conferido <=7 dias) / mostrar
+  // o historico. Popup abre so quando ha algo relevante.
+  const fetchHistoricoItem = useCallback(
+    async (code: string) => {
+      const cod = code.trim();
+      if (!cod || consultaBloqueadaPorFlag) {
+        setPopupCompras(null);
+        setBloqueioConferencia(null);
+        return;
+      }
+      try {
+        const r = await consultarHistoricoItem(lookupEmpresa, cod);
+        setBloqueioConferencia(
+          r.emConferencia ? { titulo: r.emConferencia.titulo, pessoa: r.emConferencia.pessoa } : null
+        );
+        if (r.emConferencia || r.ocorrencias.length > 0) {
+          setPopupCompras({
+            ocorrencias: r.ocorrencias,
+            carregando: false,
+            emConferencia: r.emConferencia,
+            conferidoRecente: r.conferidoRecente,
+          });
+        } else {
+          setPopupCompras(null);
+        }
+      } catch (err) {
+        console.error("[Index] Falha ao consultar historico do item:", err);
+        setPopupCompras(null);
+        setBloqueioConferencia(null);
+      }
+    },
+    [lookupEmpresa, consultaBloqueadaPorFlag]
+  );
+
   const startProductLookup = useCallback(
     (code: string) => {
       const normalizedCode = code.trim();
       if (!normalizedCode) return;
+      // Duas consultas em paralelo: ERP (foto/preco) + historico (Supabase).
       lookupProduct(normalizedCode);
+      void fetchHistoricoItem(normalizedCode);
     },
-    [lookupProduct]
+    [lookupProduct, fetchHistoricoItem]
   );
 
   useEffect(() => {
@@ -202,15 +248,15 @@ const Index = () => {
     return () => window.removeEventListener("storage", handleStorageChange);
   }, []);
 
-  // Reseta popup ao trocar barcode
+  // Limpa popup/bloqueio quando o codigo e apagado (o fetch do historico e
+  // disparado em startProductLookup, ao escanear/confirmar o codigo).
   useEffect(() => {
-    popupMostradoParaRef.current = null;
-    setPopupCompras(null);
+    if (!barcode.trim()) {
+      popupMostradoParaRef.current = null;
+      setPopupCompras(null);
+      setBloqueioConferencia(null);
+    }
   }, [barcode]);
-
-  // Historico de conferencias por item (ex-ClickUp) removido: sem fonte de dados
-  // ate a Dashboard/relatorio ser reimplementada no Supabase. popupCompras fica
-  // sempre null, entao os blocos de UI abaixo ficam inertes.
 
   useEffect(() => {
     if (!consultaBloqueadaPorFlag) return;
@@ -339,6 +385,14 @@ const Index = () => {
   const handleAdd = async () => {
     if (!activeList) {
       toast({ title: "Abra uma lista primeiro", variant: "destructive" });
+      return;
+    }
+    if (bloqueioConferencia) {
+      toast({
+        title: "🚫 Item em conferência",
+        description: `Já existe um pedido em aberto (${bloqueioConferencia.titulo}). Não dá pra pedir de novo até concluir.`,
+        variant: "destructive",
+      });
       return;
     }
     if (!photo) {
@@ -800,71 +854,103 @@ const Index = () => {
             }}
             onClick={(e) => e.stopPropagation()}
           >
-            <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
-              <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(262 80% 50% / 0.12)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
-                <ShoppingCart style={{ width: 20, height: 20, color: "hsl(262 80% 50%)" }} />
-              </div>
-              <div>
-                <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))" }}>Histórico de Pedidos</p>
-                <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>
-                  {popupCompras.carregando ? "Buscando conferências..." : `${popupCompras.ocorrencias.length}x encontrado(s)`}
-                </p>
-              </div>
-            </div>
-
-            {/* Loading */}
-            {popupCompras.carregando && (
-              <div style={{ textAlign: "center", padding: "16px 0", color: "hsl(var(--muted-foreground))", fontSize: 13 }}>
-                <Loader2 style={{ display: "inline", width: 18, height: 18, marginRight: 6, verticalAlign: "middle", animation: "spin 1s linear infinite" }} />
-                Buscando nos pedidos concluídos...
-              </div>
-            )}
-
-            {/* Ocorrências */}
-            {!popupCompras.carregando && popupCompras.ocorrencias.map((oc, i) => {
-              const corStatus = oc.status === "separado" ? "#22c55e" : oc.status === "nao_tem" ? "#ef4444" : oc.status === "parcial" ? "#eab308" : "#9ca3af";
-              const labelSt = oc.status === "separado" ? "Separado" : oc.status === "nao_tem" ? "Não tinha" : oc.status === "parcial" ? "Parcial" : oc.status;
+            {(() => {
+              const bloqueado = !!popupCompras.emConferencia;
+              const recente = popupCompras.conferidoRecente;
+              const corTema = bloqueado ? "0 84% 60%" : "262 80% 50%";
+              const limparTudo = () => {
+                setPopupCompras(null);
+                setBarcode("");
+                setSemEAN(false);
+                setSku("");
+                clearDraftPhoto();
+                setQuantity("");
+                sessionStorage.removeItem("scan_barcode");
+                sessionStorage.removeItem("scan_sku");
+                sessionStorage.removeItem("scan_quantity");
+              };
               return (
-                <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "hsl(var(--secondary))", borderRadius: 8, padding: "8px 12px", marginBottom: 6 }}>
-                  <div>
-                    <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))" }}>{oc.dataFormatada}</p>
-                    {oc.listeiro && <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>{oc.listeiro}</p>}
+                <>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 16 }}>
+                    <div style={{ width: 40, height: 40, borderRadius: 10, background: `hsl(${corTema} / 0.12)`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                      {bloqueado
+                        ? <AlertCircle style={{ width: 20, height: 20, color: `hsl(${corTema})` }} />
+                        : <ShoppingCart style={{ width: 20, height: 20, color: `hsl(${corTema})` }} />}
+                    </div>
+                    <div>
+                      <p style={{ fontSize: 14, fontWeight: 700, color: "hsl(var(--foreground))" }}>
+                        {bloqueado ? "Item em conferência" : "Histórico de Pedidos"}
+                      </p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>
+                        {bloqueado ? "Pedido barrado" : `${popupCompras.ocorrencias.length}x encontrado(s)`}
+                      </p>
+                    </div>
                   </div>
-                  <span style={{ fontSize: 12, fontWeight: 700, color: corStatus, background: `${corStatus}22`, borderRadius: 6, padding: "3px 8px" }}>{labelSt}</span>
-                </div>
+
+                  {bloqueado && (
+                    <div style={{ background: "hsl(0 84% 60% / 0.10)", border: "1px solid hsl(0 84% 60% / 0.30)", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(0 84% 45%)", marginBottom: 2 }}>🚫 Já existe pedido em aberto</p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--foreground))" }}>
+                        {popupCompras.emConferencia!.titulo}
+                        {popupCompras.emConferencia!.pessoa ? ` — ${popupCompras.emConferencia!.pessoa}` : ""}
+                      </p>
+                    </div>
+                  )}
+
+                  {!bloqueado && recente && (
+                    <div style={{ background: "hsl(38 92% 50% / 0.12)", border: "1px solid hsl(38 92% 50% / 0.30)", borderRadius: 10, padding: "10px 12px", marginBottom: 12 }}>
+                      <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(32 90% 40%)" }}>
+                        ⚠️ Conferido há {recente.diasAtras === 0 ? "menos de 1 dia" : `${recente.diasAtras} dia(s)`} ({recente.dataFormatada})
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Ocorrências */}
+                  {popupCompras.ocorrencias.map((oc, i) => {
+                    const corStatus = oc.status === "separado" ? "#22c55e" : oc.status === "nao_tem" ? "#ef4444" : oc.status === "parcial" ? "#eab308" : "#9ca3af";
+                    const labelSt = oc.status === "separado" ? "Separado" : oc.status === "nao_tem" ? "Não tinha" : oc.status === "parcial" ? "Parcial" : oc.status;
+                    return (
+                      <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "hsl(var(--secondary))", borderRadius: 8, padding: "8px 12px", marginBottom: 6 }}>
+                        <div>
+                          <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))" }}>{oc.dataFormatada}</p>
+                          {oc.listeiro && <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>{oc.listeiro}</p>}
+                        </div>
+                        <span style={{ fontSize: 12, fontWeight: 700, color: corStatus, background: `${corStatus}22`, borderRadius: 6, padding: "3px 8px" }}>{labelSt}</span>
+                      </div>
+                    );
+                  })}
+
+                  {bloqueado ? (
+                    <button
+                      onClick={limparTudo}
+                      style={{ width: "100%", height: 46, marginTop: 16, background: "hsl(0 84% 60%)", color: "#fff", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
+                    >
+                      Entendi
+                    </button>
+                  ) : (
+                    <>
+                      <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginTop: 16, marginBottom: 10, textAlign: "center" }}>
+                        Deseja pedir mesmo assim?
+                      </p>
+                      <div style={{ display: "flex", gap: 10 }}>
+                        <button
+                          onClick={limparTudo}
+                          style={{ flex: 1, height: 46, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
+                        >
+                          Não
+                        </button>
+                        <button
+                          onClick={() => setPopupCompras(null)}
+                          style={{ flex: 1, height: 46, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
+                        >
+                          Sim, pedir
+                        </button>
+                      </div>
+                    </>
+                  )}
+                </>
               );
-            })}
-
-            {/* Pergunta */}
-            <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginTop: 16, marginBottom: 10, textAlign: "center" }}>
-              Deseja pedir mesmo assim?
-            </p>
-
-            {/* Botões Sim / Não */}
-            <div style={{ display: "flex", gap: 10 }}>
-              <button
-                onClick={() => {
-                  setPopupCompras(null);
-                  setBarcode("");
-                  setSemEAN(false);
-                  setSku("");
-                  clearDraftPhoto();
-                  setQuantity("");
-                  sessionStorage.removeItem("scan_barcode");
-                  sessionStorage.removeItem("scan_sku");
-                  sessionStorage.removeItem("scan_quantity");
-                }}
-                style={{ flex: 1, height: 46, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1px solid hsl(var(--border))", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
-              >
-                Não
-              </button>
-              <button
-                onClick={() => setPopupCompras(null)}
-                style={{ flex: 1, height: 46, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
-              >
-                Sim, pedir
-              </button>
-            </div>
+            })()}
           </div>
         </div>
       )}
