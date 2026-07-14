@@ -376,8 +376,6 @@ const Compras = () => {
     concluir,
     ultimaAtualizacao,
     empresa,
-    fonte,
-    setFonte,
     persistirSecao,
     persistirDescricao,
     persistirFoto,

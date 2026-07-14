@@ -1,8 +1,4 @@
-// Camada de dados de Compras no Supabase (piloto de migracao do ClickUp).
-// Durante a transicao (dual-write), o ClickUp continua sendo a fonte de verdade e
-// o `id` do produto na UI segue sendo o ID da task do ClickUp. Aqui so espelhamos
-// e, no futuro, passamos a LER daqui (com realtime). Nada aqui derruba a UI: os
-// chamadores tratam os erros como "melhor esforco".
+// Camada de dados de Compras no Supabase.
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import type { ProdutoComprar, CompraStatusApp } from '@/hooks/useProdutosComprar';
 
@@ -70,13 +66,6 @@ interface CompraRow {
   created_at: string | null;
 }
 
-export interface PedidoFeitoCompraRow {
-  produto_key: string;
-  clickup_task_id: string | null;
-  status: CompraStatusApp;
-  pedido_feito: number | null;
-}
-
 function rowToProduto(row: CompraRow): ProdutoComprar {
   const pedidoFeito = row.pedido_feito === 1;
   const status = pedidoFeito && row.status !== 'compra_realizada' && row.status !== 'concluido'
@@ -99,7 +88,7 @@ function rowToProduto(row: CompraRow): ProdutoComprar {
   };
 }
 
-// Le os itens de compra do Supabase (usado quando a leitura for migrada).
+// Le os itens de compra do Supabase.
 export async function fetchComprasSupabase(empresa: Empresa): Promise<ProdutoComprar[]> {
   if (!isSupabaseConfigured) return [];
   const { data, error } = await supabase
@@ -108,17 +97,6 @@ export async function fetchComprasSupabase(empresa: Empresa): Promise<ProdutoCom
     .eq('empresa', empresaCompras(empresa));
   if (error) throw error;
   return (data as CompraRow[] | null ?? []).map(rowToProduto);
-}
-
-export async function fetchPedidosFeitosSupabase(empresa: Empresa): Promise<PedidoFeitoCompraRow[]> {
-  if (!isSupabaseConfigured) return [];
-  const { data, error } = await supabase
-    .from('compras')
-    .select('produto_key,clickup_task_id,status,pedido_feito')
-    .eq('empresa', empresaCompras(empresa))
-    .eq('pedido_feito', 1);
-  if (error) throw error;
-  return (data as PedidoFeitoCompraRow[] | null) ?? [];
 }
 
 // ── Enriquecimento de itens (foto + info de Compras) ─────────────────────────
@@ -206,38 +184,7 @@ export async function buscarCatalogoItens(
 
 // Espelha no Supabase os produtos ja deduplicados vindos do ClickUp (dual-write).
 // Upsert por (empresa, produto_key): re-importar nao duplica, so atualiza.
-export async function upsertComprasFromClickup(
-  produtos: ProdutoComprar[],
-  empresa: Empresa
-): Promise<void> {
-  if (!isSupabaseConfigured || produtos.length === 0) return;
-  const emp = empresaCompras(empresa);
-  const rows = produtos
-    .map((p) => ({
-      empresa: emp,
-      produto_key: produtoKey(p.codigo, p.sku),
-      codigo: p.codigo,
-      sku: p.sku,
-      descricao: isDescricaoCompraReal(p.descricao, p.codigo) ? p.descricao : undefined,
-      status: p.status,
-      vezes_pedido: p.vezesPedido ?? 1,
-      clickup_task_id: p.id,
-    }))
-    .filter((r) => r.produto_key);
-  if (rows.length === 0) return;
-  // Envia em lotes para nao mandar payloads gigantes numa requisicao so.
-  const CHUNK = 200;
-  for (let i = 0; i < rows.length; i += CHUNK) {
-    const chunk = rows.slice(i, i + CHUNK);
-    const { error } = await supabase
-      .from('compras')
-      .upsert(chunk, { onConflict: 'empresa,produto_key' });
-    if (error) throw error;
-  }
-}
-
-// Atualiza o status de um item pelo UUID da linha no Supabase (usado quando a
-// tela de Compras esta lendo direto do Supabase).
+// Atualiza o status de um item pelo UUID da linha no Supabase.
 export async function atualizarStatusPorId(
   id: string,
   status: CompraStatusApp
@@ -249,7 +196,7 @@ export async function atualizarStatusPorId(
 
 // Marca "pedido feito" (equivale a gerar o PDF do pedido ao fornecedor). Grava
 // pedido_feito = 1; o trigger no banco move o item para 'pedido_andamento'
-// automaticamente. Modo Supabase (id = UUID da linha).
+// automaticamente.
 export async function marcarPedidoFeitoPorId(id: string): Promise<void> {
   if (!isSupabaseConfigured) return;
   const { data, error } = await supabase
@@ -261,67 +208,17 @@ export async function marcarPedidoFeitoPorId(id: string): Promise<void> {
   if (!data || data.length === 0) throw new Error('Item nao encontrado no Supabase para marcar pedido feito');
 }
 
-// Mesma marcacao, mas pela task do ClickUp — usado no modo ClickUp (popula o
-// Supabase enquanto o ClickUp ainda esta ativo).
-export async function marcarPedidoFeitoPorClickup(
-  empresa: Empresa,
-  clickupTaskId: string
-): Promise<void> {
-  if (!isSupabaseConfigured) return;
-  const { data, error } = await supabase
-    .from('compras')
-    .update({ pedido_feito: 1 })
-    .eq('empresa', empresaCompras(empresa))
-    .eq('clickup_task_id', clickupTaskId)
-    .select('id');
-  if (error) throw error;
-  if (!data || data.length === 0) throw new Error('Item ClickUp nao encontrado no Supabase para marcar pedido feito');
-}
-
-// Persiste a secao (vinda do ERP) na linha, pelo UUID — usado no modo Supabase.
+// Persiste a secao (vinda do ERP) na linha.
 export async function atualizarSecaoPorId(id: string, secao: string): Promise<void> {
   if (!isSupabaseConfigured || !secao) return;
   const { error } = await supabase.from('compras').update({ secao }).eq('id', id);
   if (error) throw error;
 }
 
-// Persiste a secao pela task do ClickUp — usado no modo ClickUp (popula o banco
-// para leituras futuras no modo Supabase). So grava onde ainda esta vazio.
-export async function atualizarSecaoPorClickup(
-  empresa: Empresa,
-  clickupTaskId: string,
-  secao: string
-): Promise<void> {
-  if (!isSupabaseConfigured || !secao) return;
-  const { error } = await supabase
-    .from('compras')
-    .update({ secao })
-    .eq('empresa', empresaCompras(empresa))
-    .eq('clickup_task_id', clickupTaskId)
-    .is('secao', null);
-  if (error) throw error;
-}
-
-// Persiste a descricao (nome real vindo do ERP) na linha, pelo UUID — modo Supabase.
+// Persiste a descricao (nome real vindo do ERP) na linha.
 export async function atualizarDescricaoPorId(id: string, descricao: string): Promise<void> {
   if (!isSupabaseConfigured || !descricao) return;
   const { error } = await supabase.from('compras').update({ descricao }).eq('id', id);
-  if (error) throw error;
-}
-
-// Persiste a descricao pela task do ClickUp — modo ClickUp. Sobrescreve o valor
-// atual (produtos antigos guardaram o codigo de barras no lugar do nome real).
-export async function atualizarDescricaoPorClickup(
-  empresa: Empresa,
-  clickupTaskId: string,
-  descricao: string
-): Promise<void> {
-  if (!isSupabaseConfigured || !descricao) return;
-  const { error } = await supabase
-    .from('compras')
-    .update({ descricao })
-    .eq('empresa', empresaCompras(empresa))
-    .eq('clickup_task_id', clickupTaskId);
   if (error) throw error;
 }
 
@@ -349,14 +246,12 @@ function nomeArquivoFoto(emp: EmpresaCompras, codigo: string, sku: string | null
 }
 
 // Sobe a foto (data URL do ERP) no Storage e grava a URL publica em compras.foto_url.
-// porUuid = true no modo Supabase (id e UUID); false no modo ClickUp (clickup_task_id).
 export async function persistirFotoCompra(params: {
   produtoId: string;
   empresa: Empresa;
   codigo: string;
   sku: string | null;
   dataUrl: string;
-  porUuid: boolean;
 }): Promise<string | null> {
   if (!isSupabaseConfigured || !params.dataUrl) return null;
   const conv = dataUrlParaBlob(params.dataUrl);
@@ -374,9 +269,7 @@ export async function persistirFotoCompra(params: {
   const url = supabase.storage.from(FOTO_BUCKET).getPublicUrl(path).data.publicUrl;
 
   const query = supabase.from('compras').update({ foto_url: url });
-  const { error } = params.porUuid
-    ? await query.eq('id', params.produtoId)
-    : await query.eq('empresa', emp).eq('clickup_task_id', params.produtoId);
+  const { error } = await query.eq('id', params.produtoId);
   if (error) throw error;
 
   return url;

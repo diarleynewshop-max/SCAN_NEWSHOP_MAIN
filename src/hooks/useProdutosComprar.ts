@@ -1,25 +1,16 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { obterLoginSalvo } from '@/hooks/useAuth';
 import {
-  upsertComprasFromClickup,
   fetchComprasSupabase,
-  fetchPedidosFeitosSupabase,
   subscribeComprasSupabase,
   atualizarStatusPorId,
   atualizarSecaoPorId,
-  atualizarSecaoPorClickup,
   atualizarDescricaoPorId,
-  atualizarDescricaoPorClickup,
   marcarPedidoFeitoPorId,
-  marcarPedidoFeitoPorClickup,
   persistirFotoCompra,
   isFotoStorage,
-  type PedidoFeitoCompraRow,
 } from '@/lib/comprasSupabase';
 import { lerComprasCache, salvarComprasCache } from '@/lib/comprasCache';
-
-// Fonte de dados da tela de Compras: 'clickup' (padrao atual) ou 'supabase' (piloto).
-export type CompraFonte = 'clickup' | 'supabase';
 
 export interface ProdutoComprar {
   id: string;
@@ -51,8 +42,6 @@ interface UseProdutosComprarReturn {
   error: string | null;
   ultimaAtualizacao: Date | null;
   empresa: 'NEWSHOP' | 'SOYE' | 'FACIL';
-  fonte: CompraFonte;
-  setFonte: (fonte: CompraFonte) => void;
   persistirSecao: (produtoId: string, secao: string) => void;
   persistirDescricao: (produtoId: string, descricao: string) => void;
   persistirFoto: (produtoId: string, dataUrl: string) => void;
@@ -68,21 +57,6 @@ interface UseProdutosComprarReturn {
 }
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
-const FONTE_KEY = 'compras:fonte';
-
-function getFonteSalva(): CompraFonte {
-  // ClickUp removido: Supabase e a unica fonte. Mantido como funcao (em vez de
-  // constante) so pra nao precisar tocar nos ~15 call-sites que chamam getFonteSalva().
-  return 'supabase';
-}
-
-function setFonteSalva(fonte: CompraFonte) {
-  try {
-    window.localStorage.setItem(FONTE_KEY, fonte);
-  } catch {
-    // preferencia opcional
-  }
-}
 
 function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
   const login = obterLoginSalvo();
@@ -172,34 +146,6 @@ function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
   return [...semChave, ...resultado];
 }
 
-function aplicarPedidosFeitosSupabase(
-  produtos: ProdutoComprar[],
-  pedidosFeitos: PedidoFeitoCompraRow[]
-): ProdutoComprar[] {
-  if (pedidosFeitos.length === 0) return produtos;
-
-  const porTaskId = new Map<string, PedidoFeitoCompraRow>();
-  const porProdutoKey = new Map<string, PedidoFeitoCompraRow>();
-
-  for (const row of pedidosFeitos) {
-    if (row.clickup_task_id) porTaskId.set(row.clickup_task_id, row);
-    if (row.produto_key) porProdutoKey.set(row.produto_key, row);
-  }
-
-  return produtos.map((produto) => {
-    const row = porTaskId.get(produto.id) ?? porProdutoKey.get(getProdutoKey(produto));
-    if (!row || row.pedido_feito !== 1) return produto;
-
-    const status = STATUS_FINAIS.has(produto.status)
-      ? produto.status
-      : STATUS_FINAIS.has(row.status)
-        ? row.status
-        : 'pedido_andamento';
-
-    return { ...produto, pedidoFeito: true, status };
-  });
-}
-
 function isAbortError(err: unknown): boolean {
   return typeof err === 'object' && err !== null && 'name' in err && err.name === 'AbortError';
 }
@@ -248,39 +194,11 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [error, setError] = useState<string | null>(null);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
   const [empresa, setEmpresa] = useState<'NEWSHOP' | 'SOYE' | 'FACIL'>(() => getEmpresaAtual());
-  const [fonte, setFonteState] = useState<CompraFonte>(() => getFonteSalva());
   const requestControllerRef = useRef<AbortController | null>(null);
 
   const fetchProdutos = useCallback(async (force = false) => {
     const empresaAtual = getEmpresaAtual();
     setEmpresa(empresaAtual);
-
-    // Fonte Supabase: mostra o cache IndexedDB na hora e revalida em segundo plano
-    // (stale-while-revalidate). Realtime atualiza depois via efeito abaixo.
-    if (fonte === 'supabase') {
-      const cacheKey = `supabase:${empresaAtual}`;
-      const cache = await lerComprasCache(cacheKey);
-      if (cache && cache.length > 0) {
-        setProdutos(cache);
-        setUltimaAtualizacao(new Date());
-        setLoading(false);
-      } else {
-        setLoading(true);
-      }
-      setError(null);
-      try {
-        const lista = await fetchComprasSupabase(empresaAtual);
-        setProdutos(lista);
-        setUltimaAtualizacao(new Date());
-        void salvarComprasCache(cacheKey, lista);
-      } catch (err: unknown) {
-        console.error('[useProdutosComprar][supabase] Erro ao buscar:', err);
-        if (!cache) setError(getErrorMessage(err, 'Falha ao carregar do Supabase'));
-      } finally {
-        setLoading(false);
-      }
-      return;
-    }
 
     const cache = readProdutosCache(empresaAtual);
 
@@ -305,26 +223,8 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     requestControllerRef.current = controller;
 
     try {
-      const response = await fetch(`/api/clickup-compras-proxy?action=buscar-tasks&empresa=${empresaAtual}`, {
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        const body = await response.json().catch(() => ({}));
-        const detail = body.error ?? `Erro ${response.status}`;
-        const context = body.empresa ? ` [empresa=${body.empresa}]` : '';
-        throw new Error(`${detail}${context}`);
-      }
-
-      const data = await response.json();
-      let produtosAtualizados = deduplicarProdutos(data.produtos ?? []);
-      try {
-        await upsertComprasFromClickup(produtosAtualizados, empresaAtual);
-        const pedidosFeitos = await fetchPedidosFeitosSupabase(empresaAtual);
-        produtosAtualizados = aplicarPedidosFeitosSupabase(produtosAtualizados, pedidosFeitos);
-      } catch (err) {
-        console.warn('[compras][supabase] pedido_feito/dual-write falhou (ignorado):', err);
-      }
+      const lista = await fetchComprasSupabase(empresaAtual);
+      const produtosAtualizados = deduplicarProdutos(lista);
       setProdutos(produtosAtualizados);
       const updatedAt = new Date();
       setUltimaAtualizacao(updatedAt);
@@ -341,7 +241,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
         setLoading(false);
       }
     }
-  }, [fonte]);
+  }, []);
 
   useEffect(() => {
     fetchProdutos();
@@ -351,18 +251,15 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     };
   }, [fetchProdutos]);
 
-  // Realtime: quando a fonte e Supabase, assina mudancas da tabela e recarrega.
   useEffect(() => {
-    if (fonte !== 'supabase') return;
     const empresaAtual = getEmpresaAtual();
     const unsubscribe = subscribeComprasSupabase(empresaAtual, () => {
       void fetchProdutos(true);
     });
     return unsubscribe;
-  }, [fonte, fetchProdutos]);
+  }, [fetchProdutos]);
 
   const executarAcao = useCallback(async (taskId: string, acao: string) => {
-    const empresaAtual = getEmpresaAtual();
     const produtoAtual = produtos.find((p) => p.id === taskId);
     const statusAnterior = produtoAtual?.status;
     const pedidoFeitoAnterior = produtoAtual?.pedidoFeito;
@@ -387,61 +284,11 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       );
     }
 
-    // Fonte Supabase: atualiza o status pelo UUID da linha. O realtime propaga a
-    // mudanca; um refetch garante consistencia local.
-    if (fonte === 'supabase') {
-      try {
-        if (marcaPedidoFeito) {
-          await marcarPedidoFeitoPorId(taskId);
-        } else if (statusPrevisto) {
-          await atualizarStatusPorId(taskId, statusPrevisto);
-        }
-        await fetchProdutos(true);
-      } catch (err: unknown) {
-        if (statusAnterior) {
-          setProdutos((prev) =>
-            prev.map((p) => (
-              p.id === taskId ? { ...p, status: statusAnterior, pedidoFeito: pedidoFeitoAnterior } : p
-            ))
-          );
-        }
-        console.error('[useProdutosComprar][supabase] Erro na acao:', err);
-        throw err;
-      }
-      return;
-    }
-
     try {
-      const response = await fetch('/api/clickup-compras-proxy?action=mover-status', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          taskId,
-          acao,
-          empresa: empresaAtual,
-          currentStatus: produtoAtual?.status ?? 'todo',
-        }),
-      });
-
-      const data = await response.json();
-
-      if (!response.ok) {
-        await fetchProdutos(true);
-        const detalhe = data.details ? `: ${data.details}` : '';
-        const statusDisponiveis = Array.isArray(data.availableStatuses) && data.availableStatuses.length > 0
-          ? ` | Status disponiveis: ${data.availableStatuses.join(', ')}`
-          : '';
-        const statusTentados = Array.isArray(data.attemptedStatuses) && data.attemptedStatuses.length > 0
-          ? ` | Status tentados: ${data.attemptedStatuses.join(', ')}`
-          : '';
-        throw new Error((data.error ?? 'Erro ao executar acao') + detalhe + statusDisponiveis + statusTentados);
-      }
-
       if (marcaPedidoFeito) {
-        if (produtoAtual) {
-          await upsertComprasFromClickup([{ ...produtoAtual, status: 'fazer_pedido' }], empresaAtual);
-        }
-        await marcarPedidoFeitoPorClickup(empresaAtual, taskId);
+        await marcarPedidoFeitoPorId(taskId);
+      } else if (statusPrevisto) {
+        await atualizarStatusPorId(taskId, statusPrevisto);
       }
 
       await fetchProdutos(true);
@@ -456,12 +303,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       console.error('[useProdutosComprar] Erro na acao:', err);
       throw err;
     }
-  }, [fonte, fetchProdutos, produtos]);
-
-  const setFonte = useCallback((nova: CompraFonte) => {
-    setFonteSalva(nova);
-    setFonteState(nova);
-  }, []);
+  }, [fetchProdutos, produtos]);
 
   const atualizarStatus = useCallback(async (produtoId: string, status: CompraStatusApp) => {
     const anterior = produtos.find((p) => p.id === produtoId);
@@ -472,9 +314,6 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     );
 
     try {
-      if (fonte !== 'supabase') {
-        throw new Error('Atualizacao direta de status so existe no modo Supabase.');
-      }
       await atualizarStatusPorId(produtoId, status);
       await fetchProdutos(true);
     } catch (err) {
@@ -483,7 +322,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       );
       throw err;
     }
-  }, [fonte, fetchProdutos, produtos]);
+  }, [fetchProdutos, produtos]);
 
   // Persiste a secao (vinda do ERP na primeira carga) no Supabase, para nao
   // precisar reconsultar o ERP so pela secao nas proximas vezes. Best-effort.
@@ -492,14 +331,10 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     setProdutos((prev) =>
       prev.map((p) => (p.id === produtoId && p.secao !== secao ? { ...p, secao } : p))
     );
-    const empresaAtual = getEmpresaAtual();
-    const acao = fonte === 'supabase'
-      ? atualizarSecaoPorId(produtoId, secao)
-      : atualizarSecaoPorClickup(empresaAtual, produtoId, secao);
-    void acao.catch((err) => {
+    void atualizarSecaoPorId(produtoId, secao).catch((err) => {
       console.warn('[compras][supabase] persistir secao falhou (ignorado):', err);
     });
-  }, [fonte]);
+  }, []);
 
   // Persiste a descricao real vinda do ERP. Alguns itens antigos entraram no banco
   // com codigo de barras no lugar do nome do produto.
@@ -509,14 +344,10 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     setProdutos((prev) =>
       prev.map((p) => (p.id === produtoId && p.descricao !== descricaoLimpa ? { ...p, descricao: descricaoLimpa } : p))
     );
-    const empresaAtual = getEmpresaAtual();
-    const acao = fonte === 'supabase'
-      ? atualizarDescricaoPorId(produtoId, descricaoLimpa)
-      : atualizarDescricaoPorClickup(empresaAtual, produtoId, descricaoLimpa);
-    void acao.catch((err) => {
+    void atualizarDescricaoPorId(produtoId, descricaoLimpa).catch((err) => {
       console.warn('[compras][supabase] persistir descricao falhou (ignorado):', err);
     });
-  }, [fonte]);
+  }, []);
 
   // Sobe a foto (data URL do ERP) no Storage e guarda a URL no Supabase, uma vez
   // por produto, para nao rebaixar do ERP nas proximas cargas. Best-effort.
@@ -531,7 +362,6 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       codigo: produto.codigo,
       sku: produto.sku,
       dataUrl,
-      porUuid: fonte === 'supabase',
     })
       .then((url) => {
         if (url) {
@@ -541,13 +371,12 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       .catch((err) => {
         console.warn('[compras][supabase] persistir foto falhou (ignorado):', err);
       });
-  }, [fonte, produtos]);
+  }, [produtos]);
 
   // Marca "pedido feito" no Supabase (substitui o anexo de PDF na task do ClickUp).
   // O item vai automaticamente para 'pedido_andamento' (via trigger no banco),
   // menos se ja estiver em compra_realizada/concluido. Update otimista + revert.
   const marcarPedidoFeito = useCallback(async (produtoId: string) => {
-    const empresaAtual = getEmpresaAtual();
     const anterior = produtos.find((p) => p.id === produtoId);
     const statusFinal = anterior && (anterior.status === 'compra_realizada' || anterior.status === 'concluido')
       ? anterior.status
@@ -556,14 +385,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       prev.map((p) => (p.id === produtoId ? { ...p, pedidoFeito: true, status: statusFinal } : p))
     );
     try {
-      if (fonte === 'supabase') {
-        await marcarPedidoFeitoPorId(produtoId);
-      } else {
-        if (anterior) {
-          await upsertComprasFromClickup([anterior], empresaAtual);
-        }
-        await marcarPedidoFeitoPorClickup(empresaAtual, produtoId);
-      }
+      await marcarPedidoFeitoPorId(produtoId);
     } catch (err) {
       if (anterior) {
         setProdutos((prev) =>
@@ -572,7 +394,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
       }
       throw err;
     }
-  }, [fonte, produtos]);
+  }, [produtos]);
 
   const like = useCallback((id: string) => executarAcao(id, 'LIKE'), [executarAcao]);
   const dislike = useCallback((id: string) => executarAcao(id, 'DISLIKE'), [executarAcao]);
@@ -587,8 +409,6 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     error,
     ultimaAtualizacao,
     empresa,
-    fonte,
-    setFonte,
     persistirSecao,
     persistirDescricao,
     persistirFoto,
