@@ -492,11 +492,26 @@ export const comprasErpPreload = schedules.task({
 
     const itens = candidatos.slice(0, maxItems);
     const resultado = { total: itens.length, sucesso: 0, falha: 0, pulado: candidatos.length - itens.length, detalhes: [] as Array<Record<string, unknown>> };
+    console.info("[compras-erp-preload] fila carregada", {
+      candidatos: candidatos.length,
+      processar: itens.length,
+      pulado: resultado.pulado,
+      maxItems,
+      delayMs,
+      hasSyncColumns,
+    });
 
     for (const item of itens) {
       const empresaErp = erpEmpresa(item.empresa);
       const baseUrl = apiBaseUrl(empresaErp);
       const origin = originFromApi(baseUrl);
+      console.info("[compras-erp-preload] item inicio", {
+        id: item.id,
+        empresa: item.empresa,
+        codigo: item.codigo,
+        sku: item.sku,
+        produtoKey: item.produto_key,
+      });
 
       try {
         const token = await getErpToken(empresaErp, baseUrl);
@@ -548,6 +563,16 @@ export const comprasErpPreload = schedules.task({
 
         resultado.sucesso += 1;
         resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp, fornecedores: fornecedoresSalvos });
+        console.info("[compras-erp-preload] item ok", {
+          id: item.id,
+          empresa: item.empresa,
+          codigo: item.codigo,
+          produtoErpId: produto.id,
+          descricao: Boolean(descricao),
+          secao: Boolean(secao),
+          foto: Boolean(fotoUrl || item.foto_url),
+          fornecedores: fornecedoresSalvos,
+        });
       } catch (err) {
         const message = errorMessage(err);
         if (hasSyncColumns) {
@@ -558,11 +583,18 @@ export const comprasErpPreload = schedules.task({
         }
         resultado.falha += 1;
         resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: false, erro: message, base: empresaErp });
+        console.error("[compras-erp-preload] item falha", {
+          id: item.id,
+          empresa: item.empresa,
+          codigo: item.codigo,
+          erro: message,
+        });
       }
 
       await sleep(delayMs);
     }
 
+    console.info("[compras-erp-preload] finalizado", resultado);
     return resultado;
   },
 });
