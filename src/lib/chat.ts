@@ -29,6 +29,14 @@ export interface Mensagem {
   createdAt: string | null;
 }
 
+export interface ResumoConversa {
+  nome: string;
+  ultimaMensagem: string;
+  ultimoHorario: string | null;
+  naoLidas: number;
+  tipo: MensagemTipo;
+}
+
 interface MensagemRow {
   id: string;
   empresa: string;
@@ -246,6 +254,51 @@ export async function contarMensagensNaoLidas(empresa: string, meuNome: string):
     .eq("lida", false);
   if (error) throw error;
   return count ?? 0;
+}
+
+export async function listarResumoConversas(empresa: string, meuNome: string): Promise<Record<string, ResumoConversa>> {
+  if (!isSupabaseConfigured) return {};
+  const eu = String(meuNome ?? "").trim();
+  if (!eu) return {};
+
+  const { data, error } = await supabase
+    .from("mensagens")
+    .select("remetente,destinatario,conteudo,tipo,created_at,lida")
+    .eq("empresa", empresa)
+    .or(`remetente.eq.${eu},destinatario.eq.${eu}`)
+    .order("created_at", { ascending: false })
+    .limit(500);
+  if (error) throw error;
+
+  const resumo: Record<string, ResumoConversa> = {};
+  for (const row of (data as Pick<MensagemRow, "remetente" | "destinatario" | "conteudo" | "tipo" | "created_at" | "lida">[] | null) ?? []) {
+    const outro = row.remetente === eu ? row.destinatario : row.remetente;
+    if (!outro) continue;
+
+    if (!resumo[outro]) {
+      const conteudo = String(row.conteudo ?? "").trim();
+      const fallback = row.tipo === "foto"
+        ? "Foto"
+        : row.tipo === "item"
+          ? "Item enviado"
+          : row.tipo === "recomendacao"
+            ? "Recomendacao de troca"
+            : "";
+      resumo[outro] = {
+        nome: outro,
+        ultimaMensagem: conteudo || fallback,
+        ultimoHorario: row.created_at,
+        naoLidas: 0,
+        tipo: row.tipo,
+      };
+    }
+
+    if (row.destinatario === eu && row.lida === false) {
+      resumo[outro].naoLidas += 1;
+    }
+  }
+
+  return resumo;
 }
 
 export function subscribeMensagens(empresa: string, onChange: () => void): () => void {

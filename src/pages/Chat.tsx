@@ -1,17 +1,27 @@
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { ArrowLeft, ImageIcon, RefreshCw, ScanBarcode, Send, Users } from "lucide-react";
+import {
+  ArrowLeft,
+  Camera,
+  ImageIcon,
+  RefreshCw,
+  ScanBarcode,
+  Search,
+  Send,
+  Users,
+} from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import {
   LIMITE_MENSAGEM,
-  contarMensagensNaoLidas,
   enviarMensagem,
   listarConversa,
+  listarResumoConversas,
   listarUsuariosChat,
   marcarConversaLida,
   subscribeMensagens,
   type Mensagem,
+  type ResumoConversa,
   type UsuarioChat,
 } from "@/lib/chat";
 import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
@@ -34,6 +44,24 @@ function lerArquivoComoDataUrl(file: File): Promise<string> {
   });
 }
 
+function iniciais(nome: string): string {
+  return nome
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((parte) => parte[0])
+    .join("")
+    .toUpperCase() || "?";
+}
+
+function previewMensagem(resumo?: ResumoConversa): string {
+  if (!resumo) return "Toque para iniciar conversa";
+  if (resumo.tipo === "foto") return resumo.ultimaMensagem || "Foto";
+  if (resumo.tipo === "item") return resumo.ultimaMensagem || "Item enviado";
+  if (resumo.tipo === "recomendacao") return resumo.ultimaMensagem || "Recomendacao de troca";
+  return resumo.ultimaMensagem || "Mensagem";
+}
+
 export default function Chat() {
   const { loginSalvo } = useAuth();
   const { toast } = useToast();
@@ -43,28 +71,18 @@ export default function Chat() {
   const flag = loginSalvo?.flag ?? "loja";
 
   const [usuarios, setUsuarios] = useState<UsuarioChat[]>([]);
-  const [naoLidasPorNome, setNaoLidasPorNome] = useState<Record<string, number>>({});
+  const [resumos, setResumos] = useState<Record<string, ResumoConversa>>({});
   const [ativo, setAtivo] = useState<string>(params.get("com") ?? "");
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [texto, setTexto] = useState("");
+  const [filtro, setFiltro] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
   const fimRef = useRef<HTMLDivElement>(null);
   const carregarConversaRef = useRef<() => Promise<void>>(async () => undefined);
-
-  // Diretorio de usuarios da empresa
-  useEffect(() => {
-    if (!meuNome) return;
-    void (async () => {
-      try {
-        setUsuarios(await listarUsuariosChat(empresa, meuNome));
-      } catch (err) {
-        console.error("[Chat] falha ao listar usuarios:", err);
-      }
-    })();
-  }, [empresa, meuNome]);
+  const carregarResumoRef = useRef<() => Promise<void>>(async () => undefined);
 
   const carregarUsuarios = useCallback(async () => {
     if (!meuNome) return;
@@ -72,6 +90,15 @@ export default function Chat() {
       setUsuarios(await listarUsuariosChat(empresa, meuNome));
     } catch (err) {
       console.error("[Chat] falha ao listar usuarios:", err);
+    }
+  }, [empresa, meuNome]);
+
+  const carregarResumo = useCallback(async () => {
+    if (!meuNome) return;
+    try {
+      setResumos(await listarResumoConversas(empresa, meuNome));
+    } catch (err) {
+      console.error("[Chat] falha ao listar resumo:", err);
     }
   }, [empresa, meuNome]);
 
@@ -84,26 +111,23 @@ export default function Chat() {
       const data = await listarConversa(empresa, meuNome, ativo);
       setMensagens(data);
       await marcarConversaLida(empresa, meuNome, ativo);
+      await carregarResumoRef.current();
     } catch (err) {
       console.error("[Chat] falha ao carregar conversa:", err);
     }
-  }, [empresa, meuNome, ativo]);
+  }, [ativo, empresa, meuNome]);
 
   carregarConversaRef.current = carregarConversa;
+  carregarResumoRef.current = carregarResumo;
+
+  useEffect(() => {
+    void carregarUsuarios();
+    void carregarResumo();
+  }, [carregarResumo, carregarUsuarios]);
 
   useEffect(() => {
     void carregarConversa();
   }, [carregarConversa]);
-
-  // Contadores de nao lidas (atualizados no realtime)
-  const atualizarContadores = useCallback(async () => {
-    if (!meuNome) return;
-    try {
-      // recarrega direcao atual e recomputa badges simples via conversa nao lida
-      const total = await contarMensagensNaoLidas(empresa, meuNome);
-      if (total === 0) setNaoLidasPorNome({});
-    } catch { /* ignore */ }
-  }, [empresa, meuNome]);
 
   const atualizarTudo = useCallback(async () => {
     if (!meuNome) return;
@@ -111,35 +135,57 @@ export default function Chat() {
     try {
       await Promise.all([
         carregarUsuarios(),
+        carregarResumoRef.current(),
         carregarConversaRef.current(),
-        atualizarContadores(),
       ]);
     } finally {
       setAtualizando(false);
     }
-  }, [atualizarContadores, carregarUsuarios, meuNome]);
+  }, [carregarUsuarios, meuNome]);
 
   useEffect(() => {
     if (!meuNome) return;
     const unsub = subscribeMensagens(empresa, () => {
+      void carregarResumoRef.current();
       void carregarConversaRef.current();
-      void atualizarContadores();
     });
     return unsub;
-  }, [empresa, meuNome, atualizarContadores]);
+  }, [empresa, meuNome]);
 
   useEffect(() => {
     fimRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [mensagens]);
+
+  const contatos = useMemo(() => {
+    const busca = filtro.trim().toLowerCase();
+    return usuarios
+      .filter((u) => {
+        if (!busca) return true;
+        return `${u.nome} ${u.login} ${u.role}`.toLowerCase().includes(busca);
+      })
+      .sort((a, b) => {
+        const dataA = resumos[a.nome]?.ultimoHorario ? new Date(resumos[a.nome].ultimoHorario ?? "").getTime() : 0;
+        const dataB = resumos[b.nome]?.ultimoHorario ? new Date(resumos[b.nome].ultimoHorario ?? "").getTime() : 0;
+        if (dataA !== dataB) return dataB - dataA;
+        return a.nome.localeCompare(b.nome);
+      });
+  }, [filtro, resumos, usuarios]);
+
+  const usuarioAtivo = useMemo(() => usuarios.find((u) => u.nome === ativo), [ativo, usuarios]);
 
   const selecionar = (nome: string) => {
     setAtivo(nome);
     setParams({ com: nome });
   };
 
+  const voltarParaLista = () => {
+    setAtivo("");
+    setParams({});
+  };
+
   const enviarTexto = async () => {
     const conteudo = texto.trim();
-    if (!conteudo || !ativo) return;
+    if (!conteudo || !ativo || enviando) return;
     setEnviando(true);
     try {
       await enviarMensagem({ empresa, remetente: meuNome, destinatario: ativo, conteudo });
@@ -177,8 +223,13 @@ export default function Chat() {
       let foto: string | null = null;
       try {
         const prod = await buscarProdutoVarejoFacil(cod, { empresa, flag });
-        if (prod) { descricao = prod.descricao ?? null; foto = prod.imagem ?? null; }
-      } catch { /* best-effort */ }
+        if (prod) {
+          descricao = prod.descricao ?? null;
+          foto = prod.imagem ?? null;
+        }
+      } catch {
+        // item no chat e best-effort; mensagem ainda pode ser enviada sem dados do ERP
+      }
       await enviarMensagem({
         empresa,
         remetente: meuNome,
@@ -195,168 +246,241 @@ export default function Chat() {
     }
   };
 
-  const usuarioAtivo = useMemo(() => usuarios.find((u) => u.nome === ativo), [usuarios, ativo]);
-
   if (!meuNome) {
     return <div className="p-6 text-center text-sm text-muted-foreground">Faca login para usar o chat.</div>;
   }
 
-  // Lista de contatos (quando nenhum selecionado no mobile)
-  if (!ativo) {
-    return (
-      <div className="mx-auto flex w-full max-w-3xl flex-col gap-3 p-4 pb-[calc(env(safe-area-inset-bottom)+2rem)]">
-        <div className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <Users className="h-4 w-4" /> Chat - {empresa}
+  return (
+    <div className="mx-auto grid h-[calc(100dvh-0.5rem)] min-h-0 w-full max-w-6xl overflow-hidden bg-background md:h-[calc(100vh-1rem)] md:grid-cols-[340px_minmax(0,1fr)] md:rounded-2xl md:border md:border-border">
+      <aside className={`${ativo ? "hidden md:flex" : "flex"} min-h-0 flex-col border-r border-border bg-card`}>
+        <div className="shrink-0 border-b border-border px-4 py-3">
+          <div className="mb-3 flex items-center justify-between gap-2">
+            <div className="min-w-0">
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Chat - {empresa}</p>
+              <h1 className="truncate text-xl font-black text-foreground">Conversas</h1>
+            </div>
+            <button
+              onClick={() => void atualizarTudo()}
+              disabled={atualizando}
+              className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground disabled:opacity-50"
+              title="Atualizar"
+            >
+              <RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} />
+            </button>
           </div>
-          <button
-            onClick={() => void atualizarTudo()}
-            disabled={atualizando}
-            className="inline-flex h-9 w-9 items-center justify-center rounded-full border border-border bg-card text-muted-foreground disabled:opacity-50"
-            title="Atualizar"
-          >
-            <RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} />
-          </button>
+          <div className="flex h-10 items-center gap-2 rounded-full bg-background px-3 text-muted-foreground ring-1 ring-border focus-within:ring-primary/60">
+            <Search className="h-4 w-4 shrink-0" />
+            <input
+              value={filtro}
+              onChange={(e) => setFiltro(e.target.value)}
+              placeholder="Buscar pessoa"
+              className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+            />
+          </div>
         </div>
-        <h1 className="text-2xl font-black text-foreground">Com quem voce quer falar?</h1>
-        <div className="mt-2 flex flex-col gap-2">
-          {usuarios.length === 0 ? (
-            <p className="text-sm text-muted-foreground">Nenhum outro usuario nesta empresa.</p>
+
+        <div className="min-h-0 flex-1 overflow-y-auto">
+          {contatos.length === 0 ? (
+            <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+              <Users className="h-8 w-8" />
+              Nenhuma conversa encontrada.
+            </div>
           ) : (
-            usuarios.map((u) => (
-              <button
-                key={u.login}
-                onClick={() => selecionar(u.nome)}
-                className="flex items-center gap-3 rounded-2xl border border-border bg-card px-4 py-3 text-left transition hover:border-primary/40 hover:bg-primary/5"
-              >
-                <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10 text-sm font-black text-primary">
-                  {u.nome.slice(0, 2).toUpperCase()}
-                </div>
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-bold text-foreground">{u.nome}</p>
-                  <p className="truncate text-xs text-muted-foreground">{u.role}</p>
-                </div>
-                {naoLidasPorNome[u.nome] > 0 && (
-                  <span className="rounded-full bg-primary px-2 py-0.5 text-[11px] font-bold text-primary-foreground">
-                    {naoLidasPorNome[u.nome]}
-                  </span>
-                )}
-              </button>
-            ))
+            contatos.map((u) => {
+              const resumo = resumos[u.nome];
+              const selecionado = ativo === u.nome;
+              return (
+                <button
+                  key={u.login}
+                  onClick={() => selecionar(u.nome)}
+                  className={`flex w-full items-center gap-3 border-b border-border/60 px-4 py-3 text-left transition ${
+                    selecionado ? "bg-primary/10" : "hover:bg-muted/60"
+                  }`}
+                >
+                  <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-emerald-500 text-sm font-black text-white">
+                    {iniciais(u.nome)}
+                    {resumo?.naoLidas ? (
+                      <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-center text-[10px] font-black text-white ring-2 ring-card">
+                        {resumo.naoLidas}
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="min-w-0 flex-1 truncate text-sm font-bold text-foreground">{u.nome}</p>
+                      <span className="shrink-0 text-[11px] text-muted-foreground">{horaMsg(resumo?.ultimoHorario ?? null)}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{previewMensagem(resumo)}</p>
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
-      </div>
-    );
-  }
+      </aside>
 
-  return (
-    <div className="mx-auto flex h-[calc(100dvh-0.5rem)] min-h-0 w-full max-w-3xl flex-col overflow-hidden bg-background sm:h-[calc(100vh-1rem)] sm:rounded-2xl sm:border sm:border-border">
-      <header className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-3 sm:px-4">
-        <button onClick={() => { setAtivo(""); setParams({}); }} className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground">
-          <ArrowLeft className="h-4 w-4" />
-        </button>
-        <div className="flex h-9 w-9 items-center justify-center rounded-full bg-primary/10 text-xs font-black text-primary">
-          {ativo.slice(0, 2).toUpperCase()}
-        </div>
-        <div className="min-w-0 flex-1">
-          <p className="truncate text-sm font-bold text-foreground">{ativo}</p>
-          {usuarioAtivo && <p className="truncate text-xs text-muted-foreground">{usuarioAtivo.role}</p>}
-        </div>
-        <button
-          onClick={() => void atualizarTudo()}
-          disabled={atualizando}
-          className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground disabled:opacity-50"
-          title="Atualizar"
-        >
-          <RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} />
-        </button>
-      </header>
-
-      <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-background px-3 py-4 sm:px-4">
-        {mensagens.length === 0 ? (
-          <p className="py-10 text-center text-sm text-muted-foreground">Sem mensagens ainda. Diga oi!</p>
+      <section className={`${ativo ? "flex" : "hidden md:flex"} min-h-0 flex-col bg-background`}>
+        {!ativo ? (
+          <div className="flex h-full flex-col items-center justify-center gap-4 px-6 text-center text-muted-foreground">
+            <div className="flex h-16 w-16 items-center justify-center rounded-full bg-primary/10 text-primary">
+              <Send className="h-7 w-7" />
+            </div>
+            <div>
+              <h2 className="text-lg font-black text-foreground">Selecione uma conversa</h2>
+              <p className="mt-1 text-sm">Escolha alguem na lista para enviar mensagem, foto ou item.</p>
+            </div>
+          </div>
         ) : (
-          mensagens.map((m) => {
-            const meu = m.remetente === meuNome;
-            return (
-              <div key={m.id} className={`flex ${meu ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm ${meu ? "bg-primary text-primary-foreground" : "border border-border bg-card text-foreground"}`}>
-                  {m.tipo === "recomendacao" && (
-                    <div className="mb-1 text-[11px] font-bold uppercase tracking-wide opacity-80">🔄 Recomendacao de troca</div>
-                  )}
-                  {m.fotoUrl && (
-                    <img src={m.fotoUrl} alt="foto" className="mb-1 max-h-52 w-full rounded-lg object-cover" loading="lazy" />
-                  )}
-                  {m.itemCodigo && (
-                    <div className={`mb-1 flex items-center gap-2 rounded-lg p-2 ${meu ? "bg-primary-foreground/15" : "bg-background"}`}>
-                      {m.itemFoto ? (
-                        <img src={m.itemFoto} alt="" className="h-10 w-10 rounded object-cover" />
-                      ) : (
-                        <ScanBarcode className="h-6 w-6 opacity-70" />
-                      )}
-                      <div className="min-w-0">
-                        <p className="truncate text-xs font-bold">{m.itemDescricao || m.itemCodigo}</p>
-                        <p className="truncate font-mono text-[11px] opacity-80">{m.itemCodigo}</p>
+          <>
+            <header className="flex shrink-0 items-center gap-3 border-b border-border bg-card px-3 py-3 md:px-4">
+              <button
+                onClick={voltarParaLista}
+                className="inline-flex h-10 w-10 items-center justify-center rounded-full bg-muted text-muted-foreground md:hidden"
+                title="Voltar"
+              >
+                <ArrowLeft className="h-4 w-4" />
+              </button>
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-emerald-500 text-sm font-black text-white">
+                {iniciais(ativo)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-black text-foreground">{ativo}</p>
+                <p className="truncate text-xs text-muted-foreground">{usuarioAtivo?.role || "Conversa interna"}</p>
+              </div>
+              <button
+                onClick={() => void atualizarTudo()}
+                disabled={atualizando}
+                className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full border border-border bg-background text-muted-foreground disabled:opacity-50"
+                title="Atualizar"
+              >
+                <RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} />
+              </button>
+            </header>
+
+            <div className="min-h-0 flex-1 space-y-2 overflow-y-auto bg-[radial-gradient(circle_at_1px_1px,hsl(var(--border))_1px,transparent_0)] bg-[length:22px_22px] px-3 py-4 md:px-5">
+              {mensagens.length === 0 ? (
+                <div className="flex h-full items-center justify-center">
+                  <div className="rounded-2xl bg-card/90 px-4 py-3 text-center text-sm text-muted-foreground shadow-sm ring-1 ring-border">
+                    Sem mensagens ainda. Envie a primeira.
+                  </div>
+                </div>
+              ) : (
+                mensagens.map((m) => {
+                  const meu = m.remetente === meuNome;
+                  return (
+                    <div key={m.id} className={`flex ${meu ? "justify-end" : "justify-start"}`}>
+                      <div
+                        className={`max-w-[86%] rounded-2xl px-3 py-2 text-sm shadow-sm md:max-w-[68%] ${
+                          meu
+                            ? "rounded-br-md bg-emerald-500 text-white"
+                            : "rounded-bl-md bg-card text-foreground ring-1 ring-border"
+                        }`}
+                      >
+                        {m.tipo === "recomendacao" && (
+                          <div className={`mb-1 rounded-lg px-2 py-1 text-[11px] font-bold uppercase tracking-wide ${
+                            meu ? "bg-white/15 text-white" : "bg-amber-100 text-amber-800"
+                          }`}>
+                            Recomendacao de troca
+                          </div>
+                        )}
+                        {m.fotoUrl && (
+                          <img src={m.fotoUrl} alt="foto" className="mb-2 max-h-64 w-full rounded-xl object-cover" loading="lazy" />
+                        )}
+                        {m.itemCodigo && (
+                          <div className={`mb-2 flex items-center gap-2 rounded-xl p-2 ${meu ? "bg-white/15" : "bg-muted"}`}>
+                            {m.itemFoto ? (
+                              <img src={m.itemFoto} alt="" className="h-12 w-12 rounded-lg object-cover" loading="lazy" />
+                            ) : (
+                              <div className={`flex h-12 w-12 items-center justify-center rounded-lg ${meu ? "bg-white/10" : "bg-background"}`}>
+                                <ScanBarcode className="h-6 w-6 opacity-70" />
+                              </div>
+                            )}
+                            <div className="min-w-0">
+                              <p className="truncate text-xs font-bold">{m.itemDescricao || m.itemCodigo}</p>
+                              <p className="truncate font-mono text-[11px] opacity-80">{m.itemCodigo}</p>
+                            </div>
+                          </div>
+                        )}
+                        {m.conteudo && <p className="whitespace-pre-wrap break-words leading-relaxed">{m.conteudo}</p>}
+                        <p className={`mt-1 text-right text-[10px] ${meu ? "text-white/75" : "text-muted-foreground"}`}>
+                          {horaMsg(m.createdAt)}
+                        </p>
                       </div>
                     </div>
-                  )}
-                  {m.conteudo && <p className="whitespace-pre-wrap break-words">{m.conteudo}</p>}
-                  <p className={`mt-0.5 text-right text-[10px] ${meu ? "text-primary-foreground/70" : "text-muted-foreground"}`}>{horaMsg(m.createdAt)}</p>
-                </div>
-              </div>
-            );
-          })
-        )}
-        <div ref={fimRef} />
-      </div>
+                  );
+                })
+              )}
+              <div ref={fimRef} />
+            </div>
 
-      <div className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(env(safe-area-inset-bottom),0.5rem)]">
-        <div className="flex items-end gap-2">
-          <button
-            onClick={() => fileRef.current?.click()}
-            disabled={enviando}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground disabled:opacity-50"
-            title="Enviar foto"
-          >
-            <ImageIcon className="h-4 w-4" />
-          </button>
-          <button
-            onClick={() => setShowScanner(true)}
-            disabled={enviando}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl border border-border bg-background text-muted-foreground disabled:opacity-50"
-            title="Escanear e enviar item"
-          >
-            <ScanBarcode className="h-4 w-4" />
-          </button>
-          <div className="flex-1">
-            <textarea
-              value={texto}
-              onChange={(e) => setTexto(e.target.value.slice(0, LIMITE_MENSAGEM))}
-              onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void enviarTexto(); } }}
-              placeholder="Mensagem (max 500)"
-              rows={1}
-              className="max-h-28 w-full resize-none rounded-xl border border-border bg-background px-3 py-2 text-sm text-foreground outline-none focus:border-primary"
-            />
-            <div className="text-right text-[10px] text-muted-foreground">{texto.length}/{LIMITE_MENSAGEM}</div>
-          </div>
-          <button
-            onClick={() => void enviarTexto()}
-            disabled={enviando || !texto.trim()}
-            className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground disabled:opacity-50"
-            title="Enviar"
-          >
-            <Send className="h-4 w-4" />
-          </button>
-        </div>
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          capture="environment"
-          className="hidden"
-          onChange={(e) => { const f = e.target.files?.[0]; if (f) void enviarFoto(f); e.target.value = ""; }}
-        />
-      </div>
+            <footer className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] md:px-4">
+              <div className="flex items-end gap-2 rounded-2xl bg-background p-1.5 ring-1 ring-border focus-within:ring-primary/60">
+                <button
+                  onClick={() => fileRef.current?.click()}
+                  disabled={enviando}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-50"
+                  title="Enviar foto"
+                >
+                  <ImageIcon className="h-4 w-4" />
+                </button>
+                <button
+                  onClick={() => setShowScanner(true)}
+                  disabled={enviando}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-50"
+                  title="Escanear e enviar item"
+                >
+                  <ScanBarcode className="h-4 w-4" />
+                </button>
+                <textarea
+                  value={texto}
+                  onChange={(e) => setTexto(e.target.value.slice(0, LIMITE_MENSAGEM))}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && !e.shiftKey) {
+                      e.preventDefault();
+                      void enviarTexto();
+                    }
+                  }}
+                  placeholder="Mensagem"
+                  rows={1}
+                  className="max-h-28 min-h-10 flex-1 resize-none bg-transparent px-1 py-2.5 text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                />
+                {texto.trim() ? (
+                  <button
+                    onClick={() => void enviarTexto()}
+                    disabled={enviando}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-emerald-500 text-white disabled:opacity-50"
+                    title="Enviar"
+                  >
+                    <Send className="h-4 w-4" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={() => fileRef.current?.click()}
+                    disabled={enviando}
+                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-50"
+                    title="Abrir camera"
+                  >
+                    <Camera className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
+              <div className="mt-1 pr-2 text-right text-[10px] text-muted-foreground">{texto.length}/{LIMITE_MENSAGEM}</div>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0];
+                  if (f) void enviarFoto(f);
+                  e.target.value = "";
+                }}
+              />
+            </footer>
+          </>
+        )}
+      </section>
 
       {showScanner && (
         <Suspense fallback={<div className="fixed inset-0 z-50 bg-background p-6 text-center">Carregando scanner...</div>}>
