@@ -327,7 +327,7 @@ const buscarProdutoPorCatalogoItemErp = async (
     {
       search: codigo,
       exact: false,
-      limit: 8,
+      limit: 20,
       lightweight: true,
       includeIdentifiers: true,
     },
@@ -769,7 +769,7 @@ export const buscarOpcoesProdutoVarejoFacil = async (
     {
       search: codigo,
       exact: false,
-      limit: 8,
+      limit: 20,
       lightweight: true,
       includeIdentifiers: true,
     },
