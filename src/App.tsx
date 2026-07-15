@@ -12,6 +12,7 @@ import { DesktopShell } from "@/components/DesktopShell";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import TourGuide from "@/components/TourGuide";
 import { EmpresaToggleSF } from "@/components/EmpresaToggleSF";
+import { AppUpdateManager } from "@/components/AppUpdateManager";
 
 const Home = lazy(() => import("./pages/Home"));
 const Index = lazy(() => import("./pages/Index"));
@@ -43,6 +44,7 @@ const App = () => (
       <EmpresaToggleSF />
 
       <BrowserRouter>
+        <AppUpdateManager />
         {/* TourGuide DENTRO do Router para useLocation funcionar */}
         <TourGuide />
         <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Carregando...</div>}>
