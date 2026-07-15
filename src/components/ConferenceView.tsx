@@ -79,6 +79,7 @@ export interface ConferenceItem {
   id: string;
   codigo: string;
   sku: string;
+  descricao?: string | null;
   secao?: string | null;
   quantidadePedida: number;
   quantidadeReal: number | null;
@@ -538,6 +539,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         id: item.id || crypto.randomUUID(),
         codigo: item.codigo,
         sku: item.sku ?? "",
+        descricao: item.descricao ?? null,
         secao: item.secao ?? null,
         quantidadePedida: item.quantidadePedida,
         quantidadeReal: item.quantidadeReal,
@@ -568,6 +570,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           id: item.id,
           codigo: item.codigo,
           sku: item.sku ?? "",
+          descricao: item.descricao ?? null,
           secao: item.secao ?? null,
           quantidadePedida: item.quantidadePedida,
           quantidadeReal: item.quantidadeReal,
@@ -2310,18 +2313,30 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                       return (
                         <div key={item.id} className="rounded-2xl border border-border bg-background p-4">
                           <div className="flex flex-col gap-4 lg:flex-row lg:items-center">
-                            <div className="min-w-0 flex-1">
-                              <div className="text-sm font-bold text-foreground">{item.codigo}</div>
-                              <div className="mt-1 text-xs text-muted-foreground">
-                                SKU: {item.sku || "-"} | Status: {item.status} | Qtd atual: {item.quantidadePedida}
-                              </div>
+                            <div className="flex min-w-0 flex-1 gap-3">
+                              {item.photo ? (
+                                <img src={item.photo} alt={item.descricao || item.sku || item.codigo} className="h-20 w-20 shrink-0 rounded-xl border border-border object-cover" />
+                              ) : (
+                                <div className="flex h-20 w-20 shrink-0 items-center justify-center rounded-xl border border-dashed border-border bg-muted text-[10px] font-bold uppercase text-muted-foreground">
+                                  Sem foto
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <div className="text-sm font-bold text-foreground">{item.descricao || item.sku || item.codigo}</div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  Codigo: {item.codigo || "-"} | SKU: {item.sku || "-"}
+                                </div>
+                                <div className="mt-1 text-xs text-muted-foreground">
+                                  Secao: <span className="font-semibold text-foreground">{item.secao || "-"}</span> | Status: {item.status} | Qtd atual: {item.quantidadePedida}
+                                </div>
                               {rec && (
                                 <div className="mt-2 text-xs text-sky-700">
                                   Troca {rec.status}: {rec.codigoOriginal} por {rec.codigoSugerido} | Qtd sugerida {rec.quantidadeSugerida}
                                 </div>
                               )}
+                              </div>
                             </div>
-                            <div className="flex w-full gap-2 lg:w-auto">
+                            <div className="grid w-full grid-cols-2 gap-2 lg:flex lg:w-auto">
                               <input
                                 type="number"
                                 min="1"
@@ -2330,7 +2345,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                                   const valor = Number(event.target.value);
                                   setItensDetalheTask((prev) => prev.map((it) => it.id === item.id ? { ...it, quantidadePedida: Number.isFinite(valor) && valor > 0 ? valor : it.quantidadePedida } : it));
                                 }}
-                                className="h-11 w-24 rounded-xl border border-input bg-card px-3 text-sm font-bold text-foreground outline-none"
+                                className="h-11 w-full rounded-xl border border-input bg-card px-3 text-sm font-bold text-foreground outline-none lg:w-24"
                               />
                               <button
                                 type="button"

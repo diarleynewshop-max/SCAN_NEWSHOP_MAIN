@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { enviarListaParaSupabase, WebhookPayload } from "@/lib/webhookRouter";
 import { Product, ListData } from "@/components/ProductCard";
 import { Pencil, Trash2, Download, FileText, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
@@ -43,9 +43,35 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
   const [editList, setEditList] = useState<ListData | null>(null);
   const [editIndex, setEditIndex] = useState(0);
   const [editProduct, setEditProduct] = useState<Product | null>(null);
+  const [editPhotoPreview, setEditPhotoPreview] = useState<string | null>(null);
 
 
   const [sendingId, setSendingId] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const carregarPreview = async () => {
+      if (!editProduct) {
+        setEditPhotoPreview(null);
+        return;
+      }
+
+      if (editProduct.photo) {
+        setEditPhotoPreview(editProduct.photo);
+        return;
+      }
+
+      const dataUrl = await resolvePhotoToDataUrl(editProduct).catch(() => null);
+      if (!cancelled) setEditPhotoPreview(dataUrl);
+    };
+
+    void carregarPreview();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [editProduct]);
 
   const sortedLists = [...lists]
     .filter((l) => l.status !== "open")
@@ -564,7 +590,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       </Dialog>
 
       {/* ── EDIT ── */}
-      <Dialog open={!!editList} onOpenChange={() => { setEditList(null); setEditProduct(null); }}>
+      <Dialog open={!!editList} onOpenChange={() => { setEditList(null); setEditProduct(null); setEditPhotoPreview(null); }}>
         <DialogContent aria-describedby={undefined} className="max-w-sm" style={{ ...dialogStyle, maxHeight: "90vh", overflowY: "auto" }}>
           <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
           <DialogHeader>
@@ -573,10 +599,35 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           </DialogHeader>
           {editProduct && (
             <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 8 }}>
-              {editProduct.photo && <img src={editProduct.photo} alt="Produto" style={{ width: "100%", height: 120, objectFit: "cover", borderRadius: 10 }} />}
+              <div style={{ border: "1px solid hsl(var(--border))", borderRadius: 12, overflow: "hidden", background: "hsl(var(--secondary))" }}>
+                {editPhotoPreview ? (
+                  <img src={editPhotoPreview} alt={editProduct.sku || editProduct.barcode || "Produto"} style={{ width: "100%", height: 180, objectFit: "cover", display: "block" }} />
+                ) : (
+                  <div style={{ width: "100%", height: 140, display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(var(--muted-foreground))", fontWeight: 800, fontSize: 13 }}>
+                    SEM FOTO
+                  </div>
+                )}
+                <div style={{ padding: 12, display: "grid", gap: 8, background: "hsl(var(--card))", borderTop: "1px solid hsl(var(--border))" }}>
+                  <div>
+                    <p style={{ ...LABEL, marginBottom: 3 }}>Descricao</p>
+                    <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))", lineHeight: 1.35 }}>{editProduct.description || editProduct.sku || "-"}</p>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                    <div>
+                      <p style={{ ...LABEL, marginBottom: 3 }}>Secao</p>
+                      <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(var(--primary))" }}>{editProduct.secao || "-"}</p>
+                    </div>
+                    <div>
+                      <p style={{ ...LABEL, marginBottom: 3 }}>ERP</p>
+                      <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(var(--foreground))" }}>{editProduct.erpProdutoId || "-"}</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
               {[
                 { label: "Código de Barras", value: editProduct.barcode, onChange: (v: string) => setEditProduct({ ...editProduct, barcode: v }), type: "text" },
                 { label: "SKU", value: editProduct.sku, onChange: (v: string) => setEditProduct({ ...editProduct, sku: v }), type: "text" },
+                { label: "Seção do Item", value: editProduct.secao || "", onChange: (v: string) => setEditProduct({ ...editProduct, secao: v }), type: "text" },
                 { label: "Quantidade", value: String(editProduct.quantity), onChange: (v: string) => setEditProduct({ ...editProduct, quantity: Number(v) || 0 }), type: "number" },
               ].map(({ label, value, onChange, type }) => (
                 <div key={label}>
