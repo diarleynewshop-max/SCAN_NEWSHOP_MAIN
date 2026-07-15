@@ -14,7 +14,7 @@ type CompraRow = {
   secao: string | null;
   foto_url: string | null;
   updated_at: string | null;
-  erp_sync_at: string | null;
+  erp_sync_at?: string | null;
 };
 
 type ErpListResponse<T> = { items?: T[] };
@@ -274,8 +274,7 @@ function isDescricaoReal(descricao: string | null | undefined, codigo: string | 
 }
 
 function precisaSincronizar(row: CompraRow): boolean {
-  if (!row.erp_sync_at) return true;
-  if (row.updated_at && row.updated_at > row.erp_sync_at) return true;
+  if (row.erp_sync_at && row.updated_at && row.updated_at > row.erp_sync_at) return true;
   if (!row.secao || !row.foto_url) return true;
   if (!isDescricaoReal(row.descricao, row.codigo)) return true;
   return false;
@@ -316,6 +315,48 @@ function isUnauthorizedError(err: unknown): boolean {
   return /unauthorized|invalid api key|jwt/i.test(errorMessage(err));
 }
 
+function isMissingSyncColumnError(err: unknown): boolean {
+  const message = errorMessage(err);
+  return message.includes("erp_sync_at") || message.includes("erp_sync_error");
+}
+
+async function carregarCandidatos(supabase: any, empresas: EmpresaCompras[], scanLimit: number): Promise<{ candidatos: CompraRow[]; hasSyncColumns: boolean }> {
+  const candidatos: CompraRow[] = [];
+  let hasSyncColumns = true;
+
+  for (const empresa of empresas) {
+    let data: CompraRow[] | null = null;
+    let error: unknown = null;
+
+    const query = await supabase
+      .from("compras")
+      .select("id,empresa,produto_key,codigo,sku,descricao,secao,foto_url,updated_at,erp_sync_at")
+      .eq("empresa", empresa)
+      .order("erp_sync_at", { ascending: true, nullsFirst: true })
+      .limit(scanLimit);
+
+    data = query.data;
+    error = query.error;
+
+    if (error && isMissingSyncColumnError(error)) {
+      hasSyncColumns = false;
+      const fallback = await supabase
+        .from("compras")
+        .select("id,empresa,produto_key,codigo,sku,descricao,secao,foto_url,updated_at")
+        .eq("empresa", empresa)
+        .order("updated_at", { ascending: true, nullsFirst: true })
+        .limit(scanLimit);
+      data = fallback.data;
+      error = fallback.error;
+    }
+
+    if (error) throw error;
+    candidatos.push(...((data ?? []) as CompraRow[]).filter(precisaSincronizar));
+  }
+
+  return { candidatos, hasSyncColumns };
+}
+
 async function runComprasErpPreload() {
   if (process.env.COMPRAS_ERP_PRELOAD_ENABLED === "false") {
     return { skipped: true, reason: "COMPRAS_ERP_PRELOAD_ENABLED=false" };
@@ -344,18 +385,7 @@ async function runComprasErpPreload() {
   const scanLimit = intEnv("COMPRAS_ERP_PRELOAD_SCAN_LIMIT", DEFAULT_SCAN_LIMIT_PER_EMPRESA);
   const delayMs = intEnv("COMPRAS_ERP_PRELOAD_DELAY_MS", DEFAULT_DELAY_MS);
   const empresas: EmpresaCompras[] = ["NEWSHOP", "SF"];
-  const candidatos: CompraRow[] = [];
-
-  for (const empresa of empresas) {
-    const { data, error } = await supabase
-      .from("compras")
-      .select("id,empresa,produto_key,codigo,sku,descricao,secao,foto_url,updated_at,erp_sync_at")
-      .eq("empresa", empresa)
-      .order("erp_sync_at", { ascending: true, nullsFirst: true })
-      .limit(scanLimit);
-    if (error) throw error;
-    candidatos.push(...((data ?? []) as CompraRow[]).filter(precisaSincronizar));
-  }
+  const { candidatos, hasSyncColumns } = await carregarCandidatos(supabase, empresas, scanLimit);
 
   const itens = candidatos.slice(0, maxItems);
   const resultado = { total: itens.length, sucesso: 0, falha: 0, pulado: candidatos.length - itens.length, detalhes: [] as Array<Record<string, unknown>> };
@@ -390,24 +420,30 @@ async function runComprasErpPreload() {
       }
 
       const update: Record<string, unknown> = {
-        erp_sync_at: new Date().toISOString(),
-        erp_sync_error: null,
       };
+      if (hasSyncColumns) {
+        update.erp_sync_at = new Date().toISOString();
+        update.erp_sync_error = null;
+      }
       if (descricao) update.descricao = descricao;
       if (secao) update.secao = secao;
       if (fotoUrl) update.foto_url = fotoUrl;
 
-      const { error } = await supabase.from("compras").update(update).eq("id", item.id);
-      if (error) throw error;
+      if (Object.keys(update).length > 0) {
+        const { error } = await supabase.from("compras").update(update).eq("id", item.id);
+        if (error) throw error;
+      }
 
       resultado.sucesso += 1;
       resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp });
     } catch (err) {
       const message = errorMessage(err);
-      await supabase
-        .from("compras")
-        .update({ erp_sync_at: new Date().toISOString(), erp_sync_error: message.slice(0, 500) })
-        .eq("id", item.id);
+      if (hasSyncColumns) {
+        await supabase
+          .from("compras")
+          .update({ erp_sync_at: new Date().toISOString(), erp_sync_error: message.slice(0, 500) })
+          .eq("id", item.id);
+      }
       resultado.falha += 1;
       resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: false, erro: message, base: empresaErp });
     }
