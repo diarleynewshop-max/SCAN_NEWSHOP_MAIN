@@ -10,6 +10,7 @@ export interface UsuarioAdmin {
   flagDefault: LoginFlag;
   secoesCompras: string[];
   secaoPadrao?: string;
+  fotoUrl?: string;
   ativo: boolean;
   createdAt: string;
   updatedAt: string;
@@ -41,6 +42,7 @@ type UsuarioRpcRow = {
   flag_default?: string;
   secoes_compras?: string[];
   secao_padrao?: string | null;
+  foto_url?: string | null;
   ativo?: boolean;
   created_at?: string;
   updated_at?: string;
@@ -89,6 +91,7 @@ function mapUsuario(row: UsuarioRpcRow): UsuarioAdmin {
     flagDefault: normalizarFlag(row.flag_default),
     secoesCompras: normalizarArray(row.secoes_compras),
     secaoPadrao: normalizarTextoOpcional(row.secao_padrao),
+    fotoUrl: normalizarTextoOpcional(row.foto_url),
     ativo: row.ativo !== false,
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
@@ -191,4 +194,44 @@ export async function alterarMinhaSenha(login: string, senhaAtual: string, novaS
   });
   if (error) throw error;
   return data === true;
+}
+
+export const LIMITE_FOTO_PERFIL_BYTES = 2 * 1024 * 1024;
+const FOTO_BUCKET = "compras-fotos";
+
+export async function salvarMinhaFotoPerfil(input: {
+  usuarioId: string;
+  login: string;
+  arquivo: File;
+}): Promise<string> {
+  assertSupabase();
+
+  if (!input.usuarioId || !input.login) {
+    throw new Error("Conta sem identificacao para salvar foto.");
+  }
+  if (input.arquivo.size > LIMITE_FOTO_PERFIL_BYTES) {
+    throw new Error("A foto precisa ter no maximo 2MB.");
+  }
+  if (!input.arquivo.type.startsWith("image/")) {
+    throw new Error("Selecione uma imagem valida.");
+  }
+
+  const ext = input.arquivo.type.includes("png") ? "png" : "jpg";
+  const path = `perfil/${input.usuarioId}/${Date.now()}.${ext}`;
+  const upload = await supabase.storage.from(FOTO_BUCKET).upload(path, input.arquivo, {
+    contentType: input.arquivo.type || `image/${ext}`,
+    upsert: true,
+  });
+  if (upload.error) throw upload.error;
+
+  const fotoUrl = supabase.storage.from(FOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+  const { data, error } = await supabase.rpc("atualizar_minha_foto", {
+    p_usuario_id: input.usuarioId,
+    p_login: input.login,
+    p_foto_url: fotoUrl,
+  });
+  if (error) throw error;
+  if (data !== true) throw new Error("Nao foi possivel vincular a foto ao usuario.");
+
+  return fotoUrl;
 }

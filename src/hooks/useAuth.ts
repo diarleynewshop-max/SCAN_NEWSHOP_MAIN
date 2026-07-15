@@ -17,6 +17,7 @@ export interface LoginData {
   usuarioId?: string;
   login?: string;
   empresasPermitidas?: Empresa[];
+  fotoUrl?: string;
 }
 
 export interface UsuarioLoginContext {
@@ -28,6 +29,7 @@ export interface UsuarioLoginContext {
   flagDefault: LoginFlag;
   secoesCompras: string[];
   secaoPadrao?: string;
+  fotoUrl?: string;
 }
 
 export interface LoginRequest {
@@ -56,6 +58,7 @@ type LoginUsuarioRow = {
   flag_default?: string;
   secoes_compras?: string[];
   secao_padrao?: string | null;
+  foto_url?: string | null;
 };
 
 const normalizarEmpresa = (value: unknown): Empresa | null => {
@@ -102,6 +105,7 @@ function montarContextoUsuario(row: LoginUsuarioRow): UsuarioLoginContext | null
     flagDefault: normalizarFlag(row.flag_default),
     secoesCompras: toStringArray(row.secoes_compras),
     secaoPadrao: normalizarTextoOpcional(row.secao_padrao),
+    fotoUrl: normalizarTextoOpcional(row.foto_url),
   };
 }
 
@@ -137,6 +141,7 @@ export function obterLoginSalvo(): LoginData | null {
       usuarioId: dados.usuarioId ? String(dados.usuarioId) : undefined,
       login: dados.login ? String(dados.login) : undefined,
       empresasPermitidas: empresasPermitidas.length > 0 ? empresasPermitidas : [empresa],
+      fotoUrl: normalizarTextoOpcional(dados.fotoUrl),
     };
   } catch {
     return null;
@@ -209,6 +214,7 @@ export function useAuth() {
       usuarioId: contexto.id,
       login: contexto.login,
       empresasPermitidas: contexto.empresasPermitidas,
+      fotoUrl: contexto.fotoUrl,
     };
 
     salvarLogin(dados);
@@ -223,11 +229,21 @@ export function useAuth() {
     setMostrarModalLogin(true);
   };
 
+  const atualizarLoginSalvo = (updates: Partial<LoginData>): void => {
+    setLoginSalvo((atual) => {
+      if (!atual) return atual;
+      const proximo = { ...atual, ...updates };
+      salvarLogin(proximo);
+      return proximo;
+    });
+  };
+
   return {
     loginSalvo,
     mostrarModalLogin,
     setMostrarModalLogin,
     fazerLogin,
     fazerLogout,
+    atualizarLoginSalvo,
   };
 }

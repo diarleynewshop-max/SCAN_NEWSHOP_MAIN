@@ -37,6 +37,35 @@ const LABEL_MONO: React.CSSProperties = {
   color: "hsl(var(--muted-foreground))",
 };
 
+function UserAvatar({ loginSalvo, size }: { loginSalvo: LoginData; size: number }) {
+  if (loginSalvo.fotoUrl) {
+    return (
+      <img
+        src={loginSalvo.fotoUrl}
+        alt={loginSalvo.nomePessoa || "Usuario"}
+        style={{ width: size, height: size, borderRadius: "50%", objectFit: "cover", flexShrink: 0 }}
+      />
+    );
+  }
+
+  return (
+    <div style={{
+      width: size, height: size, borderRadius: "50%",
+      background: "hsl(var(--primary))",
+      display: "flex", alignItems: "center", justifyContent: "center",
+      flexShrink: 0,
+    }}>
+      <span style={{
+        color: "hsl(var(--primary-foreground))",
+        fontSize: Math.max(11, Math.round(size * 0.38)), fontWeight: 700,
+        fontFamily: "var(--font-serif)",
+      }}>
+        {(loginSalvo.nomePessoa || "U").charAt(0).toUpperCase()}
+      </span>
+    </div>
+  );
+}
+
 export function ErpLayout({
   children,
   loginSalvo,
@@ -267,20 +296,7 @@ export function ErpLayout({
           }}>
             {!collapsed ? (
               <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-                <div style={{
-                  width: 34, height: 34, borderRadius: "50%",
-                  background: "hsl(var(--primary))",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                  flexShrink: 0,
-                }}>
-                  <span style={{
-                    color: "hsl(var(--primary-foreground))",
-                    fontSize: 13, fontWeight: 700,
-                    fontFamily: "var(--font-serif)",
-                  }}>
-                    {(loginSalvo.nomePessoa || "U").charAt(0).toUpperCase()}
-                  </span>
-                </div>
+                <UserAvatar loginSalvo={loginSalvo} size={34} />
                 <div style={{ flex: 1, minWidth: 0 }}>
                   <p style={{
                     fontSize: 13,
@@ -316,19 +332,7 @@ export function ErpLayout({
               </div>
             ) : (
               <div style={{ display: "flex", justifyContent: "center" }}>
-                <div style={{
-                  width: 34, height: 34, borderRadius: "50%",
-                  background: "hsl(var(--primary))",
-                  display: "flex", alignItems: "center", justifyContent: "center",
-                }}>
-                  <span style={{
-                    color: "hsl(var(--primary-foreground))",
-                    fontSize: 13, fontWeight: 700,
-                    fontFamily: "var(--font-serif)",
-                  }}>
-                    {(loginSalvo.nomePessoa || "U").charAt(0).toUpperCase()}
-                  </span>
-                </div>
+                <UserAvatar loginSalvo={loginSalvo} size={34} />
               </div>
             )}
           </div>
@@ -371,19 +375,7 @@ export function ErpLayout({
               borderRadius: 10,
               border: "1px solid hsl(var(--border))",
             }}>
-              <div style={{
-                width: 26, height: 26, borderRadius: "50%",
-                background: "hsl(var(--primary))",
-                display: "flex", alignItems: "center", justifyContent: "center",
-              }}>
-                <span style={{
-                  color: "hsl(var(--primary-foreground))",
-                  fontSize: 11, fontWeight: 700,
-                  fontFamily: "var(--font-serif)",
-                }}>
-                  {(loginSalvo.nomePessoa || "U").charAt(0).toUpperCase()}
-                </span>
-              </div>
+              <UserAvatar loginSalvo={loginSalvo} size={26} />
               <div>
                 <p style={{
                   fontSize: 12,

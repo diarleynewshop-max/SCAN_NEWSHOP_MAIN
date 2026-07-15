@@ -10,7 +10,15 @@ export interface UsuarioChat {
   login: string;
   nome: string;
   role: string;
+  fotoUrl?: string | null;
 }
+
+type UsuarioChatRow = {
+  login?: string;
+  nome?: string;
+  role?: string;
+  foto_url?: string | null;
+};
 
 export interface Mensagem {
   id: string;
@@ -79,9 +87,14 @@ export async function listarUsuariosChat(empresa: string, excluirNome?: string):
   const { data, error } = await supabase.rpc("chat_listar_usuarios", { p_empresa: empresa });
   if (error) throw error;
   const excluir = String(excluirNome ?? "").trim().toLowerCase();
-  return ((data as UsuarioChat[] | null) ?? []).filter(
-    (u) => String(u.nome ?? "").trim().toLowerCase() !== excluir
-  );
+  return ((data as UsuarioChatRow[] | null) ?? [])
+    .map((u) => ({
+      login: String(u.login ?? ""),
+      nome: String(u.nome ?? ""),
+      role: String(u.role ?? ""),
+      fotoUrl: u.foto_url ?? null,
+    }))
+    .filter((u) => String(u.nome ?? "").trim().toLowerCase() !== excluir);
 }
 
 function normalizarPessoaChat(value: string | null | undefined): string {

@@ -24,6 +24,11 @@ import {
   type ResumoConversa,
   type UsuarioChat,
 } from "@/lib/chat";
+import {
+  buscarRecomendacaoPorId,
+  responderRecomendacaoSubstituicao,
+  type RecomendacaoSubstituicao,
+} from "@/lib/recomendacoesSubstituicao";
 import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
 
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
@@ -54,6 +59,17 @@ function iniciais(nome: string): string {
     .toUpperCase() || "?";
 }
 
+function AvatarPessoa({ nome, fotoUrl, className }: { nome: string; fotoUrl?: string | null; className: string }) {
+  if (fotoUrl) {
+    return <img src={fotoUrl} alt={nome} className={`${className} object-cover`} loading="lazy" />;
+  }
+  return (
+    <div className={`${className} flex items-center justify-center bg-gradient-to-br from-sky-500 to-emerald-500 text-sm font-black text-white`}>
+      {iniciais(nome)}
+    </div>
+  );
+}
+
 function previewMensagem(resumo?: ResumoConversa): string {
   if (!resumo) return "Toque para iniciar conversa";
   if (resumo.tipo === "foto") return resumo.ultimaMensagem || "Foto";
@@ -74,11 +90,13 @@ export default function Chat() {
   const [resumos, setResumos] = useState<Record<string, ResumoConversa>>({});
   const [ativo, setAtivo] = useState<string>(params.get("com") ?? "");
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
+  const [recomendacoes, setRecomendacoes] = useState<Record<string, RecomendacaoSubstituicao>>({});
   const [texto, setTexto] = useState("");
   const [filtro, setFiltro] = useState("");
   const [enviando, setEnviando] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  const [respondendoRecomendacao, setRespondendoRecomendacao] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const fimRef = useRef<HTMLDivElement>(null);
   const carregarConversaRef = useRef<() => Promise<void>>(async () => undefined);
@@ -154,6 +172,33 @@ export default function Chat() {
 
   useEffect(() => {
     fimRef.current?.scrollIntoView({ behavior: "smooth" });
+  }, [mensagens]);
+
+  useEffect(() => {
+    const ids = [...new Set(mensagens.map((m) => m.recomendacaoId).filter((id): id is string => Boolean(id)))];
+    if (ids.length === 0) {
+      setRecomendacoes({});
+      return;
+    }
+
+    let cancelado = false;
+    void (async () => {
+      const pares = await Promise.all(ids.map(async (id) => {
+        try {
+          const rec = await buscarRecomendacaoPorId(id);
+          return rec ? [id, rec] as const : null;
+        } catch (err) {
+          console.warn("[Chat] falha ao buscar recomendacao:", err);
+          return null;
+        }
+      }));
+      if (cancelado) return;
+      setRecomendacoes(Object.fromEntries(pares.filter((item): item is readonly [string, RecomendacaoSubstituicao] => Boolean(item))));
+    })();
+
+    return () => {
+      cancelado = true;
+    };
   }, [mensagens]);
 
   const contatos = useMemo(() => {
@@ -246,6 +291,31 @@ export default function Chat() {
     }
   };
 
+  const responderRecomendacao = async (id: string, decisao: "aceita" | "recusada") => {
+    if (!id || respondendoRecomendacao) return;
+    setRespondendoRecomendacao(id);
+    try {
+      await responderRecomendacaoSubstituicao(id, decisao, meuNome);
+      const atualizada = await buscarRecomendacaoPorId(id);
+      if (atualizada) {
+        setRecomendacoes((prev) => ({ ...prev, [id]: atualizada }));
+      }
+      toast({
+        title: decisao === "aceita" ? "Troca aceita" : "Troca recusada",
+        description: decisao === "aceita" ? "O item foi atualizado no pedido." : "A recomendacao foi recusada.",
+      });
+      await carregarConversa();
+    } catch (err) {
+      toast({
+        title: "Falha ao responder recomendacao",
+        description: err instanceof Error ? err.message : "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setRespondendoRecomendacao(null);
+    }
+  };
+
   if (!meuNome) {
     return <div className="p-6 text-center text-sm text-muted-foreground">Faca login para usar o chat.</div>;
   }
@@ -297,8 +367,8 @@ export default function Chat() {
                     selecionado ? "bg-primary/10" : "hover:bg-muted/60"
                   }`}
                 >
-                  <div className="relative flex h-12 w-12 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-emerald-500 text-sm font-black text-white">
-                    {iniciais(u.nome)}
+                  <div className="relative h-12 w-12 shrink-0">
+                    <AvatarPessoa nome={u.nome} fotoUrl={u.fotoUrl} className="h-12 w-12 rounded-full" />
                     {resumo?.naoLidas ? (
                       <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-center text-[10px] font-black text-white ring-2 ring-card">
                         {resumo.naoLidas}
@@ -340,9 +410,7 @@ export default function Chat() {
               >
                 <ArrowLeft className="h-4 w-4" />
               </button>
-              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-sky-500 to-emerald-500 text-sm font-black text-white">
-                {iniciais(ativo)}
-              </div>
+              <AvatarPessoa nome={ativo} fotoUrl={usuarioAtivo?.fotoUrl} className="h-11 w-11 shrink-0 rounded-full" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-black text-foreground">{ativo}</p>
                 <p className="truncate text-xs text-muted-foreground">{usuarioAtivo?.role || "Conversa interna"}</p>
@@ -367,6 +435,12 @@ export default function Chat() {
               ) : (
                 mensagens.map((m) => {
                   const meu = m.remetente === meuNome;
+                  const recomendacao = m.recomendacaoId ? recomendacoes[m.recomendacaoId] : null;
+                  const podeResponderRecomendacao = Boolean(
+                    recomendacao &&
+                    recomendacao.status === "pendente" &&
+                    recomendacao.destinatario.trim().toLowerCase() === meuNome.trim().toLowerCase()
+                  );
                   return (
                     <div key={m.id} className={`flex ${meu ? "justify-end" : "justify-start"}`}>
                       <div
@@ -380,7 +454,44 @@ export default function Chat() {
                           <div className={`mb-1 rounded-lg px-2 py-1 text-[11px] font-bold uppercase tracking-wide ${
                             meu ? "bg-white/15 text-white" : "bg-amber-100 text-amber-800"
                           }`}>
-                            Recomendacao de troca
+                            Recomendacao de troca{recomendacao ? ` - ${recomendacao.status}` : ""}
+                          </div>
+                        )}
+                        {recomendacao && (
+                          <div className={`mb-2 rounded-xl p-2 ${meu ? "bg-white/15" : "bg-muted"}`}>
+                            <div className="flex items-center gap-2">
+                              {recomendacao.fotoSugerida ? (
+                                <img src={recomendacao.fotoSugerida} alt="" className="h-12 w-12 rounded-lg object-cover" loading="lazy" />
+                              ) : (
+                                <div className={`flex h-12 w-12 items-center justify-center rounded-lg ${meu ? "bg-white/10" : "bg-background"}`}>
+                                  <ScanBarcode className="h-6 w-6 opacity-70" />
+                                </div>
+                              )}
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate text-xs font-black">{recomendacao.descricaoSugerida || recomendacao.codigoSugerido}</p>
+                                <p className="truncate font-mono text-[11px] opacity-80">
+                                  {recomendacao.codigoOriginal} {"->"} {recomendacao.codigoSugerido}
+                                </p>
+                              </div>
+                            </div>
+                            {podeResponderRecomendacao && (
+                              <div className="mt-2 grid grid-cols-2 gap-2">
+                                <button
+                                  onClick={() => void responderRecomendacao(recomendacao.id, "recusada")}
+                                  disabled={respondendoRecomendacao === recomendacao.id}
+                                  className={`h-9 rounded-lg text-xs font-black ${meu ? "bg-white/10 text-white" : "bg-background text-destructive ring-1 ring-border"} disabled:opacity-60`}
+                                >
+                                  Recusar
+                                </button>
+                                <button
+                                  onClick={() => void responderRecomendacao(recomendacao.id, "aceita")}
+                                  disabled={respondendoRecomendacao === recomendacao.id}
+                                  className="h-9 rounded-lg bg-emerald-600 text-xs font-black text-white disabled:opacity-60"
+                                >
+                                  Aceitar
+                                </button>
+                              </div>
+                            )}
                           </div>
                         )}
                         {m.fotoUrl && (

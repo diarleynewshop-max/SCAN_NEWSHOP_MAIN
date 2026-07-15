@@ -1,9 +1,9 @@
 ﻿import { useNavigate, useSearchParams } from "react-router-dom";
 import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLoginContext } from "@/hooks/useAuth";
-import { alterarMinhaSenha } from "@/lib/usuarios";
+import { alterarMinhaSenha, LIMITE_FOTO_PERFIL_BYTES, salvarMinhaFotoPerfil } from "@/lib/usuarios";
 import CriarContaModal from "@/components/CriarContaModal";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
@@ -186,6 +186,8 @@ const Home = () => {
   const [novaSenhaPerfil, setNovaSenhaPerfil] = useState("");
   const [trocandoSenha, setTrocandoSenha] = useState(false);
   const [msgSenhaPerfil, setMsgSenhaPerfil] = useState<{ tipo: "ok" | "erro"; texto: string } | null>(null);
+  const [salvandoFotoPerfil, setSalvandoFotoPerfil] = useState(false);
+  const fotoPerfilRef = useRef<HTMLInputElement>(null);
 
   const handleTrocarMinhaSenha = async () => {
     setMsgSenhaPerfil(null);
@@ -225,8 +227,44 @@ const Home = () => {
     mostrarModalLogin, 
     setMostrarModalLogin, 
     fazerLogin,
-    fazerLogout
+    fazerLogout,
+    atualizarLoginSalvo
   } = useAuth();
+
+  const handleFotoPerfil = async (file: File | undefined) => {
+    if (!file) return;
+    if (!loginSalvo?.usuarioId || !loginSalvo?.login) {
+      toast({ title: "Conta sem usuario vinculado", description: "Refaca o login antes de salvar foto.", variant: "destructive" });
+      return;
+    }
+    if (file.size > LIMITE_FOTO_PERFIL_BYTES) {
+      toast({ title: "Foto muito grande", description: "Use uma imagem de ate 2MB.", variant: "destructive" });
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      toast({ title: "Arquivo invalido", description: "Selecione uma imagem.", variant: "destructive" });
+      return;
+    }
+
+    setSalvandoFotoPerfil(true);
+    try {
+      const fotoUrl = await salvarMinhaFotoPerfil({
+        usuarioId: loginSalvo.usuarioId,
+        login: loginSalvo.login,
+        arquivo: file,
+      });
+      atualizarLoginSalvo({ fotoUrl });
+      toast({ title: "Foto atualizada" });
+    } catch (err) {
+      toast({
+        title: "Falha ao salvar foto",
+        description: err instanceof Error ? err.message : "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvandoFotoPerfil(false);
+    }
+  };
 
   // Estados para o formulário de login
   const [empresa, setEmpresa] = useState<Empresa>("NEWSHOP");
@@ -1086,6 +1124,39 @@ const Home = () => {
                   <div style={{ background: "hsl(var(--success) / 0.08)", border: "1px solid hsl(var(--success) / 0.2)", borderRadius: 10, padding: "14px 16px" }}>
                     <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 500, letterSpacing: "0.18em", textTransform: "uppercase", color: "hsl(var(--success))", marginBottom: 4 }}>Login configurado ✅</p>
                     <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Seus dados estão salvos e serão usados automaticamente.</p>
+                  </div>
+
+                  <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 12, padding: "16px", display: "flex", alignItems: "center", gap: 14 }}>
+                    {loginSalvo.fotoUrl ? (
+                      <img src={loginSalvo.fotoUrl} alt={loginSalvo.nomePessoa} style={{ width: 64, height: 64, borderRadius: "50%", objectFit: "cover", flexShrink: 0, border: "2px solid hsl(var(--border))" }} />
+                    ) : (
+                      <div style={{ width: 64, height: 64, borderRadius: "50%", background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0, fontSize: 22, fontWeight: 800 }}>
+                        {(loginSalvo.nomePessoa || "U").charAt(0).toUpperCase()}
+                      </div>
+                    )}
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <p style={{ fontSize: 14, fontWeight: 800, color: "hsl(var(--foreground))", marginBottom: 4 }}>Foto do perfil</p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginBottom: 10 }}>Imagem ate 2MB.</p>
+                      <button
+                        type="button"
+                        onClick={() => fotoPerfilRef.current?.click()}
+                        disabled={salvandoFotoPerfil}
+                        style={{ height: 38, padding: "0 14px", borderRadius: 10, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))", color: "hsl(var(--foreground))", fontSize: 13, fontWeight: 800, cursor: salvandoFotoPerfil ? "wait" : "pointer", opacity: salvandoFotoPerfil ? 0.7 : 1 }}
+                      >
+                        {salvandoFotoPerfil ? "Salvando..." : "Alterar foto"}
+                      </button>
+                      <input
+                        ref={fotoPerfilRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          void handleFotoPerfil(file);
+                          e.currentTarget.value = "";
+                        }}
+                      />
+                    </div>
                   </div>
 
                   <div>
