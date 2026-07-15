@@ -10,6 +10,7 @@ const HOSTS: Record<EmpresaKey, string> = {
 };
 
 const tokenCache = new Map<string, string>();
+const webSessionCache = new Map<string, string>();
 
 interface ErpAuth {
   token: string;
@@ -41,13 +42,78 @@ function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOK
   const baseEmpresa = erpBaseEmpresa(empresa);
   return (
     process.env[`ERP_API_${key}_${empresa}`] ||
+    process.env[`ERP_${key}_${empresa}`] ||
     process.env[`VITE_ERP_API_${key}_${empresa}`] ||
+    process.env[`VITE_ERP_${key}_${empresa}`] ||
     process.env[`ERP_API_${key}_${baseEmpresa}`] ||
+    process.env[`ERP_${key}_${baseEmpresa}`] ||
     process.env[`VITE_ERP_API_${key}_${baseEmpresa}`] ||
+    process.env[`VITE_ERP_${key}_${baseEmpresa}`] ||
     process.env[`ERP_API_${key}`] ||
+    process.env[`ERP_${key}`] ||
     process.env[`VITE_ERP_API_${key}`] ||
+    process.env[`VITE_ERP_${key}`] ||
     ""
   );
+}
+
+function getConfiguredWebSessionCookie(empresa: EmpresaKey): string {
+  const baseEmpresa = erpBaseEmpresa(empresa);
+  return (
+    process.env[`ERP_WEB_COOKIE_${empresa}`] ||
+    process.env[`ERP_SESSION_COOKIE_${empresa}`] ||
+    process.env[`VAREJOFACIL_SESSION_COOKIE_${empresa}`] ||
+    process.env[`ERP_WEB_COOKIE_${baseEmpresa}`] ||
+    process.env[`ERP_SESSION_COOKIE_${baseEmpresa}`] ||
+    process.env[`VAREJOFACIL_SESSION_COOKIE_${baseEmpresa}`] ||
+    process.env.ERP_WEB_COOKIE ||
+    process.env.ERP_SESSION_COOKIE ||
+    process.env.VAREJOFACIL_SESSION_COOKIE ||
+    ""
+  ).trim();
+}
+
+function resolveWebBaseUrl(empresa: EmpresaKey): string {
+  const baseEmpresa = erpBaseEmpresa(empresa);
+  const configuredUrl = (getEnv(empresa, "URL") || `https://${HOSTS[baseEmpresa]}`).replace(/\/$/, "");
+  return configuredUrl.endsWith("/api") ? configuredUrl.slice(0, -4) : configuredUrl;
+}
+
+function getWebSessionCacheKey(empresa: EmpresaKey): string {
+  return `${empresa}:${resolveWebBaseUrl(empresa)}:${getEnv(empresa, "USERNAME")}`;
+}
+
+async function getWebSessionCookie(empresa: EmpresaKey): Promise<string> {
+  const configuredCookie = getConfiguredWebSessionCookie(empresa);
+  if (configuredCookie) return configuredCookie;
+
+  const username = getEnv(empresa, "USERNAME");
+  const password = getEnv(empresa, "PASSWORD");
+  if (!username || !password) return "";
+
+  const cacheKey = getWebSessionCacheKey(empresa);
+  const cached = webSessionCache.get(cacheKey);
+  if (cached) return cached;
+
+  const webBaseUrl = resolveWebBaseUrl(empresa);
+  const params = new URLSearchParams({ j_username: username, j_password: password });
+  const response = await fetchErpWithRetry(`${webBaseUrl}/j_spring_security_check?${params.toString()}`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Referer: `${webBaseUrl}/login`,
+    },
+  });
+
+  const setCookie = response.headers.get("set-cookie") || "";
+  const match = setCookie.match(/JSESSIONID=([^;]+)/);
+  if (!match?.[1]) return "";
+
+  const cookie = `JSESSIONID=${match[1]}`;
+  webSessionCache.set(cacheKey, cookie);
+  return cookie;
 }
 
 function resolveBaseUrl(empresa: EmpresaKey): string {
@@ -117,6 +183,43 @@ function buildErpHeaders(auth: ErpAuth): Record<string, string> {
   return headers;
 }
 
+async function buildWebSessionHeaders(empresa: EmpresaKey): Promise<Record<string, string> | null> {
+  const cookie = await getWebSessionCookie(empresa);
+  if (!cookie) return null;
+
+  return {
+    Accept: "application/json, text/javascript, */*; q=0.01",
+    "X-Requested-With": "XMLHttpRequest",
+    Referer: `https://${HOSTS[erpBaseEmpresa(empresa)]}/produto/cadastro`,
+    Cookie: cookie,
+  };
+}
+
+async function fetchErpPath(empresa: EmpresaKey, baseUrl: string, path: string): Promise<Response> {
+  try {
+    const auth = await getAccessToken(empresa, baseUrl);
+    const response = await fetchErpWithRetry(`${baseUrl}${path}`, {
+      headers: buildErpHeaders(auth),
+    });
+
+    if (response.status !== 401) return response;
+    tokenCache.clear();
+  } catch (error) {
+    if (!(await buildWebSessionHeaders(empresa))) throw error;
+  }
+
+  const webHeaders = await buildWebSessionHeaders(empresa);
+  if (!webHeaders) throw new Error(`Credenciais do ERP nao configuradas para ${empresa}.`);
+  const response = await fetchErpWithRetry(`${baseUrl}${path}`, { headers: webHeaders, redirect: "manual" });
+
+  if (response.status !== 302) return response;
+
+  webSessionCache.delete(getWebSessionCacheKey(empresa));
+  const refreshedHeaders = await buildWebSessionHeaders(empresa);
+  if (!refreshedHeaders) return response;
+  return fetchErpWithRetry(`${baseUrl}${path}`, { headers: refreshedHeaders, redirect: "manual" });
+}
+
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   setCors(res);
 
@@ -137,15 +240,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
   try {
     const baseUrl = resolveBaseUrl(empresa);
-    const auth = await getAccessToken(empresa, baseUrl);
-
-    const response = await fetchErpWithRetry(`${baseUrl}${path}`, {
-      headers: buildErpHeaders(auth),
-    });
-
-    if (response.status === 401) {
-      tokenCache.clear();
-    }
+    const response = await fetchErpPath(empresa, baseUrl, path);
 
     const text = await response.text();
     const contentType = response.headers.get("content-type") || "";

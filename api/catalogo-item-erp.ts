@@ -14,6 +14,11 @@ type ErpProduto = {
   fotoUrl?: string;
 };
 
+type CatalogoItem = ReturnType<typeof toItem> & {
+  empresa?: EmpresaKey;
+  match?: string;
+};
+
 type ErpCodigoAuxiliar = {
   id?: string;
   produtoId?: number;
@@ -22,6 +27,17 @@ type ErpCodigoAuxiliar = {
 
 type ErpListResponse<T> = {
   items?: T[];
+};
+
+type CadastroProduto = {
+  codigo?: number;
+  descricao?: string;
+  pesoVariavel?: string;
+};
+
+type CadastroSearchResponse = {
+  totalDeRegistros?: number;
+  produtosDTO?: CadastroProduto[];
 };
 
 type ErpAuth = {
@@ -36,6 +52,7 @@ const HOSTS: Record<EmpresaKey, string> = {
 };
 
 const tokenCache = new Map<string, string>();
+const webSessionCache = new Map<string, string>();
 
 function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
@@ -62,11 +79,17 @@ function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOK
   const baseEmpresa = erpBaseEmpresa(empresa);
   return (
     process.env[`ERP_API_${key}_${empresa}`] ||
+    process.env[`ERP_${key}_${empresa}`] ||
     process.env[`VITE_ERP_API_${key}_${empresa}`] ||
+    process.env[`VITE_ERP_${key}_${empresa}`] ||
     process.env[`ERP_API_${key}_${baseEmpresa}`] ||
+    process.env[`ERP_${key}_${baseEmpresa}`] ||
     process.env[`VITE_ERP_API_${key}_${baseEmpresa}`] ||
+    process.env[`VITE_ERP_${key}_${baseEmpresa}`] ||
     process.env[`ERP_API_${key}`] ||
+    process.env[`ERP_${key}`] ||
     process.env[`VITE_ERP_API_${key}`] ||
+    process.env[`VITE_ERP_${key}`] ||
     ""
   );
 }
@@ -75,6 +98,65 @@ function resolveBaseUrl(empresa: EmpresaKey): string {
   const baseEmpresa = erpBaseEmpresa(empresa);
   const configuredUrl = (getEnv(empresa, "URL") || `https://${HOSTS[baseEmpresa]}`).replace(/\/$/, "");
   return configuredUrl.endsWith("/api") ? configuredUrl : `${configuredUrl}/api`;
+}
+
+function resolveWebBaseUrl(empresa: EmpresaKey): string {
+  const baseEmpresa = erpBaseEmpresa(empresa);
+  const configuredUrl = (getEnv(empresa, "URL") || `https://${HOSTS[baseEmpresa]}`).replace(/\/$/, "");
+  return configuredUrl.endsWith("/api") ? configuredUrl.slice(0, -4) : configuredUrl;
+}
+
+function getConfiguredWebSessionCookie(empresa: EmpresaKey): string {
+  const baseEmpresa = erpBaseEmpresa(empresa);
+  return (
+    process.env[`ERP_WEB_COOKIE_${empresa}`] ||
+    process.env[`ERP_SESSION_COOKIE_${empresa}`] ||
+    process.env[`VAREJOFACIL_SESSION_COOKIE_${empresa}`] ||
+    process.env[`ERP_WEB_COOKIE_${baseEmpresa}`] ||
+    process.env[`ERP_SESSION_COOKIE_${baseEmpresa}`] ||
+    process.env[`VAREJOFACIL_SESSION_COOKIE_${baseEmpresa}`] ||
+    process.env.ERP_WEB_COOKIE ||
+    process.env.ERP_SESSION_COOKIE ||
+    process.env.VAREJOFACIL_SESSION_COOKIE ||
+    ""
+  ).trim();
+}
+
+function getWebSessionCacheKey(empresa: EmpresaKey): string {
+  return `${empresa}:${resolveWebBaseUrl(empresa)}:${getEnv(empresa, "USERNAME")}`;
+}
+
+async function getWebSessionCookie(empresa: EmpresaKey): Promise<string> {
+  const configuredCookie = getConfiguredWebSessionCookie(empresa);
+  if (configuredCookie) return configuredCookie;
+
+  const username = getEnv(empresa, "USERNAME");
+  const password = getEnv(empresa, "PASSWORD");
+  if (!username || !password) return "";
+
+  const cacheKey = getWebSessionCacheKey(empresa);
+  const cached = webSessionCache.get(cacheKey);
+  if (cached) return cached;
+
+  const webBaseUrl = resolveWebBaseUrl(empresa);
+  const params = new URLSearchParams({ j_username: username, j_password: password });
+  const response = await fetchErpWithRetry(`${webBaseUrl}/j_spring_security_check?${params.toString()}`, {
+    method: "POST",
+    redirect: "manual",
+    headers: {
+      Accept: "application/json, text/plain, */*",
+      "Content-Type": "application/x-www-form-urlencoded",
+      Referer: `${webBaseUrl}/login`,
+    },
+  });
+
+  const setCookie = response.headers.get("set-cookie") || "";
+  const match = setCookie.match(/JSESSIONID=([^;]+)/);
+  if (!match?.[1]) return "";
+
+  const cookie = `JSESSIONID=${match[1]}`;
+  webSessionCache.set(cacheKey, cookie);
+  return cookie;
 }
 
 function resolveTokenFromAuth(data: Record<string, unknown>): string {
@@ -131,6 +213,28 @@ async function fetchErpJson<T>(baseUrl: string, auth: ErpAuth, path: string): Pr
   return (await response.json()) as T;
 }
 
+async function fetchErpWebJson<T>(empresa: EmpresaKey, path: string): Promise<T | null> {
+  const cookie = await getWebSessionCookie(empresa);
+  if (!cookie) return null;
+
+  const response = await fetchErpWithRetry(`${resolveWebBaseUrl(empresa)}${path}`, {
+    headers: {
+      Accept: "application/json, text/javascript, */*; q=0.01",
+      "X-Requested-With": "XMLHttpRequest",
+      Referer: `${resolveWebBaseUrl(empresa)}/produto/cadastro`,
+      Cookie: cookie,
+    },
+  });
+
+  if (response.status === 302) {
+    webSessionCache.delete(getWebSessionCacheKey(empresa));
+    return null;
+  }
+  if ([401, 403, 404].includes(response.status)) return null;
+  if (!response.ok) throw new Error(`Falha ERP cadastro ${response.status}`);
+  return (await response.json()) as T;
+}
+
 function normalizarEans(codigo: string): string[] {
   const limpo = codigo.replace(/\s+/g, "");
   const candidatos = [limpo];
@@ -157,6 +261,44 @@ function toItem(produto: ErpProduto, ean?: string) {
   };
 }
 
+function sanitizeSearchTerm(value: string): string {
+  return value
+    .normalize("NFKC")
+    .replace(/[\u0000-\u001F]+/g, " ")
+    .replace(/[;,:=><!(){}[\]]+/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function escaparFiql(value: string): string {
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+}
+
+function searchCandidates(term: string): string[] {
+  const clean = sanitizeSearchTerm(term);
+  const noDash = clean.replace(/-/g, " ");
+  const onlyDigits = clean.replace(/\D+/g, "");
+  const compact = clean.replace(/\s+/g, "");
+  const candidates = [clean, noDash, compact];
+
+  if (onlyDigits && onlyDigits !== clean) candidates.push(onlyDigits);
+
+  if (/^[A-Za-z]+[-\s]?\d+/.test(clean)) {
+    const match = clean.match(/^([A-Za-z]+)[-\s]?(\d+)/);
+    if (match) {
+      const [, prefix, digits] = match;
+      candidates.push(`${prefix}-${digits}`);
+      candidates.push(`${prefix} ${digits}`);
+      for (let len = digits.length; len >= Math.max(2, digits.length - 3); len -= 1) {
+        candidates.push(`${prefix}-${digits.slice(0, len)}`);
+        candidates.push(`${prefix}${digits.slice(0, len)}`);
+      }
+    }
+  }
+
+  return [...new Set(candidates.map((item) => item.trim()).filter(Boolean))];
+}
+
 async function buscarPorEan(baseUrl: string, auth: ErpAuth, ean: string): Promise<ReturnType<typeof toItem> | null> {
   for (const candidato of normalizarEans(ean)) {
     const fiql = encodeURIComponent(`id==${candidato}`);
@@ -174,27 +316,135 @@ async function buscarPorEan(baseUrl: string, auth: ErpAuth, ean: string): Promis
   return null;
 }
 
-async function buscarPorTermo(baseUrl: string, auth: ErpAuth, termo: string, limit: number) {
-  const queries = [
-    `descricao==*${termo}*`,
-    `codigoInterno==*${termo}*`,
-  ];
+async function buscarPorTermo(baseUrl: string, auth: ErpAuth, termo: string, limit: number, empresa: EmpresaKey) {
   const byId = new Map<number, ErpProduto>();
+  const labels = new Map<number, string>();
 
-  for (const query of queries) {
-    const fiql = encodeURIComponent(query);
-    const data = await fetchErpJson<ErpListResponse<ErpProduto>>(
-      baseUrl,
-      auth,
-      `/v1/produto/produtos?q=${fiql}&count=${limit}`
+  for (const candidate of searchCandidates(termo)) {
+    const escaped = escaparFiql(candidate);
+    const queries = [
+      { label: `descricao:${candidate}`, fiql: `descricao==*${escaped}*` },
+      { label: `codigoInterno:${candidate}`, fiql: `codigoInterno==*${escaped}*` },
+    ];
+
+    for (const query of queries) {
+      const fiql = encodeURIComponent(query.fiql);
+      const data = await fetchErpJson<ErpListResponse<ErpProduto>>(
+        baseUrl,
+        auth,
+        `/v1/produto/produtos?q=${fiql}&count=${limit}`
+      ).catch(() => null);
+
+      for (const item of data?.items ?? []) {
+        if (!item.id || byId.has(item.id)) continue;
+        byId.set(item.id, item);
+        labels.set(item.id, query.label);
+      }
+
+      if (byId.size >= limit) break;
+    }
+
+    if (byId.size >= limit) break;
+  }
+
+  return [...byId.values()].slice(0, limit).map((produto) => ({
+    ...toItem(produto),
+    empresa,
+    match: produto.id ? labels.get(produto.id) : undefined,
+  }));
+}
+
+function buildCadastroSearchPath(candidate: string, limit: number): string {
+  const params = new URLSearchParams({
+    "produtoFilter.pesquisaDeCadastro": "true",
+    "produtoFilter.codigo": "",
+    "produtoFilter.descricao": candidate,
+    "produtoFilter.codigoDaSecao": "",
+    "produtoFilter.codigoDoGrupo": "",
+    "produtoFilter.codigoDoSubgrupo": "",
+    "produtoFilter.situacaoFiscal": "",
+    "produtoFilter.situacaoFiscalEspecificaSaida": "",
+    "produtoFilter.codigoDoFornecedor": "",
+    "produtoFilter.identificadorDeOrigem": "",
+    "produtoFilter.cadastroInicial": "",
+    "produtoFilter.cadastroFinal": "",
+    "produtoFilter.maxResult": String(limit),
+    "produtoFilter.startResult": "0",
+    "produtoFilter.order.field": "codigo",
+    "produtoFilter.order.direcao": "ASC",
+    _: String(Date.now()),
+  });
+
+  return `/produto/cadastro/pesquisa/paginada?${params.toString()}`;
+}
+
+async function buscarPorCadastroWeb(empresa: EmpresaKey, termo: string, limit: number): Promise<CatalogoItem[]> {
+  const byId = new Map<number, CadastroProduto>();
+  const labels = new Map<number, string>();
+
+  for (const candidate of searchCandidates(termo)) {
+    const data = await fetchErpWebJson<CadastroSearchResponse>(
+      empresa,
+      buildCadastroSearchPath(candidate, limit)
     ).catch(() => null);
 
-    for (const item of data?.items ?? []) {
-      if (item.id && !byId.has(item.id)) byId.set(item.id, item);
+    for (const item of data?.produtosDTO ?? []) {
+      if (!item.codigo || byId.has(item.codigo)) continue;
+      byId.set(item.codigo, item);
+      labels.set(item.codigo, `cadastro:${candidate}`);
+    }
+
+    if (byId.size >= limit) break;
+  }
+
+  return [...byId.values()].slice(0, limit).map((produto) => ({
+    ...toItem({ id: produto.codigo, descricao: produto.descricao }),
+    empresa,
+    match: produto.codigo ? labels.get(produto.codigo) : undefined,
+  }));
+}
+
+async function buscarPorTermoNaEmpresa(empresa: EmpresaKey, termo: string, limit: number): Promise<CatalogoItem[]> {
+  let eanItem: ReturnType<typeof toItem> | null = null;
+  let items: CatalogoItem[] = [];
+
+  try {
+    const baseUrl = resolveBaseUrl(empresa);
+    const auth = await getAccessToken(empresa, baseUrl);
+    eanItem = /^\d{6,14}$/.test(termo) ? await buscarPorEan(baseUrl, auth, termo) : null;
+    items = await buscarPorTermo(baseUrl, auth, termo, limit, empresa);
+  } catch {
+    // A busca por SKU ainda pode funcionar pela rota de cadastro web quando houver sessao configurada.
+  }
+
+  if (items.length === 0) {
+    items = await buscarPorCadastroWeb(empresa, termo, limit);
+  }
+
+  const todos = eanItem
+    ? [{ ...eanItem, empresa, match: "ean" }, ...items.filter((item) => item.produtoId !== eanItem.produtoId)]
+    : items;
+  return todos.slice(0, limit);
+}
+
+async function buscarPorTermoTodasEmpresas(empresaInicial: EmpresaKey, termo: string, limit: number): Promise<CatalogoItem[]> {
+  const empresas = [empresaInicial, ...(["NEWSHOP", "FACIL", "SOYE"] as EmpresaKey[]).filter((item) => item !== empresaInicial)];
+  const byKey = new Map<string, CatalogoItem>();
+
+  for (const empresa of empresas) {
+    try {
+      const encontrados = await buscarPorTermoNaEmpresa(empresa, termo, limit);
+      for (const item of encontrados) {
+        const key = `${item.empresa}:${item.produtoId}`;
+        if (!byKey.has(key)) byKey.set(key, item);
+      }
+      if (byKey.size >= limit) break;
+    } catch {
+      // Continua tentando as outras bases.
     }
   }
 
-  return [...byId.values()].slice(0, limit).map((produto) => toItem(produto));
+  return [...byKey.values()].slice(0, limit);
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -209,11 +459,17 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const limit = Number.isFinite(limitRaw) ? Math.min(20, Math.max(1, Math.trunc(limitRaw))) : 8;
 
   try {
-    const baseUrl = resolveBaseUrl(empresa);
-    const auth = await getAccessToken(empresa, baseUrl);
     const ean = getString(body.ean);
     const search = getString(body.search);
     const produtoId = Number(body.produtoId);
+
+    if (search) {
+      const items = await buscarPorTermoTodasEmpresas(empresa, search, limit);
+      return res.status(200).json({ items });
+    }
+
+    const baseUrl = resolveBaseUrl(empresa);
+    const auth = await getAccessToken(empresa, baseUrl);
 
     if (Number.isFinite(produtoId) && produtoId > 0) {
       const produto = await fetchErpJson<ErpProduto>(baseUrl, auth, `/v1/produto/produtos/${produtoId}`);
@@ -222,13 +478,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     if (ean) {
       return res.status(200).json({ item: await buscarPorEan(baseUrl, auth, ean) });
-    }
-
-    if (search) {
-      const eanItem = /^\d{6,14}$/.test(search) ? await buscarPorEan(baseUrl, auth, search) : null;
-      const items = await buscarPorTermo(baseUrl, auth, search, limit);
-      const todos = eanItem ? [eanItem, ...items.filter((item) => item.produtoId !== eanItem.produtoId)] : items;
-      return res.status(200).json({ items: todos.slice(0, limit) });
     }
 
     return res.status(400).json({ error: "Informe ean, search ou produtoId." });
