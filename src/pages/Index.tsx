@@ -170,7 +170,7 @@ const Index = () => {
   const logoEmpresa = getCompanyLogo(lookupEmpresa);
   const nomeEmpresaLogo = getCompanyName(lookupEmpresa);
   const consultaBloqueadaPorFlag = isConsultaBloqueada(lookupFlag);
-  const { productInfo, loading, error, lookupProduct } = useProductLookup({
+  const { productInfo, productOptions, loading, error, lookupProduct, selectProductOption, clearProductOptions } = useProductLookup({
     enabled: !consultaBloqueadaPorFlag,
     empresa: lookupEmpresa,
     flag: lookupFlag,
@@ -833,6 +833,78 @@ const Index = () => {
             }}
           />
         </Suspense>
+      )}
+
+      {productOptions.length > 0 && (
+        <div
+          style={{
+            position: "fixed", inset: 0, zIndex: 110,
+            background: "rgba(0,0,0,0.58)",
+            display: "flex", alignItems: "center", justifyContent: "center", padding: 18,
+          }}
+          onClick={clearProductOptions}
+        >
+          <div
+            style={{
+              width: "100%", maxWidth: 520, maxHeight: "82vh", overflow: "hidden",
+              background: "hsl(var(--background))", border: "1px solid hsl(var(--border))",
+              borderRadius: 16, boxShadow: "0 12px 40px rgba(0,0,0,0.28)",
+              display: "flex", flexDirection: "column",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: "18px 18px 12px", borderBottom: "1px solid hsl(var(--border))", display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 4 }}>
+                  Escolha o item
+                </p>
+                <h3 style={{ fontSize: 18, fontWeight: 800, color: "hsl(var(--foreground))" }}>
+                  SKU encontrou {productOptions.length} produtos
+                </h3>
+              </div>
+              <button
+                onClick={clearProductOptions}
+                style={{ width: 36, height: 36, borderRadius: 10, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))", color: "hsl(var(--muted-foreground))", cursor: "pointer", fontSize: 18 }}
+              >
+                x
+              </button>
+            </div>
+
+            <div style={{ padding: 12, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+              {productOptions.map((option) => (
+                <button
+                  key={option.id}
+                  type="button"
+                  onClick={() => {
+                    setBarcode(option.codigo_barras);
+                    setSku(option.descricao);
+                    setShowProductInfo(true);
+                    void selectProductOption(option);
+                  }}
+                  style={{
+                    width: "100%", textAlign: "left", border: "1px solid hsl(var(--border))",
+                    borderRadius: 12, background: "hsl(var(--card))", padding: 12,
+                    display: "flex", gap: 12, cursor: "pointer",
+                  }}
+                >
+                  {option.imagem ? (
+                    <img src={option.imagem} alt={option.descricao} style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover", border: "1px solid hsl(var(--border))", flexShrink: 0 }} />
+                  ) : (
+                    <div style={{ width: 56, height: 56, borderRadius: 10, background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", flexShrink: 0 }} />
+                  )}
+                  <div style={{ minWidth: 0, flex: 1 }}>
+                    <p style={{ fontSize: 14, fontWeight: 800, color: "hsl(var(--foreground))", lineHeight: 1.25 }}>
+                      {option.descricao}
+                    </p>
+                    <p style={{ marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
+                      ERP {option.id} {option.sku ? `| SKU ${option.sku}` : ""} | Cod {option.codigo_barras}
+                    </p>
+                  </div>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
       )}
 
       {/* Popup histórico de compras */}

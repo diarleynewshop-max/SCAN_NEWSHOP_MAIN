@@ -1,4 +1,5 @@
 import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { fetchErpWithRetry, RATE_LIMITED_MARKER } from "./_erp-fetch";
 
 type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
 
@@ -79,7 +80,7 @@ async function getAccessToken(empresa: EmpresaKey, baseUrl: string): Promise<Erp
     throw new Error(`Credenciais do ERP nao configuradas para ${empresa}.`);
   }
 
-  const response = await fetch(`${baseUrl}/api/auth`, {
+  const response = await fetchErpWithRetry(`${baseUrl}/api/auth`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
@@ -182,7 +183,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     let imageResponse: Response | null = null;
 
     for (const candidateUrl of buildImageCandidates(baseUrl, src, produtoId)) {
-      const response = await fetch(candidateUrl, {
+      const response = await fetchErpWithRetry(candidateUrl, {
         headers: buildErpHeaders(auth, "image/*,*/*"),
       });
       const contentType = response.headers.get("content-type") || "";
@@ -216,6 +217,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(200).send(buffer);
   } catch (error) {
     const message = error instanceof Error ? error.message : "Erro desconhecido";
+    if (message === RATE_LIMITED_MARKER) {
+      return res.status(503).json({
+        error: "ERP indisponivel no momento (limite de requisicoes). Tente novamente em instantes.",
+      });
+    }
     return res.status(500).send(message);
   }
 }

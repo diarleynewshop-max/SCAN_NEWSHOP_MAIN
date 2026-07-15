@@ -19,6 +19,16 @@ export interface VarejoFacilProduct {
   hasErpImage?: boolean;
 }
 
+export interface VarejoFacilProductOption {
+  id: string;
+  codigo_barras: string;
+  sku?: string;
+  descricao: string;
+  precoVarejo?: number;
+  precoAtacado?: number;
+  imagem?: string;
+}
+
 export interface VarejoFacilEstoqueConferencia {
   loja: "Loja" | "CD" | "Deposito";
   lojaId: number;
@@ -89,6 +99,7 @@ type ErpListResponse<T> = {
 type CatalogoItemErp = {
   produtoId?: number | string;
   ean?: string;
+  sku?: string;
   descricao?: string;
   varejo?: number;
   atacado?: number;
@@ -254,6 +265,10 @@ const getSupabaseFunctionHeaders = (): Record<string, string> => {
 };
 
 const getCatalogoItemErpEndpoint = (): string => {
+  const configuredBase = getConfiguredErpProxyBase();
+  if (configuredBase) return `${configuredBase}/catalogo-item-erp`;
+  if (!import.meta.env.DEV) return "/api/catalogo-item-erp";
+
   const functionsBase = getSupabaseFunctionsBase();
   return functionsBase ? `${functionsBase}/catalogo-item-erp` : "";
 };
@@ -305,24 +320,63 @@ const buscarProdutoPorCatalogoItemErp = async (
   termo: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<{ produto: ErpProduto; ean: string } | null> => {
-  const endpoint = getCatalogoItemErpEndpoint();
   const codigo = termo.trim();
-  const anonKey = getSupabaseAnonKey();
-  if (!endpoint || !anonKey || !codigo) return null;
+  if (!codigo) return null;
 
-  const response = await fetch(endpoint, {
-    method: "POST",
-    headers: {
-      ...getSupabaseFunctionHeaders(),
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
+  const data = await chamarCatalogoItemErp(
+    {
       search: codigo,
       exact: false,
       limit: 8,
-      ...getCatalogoItemContexto(contexto),
       lightweight: true,
       includeIdentifiers: true,
+    },
+    contexto
+  );
+
+  if (!data) return null;
+  const selecionado = escolherCatalogoItem(codigo, data.items ?? (data.item ? [data.item] : []));
+  const produtoId = Number(selecionado?.produtoId);
+  if (!Number.isFinite(produtoId) || produtoId <= 0) return null;
+
+  let produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${produtoId}`, contexto).catch(() => null);
+  if (!produto?.id) {
+    produto = {
+      id: produtoId,
+      descricao: selecionado?.descricao,
+      codigoInterno: selecionado?.sku,
+    };
+  }
+
+  return {
+    produto,
+    ean: selecionado?.ean?.trim() || selecionado?.sku?.trim() || codigo,
+  };
+};
+
+const chamarCatalogoItemErp = async (
+  payload: Record<string, unknown>,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<CatalogoItemErpResponse | null> => {
+  const endpoint = getCatalogoItemErpEndpoint();
+  if (!endpoint) return null;
+
+  const headers: Record<string, string> = {
+    "Content-Type": "application/json",
+    Accept: "application/json",
+  };
+
+  if (endpoint.includes("/functions/v1/")) {
+    Object.assign(headers, getSupabaseFunctionHeaders());
+    if (!getSupabaseAnonKey()) return null;
+  }
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers,
+    body: JSON.stringify({
+      ...getCatalogoItemContexto(contexto),
+      ...payload,
     }),
   });
 
@@ -340,22 +394,7 @@ const buscarProdutoPorCatalogoItemErp = async (
     return null;
   }
 
-  const selecionado = escolherCatalogoItem(codigo, data.items ?? (data.item ? [data.item] : []));
-  const produtoId = Number(selecionado?.produtoId);
-  if (!Number.isFinite(produtoId) || produtoId <= 0) return null;
-
-  let produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${produtoId}`, contexto).catch(() => null);
-  if (!produto?.id) {
-    produto = {
-      id: produtoId,
-      descricao: selecionado?.descricao,
-    };
-  }
-
-  return {
-    produto,
-    ean: selecionado?.ean?.trim() || codigo,
-  };
+  return data;
 };
 
 const normalizarPreco = (precoVenda?: number, precoOferta?: number) => {
@@ -583,17 +622,13 @@ const resolverProdutoErp = async (
   return { produto, eanResolvido };
 };
 
-const buscarProdutoVarejoFacilSemCache = async (
-  codigoBarras: string,
+const montarProdutoVarejoFacil = async (
+  produto: ErpProduto,
+  eanResolvido: string,
+  codigoOrigem: string,
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilProduct | null> => {
-  const codigo = codigoBarras.trim();
-  if (!codigo) return null;
-
-  const resolvido = await resolverProdutoErp(codigo, contexto);
-  if (!resolvido) return null;
-
-  const { produto, eanResolvido } = resolvido;
+  if (!produto?.id) return null;
 
   const [precosResult, estoqueResult, secaoResult] = await Promise.allSettled([
     fetchJson<ErpPreco[]>(`/v1/produto/produtos/${produto.id}/precos`, contexto),
@@ -606,21 +641,21 @@ const buscarProdutoVarejoFacilSemCache = async (
 
   if (precosResult.status === "rejected") {
     console.warn("[VarejoFacil][Produto] Preco nao carregado", {
-      codigo,
+      codigo: codigoOrigem,
       produtoId: produto.id,
       erro: precosResult.reason instanceof Error ? precosResult.reason.message : String(precosResult.reason),
     });
   }
   if (estoqueResult.status === "rejected") {
     console.warn("[VarejoFacil][Produto] Estoque nao carregado", {
-      codigo,
+      codigo: codigoOrigem,
       produtoId: produto.id,
       erro: estoqueResult.reason instanceof Error ? estoqueResult.reason.message : String(estoqueResult.reason),
     });
   }
   if (secaoResult.status === "rejected") {
     console.warn("[VarejoFacil][Produto] Secao nao carregada", {
-      codigo,
+      codigo: codigoOrigem,
       produtoId: produto.id,
       erro: secaoResult.reason instanceof Error ? secaoResult.reason.message : String(secaoResult.reason),
     });
@@ -634,7 +669,7 @@ const buscarProdutoVarejoFacilSemCache = async (
   const imagem = hasErpImage ? resolverImagemProduto(imagemOriginal, produto.id, contexto) : undefined;
 
   console.info("[VarejoFacil][Produto] Produto resolvido", {
-    codigo,
+    codigo: codigoOrigem,
     eanResolvido,
     produtoId: produto.id,
     descricao: produto.descricao || produto.codigoInterno || "",
@@ -653,6 +688,19 @@ const buscarProdutoVarejoFacilSemCache = async (
     imagem,
     hasErpImage,
   };
+};
+
+const buscarProdutoVarejoFacilSemCache = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VarejoFacilProduct | null> => {
+  const codigo = codigoBarras.trim();
+  if (!codigo) return null;
+
+  const resolvido = await resolverProdutoErp(codigo, contexto);
+  if (!resolvido) return null;
+
+  return montarProdutoVarejoFacil(resolvido.produto, resolvido.eanResolvido, codigo, contexto);
 };
 
 export const buscarEstoquesConferenciaVarejoFacil = async (
@@ -700,7 +748,6 @@ export const buscarProdutoVarejoFacil = async (
       return produto;
     })
     .catch((err) => {
-      setProdutoLookupCached(cacheKey, null);
       throw err;
     })
     .finally(() => {
@@ -709,6 +756,60 @@ export const buscarProdutoVarejoFacil = async (
 
   produtoLookupInFlight.set(cacheKey, lookup);
   return lookup;
+};
+
+export const buscarOpcoesProdutoVarejoFacil = async (
+  termo: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<VarejoFacilProductOption[]> => {
+  const codigo = termo.trim();
+  if (!codigo) return [];
+
+  const data = await chamarCatalogoItemErp(
+    {
+      search: codigo,
+      exact: false,
+      limit: 8,
+      lightweight: true,
+      includeIdentifiers: true,
+    },
+    contexto
+  );
+
+  const porId = new Map<string, VarejoFacilProductOption>();
+  for (const item of data?.items ?? (data?.item ? [data.item] : [])) {
+    const produtoId = Number(item.produtoId);
+    if (!Number.isFinite(produtoId) || produtoId <= 0) continue;
+    const id = String(produtoId);
+    if (porId.has(id)) continue;
+
+    const foto = item.foto?.trim();
+    porId.set(id, {
+      id,
+      codigo_barras: item.ean?.trim() || item.sku?.trim() || id,
+      sku: item.sku?.trim() || undefined,
+      descricao: item.descricao?.trim() || item.sku?.trim() || `Produto ${id}`,
+      precoVarejo: typeof item.varejo === "number" ? item.varejo : undefined,
+      precoAtacado: typeof item.atacado === "number" ? item.atacado : undefined,
+      imagem: foto ? resolverImagemProduto(foto, produtoId, contexto) : undefined,
+    });
+  }
+
+  return [...porId.values()];
+};
+
+export const buscarProdutoVarejoFacilPorProdutoId = async (
+  produtoId: string,
+  contexto: VarejoFacilLookupContext = {},
+  codigoPreferido?: string
+): Promise<VarejoFacilProduct | null> => {
+  const id = Number(produtoId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+
+  const produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${id}`, contexto);
+  if (!produto?.id) return null;
+
+  return montarProdutoVarejoFacil(produto, codigoPreferido?.trim() || produto.codigoInterno || String(id), String(id), contexto);
 };
 
 export const consultarPrecoProdutoVarejoFacil = async (
