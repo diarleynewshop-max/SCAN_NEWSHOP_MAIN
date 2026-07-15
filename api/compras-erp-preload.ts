@@ -57,6 +57,16 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
 function erpEmpresa(empresa: EmpresaCompras): ErpEmpresa {
   return empresa === "NEWSHOP" ? "NEWSHOP" : "FACIL";
 }
@@ -372,7 +382,7 @@ async function runComprasErpPreload() {
       resultado.sucesso += 1;
       resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp });
     } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
+      const message = errorMessage(err);
       await supabase
         .from("compras")
         .update({ erp_sync_at: new Date().toISOString(), erp_sync_error: message.slice(0, 500) })
@@ -399,7 +409,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const result = await runComprasErpPreload();
     return res.status(200).json(result);
   } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
+    const message = errorMessage(err);
     return res.status(500).json({ error: message });
   }
 }
