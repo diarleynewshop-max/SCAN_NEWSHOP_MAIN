@@ -3,8 +3,9 @@ import { isSupabaseConfigured, supabase } from "./supabaseClient";
 import { criarNotificacao } from "./notificacoes";
 
 export const LIMITE_MENSAGEM = 500;
+export const LIMITE_MIDIA_CHAT_BYTES = 5 * 1024 * 1024;
 
-export type MensagemTipo = "texto" | "foto" | "item" | "recomendacao";
+export type MensagemTipo = "texto" | "foto" | "audio" | "item" | "recomendacao";
 
 export interface UsuarioChat {
   login: string;
@@ -27,6 +28,10 @@ export interface Mensagem {
   destinatario: string;
   conteudo: string;
   fotoUrl: string | null;
+  midiaUrl: string | null;
+  midiaMime: string | null;
+  midiaNome: string | null;
+  midiaTamanho: number | null;
   itemCodigo: string | null;
   itemSku: string | null;
   itemDescricao: string | null;
@@ -52,6 +57,10 @@ interface MensagemRow {
   destinatario: string;
   conteudo: string;
   foto_url: string | null;
+  midia_url: string | null;
+  midia_mime: string | null;
+  midia_nome: string | null;
+  midia_tamanho: number | null;
   item_codigo: string | null;
   item_sku: string | null;
   item_descricao: string | null;
@@ -70,6 +79,10 @@ function mapRow(row: MensagemRow): Mensagem {
     destinatario: row.destinatario,
     conteudo: row.conteudo ?? "",
     fotoUrl: row.foto_url,
+    midiaUrl: row.midia_url,
+    midiaMime: row.midia_mime,
+    midiaNome: row.midia_nome,
+    midiaTamanho: row.midia_tamanho,
     itemCodigo: row.item_codigo,
     itemSku: row.item_sku,
     itemDescricao: row.item_descricao,
@@ -152,10 +165,22 @@ function dataUrlParaBlob(dataUrl: string): { blob: Blob; contentType: string } |
   return { blob: new Blob([bytes], { type: contentType }), contentType };
 }
 
-async function subirFotoChat(empresa: string, dataUrl: string): Promise<string | null> {
+function extensaoMidia(contentType: string): string {
+  if (contentType === "image/gif") return "gif";
+  if (contentType === "image/png") return "png";
+  if (contentType === "image/webp") return "webp";
+  if (contentType.includes("mpeg")) return "mp3";
+  if (contentType.includes("ogg")) return "ogg";
+  if (contentType.includes("wav")) return "wav";
+  if (contentType.includes("webm")) return "webm";
+  if (contentType.includes("mp4")) return "m4a";
+  return "jpg";
+}
+
+async function subirMidiaChat(empresa: string, dataUrl: string): Promise<string | null> {
   const conv = dataUrlParaBlob(dataUrl);
   if (!conv) return null;
-  const path = `chat/${empresa}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.jpg`;
+  const path = `chat/${empresa}/${Date.now()}-${Math.random().toString(36).slice(2, 8)}.${extensaoMidia(conv.contentType)}`;
   try {
     const up = await supabase.storage.from(BUCKET).upload(path, conv.blob, {
       contentType: conv.contentType,
@@ -175,6 +200,10 @@ export interface EnviarMensagemInput {
   destinatario: string;
   conteudo?: string;
   fotoDataUrl?: string | null;
+  midiaDataUrl?: string | null;
+  midiaMime?: string | null;
+  midiaNome?: string | null;
+  midiaTamanho?: number | null;
   item?: { codigo: string; sku?: string | null; descricao?: string | null; foto?: string | null } | null;
   recomendacaoId?: string | null;
 }
@@ -188,16 +217,24 @@ export async function enviarMensagem(input: EnviarMensagemInput): Promise<Mensag
   const conteudo = String(input.conteudo ?? "").slice(0, LIMITE_MENSAGEM);
   const item = input.item ?? null;
   let fotoUrl: string | null = null;
+  let midiaUrl: string | null = null;
   if (input.fotoDataUrl) {
     fotoUrl = input.fotoDataUrl.startsWith("data:")
-      ? await subirFotoChat(input.empresa, input.fotoDataUrl)
+      ? await subirMidiaChat(input.empresa, input.fotoDataUrl)
       : input.fotoDataUrl;
+  }
+  if (input.midiaDataUrl) {
+    midiaUrl = input.midiaDataUrl.startsWith("data:")
+      ? await subirMidiaChat(input.empresa, input.midiaDataUrl)
+      : input.midiaDataUrl;
   }
 
   const tipo: MensagemTipo = input.recomendacaoId
     ? "recomendacao"
     : item
       ? "item"
+      : midiaUrl
+        ? "audio"
       : fotoUrl
         ? "foto"
         : "texto";
@@ -214,6 +251,10 @@ export async function enviarMensagem(input: EnviarMensagemInput): Promise<Mensag
       destinatario,
       conteudo,
       foto_url: fotoUrl,
+      midia_url: midiaUrl,
+      midia_mime: input.midiaMime ?? null,
+      midia_nome: input.midiaNome ?? null,
+      midia_tamanho: input.midiaTamanho ?? null,
       item_codigo: item?.codigo ?? null,
       item_sku: item?.sku ?? null,
       item_descricao: item?.descricao ?? null,
@@ -226,7 +267,7 @@ export async function enviarMensagem(input: EnviarMensagemInput): Promise<Mensag
   if (error) throw error;
 
   // Notificacao de nova mensagem para o destinatario (best-effort).
-  const resumo = tipo === "foto" ? "enviou uma foto" : tipo === "item" ? "enviou um item" : tipo === "recomendacao" ? "enviou uma recomendacao" : conteudo.slice(0, 80);
+  const resumo = tipo === "foto" ? "enviou uma foto" : tipo === "audio" ? "enviou um audio" : tipo === "item" ? "enviou um item" : tipo === "recomendacao" ? "enviou uma recomendacao" : conteudo.slice(0, 80);
   await criarNotificacao({
     empresa: input.empresa,
     destinatario,
@@ -325,6 +366,8 @@ export async function listarResumoConversas(empresa: string, meuNome: string): P
       const conteudo = String(row.conteudo ?? "").trim();
       const fallback = row.tipo === "foto"
         ? "Foto"
+        : row.tipo === "audio"
+          ? "Audio"
         : row.tipo === "item"
           ? "Item enviado"
           : row.tipo === "recomendacao"

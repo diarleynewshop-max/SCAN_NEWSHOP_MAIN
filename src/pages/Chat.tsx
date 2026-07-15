@@ -5,11 +5,13 @@ import {
   Camera,
   Check,
   ImageIcon,
+  Mic,
   Pencil,
   RefreshCw,
   ScanBarcode,
   Search,
   Send,
+  Smile,
   Trash2,
   Users,
   X,
@@ -18,6 +20,7 @@ import { useAuth } from "@/hooks/useAuth";
 import type { Empresa } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import {
+  LIMITE_MIDIA_CHAT_BYTES,
   LIMITE_MENSAGEM,
   apagarMensagemChat,
   editarMensagemChat,
@@ -80,6 +83,7 @@ function AvatarPessoa({ nome, fotoUrl, className }: { nome: string; fotoUrl?: st
 function previewMensagem(resumo?: ResumoConversa): string {
   if (!resumo) return "Toque para iniciar conversa";
   if (resumo.tipo === "foto") return resumo.ultimaMensagem || "Foto";
+  if (resumo.tipo === "audio") return resumo.ultimaMensagem || "Audio";
   if (resumo.tipo === "item") return resumo.ultimaMensagem || "Item enviado";
   if (resumo.tipo === "recomendacao") return resumo.ultimaMensagem || "Recomendacao de troca";
   return resumo.ultimaMensagem || "Mensagem";
@@ -93,6 +97,21 @@ function formatarMoeda(valor: number | null | undefined): string {
 
 const EMPRESAS_CHAT: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
 const LIMITE_ENVIOS_MINUTO = 8;
+const EMOJIS_CHAT = ["👍", "🙏", "😂", "😅", "❤️", "👏", "🔥", "✅", "❌", "👀", "📦", "🛒", "💰", "🚚", "⚠️", "🤝"];
+const MIDIAS_CHAT_PERMITIDAS = new Set([
+  "image/jpeg",
+  "image/png",
+  "image/webp",
+  "image/gif",
+  "audio/mpeg",
+  "audio/mp3",
+  "audio/mp4",
+  "audio/aac",
+  "audio/wav",
+  "audio/x-wav",
+  "audio/ogg",
+  "audio/webm",
+]);
 
 type ResumoConversaEmpresa = ResumoConversa & { empresa: Empresa };
 
@@ -103,6 +122,29 @@ function normalizarEmpresaChat(value: string | null | undefined, fallback: Empre
 
 function chaveConversa(empresa: Empresa, nome: string): string {
   return `${empresa}::${nome}`;
+}
+
+function formatarTamanho(bytes: number): string {
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function validarMidiaChat(file: File): { ok: true; tipo: "foto" | "audio" } | { ok: false; motivo: string } {
+  const mime = String(file.type ?? "").toLowerCase();
+  const nome = String(file.name ?? "").toLowerCase();
+  const isGif = mime === "image/gif" || nome.endsWith(".gif");
+  const isImagem = mime.startsWith("image/") || isGif;
+  const isAudio = mime.startsWith("audio/");
+
+  if (!MIDIAS_CHAT_PERMITIDAS.has(mime) && !isGif) {
+    return { ok: false, motivo: "Envie apenas foto, GIF ou audio. PDF, ZIP, Excel e outros arquivos foram bloqueados." };
+  }
+  if (!isImagem && !isAudio) {
+    return { ok: false, motivo: "Envie apenas foto, GIF ou audio." };
+  }
+  if (file.size > LIMITE_MIDIA_CHAT_BYTES) {
+    return { ok: false, motivo: `Arquivo muito pesado. Limite: ${formatarTamanho(LIMITE_MIDIA_CHAT_BYTES)}.` };
+  }
+  return { ok: true, tipo: isAudio ? "audio" : "foto" };
 }
 
 export default function Chat() {
@@ -121,6 +163,7 @@ export default function Chat() {
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [recomendacoes, setRecomendacoes] = useState<Record<string, RecomendacaoSubstituicao>>({});
   const [texto, setTexto] = useState("");
+  const [mostraEmojis, setMostraEmojis] = useState(false);
   const [filtro, setFiltro] = useState("");
   const [filtroNovaConversa, setFiltroNovaConversa] = useState("");
   const [buscandoNovaConversa, setBuscandoNovaConversa] = useState(false);
@@ -134,6 +177,7 @@ export default function Chat() {
   const [textoEdicao, setTextoEdicao] = useState("");
   const [salvandoEdicaoId, setSalvandoEdicaoId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
+  const textoRef = useRef<HTMLTextAreaElement>(null);
   const fimRef = useRef<HTMLDivElement>(null);
   const carregarConversaRef = useRef<() => Promise<void>>(async () => undefined);
   const carregarResumoRef = useRef<() => Promise<void>>(async () => undefined);
@@ -315,6 +359,23 @@ export default function Chat() {
     setParams({ com: nome, empresa: empresaSelecionada });
   };
 
+  const inserirEmoji = (emoji: string) => {
+    const campo = textoRef.current;
+    if (!campo) {
+      setTexto((prev) => `${prev}${emoji}`.slice(0, LIMITE_MENSAGEM));
+      return;
+    }
+    const start = campo.selectionStart ?? texto.length;
+    const end = campo.selectionEnd ?? texto.length;
+    const novoTexto = `${texto.slice(0, start)}${emoji}${texto.slice(end)}`.slice(0, LIMITE_MENSAGEM);
+    setTexto(novoTexto);
+    window.requestAnimationFrame(() => {
+      campo.focus();
+      const pos = Math.min(start + emoji.length, novoTexto.length);
+      campo.setSelectionRange(pos, pos);
+    });
+  };
+
   const voltarParaLista = () => {
     setAtivo("");
     setParams({});
@@ -336,17 +397,35 @@ export default function Chat() {
     }
   };
 
-  const enviarFoto = async (file: File) => {
+  const enviarMidia = async (file: File) => {
     if (!ativo) return;
+    const validacao = validarMidiaChat(file);
+    if (!validacao.ok) {
+      toast({ title: "Arquivo bloqueado", description: validacao.motivo, variant: "destructive" });
+      return;
+    }
     if (!podeEnviarAgora()) return;
     setEnviando(true);
     try {
       const dataUrl = await lerArquivoComoDataUrl(file);
-      await enviarMensagem({ empresa: empresaConversa, remetente: meuNome, destinatario: ativo, fotoDataUrl: dataUrl, conteudo: texto.trim() });
+      if (validacao.tipo === "audio") {
+        await enviarMensagem({
+          empresa: empresaConversa,
+          remetente: meuNome,
+          destinatario: ativo,
+          midiaDataUrl: dataUrl,
+          midiaMime: file.type,
+          midiaNome: file.name,
+          midiaTamanho: file.size,
+          conteudo: texto.trim(),
+        });
+      } else {
+        await enviarMensagem({ empresa: empresaConversa, remetente: meuNome, destinatario: ativo, fotoDataUrl: dataUrl, conteudo: texto.trim() });
+      }
       setTexto("");
       await carregarConversa();
     } catch (err) {
-      toast({ title: "Falha ao enviar foto", description: err instanceof Error ? err.message : "", variant: "destructive" });
+      toast({ title: "Falha ao enviar midia", description: err instanceof Error ? err.message : "", variant: "destructive" });
     } finally {
       setEnviando(false);
     }
@@ -724,6 +803,15 @@ export default function Chat() {
                         {m.fotoUrl && (
                           <img src={m.fotoUrl} alt="foto" className="mb-2 max-h-64 w-full rounded-xl object-cover" loading="lazy" />
                         )}
+                        {m.midiaUrl && m.tipo === "audio" && (
+                          <div className={`mb-2 rounded-xl p-2 ${meu ? "bg-white/15" : "bg-muted"}`}>
+                            <div className="mb-1 flex items-center gap-2 text-xs font-bold">
+                              <Mic className="h-4 w-4" />
+                              <span className="truncate">{m.midiaNome || "Audio"}</span>
+                            </div>
+                            <audio controls src={m.midiaUrl} className="w-full" preload="metadata" />
+                          </div>
+                        )}
                         {m.itemCodigo && (
                           <div className={`mb-2 flex items-center gap-2 rounded-xl p-2 ${meu ? "bg-white/15" : "bg-muted"}`}>
                             {m.itemFoto ? (
@@ -804,12 +892,27 @@ export default function Chat() {
             </div>
 
             <footer className="shrink-0 border-t border-border bg-card px-3 py-2 pb-[max(env(safe-area-inset-bottom),0.5rem)] md:px-4">
+              {mostraEmojis && (
+                <div className="mb-2 grid grid-cols-8 gap-1 rounded-2xl bg-background p-2 ring-1 ring-border">
+                  {EMOJIS_CHAT.map((emoji) => (
+                    <button
+                      key={emoji}
+                      type="button"
+                      onClick={() => inserirEmoji(emoji)}
+                      className="flex h-9 items-center justify-center rounded-xl text-lg hover:bg-muted"
+                      title="Inserir emoji"
+                    >
+                      {emoji}
+                    </button>
+                  ))}
+                </div>
+              )}
               <div className="flex items-end gap-2 rounded-2xl bg-background p-1.5 ring-1 ring-border focus-within:ring-primary/60">
                 <button
                   onClick={() => fileRef.current?.click()}
                   disabled={enviando}
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-50"
-                  title="Enviar foto"
+                  title="Enviar foto, GIF ou audio"
                 >
                   <ImageIcon className="h-4 w-4" />
                 </button>
@@ -821,7 +924,16 @@ export default function Chat() {
                 >
                   <ScanBarcode className="h-4 w-4" />
                 </button>
+                <button
+                  onClick={() => setMostraEmojis((value) => !value)}
+                  disabled={enviando}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-50"
+                  title="Emoji"
+                >
+                  <Smile className="h-4 w-4" />
+                </button>
                 <textarea
+                  ref={textoRef}
                   value={texto}
                   onChange={(e) => setTexto(e.target.value.slice(0, LIMITE_MENSAGEM))}
                   onKeyDown={(e) => {
@@ -846,10 +958,10 @@ export default function Chat() {
                 ) : (
                   <button
                     onClick={() => fileRef.current?.click()}
-                    disabled={enviando}
-                    className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-50"
-                    title="Abrir camera"
-                  >
+                  disabled={enviando}
+                  className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-primary text-primary-foreground disabled:opacity-50"
+                    title="Enviar midia"
+                >
                     <Camera className="h-4 w-4" />
                   </button>
                 )}
@@ -858,12 +970,11 @@ export default function Chat() {
               <input
                 ref={fileRef}
                 type="file"
-                accept="image/*"
-                capture="environment"
+                accept="image/jpeg,image/png,image/webp,image/gif,audio/mpeg,audio/mp3,audio/mp4,audio/aac,audio/wav,audio/x-wav,audio/ogg,audio/webm"
                 className="hidden"
                 onChange={(e) => {
                   const f = e.target.files?.[0];
-                  if (f) void enviarFoto(f);
+                  if (f) void enviarMidia(f);
                   e.target.value = "";
                 }}
               />
