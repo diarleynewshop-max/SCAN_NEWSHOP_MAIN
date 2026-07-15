@@ -377,7 +377,11 @@ async function runComprasErpPreload() {
   } catch (err) {
     if (!anonKey || !isUnauthorizedError(err)) throw err;
     supabase = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } }) as any;
-    locked = tryMemoryLock();
+    try {
+      locked = await tryLock(supabase);
+    } catch {
+      locked = tryMemoryLock();
+    }
   }
   if (!locked) return { skipped: true, reason: "job ja esta rodando" };
 
