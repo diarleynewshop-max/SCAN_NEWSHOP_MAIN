@@ -63,7 +63,7 @@ import {
   type RecomendacaoSubstituicao,
 } from "@/lib/recomendacoesSubstituicao";
 import { criarNotificacao } from "@/lib/notificacoes";
-import { enviarMensagem } from "@/lib/chat";
+import { enviarMensagem, resolverDestinatarioChat } from "@/lib/chat";
 import { z } from "zod";
 
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
@@ -1724,9 +1724,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       return;
     }
     const pedidoBase = modalDetalharTask ?? taskSelecionada;
-    const pessoaDestino = modalDetalharTask?.listeiro || listeiro;
+    const pessoaDestinoInformada = modalDetalharTask?.listeiro || listeiro;
     if (!pedidoBase) return;
-    if (!pessoaDestino.trim()) {
+    if (!pessoaDestinoInformada.trim()) {
       toast({ title: "Pedido sem pessoa para recomendar", variant: "destructive" });
       return;
     }
@@ -1742,6 +1742,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
 
     setSalvandoRecomendacao(true);
     try {
+      const pessoaDestino = await resolverDestinatarioChat(empresa, pessoaDestinoInformada);
       const criada = await criarRecomendacaoSubstituicao({
         empresa,
         flag,
@@ -1770,10 +1771,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         ...prev.filter((item) => item.pedidoItemId !== criada.pedidoItemId || item.id === criada.id),
       ]);
 
-      // Notifica a pessoa do pedido e manda a recomendacao para o chat dela
-      // (best-effort: nao bloqueia o fluxo se falhar).
+      // Notifica a pessoa do pedido e manda a recomendacao para o chat dela.
       const sugerente = conferente || loginSalvo?.nomePessoa || "Sistema";
-      void criarNotificacao({
+      const notificacaoPromise = criarNotificacao({
         empresa,
         destinatario: pessoaDestino,
         tipo: "recomendacao",
@@ -1782,20 +1782,35 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         refTipo: "recomendacao",
         refId: criada.id,
       });
-      void enviarMensagem({
+      const chatPromise = enviarMensagem({
         empresa,
         remetente: sugerente,
         destinatario: pessoaDestino,
         recomendacaoId: criada.id,
         conteudo: `Troca sugerida: ${criada.codigoOriginal} → ${criada.descricaoSugerida || criada.codigoSugerido}${criada.observacao ? `\n${criada.observacao}` : ""}`,
-      }).catch((e) => console.warn("[conferencia] falha ao mandar recomendacao pro chat:", e));
+      });
+      const [notificacaoResult, chatResult] = await Promise.allSettled([notificacaoPromise, chatPromise]);
+      if (notificacaoResult.status === "rejected") {
+        console.warn("[conferencia] falha ao notificar recomendacao:", notificacaoResult.reason);
+      }
+      const chatEnviado = chatResult.status === "fulfilled";
+      if (!chatEnviado) {
+        console.warn("[conferencia] falha ao mandar recomendacao pro chat:", chatResult.reason);
+        toast({
+          title: "Recomendacao salva, mas nao entrou no chat",
+          description: chatResult.reason instanceof Error ? chatResult.reason.message : "Falha ao criar mensagem.",
+          variant: "destructive",
+        });
+      }
 
       setModalRecomendacaoAberto(false);
       setItemSelecionadoRecomendacao(null);
-      toast({
-        title: "Recomendacao enviada",
-        description: `${pessoaDestino} pode aprovar ou recusar no app.`,
-      });
+      if (chatEnviado) {
+        toast({
+          title: "Recomendacao enviada",
+          description: `${pessoaDestino} pode aprovar ou recusar no app.`,
+        });
+      }
     } catch (err) {
       toast({
         title: "Falha ao salvar recomendacao",

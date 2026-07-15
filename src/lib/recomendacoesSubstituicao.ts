@@ -292,13 +292,18 @@ export async function listarRecomendacoesPendentesPorDestinatario(
   destinatario: string
 ): Promise<RecomendacaoSubstituicao[]> {
   ensureSupabase();
-  const { data, error } = await supabase
+  let query = supabase
     .from("recomendacoes_substituicao")
     .select("*")
     .eq("empresa", empresa)
-    .eq("flag", flag)
     .eq("status", "pendente")
-    .ilike("destinatario", destinatario.trim())
+    .ilike("destinatario", destinatario.trim());
+
+  // Legado: chamadas antigas passavam flag, mas a recomendacao deve aparecer
+  // para o login da pessoa mesmo quando a lista veio de outra aba/flag.
+  void flag;
+
+  const { data, error } = await query
     .order("created_at", { ascending: false });
   if (error) throw error;
   return ((data as RecomendacaoRow[] | null) ?? []).map(mapRow);

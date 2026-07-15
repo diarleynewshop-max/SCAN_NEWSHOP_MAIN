@@ -76,6 +76,29 @@ export async function listarUsuariosChat(empresa: string, excluirNome?: string):
   );
 }
 
+function normalizarPessoaChat(value: string | null | undefined): string {
+  return String(value ?? "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+export async function resolverDestinatarioChat(empresa: string, nomeOuLogin: string): Promise<string> {
+  const alvo = String(nomeOuLogin ?? "").trim();
+  if (!alvo || !isSupabaseConfigured) return alvo;
+
+  const usuarios = await listarUsuariosChat(empresa);
+  const alvoNorm = normalizarPessoaChat(alvo);
+  const usuario = usuarios.find((u) => (
+    normalizarPessoaChat(u.nome) === alvoNorm ||
+    normalizarPessoaChat(u.login) === alvoNorm
+  ));
+
+  return usuario?.nome?.trim() || alvo;
+}
+
 // Conversa entre duas pessoas (ambas as direcoes), ordem cronologica.
 export async function listarConversa(empresa: string, a: string, b: string, limite = 200): Promise<Mensagem[]> {
   if (!isSupabaseConfigured) return [];
