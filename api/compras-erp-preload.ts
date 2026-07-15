@@ -47,6 +47,7 @@ const DEFAULT_MAX_ITEMS_PER_RUN = 5;
 const DEFAULT_SCAN_LIMIT_PER_EMPRESA = 250;
 const DEFAULT_DELAY_MS = 1500;
 const DEFAULT_LOCK_TTL_MINUTES = 5;
+let memoryLockUntil = 0;
 
 function intEnv(name: string, fallback: number): number {
   const value = Number(process.env[name]);
@@ -304,19 +305,39 @@ async function tryLock(supabase: any): Promise<boolean> {
   return data === true;
 }
 
+function tryMemoryLock(): boolean {
+  const now = Date.now();
+  if (memoryLockUntil > now) return false;
+  memoryLockUntil = now + intEnv("COMPRAS_ERP_PRELOAD_LOCK_TTL_MINUTES", DEFAULT_LOCK_TTL_MINUTES) * 60_000;
+  return true;
+}
+
+function isUnauthorizedError(err: unknown): boolean {
+  return /unauthorized|invalid api key|jwt/i.test(errorMessage(err));
+}
+
 async function runComprasErpPreload() {
   if (process.env.COMPRAS_ERP_PRELOAD_ENABLED === "false") {
     return { skipped: true, reason: "COMPRAS_ERP_PRELOAD_ENABLED=false" };
   }
 
   const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  const anonKey = process.env.VITE_SUPABASE_ANON_KEY || process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "";
+  const supabaseKey = serviceKey || anonKey;
   if (!supabaseUrl || !supabaseKey) {
-    return { skipped: true, reason: "SUPABASE_URL/SERVICE_ROLE ausente" };
+    return { skipped: true, reason: "SUPABASE_URL/SUPABASE_KEY ausente" };
   }
 
-  const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } }) as any;
-  const locked = await tryLock(supabase);
+  let supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } }) as any;
+  let locked = false;
+  try {
+    locked = await tryLock(supabase);
+  } catch (err) {
+    if (!anonKey || !isUnauthorizedError(err)) throw err;
+    supabase = createClient(supabaseUrl, anonKey, { auth: { persistSession: false } }) as any;
+    locked = tryMemoryLock();
+  }
   if (!locked) return { skipped: true, reason: "job ja esta rodando" };
 
   const maxItems = intEnv("COMPRAS_ERP_PRELOAD_MAX_ITEMS", DEFAULT_MAX_ITEMS_PER_RUN);
