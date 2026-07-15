@@ -116,9 +116,57 @@ Codex responde com: arquivos alterados, resultado do build, e dúvidas se travar
 | **T9** | Verificação final de custo (Vercel Function Invocations, Trigger runs) | T7, T8 | pendente |
 | **T10 (novo)** | Débito técnico da limpeza ClickUp: remover fisicamente o branch morto `fonte==='clickup'` em `Compras.tsx`/`useProdutosComprar.ts`/`comprasSupabase.ts`; renomear `enviarClickUp`/`getPayloadClickUp` em `ConferenceView.tsx` | — | **rename feito** (2026-07-09, Codex): `enviarClickUp`→`fecharConferencia`, `getPayloadClickUp`→`getPayloadConferencia` (4 ocorr.). Branch morto `fonte==='clickup'` **ainda pendente** |
 | **T11 (novo)** | Validar/consertar auth do ERP na Vercel: confirmar `/api/erp-proxy` em produção retornando JSON do ERP, sem 401/404/HTML no caminho de scan; se 401, corrigir formato de auth nos 4 proxies mantendo paridade | T7 revertida | **feito em 2026-07-08**: `scanflow-alpha.vercel.app` retornou JSON 200 para NEWSHOP/FACIL/SOYE em `codigos-auxiliares?q=id==...`, `produtos/{id}`, `precos` e `estoque`; sem mudança de auth necessária. `npm run build` verde; `npx tsc -p tsconfig.app.json --noEmit` ainda falha por débitos fora do ERP |
+| **T12 (novo)** | Tirar as 2 tasks restantes do Trigger e manter só Supabase + Vercel | T6 | **roadmap** (2026-07-15): migrar `expedicao-sync` primeiro para Supabase Edge Function; depois avaliar `erp-foto-sync`, que é mais sensível por usar Sharp, multipart, login web no ERP e validação de imagem |
 
 **Guardrail de rollout:** mesmo em corte seco, cada G entra atrás de `npm run build` verde
 e de um teste manual do loop antes de seguir pro próximo G.
+
+### T12 — Roadmap para remover Trigger.dev
+
+Objetivo:
+- Ficar com só 2 ferramentas operacionais: **Supabase/VPS** para banco, realtime, storage e jobs internos; **Vercel** para frontend e proxies ERP de produção.
+- Remover `VITE_TRIGGER_API_KEY`, `@trigger.dev/*`, `trigger.config.ts` e `src/trigger/*` depois que as duas migrações estiverem validadas.
+
+Ordem recomendada:
+1. **Migrar `expedicao-sync` primeiro**
+   - Criar `supabase/functions/expedicao-sync/index.ts`.
+   - Portar a lógica atual de `src/trigger/expedicaoSync.ts`: montar payload, escolher `EXPEDICAO_API_KEY` ou `EXPEDICAO_API_KEY_SF`, chamar `https://wvykzzbzwyrbggzxkypf.supabase.co/functions/v1/expedicao-integration`.
+   - Proteger com segredo tipo `EXPEDICAO_SYNC_SECRET`.
+   - Trocar `dispararExpedicaoConferencia()` em `src/lib/pedidosFila.ts` para chamar `SUPABASE_URL/functions/v1/expedicao-sync`, não `api.trigger.dev`.
+   - Validar com uma conferência real que gere expedição.
+
+2. **Migrar `erp-foto-sync` com cuidado**
+   - Criar `supabase/functions/erp-foto-sync/index.ts`.
+   - Substituir dependências Node incompatíveis no Edge Runtime:
+     - `sharp`: usar compressão no browser antes de enviar, ou manter a foto já reduzida; Edge Function não deve depender de Sharp.
+     - `form-data`: usar `FormData` nativo do Deno.
+     - `axios`: usar `fetch`.
+     - `cheerio`: avaliar troca por parser HTML leve ou manter uma rota Vercel específica se o parse do formulário ficar instável.
+   - Portar login web ERP, upload `/arquivo/upload`, tentativa de salvar via formulário e fallback REST.
+   - Proteger com segredo tipo `ERP_FOTO_SYNC_SECRET`.
+   - Trocar `dispararErpFotoSyncLista()` em `src/lib/pedidosFila.ts` para chamar Supabase Function.
+   - Validar com 1 produto de teste por empresa antes de liberar geral.
+
+3. **Cortar Trigger**
+   - Remover chamadas `https://api.trigger.dev/api/v1/tasks/...` do frontend/lib.
+   - Remover `VITE_TRIGGER_API_KEY` da Vercel quando não houver mais uso.
+   - Remover `src/trigger/erpFotoSync.ts`, `src/trigger/expedicaoSync.ts`, `trigger.config.ts` e dependências `@trigger.dev/*`.
+   - Rodar `npm run build`.
+   - Fazer deploy final e confirmar que Trigger fica com 0 tasks necessárias.
+
+Fortes:
+- Menos ferramenta para monitorar.
+- Jobs ficam perto do banco e do storage.
+- Menos custo/complexidade operacional.
+
+Fracos:
+- `erp-foto-sync` é a parte arriscada: hoje depende de libs Node e de tela web do ERP.
+- Edge Function self-host tem timeout/memória próprios; imagem grande e parse HTML podem exigir ajuste.
+- Se o ERP mudar formulário/login, a manutenção fica no Supabase Function.
+
+Decisão sugerida:
+- Migrar `expedicao-sync` primeiro por ser simples e baixo risco.
+- Só migrar `erp-foto-sync` depois de teste isolado em produto real; se ficar instável, manter uma Vercel Function pequena para foto e ainda remover Trigger.
 
 ---
 
