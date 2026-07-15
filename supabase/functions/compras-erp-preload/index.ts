@@ -1,5 +1,4 @@
-import { schedules } from "@trigger.dev/sdk/v3";
-import { createClient } from "@supabase/supabase-js";
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
 type EmpresaCompras = "NEWSHOP" | "SF";
 type ErpEmpresa = "NEWSHOP" | "FACIL";
@@ -67,13 +66,46 @@ const DEFAULT_SCAN_LIMIT_PER_EMPRESA = 250;
 const DEFAULT_DELAY_MS = 1500;
 const DEFAULT_LOCK_TTL_MINUTES = 5;
 
+const CORS_HEADERS: Record<string, string> = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-cron-secret",
+  "Access-Control-Allow-Methods": "POST, GET, OPTIONS",
+};
+
+const tokenCache = new Map<string, string>();
+
+function jsonResponse(status: number, data: unknown): Response {
+  return new Response(JSON.stringify(data), {
+    status,
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
+  });
+}
+
 function intEnv(name: string, fallback: number): number {
-  const value = Number(process.env[name]);
+  const value = Number(Deno.env.get(name));
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
 function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorMessage(err: unknown): string {
+  if (err instanceof Error) return err.message;
+  if (typeof err === "string") return err;
+  try {
+    return JSON.stringify(err);
+  } catch {
+    return String(err);
+  }
+}
+
+function hasCronAccess(req: Request): boolean {
+  const secret = Deno.env.get("COMPRAS_ERP_PRELOAD_SECRET") || Deno.env.get("CRON_SECRET") || "";
+  if (!secret) return true;
+  const authorization = req.headers.get("authorization") || "";
+  const xSecret = req.headers.get("x-cron-secret") || "";
+  return authorization === `Bearer ${secret}` || xSecret === secret;
 }
 
 function erpEmpresa(empresa: EmpresaCompras): ErpEmpresa {
@@ -82,14 +114,14 @@ function erpEmpresa(empresa: EmpresaCompras): ErpEmpresa {
 
 function getEnv(empresa: ErpEmpresa, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN"): string {
   return (
-    process.env[`ERP_API_${key}_${empresa}`] ||
-    process.env[`ERP_${key}_${empresa}`] ||
-    process.env[`VITE_ERP_API_${key}_${empresa}`] ||
-    process.env[`VITE_ERP_${key}_${empresa}`] ||
-    process.env[`ERP_API_${key}`] ||
-    process.env[`ERP_${key}`] ||
-    process.env[`VITE_ERP_API_${key}`] ||
-    process.env[`VITE_ERP_${key}`] ||
+    Deno.env.get(`ERP_API_${key}_${empresa}`) ||
+    Deno.env.get(`ERP_${key}_${empresa}`) ||
+    Deno.env.get(`VITE_ERP_API_${key}_${empresa}`) ||
+    Deno.env.get(`VITE_ERP_${key}_${empresa}`) ||
+    Deno.env.get(`ERP_API_${key}`) ||
+    Deno.env.get(`ERP_${key}`) ||
+    Deno.env.get(`VITE_ERP_API_${key}`) ||
+    Deno.env.get(`VITE_ERP_${key}`) ||
     ""
   );
 }
@@ -112,8 +144,6 @@ function resolveTokenFromAuth(data: Record<string, unknown>): string {
     ""
   );
 }
-
-const tokenCache = new Map<string, string>();
 
 async function getErpToken(empresa: ErpEmpresa, baseUrl: string): Promise<string> {
   const configuredToken = getEnv(empresa, "TOKEN");
@@ -165,7 +195,7 @@ async function buscarCodigoAuxiliarPorEan(baseUrl: string, token: string, ean: s
     const data = await fetchErpJson<ErpListResponse<ErpCodigoAuxiliar>>(
       baseUrl,
       token,
-      `/v1/produto/codigos-auxiliares?q=${fiql}&count=5`
+      `/v1/produto/codigos-auxiliares?q=${fiql}&count=5`,
     );
     const codigoAuxiliar = (data?.items || []).find((item) => item?.produtoId && item?.tipo === "EAN") || (data?.items || [])[0];
     if (codigoAuxiliar?.produtoId) return { produtoId: codigoAuxiliar.produtoId, ean: codigoAuxiliar.id || candidato };
@@ -213,7 +243,7 @@ async function buscarFornecedoresProduto(baseUrl: string, token: string, produto
   const referenciasData = await fetchErpJson<ErpListResponse<ErpFornecedorProduto>>(
     baseUrl,
     token,
-    `/v1/produto/produtos/${encodeURIComponent(produtoId)}/fornecedores`
+    `/v1/produto/produtos/${encodeURIComponent(produtoId)}/fornecedores`,
   );
   const referencias = referenciasData?.items ?? [];
   const fornecedorIds = [...new Set(referencias.map((ref) => ref.fornecedorId).filter((id): id is number => Boolean(id)))];
@@ -274,23 +304,23 @@ async function sincronizarFornecedoresProdutoCompras(supabase: any, params: {
   };
   const rows = params.fornecedores.length > 0
     ? params.fornecedores.map((fornecedor) => ({
-        ...base,
-        fornecedor_id: String(fornecedor.fornecedorId ?? "").trim(),
-        fornecedor_nome: String(fornecedor.nome ?? "").trim() || null,
-        fornecedor_fantasia: String(fornecedor.fantasia ?? "").trim() || null,
-        fornecedor_documento: String(fornecedor.documento ?? "").trim() || null,
-        principal: Boolean(fornecedor.principal),
-        placeholder: false,
-      }))
+      ...base,
+      fornecedor_id: String(fornecedor.fornecedorId ?? "").trim(),
+      fornecedor_nome: String(fornecedor.nome ?? "").trim() || null,
+      fornecedor_fantasia: String(fornecedor.fantasia ?? "").trim() || null,
+      fornecedor_documento: String(fornecedor.documento ?? "").trim() || null,
+      principal: Boolean(fornecedor.principal),
+      placeholder: false,
+    }))
     : [{
-        ...base,
-        fornecedor_id: "SEM_FORNECEDOR",
-        fornecedor_nome: "Sem fornecedor cadastrado",
-        fornecedor_fantasia: null,
-        fornecedor_documento: null,
-        principal: false,
-        placeholder: true,
-      }];
+      ...base,
+      fornecedor_id: "SEM_FORNECEDOR",
+      fornecedor_nome: "Sem fornecedor cadastrado",
+      fornecedor_fantasia: null,
+      fornecedor_documento: null,
+      principal: false,
+      placeholder: true,
+    }];
 
   const insertResult = await supabase.from("compras_produto_fornecedores").insert(rows);
   if (insertResult.error) throw insertResult.error;
@@ -325,7 +355,7 @@ function imageCandidates(origin: string, src: string, produtoId: string): string
   ];
 }
 
-async function baixarImagemErp(origin: string, token: string, produtoId: string, src?: string): Promise<{ buffer: Buffer; contentType: string } | null> {
+async function baixarImagemErp(origin: string, token: string, produtoId: string, src?: string): Promise<{ bytes: Uint8Array; contentType: string } | null> {
   if (!src || /^data:image\//i.test(src)) return null;
 
   for (const url of imageCandidates(origin, src, produtoId)) {
@@ -336,7 +366,7 @@ async function baixarImagemErp(origin: string, token: string, produtoId: string,
       });
       const contentType = response.headers.get("content-type") || "";
       if (!response.ok || !contentType.startsWith("image/")) continue;
-      return { buffer: Buffer.from(await response.arrayBuffer()), contentType };
+      return { bytes: new Uint8Array(await response.arrayBuffer()), contentType };
     } catch {
       // tenta proximo candidato
     }
@@ -381,16 +411,6 @@ function precisaSincronizar(row: CompraRow): boolean {
   if (!row.secao || !row.foto_url) return true;
   if (!isDescricaoReal(row.descricao, row.codigo)) return true;
   return false;
-}
-
-function errorMessage(err: unknown): string {
-  if (err instanceof Error) return err.message;
-  if (typeof err === "string") return err;
-  try {
-    return JSON.stringify(err);
-  } catch {
-    return String(err);
-  }
 }
 
 function isMissingSyncColumnError(err: unknown): boolean {
@@ -460,141 +480,148 @@ async function tryLock(supabase: any): Promise<boolean> {
   return data === true;
 }
 
-export const comprasErpPreload = schedules.task({
-  id: "compras-erp-preload",
-  cron: { pattern: "*/10 * * * *", timezone: "America/Sao_Paulo" },
-  maxDuration: 300,
-  run: async () => {
-    if (process.env.COMPRAS_ERP_PRELOAD_ENABLED === "false") {
-      return { skipped: true, reason: "COMPRAS_ERP_PRELOAD_ENABLED=false" };
-    }
+async function runComprasErpPreload() {
+  if (Deno.env.get("COMPRAS_ERP_PRELOAD_ENABLED") === "false") {
+    return { skipped: true, reason: "COMPRAS_ERP_PRELOAD_ENABLED=false" };
+  }
 
-    const supabaseUrl = process.env.SUPABASE_URL ?? "";
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-    if (!supabaseUrl || !supabaseKey) {
-      return { skipped: true, reason: "SUPABASE_URL/SERVICE_ROLE ausente" };
-    }
+  const supabaseUrl = Deno.env.get("SUPABASE_URL") || "";
+  const serviceKey = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") || Deno.env.get("SERVICE_ROLE_KEY") || "";
+  if (!supabaseUrl || !serviceKey) {
+    return { skipped: true, reason: "SUPABASE_URL/SERVICE_ROLE ausente" };
+  }
 
-    const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } }) as any;
-    let locked = true;
-    try {
-      locked = await tryLock(supabase);
-    } catch (err) {
-      console.warn("[compras-erp-preload] lock indisponivel; seguindo sem lock duravel", errorMessage(err));
-    }
-    if (!locked) return { skipped: true, reason: "job ja esta rodando" };
+  const supabase = createClient(supabaseUrl, serviceKey, { auth: { persistSession: false } }) as any;
+  let locked = true;
+  try {
+    locked = await tryLock(supabase);
+  } catch (err) {
+    console.warn("[compras-erp-preload] lock indisponivel; seguindo sem lock duravel", errorMessage(err));
+  }
+  if (!locked) return { skipped: true, reason: "job ja esta rodando" };
 
-    const maxItems = intEnv("COMPRAS_ERP_PRELOAD_MAX_ITEMS", DEFAULT_MAX_ITEMS_PER_RUN);
-    const scanLimit = intEnv("COMPRAS_ERP_PRELOAD_SCAN_LIMIT", DEFAULT_SCAN_LIMIT_PER_EMPRESA);
-    const delayMs = intEnv("COMPRAS_ERP_PRELOAD_DELAY_MS", DEFAULT_DELAY_MS);
-    const empresas: EmpresaCompras[] = ["NEWSHOP", "SF"];
-    const { candidatos, hasSyncColumns } = await carregarCandidatos(supabase, empresas, scanLimit);
+  const maxItems = intEnv("COMPRAS_ERP_PRELOAD_MAX_ITEMS", DEFAULT_MAX_ITEMS_PER_RUN);
+  const scanLimit = intEnv("COMPRAS_ERP_PRELOAD_SCAN_LIMIT", DEFAULT_SCAN_LIMIT_PER_EMPRESA);
+  const delayMs = intEnv("COMPRAS_ERP_PRELOAD_DELAY_MS", DEFAULT_DELAY_MS);
+  const empresas: EmpresaCompras[] = ["NEWSHOP", "SF"];
+  const { candidatos, hasSyncColumns } = await carregarCandidatos(supabase, empresas, scanLimit);
 
-    const itens = candidatos.slice(0, maxItems);
-    const resultado = { total: itens.length, sucesso: 0, falha: 0, pulado: candidatos.length - itens.length, detalhes: [] as Array<Record<string, unknown>> };
-    console.info("[compras-erp-preload] fila carregada", {
-      candidatos: candidatos.length,
-      processar: itens.length,
-      pulado: resultado.pulado,
-      maxItems,
-      delayMs,
-      hasSyncColumns,
+  const itens = candidatos.slice(0, maxItems);
+  const resultado = { total: itens.length, sucesso: 0, falha: 0, pulado: candidatos.length - itens.length, detalhes: [] as Array<Record<string, unknown>> };
+  console.info("[compras-erp-preload] fila carregada", {
+    candidatos: candidatos.length,
+    processar: itens.length,
+    pulado: resultado.pulado,
+    maxItems,
+    delayMs,
+    hasSyncColumns,
+  });
+
+  for (const item of itens) {
+    const empresaErp = erpEmpresa(item.empresa);
+    const baseUrl = apiBaseUrl(empresaErp);
+    const origin = originFromApi(baseUrl);
+    console.info("[compras-erp-preload] item inicio", {
+      id: item.id,
+      empresa: item.empresa,
+      codigo: item.codigo,
+      sku: item.sku,
+      produtoKey: item.produto_key,
     });
 
-    for (const item of itens) {
-      const empresaErp = erpEmpresa(item.empresa);
-      const baseUrl = apiBaseUrl(empresaErp);
-      const origin = originFromApi(baseUrl);
-      console.info("[compras-erp-preload] item inicio", {
+    try {
+      const token = await getErpToken(empresaErp, baseUrl);
+      let encontrado = await buscarProdutoErp(baseUrl, token, item.codigo);
+      if (!encontrado?.produto?.id && item.sku) encontrado = await buscarProdutoErp(baseUrl, token, item.sku);
+      if (!encontrado?.produto?.id) throw new Error("Produto nao encontrado no ERP");
+
+      const produto = encontrado.produto;
+      const descricao = produto.descricao?.trim() || produto.codigoInterno?.trim() || null;
+      const secao = await buscarSecao(baseUrl, token, produto.secaoId);
+      const fornecedores = await buscarFornecedoresProduto(baseUrl, token, String(produto.id));
+      const fornecedoresSalvos = await sincronizarFornecedoresProdutoCompras(supabase, {
+        empresa: item.empresa,
+        produtoKey: item.produto_key,
+        codigo: item.codigo,
+        sku: item.sku,
+        produtoErpId: String(produto.id),
+        fornecedores,
+      });
+      let fotoUrl: string | null = null;
+
+      if (!item.foto_url) {
+        const imagem = await baixarImagemErp(origin, token, String(produto.id), extrairImagemProduto(produto));
+        if (imagem) {
+          const path = safeStoragePath(item.empresa, item.produto_key, item.codigo);
+          const upload = await supabase.storage.from(FOTO_BUCKET).upload(path, imagem.bytes, {
+            contentType: imagem.contentType,
+            upsert: true,
+          });
+          if (upload.error) throw upload.error;
+          fotoUrl = supabase.storage.from(FOTO_BUCKET).getPublicUrl(path).data.publicUrl;
+        }
+      }
+
+      const update: Record<string, unknown> = {};
+      if (hasSyncColumns) {
+        update.erp_sync_at = new Date().toISOString();
+        update.erp_sync_error = null;
+      }
+      if (descricao) update.descricao = descricao;
+      if (secao) update.secao = secao;
+      if (fotoUrl) update.foto_url = fotoUrl;
+
+      if (Object.keys(update).length > 0) {
+        const { error } = await supabase.from("compras").update(update).eq("id", item.id);
+        if (error) throw error;
+      }
+
+      resultado.sucesso += 1;
+      resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp, fornecedores: fornecedoresSalvos });
+      console.info("[compras-erp-preload] item ok", {
         id: item.id,
         empresa: item.empresa,
         codigo: item.codigo,
-        sku: item.sku,
-        produtoKey: item.produto_key,
+        produtoErpId: produto.id,
+        descricao: Boolean(descricao),
+        secao: Boolean(secao),
+        foto: Boolean(fotoUrl || item.foto_url),
+        fornecedores: fornecedoresSalvos,
       });
-
-      try {
-        const token = await getErpToken(empresaErp, baseUrl);
-        let encontrado = await buscarProdutoErp(baseUrl, token, item.codigo);
-        if (!encontrado?.produto?.id && item.sku) encontrado = await buscarProdutoErp(baseUrl, token, item.sku);
-        if (!encontrado?.produto?.id) throw new Error("Produto nao encontrado no ERP");
-
-        const produto = encontrado.produto;
-        const descricao = produto.descricao?.trim() || produto.codigoInterno?.trim() || null;
-        const secao = await buscarSecao(baseUrl, token, produto.secaoId);
-        const fornecedores = await buscarFornecedoresProduto(baseUrl, token, String(produto.id));
-        const fornecedoresSalvos = await sincronizarFornecedoresProdutoCompras(supabase, {
-          empresa: item.empresa,
-          produtoKey: item.produto_key,
-          codigo: item.codigo,
-          sku: item.sku,
-          produtoErpId: String(produto.id),
-          fornecedores,
-        });
-        let fotoUrl: string | null = null;
-
-        if (!item.foto_url) {
-          const imagem = await baixarImagemErp(origin, token, String(produto.id), extrairImagemProduto(produto));
-          if (imagem) {
-            const path = safeStoragePath(item.empresa, item.produto_key, item.codigo);
-            const upload = await supabase.storage.from(FOTO_BUCKET).upload(path, imagem.buffer, {
-              contentType: imagem.contentType,
-              upsert: true,
-            });
-            if (upload.error) throw upload.error;
-            fotoUrl = supabase.storage.from(FOTO_BUCKET).getPublicUrl(path).data.publicUrl;
-          }
-        }
-
-        const update: Record<string, unknown> = {
-        };
-        if (hasSyncColumns) {
-          update.erp_sync_at = new Date().toISOString();
-          update.erp_sync_error = null;
-        }
-        if (descricao) update.descricao = descricao;
-        if (secao) update.secao = secao;
-        if (fotoUrl) update.foto_url = fotoUrl;
-
-        if (Object.keys(update).length > 0) {
-          const { error } = await supabase.from("compras").update(update).eq("id", item.id);
-          if (error) throw error;
-        }
-
-        resultado.sucesso += 1;
-        resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp, fornecedores: fornecedoresSalvos });
-        console.info("[compras-erp-preload] item ok", {
-          id: item.id,
-          empresa: item.empresa,
-          codigo: item.codigo,
-          produtoErpId: produto.id,
-          descricao: Boolean(descricao),
-          secao: Boolean(secao),
-          foto: Boolean(fotoUrl || item.foto_url),
-          fornecedores: fornecedoresSalvos,
-        });
-      } catch (err) {
-        const message = errorMessage(err);
-        if (hasSyncColumns) {
-          await supabase
-            .from("compras")
-            .update({ erp_sync_at: new Date().toISOString(), erp_sync_error: message.slice(0, 500) })
-            .eq("id", item.id);
-        }
-        resultado.falha += 1;
-        resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: false, erro: message, base: empresaErp });
-        console.error("[compras-erp-preload] item falha", {
-          id: item.id,
-          empresa: item.empresa,
-          codigo: item.codigo,
-          erro: message,
-        });
+    } catch (err) {
+      const message = errorMessage(err);
+      if (hasSyncColumns) {
+        await supabase
+          .from("compras")
+          .update({ erp_sync_at: new Date().toISOString(), erp_sync_error: message.slice(0, 500) })
+          .eq("id", item.id);
       }
-
-      await sleep(delayMs);
+      resultado.falha += 1;
+      resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: false, erro: message, base: empresaErp });
+      console.error("[compras-erp-preload] item falha", {
+        id: item.id,
+        empresa: item.empresa,
+        codigo: item.codigo,
+        erro: message,
+      });
     }
 
-    console.info("[compras-erp-preload] finalizado", resultado);
-    return resultado;
-  },
+    await sleep(delayMs);
+  }
+
+  console.info("[compras-erp-preload] finalizado", resultado);
+  return resultado;
+}
+
+Deno.serve(async (req: Request) => {
+  if (req.method === "OPTIONS") return new Response(null, { headers: CORS_HEADERS });
+  if (req.method !== "POST" && req.method !== "GET") return jsonResponse(405, { error: "Metodo nao permitido" });
+  if (!hasCronAccess(req)) return jsonResponse(401, { error: "Nao autorizado" });
+
+  try {
+    const result = await runComprasErpPreload();
+    return jsonResponse(200, result);
+  } catch (err) {
+    return jsonResponse(500, { error: errorMessage(err) });
+  }
 });
