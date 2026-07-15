@@ -369,6 +369,15 @@ export default function Chat() {
     setParams({ com: nome, empresa: empresaSelecionada });
   };
 
+  const resolverFotoItemChat = (prod: VarejoFacilProduct | null, fotoFallback?: string | null): string | null => {
+    if (prod?.imagem) return prod.imagem;
+    if (fotoFallback) return fotoFallback;
+    const produtoId = String(prod?.id ?? "").trim();
+    if (!produtoId || !/^\d+$/.test(produtoId)) return null;
+    const empresaImagem = empresaConversa === "SOYE" ? "facil" : empresaConversa.toLowerCase();
+    return `/api/erp-image-proxy?empresa=${empresaImagem}&produtoId=${encodeURIComponent(produtoId)}&src=${encodeURIComponent(produtoId)}`;
+  };
+
   const inserirEmoji = (emoji: string) => {
     const campo = textoRef.current;
     if (!campo) {
@@ -441,7 +450,7 @@ export default function Chat() {
     }
   };
 
-  const enviarProdutoNoChat = async (prod: VarejoFacilProduct | null, codigoOriginal: string, skuResolvido?: string | null) => {
+  const enviarProdutoNoChat = async (prod: VarejoFacilProduct | null, codigoOriginal: string, skuResolvido?: string | null, fotoFallback?: string | null) => {
     const cod = String(prod?.codigo_barras || codigoOriginal).trim();
     const skuItem = String(skuResolvido || (/[^0-9]/.test(codigoOriginal) ? codigoOriginal : "")).trim();
     if (!cod || !ativo) return;
@@ -449,7 +458,7 @@ export default function Chat() {
     setEnviando(true);
     try {
       const descricao = prod?.descricao ?? null;
-      const foto = prod?.imagem ?? null;
+      const foto = resolverFotoItemChat(prod, fotoFallback);
       let resumoItem = texto.trim();
       if (prod) {
         const linhas = [
@@ -535,7 +544,7 @@ export default function Chat() {
         toast({ title: "Item nao encontrado", description: "O ERP nao retornou o item escolhido.", variant: "destructive" });
         return;
       }
-      await enviarProdutoNoChat(prod, option.codigo_barras || option.sku || option.id, option.sku);
+      await enviarProdutoNoChat(prod, option.codigo_barras || option.sku || option.id, option.sku, option.imagem);
     } catch (err) {
       toast({ title: "Falha ao carregar item", description: err instanceof Error ? err.message : "Tente novamente.", variant: "destructive" });
     } finally {
@@ -881,17 +890,17 @@ export default function Chat() {
                           </div>
                         )}
                         {m.itemCodigo && (
-                          <div className={`mb-2 flex items-center gap-2 rounded-xl p-2 ${meu ? "bg-white/15" : "bg-muted"}`}>
+                          <div className={`mb-2 flex items-center gap-3 rounded-xl p-2 ${meu ? "bg-white/15" : "bg-muted"}`}>
                             {m.itemFoto ? (
-                              <img src={m.itemFoto} alt="" className="h-12 w-12 rounded-lg object-cover" loading="lazy" />
+                              <img src={m.itemFoto} alt="" className="h-20 w-20 shrink-0 rounded-lg object-cover" loading="lazy" />
                             ) : (
-                              <div className={`flex h-12 w-12 items-center justify-center rounded-lg ${meu ? "bg-white/10" : "bg-background"}`}>
+                              <div className={`flex h-20 w-20 shrink-0 items-center justify-center rounded-lg ${meu ? "bg-white/10" : "bg-background"}`}>
                                 <ScanBarcode className="h-6 w-6 opacity-70" />
                               </div>
                             )}
-                            <div className="min-w-0">
-                              <p className="truncate text-xs font-bold">{m.itemDescricao || m.itemCodigo}</p>
-                              <p className="truncate font-mono text-[11px] opacity-80">{m.itemCodigo}</p>
+                            <div className="min-w-0 flex-1">
+                              <p className="line-clamp-3 text-xs font-bold">{m.itemDescricao || m.itemCodigo}</p>
+                              <p className="mt-1 truncate font-mono text-[11px] opacity-80">{m.itemCodigo}</p>
                             </div>
                           </div>
                         )}
