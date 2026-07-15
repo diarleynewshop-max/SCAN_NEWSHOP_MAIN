@@ -39,7 +39,13 @@ import {
   responderRecomendacaoSubstituicao,
   type RecomendacaoSubstituicao,
 } from "@/lib/recomendacoesSubstituicao";
-import { buscarProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
+import {
+  buscarOpcoesProdutoVarejoFacil,
+  buscarProdutoVarejoFacil,
+  buscarProdutoVarejoFacilPorProdutoId,
+  type VarejoFacilProduct,
+  type VarejoFacilProductOption,
+} from "@/lib/varejoFacilIntegration";
 
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
 
@@ -172,6 +178,10 @@ export default function Chat() {
   const [enviando, setEnviando] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
+  const [showItemLookup, setShowItemLookup] = useState(false);
+  const [itemLookupTermo, setItemLookupTermo] = useState("");
+  const [itemLookupOptions, setItemLookupOptions] = useState<VarejoFacilProductOption[]>([]);
+  const [buscandoItemLookup, setBuscandoItemLookup] = useState(false);
   const [respondendoRecomendacao, setRespondendoRecomendacao] = useState<string | null>(null);
   const [editandoMensagemId, setEditandoMensagemId] = useState<string | null>(null);
   const [textoEdicao, setTextoEdicao] = useState("");
@@ -431,47 +441,105 @@ export default function Chat() {
     }
   };
 
-  const enviarItem = async (codigo: string) => {
-    setShowScanner(false);
-    const cod = codigo.trim();
+  const enviarProdutoNoChat = async (prod: VarejoFacilProduct | null, codigoOriginal: string, skuResolvido?: string | null) => {
+    const cod = String(prod?.codigo_barras || codigoOriginal).trim();
+    const skuItem = String(skuResolvido || (/[^0-9]/.test(codigoOriginal) ? codigoOriginal : "")).trim();
     if (!cod || !ativo) return;
     if (!podeEnviarAgora()) return;
     setEnviando(true);
     try {
-      let descricao: string | null = null;
-      let foto: string | null = null;
+      const descricao = prod?.descricao ?? null;
+      const foto = prod?.imagem ?? null;
       let resumoItem = texto.trim();
-      try {
-        const prod = await buscarProdutoVarejoFacil(cod, { empresa: empresaConversa, flag });
-        if (prod) {
-          descricao = prod.descricao ?? null;
-          foto = prod.imagem ?? null;
-          const linhas = [
-            prod.descricao ? `Item: ${prod.descricao}` : null,
-            `Codigo: ${prod.codigo_barras || cod}`,
-            prod.secao ? `Secao: ${prod.secao}` : "Secao: Nao informado",
-            `Varejo: ${formatarMoeda(prod.precoVarejo)}`,
-            `Atacado: ${formatarMoeda(prod.precoAtacado)}`,
-            texto.trim() ? `Obs: ${texto.trim()}` : null,
-          ].filter(Boolean);
-          resumoItem = linhas.join("\n").slice(0, LIMITE_MENSAGEM);
-        }
-      } catch {
-        // item no chat e best-effort; mensagem ainda pode ser enviada sem dados do ERP
+      if (prod) {
+        const linhas = [
+          prod.descricao ? `Item: ${prod.descricao}` : null,
+          `Codigo: ${prod.codigo_barras || cod}`,
+          skuItem ? `SKU: ${skuItem}` : null,
+          prod.secao ? `Secao: ${prod.secao}` : "Secao: Nao informado",
+          `Varejo: ${formatarMoeda(prod.precoVarejo)}`,
+          `Atacado: ${formatarMoeda(prod.precoAtacado)}`,
+          texto.trim() ? `Obs: ${texto.trim()}` : null,
+        ].filter(Boolean);
+        resumoItem = linhas.join("\n").slice(0, LIMITE_MENSAGEM);
       }
       await enviarMensagem({
         empresa: empresaConversa,
         remetente: meuNome,
         destinatario: ativo,
-        item: { codigo: cod, descricao, foto },
+        item: { codigo: cod, sku: skuItem || prod?.id || null, descricao, foto },
         conteudo: resumoItem,
       });
       setTexto("");
+      setShowItemLookup(false);
+      setItemLookupTermo("");
+      setItemLookupOptions([]);
       await carregarConversa();
     } catch (err) {
       toast({ title: "Falha ao enviar item", description: err instanceof Error ? err.message : "", variant: "destructive" });
     } finally {
       setEnviando(false);
+    }
+  };
+
+  const enviarItem = async (codigo: string) => {
+    setShowScanner(false);
+    const cod = codigo.trim();
+    if (!cod || !ativo) return;
+    try {
+      const prod = await buscarProdutoVarejoFacil(cod, { empresa: empresaConversa, flag });
+      await enviarProdutoNoChat(prod, cod);
+    } catch {
+      await enviarProdutoNoChat(null, cod);
+    }
+  };
+
+  const buscarItemPorSkuChat = async () => {
+    const termo = itemLookupTermo.trim();
+    if (!termo || !ativo || buscandoItemLookup) return;
+    setBuscandoItemLookup(true);
+    setItemLookupOptions([]);
+    try {
+      const deveAbrirOpcoesSku = /[a-z]/i.test(termo) || (/^\d+$/.test(termo) && termo.length < 6);
+      if (deveAbrirOpcoesSku) {
+        const opcoes = await buscarOpcoesProdutoVarejoFacil(termo, { empresa: empresaConversa, flag });
+        if (opcoes.length > 1) {
+          setItemLookupOptions(opcoes);
+          return;
+        }
+        if (opcoes.length === 1) {
+          await selecionarOpcaoItemChat(opcoes[0]);
+          return;
+        }
+      }
+
+      const prod = await buscarProdutoVarejoFacil(termo, { empresa: empresaConversa, flag });
+      if (!prod) {
+        toast({ title: "Item nao encontrado", description: "Confira o codigo ou SKU digitado.", variant: "destructive" });
+        return;
+      }
+      await enviarProdutoNoChat(prod, termo, /[^0-9]/.test(termo) ? termo : null);
+    } catch (err) {
+      toast({ title: "Falha ao buscar item", description: err instanceof Error ? err.message : "Tente novamente.", variant: "destructive" });
+    } finally {
+      setBuscandoItemLookup(false);
+    }
+  };
+
+  const selecionarOpcaoItemChat = async (option: VarejoFacilProductOption) => {
+    if (!ativo || buscandoItemLookup) return;
+    setBuscandoItemLookup(true);
+    try {
+      const prod = await buscarProdutoVarejoFacilPorProdutoId(option.id, { empresa: empresaConversa, flag }, option.codigo_barras || option.sku);
+      if (!prod) {
+        toast({ title: "Item nao encontrado", description: "O ERP nao retornou o item escolhido.", variant: "destructive" });
+        return;
+      }
+      await enviarProdutoNoChat(prod, option.codigo_barras || option.sku || option.id, option.sku);
+    } catch (err) {
+      toast({ title: "Falha ao carregar item", description: err instanceof Error ? err.message : "Tente novamente.", variant: "destructive" });
+    } finally {
+      setBuscandoItemLookup(false);
     }
   };
 
@@ -917,10 +985,10 @@ export default function Chat() {
                   <ImageIcon className="h-4 w-4" />
                 </button>
                 <button
-                  onClick={() => setShowScanner(true)}
+                  onClick={() => setShowItemLookup(true)}
                   disabled={enviando}
                   className="inline-flex h-10 w-10 shrink-0 items-center justify-center rounded-full text-muted-foreground hover:bg-muted disabled:opacity-50"
-                  title="Escanear e enviar item"
+                  title="Escanear ou enviar item por SKU"
                 >
                   <ScanBarcode className="h-4 w-4" />
                 </button>
@@ -987,6 +1055,99 @@ export default function Chat() {
         <Suspense fallback={<div className="fixed inset-0 z-50 bg-background p-6 text-center">Carregando scanner...</div>}>
           <BarcodeScanner onDetected={(code) => void enviarItem(code)} onClose={() => setShowScanner(false)} />
         </Suspense>
+      )}
+
+      {showItemLookup && (
+        <div className="fixed inset-0 z-50 flex items-end bg-black/55 p-3 md:items-center md:justify-center">
+          <div className="max-h-[88dvh] w-full overflow-hidden rounded-2xl bg-card shadow-xl ring-1 ring-border md:max-w-lg">
+            <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+              <div className="min-w-0">
+                <h2 className="text-base font-black text-foreground">Enviar item</h2>
+                <p className="truncate text-xs text-muted-foreground">{empresaConversa} · codigo de barras ou SKU</p>
+              </div>
+              <button
+                onClick={() => {
+                  setShowItemLookup(false);
+                  setItemLookupOptions([]);
+                }}
+                className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-muted text-muted-foreground"
+                title="Fechar"
+              >
+                <X className="h-4 w-4" />
+              </button>
+            </div>
+
+            <div className="space-y-3 overflow-y-auto p-4">
+              <div className="flex gap-2">
+                <input
+                  value={itemLookupTermo}
+                  onChange={(e) => setItemLookupTermo(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      void buscarItemPorSkuChat();
+                    }
+                  }}
+                  placeholder="Digite SKU ou codigo"
+                  className="min-w-0 flex-1 rounded-xl border border-border bg-background px-3 py-2 text-sm outline-none focus:ring-2 focus:ring-primary/40"
+                  autoFocus
+                />
+                <button
+                  onClick={() => void buscarItemPorSkuChat()}
+                  disabled={buscandoItemLookup || !itemLookupTermo.trim()}
+                  className="inline-flex h-10 shrink-0 items-center justify-center rounded-xl bg-emerald-500 px-4 text-sm font-black text-white disabled:opacity-50"
+                >
+                  {buscandoItemLookup ? "..." : "Buscar"}
+                </button>
+              </div>
+
+              <button
+                onClick={() => {
+                  setShowItemLookup(false);
+                  setShowScanner(true);
+                }}
+                disabled={buscandoItemLookup}
+                className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background text-sm font-bold text-foreground disabled:opacity-50"
+              >
+                <ScanBarcode className="h-4 w-4" />
+                Escanear codigo de barras
+              </button>
+
+              {itemLookupOptions.length > 0 && (
+                <div className="space-y-2">
+                  <p className="text-xs font-bold uppercase tracking-wide text-muted-foreground">
+                    Escolha o item encontrado ({itemLookupOptions.length})
+                  </p>
+                  {itemLookupOptions.map((option) => (
+                    <button
+                      key={option.id}
+                      onClick={() => void selecionarOpcaoItemChat(option)}
+                      disabled={buscandoItemLookup}
+                      className="flex w-full items-center gap-3 rounded-xl border border-border bg-background p-2 text-left transition hover:bg-muted disabled:opacity-50"
+                    >
+                      {option.imagem ? (
+                        <img src={option.imagem} alt="" className="h-14 w-14 shrink-0 rounded-lg object-cover" loading="lazy" />
+                      ) : (
+                        <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-muted text-muted-foreground">
+                          <ScanBarcode className="h-6 w-6" />
+                        </div>
+                      )}
+                      <div className="min-w-0 flex-1">
+                        <p className="line-clamp-2 text-sm font-black text-foreground">{option.descricao}</p>
+                        <p className="mt-1 truncate font-mono text-[11px] text-muted-foreground">
+                          ERP {option.id} {option.sku ? `| SKU ${option.sku}` : ""} | Cod {option.codigo_barras}
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Varejo {formatarMoeda(option.precoVarejo)} · Atacado {formatarMoeda(option.precoAtacado)}
+                        </p>
+                      </div>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );
