@@ -751,6 +751,42 @@ const Compras = () => {
     return Array.from(mapa.values()).sort((a, b) => a.nome.localeCompare(b.nome, "pt-BR"));
   }, [fornecedoresCache]);
 
+  const progressoErpCompras = useMemo(() => {
+    const total = produtos.length;
+    let completos = 0;
+    let semDescricao = 0;
+    let semSecao = 0;
+    let semFoto = 0;
+    let semFornecedor = 0;
+
+    for (const produto of produtos) {
+      const temDescricao = isDescricaoRealProduto(produto);
+      const temSecao = Boolean(produto.secao?.trim());
+      const temFoto = isValidImageSrc(produto.foto);
+      const temFornecedor = (fornecedoresPorProdutoKey.get(getProdutoKeyCompra(produto))?.length ?? 0) > 0;
+
+      if (!temDescricao) semDescricao += 1;
+      if (!temSecao) semSecao += 1;
+      if (!temFoto) semFoto += 1;
+      if (!temFornecedor) semFornecedor += 1;
+      if (temDescricao && temSecao && temFoto && temFornecedor) completos += 1;
+    }
+
+    const pendentes = Math.max(0, total - completos);
+    const percentual = total > 0 ? Math.round((completos / total) * 100) : 0;
+
+    return {
+      total,
+      completos,
+      pendentes,
+      percentual,
+      semDescricao,
+      semSecao,
+      semFoto,
+      semFornecedor,
+    };
+  }, [fornecedoresPorProdutoKey, produtos]);
+
   const fornecedorSelecionado = useMemo(
     () => fornecedoresDisponiveis.find((fornecedor) => fornecedor.id === fornecedorSelecionadoId) ?? null,
     [fornecedorSelecionadoId, fornecedoresDisponiveis]
@@ -1597,6 +1633,52 @@ const Compras = () => {
             </CardContent>
           </Card>
         </div>
+
+        <Card className="mb-4 border-slate-200">
+          <CardContent className="pt-4">
+            <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-slate-800">Dados ERP em Compras</div>
+                    <div className="text-xs text-slate-500">
+                      {progressoErpCompras.completos} completos de {progressoErpCompras.total} itens
+                    </div>
+                  </div>
+                  <div className="text-right">
+                    <div className="text-2xl font-bold text-slate-900">{progressoErpCompras.percentual}%</div>
+                    <div className="text-xs text-slate-500">{progressoErpCompras.pendentes} pendente(s)</div>
+                  </div>
+                </div>
+                <div className="mt-3 h-3 w-full overflow-hidden rounded-full bg-slate-100">
+                  <div
+                    className="h-full rounded-full bg-emerald-500 transition-all duration-500"
+                    style={{ width: `${progressoErpCompras.percentual}%` }}
+                  />
+                </div>
+              </div>
+
+              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4 lg:w-[520px]">
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-xs text-slate-500">Sem descricao</div>
+                  <div className="text-lg font-bold text-slate-900">{progressoErpCompras.semDescricao}</div>
+                </div>
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-xs text-slate-500">Sem secao</div>
+                  <div className="text-lg font-bold text-slate-900">{progressoErpCompras.semSecao}</div>
+                </div>
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-xs text-slate-500">Sem foto</div>
+                  <div className="text-lg font-bold text-slate-900">{progressoErpCompras.semFoto}</div>
+                </div>
+                <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2">
+                  <div className="text-xs text-slate-500">Sem fornecedor</div>
+                  <div className="text-lg font-bold text-slate-900">{progressoErpCompras.semFornecedor}</div>
+                </div>
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
         <Card className="mb-6">
           <CardContent className="pt-6">
