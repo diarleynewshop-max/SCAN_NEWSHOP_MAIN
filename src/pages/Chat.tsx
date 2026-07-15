@@ -3,17 +3,23 @@ import { useSearchParams } from "react-router-dom";
 import {
   ArrowLeft,
   Camera,
+  Check,
   ImageIcon,
+  Pencil,
   RefreshCw,
   ScanBarcode,
   Search,
   Send,
+  Trash2,
   Users,
+  X,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import {
   LIMITE_MENSAGEM,
+  apagarMensagemChat,
+  editarMensagemChat,
   enviarMensagem,
   listarConversa,
   listarResumoConversas,
@@ -78,6 +84,12 @@ function previewMensagem(resumo?: ResumoConversa): string {
   return resumo.ultimaMensagem || "Mensagem";
 }
 
+function formatarMoeda(valor: number | null | undefined): string {
+  const numero = Number(valor ?? 0);
+  if (!Number.isFinite(numero) || numero <= 0) return "Nao informado";
+  return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(numero);
+}
+
 export default function Chat() {
   const { loginSalvo } = useAuth();
   const { toast } = useToast();
@@ -97,6 +109,9 @@ export default function Chat() {
   const [atualizando, setAtualizando] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [respondendoRecomendacao, setRespondendoRecomendacao] = useState<string | null>(null);
+  const [editandoMensagemId, setEditandoMensagemId] = useState<string | null>(null);
+  const [textoEdicao, setTextoEdicao] = useState("");
+  const [salvandoEdicaoId, setSalvandoEdicaoId] = useState<string | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
   const fimRef = useRef<HTMLDivElement>(null);
   const carregarConversaRef = useRef<() => Promise<void>>(async () => undefined);
@@ -266,11 +281,21 @@ export default function Chat() {
     try {
       let descricao: string | null = null;
       let foto: string | null = null;
+      let resumoItem = texto.trim();
       try {
         const prod = await buscarProdutoVarejoFacil(cod, { empresa, flag });
         if (prod) {
           descricao = prod.descricao ?? null;
           foto = prod.imagem ?? null;
+          const linhas = [
+            prod.descricao ? `Item: ${prod.descricao}` : null,
+            `Codigo: ${prod.codigo_barras || cod}`,
+            prod.secao ? `Secao: ${prod.secao}` : "Secao: Nao informado",
+            `Varejo: ${formatarMoeda(prod.precoVarejo)}`,
+            `Atacado: ${formatarMoeda(prod.precoAtacado)}`,
+            texto.trim() ? `Obs: ${texto.trim()}` : null,
+          ].filter(Boolean);
+          resumoItem = linhas.join("\n").slice(0, LIMITE_MENSAGEM);
         }
       } catch {
         // item no chat e best-effort; mensagem ainda pode ser enviada sem dados do ERP
@@ -280,7 +305,7 @@ export default function Chat() {
         remetente: meuNome,
         destinatario: ativo,
         item: { codigo: cod, descricao, foto },
-        conteudo: texto.trim(),
+        conteudo: resumoItem,
       });
       setTexto("");
       await carregarConversa();
@@ -313,6 +338,60 @@ export default function Chat() {
       });
     } finally {
       setRespondendoRecomendacao(null);
+    }
+  };
+
+  const iniciarEdicaoMensagem = (mensagem: Mensagem) => {
+    setEditandoMensagemId(mensagem.id);
+    setTextoEdicao(mensagem.conteudo ?? "");
+  };
+
+  const cancelarEdicaoMensagem = () => {
+    setEditandoMensagemId(null);
+    setTextoEdicao("");
+  };
+
+  const salvarEdicaoMensagem = async (mensagem: Mensagem) => {
+    const conteudo = textoEdicao.trim();
+    if (!conteudo) return;
+    setSalvandoEdicaoId(mensagem.id);
+    try {
+      await editarMensagemChat({
+        id: mensagem.id,
+        empresa,
+        remetente: meuNome,
+        conteudo,
+      });
+      cancelarEdicaoMensagem();
+      await carregarConversa();
+      await carregarResumoRef.current();
+    } catch (err) {
+      toast({
+        title: "Falha ao editar mensagem",
+        description: err instanceof Error ? err.message : "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvandoEdicaoId(null);
+    }
+  };
+
+  const apagarMensagem = async (mensagem: Mensagem) => {
+    if (!window.confirm("Apagar esta mensagem?")) return;
+    try {
+      await apagarMensagemChat({
+        id: mensagem.id,
+        empresa,
+        remetente: meuNome,
+      });
+      await carregarConversa();
+      await carregarResumoRef.current();
+    } catch (err) {
+      toast({
+        title: "Falha ao apagar mensagem",
+        description: err instanceof Error ? err.message : "Tente novamente.",
+        variant: "destructive",
+      });
     }
   };
 
@@ -512,10 +591,62 @@ export default function Chat() {
                             </div>
                           </div>
                         )}
-                        {m.conteudo && <p className="whitespace-pre-wrap break-words leading-relaxed">{m.conteudo}</p>}
-                        <p className={`mt-1 text-right text-[10px] ${meu ? "text-white/75" : "text-muted-foreground"}`}>
-                          {horaMsg(m.createdAt)}
-                        </p>
+                        {editandoMensagemId === m.id ? (
+                          <div className="mt-1 space-y-2">
+                            <textarea
+                              value={textoEdicao}
+                              onChange={(event) => setTextoEdicao(event.target.value.slice(0, LIMITE_MENSAGEM))}
+                              className={`min-h-20 w-full resize-none rounded-xl px-3 py-2 text-sm outline-none ${
+                                meu ? "bg-white text-slate-900" : "bg-background text-foreground ring-1 ring-border"
+                              }`}
+                              autoFocus
+                            />
+                            <div className="flex justify-end gap-2">
+                              <button
+                                onClick={cancelarEdicaoMensagem}
+                                className={`inline-flex h-8 w-8 items-center justify-center rounded-full ${meu ? "bg-white/15 text-white" : "bg-muted text-muted-foreground"}`}
+                                title="Cancelar"
+                              >
+                                <X className="h-4 w-4" />
+                              </button>
+                              <button
+                                onClick={() => void salvarEdicaoMensagem(m)}
+                                disabled={salvandoEdicaoId === m.id || !textoEdicao.trim()}
+                                className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-emerald-700 text-white disabled:opacity-50"
+                                title="Salvar"
+                              >
+                                <Check className="h-4 w-4" />
+                              </button>
+                            </div>
+                          </div>
+                        ) : (
+                          <>
+                            {m.conteudo && <p className="whitespace-pre-wrap break-words leading-relaxed">{m.conteudo}</p>}
+                            <div className="mt-1 flex items-center justify-end gap-1">
+                              {meu && (
+                                <>
+                                  <button
+                                    onClick={() => iniciarEdicaoMensagem(m)}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-full opacity-75 hover:bg-white/15 hover:opacity-100"
+                                    title="Editar mensagem"
+                                  >
+                                    <Pencil className="h-3 w-3" />
+                                  </button>
+                                  <button
+                                    onClick={() => void apagarMensagem(m)}
+                                    className="inline-flex h-6 w-6 items-center justify-center rounded-full opacity-75 hover:bg-white/15 hover:opacity-100"
+                                    title="Apagar mensagem"
+                                  >
+                                    <Trash2 className="h-3 w-3" />
+                                  </button>
+                                </>
+                              )}
+                              <span className={`text-[10px] ${meu ? "text-white/75" : "text-muted-foreground"}`}>
+                                {horaMsg(m.createdAt)}
+                              </span>
+                            </div>
+                          </>
+                        )}
                       </div>
                     </div>
                   );

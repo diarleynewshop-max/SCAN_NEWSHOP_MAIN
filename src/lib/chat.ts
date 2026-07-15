@@ -240,6 +240,39 @@ export async function enviarMensagem(input: EnviarMensagemInput): Promise<Mensag
   return mapRow(data as MensagemRow);
 }
 
+export async function editarMensagemChat(input: {
+  id: string;
+  empresa: string;
+  remetente: string;
+  conteudo: string;
+}): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error("Supabase nao configurado.");
+  const conteudo = String(input.conteudo ?? "").trim().slice(0, LIMITE_MENSAGEM);
+  if (!conteudo) throw new Error("Mensagem vazia.");
+  const { error } = await supabase
+    .from("mensagens")
+    .update({ conteudo })
+    .eq("id", input.id)
+    .eq("empresa", input.empresa)
+    .eq("remetente", input.remetente);
+  if (error) throw error;
+}
+
+export async function apagarMensagemChat(input: {
+  id: string;
+  empresa: string;
+  remetente: string;
+}): Promise<void> {
+  if (!isSupabaseConfigured) throw new Error("Supabase nao configurado.");
+  const { error } = await supabase
+    .from("mensagens")
+    .delete()
+    .eq("id", input.id)
+    .eq("empresa", input.empresa)
+    .eq("remetente", input.remetente);
+  if (error) throw error;
+}
+
 export async function marcarConversaLida(empresa: string, meuNome: string, outroNome: string): Promise<void> {
   if (!isSupabaseConfigured) return;
   const eu = String(meuNome ?? "").trim();
