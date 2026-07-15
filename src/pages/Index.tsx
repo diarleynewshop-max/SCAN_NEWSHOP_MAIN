@@ -75,6 +75,12 @@ const S = {
   } as React.CSSProperties,
 };
 
+const MIN_ITEM_DESCRIPTION_CHARS = 15;
+
+function normalizarDescricaoItem(value: string): string {
+  return value.replace(/\s+/g, " ").trim();
+}
+
 function isConsultaBloqueada(flag?: string | null): boolean {
   return (flag ?? "loja").toLowerCase() !== "loja";
 }
@@ -395,6 +401,17 @@ const Index = () => {
       });
       return;
     }
+
+    const descricaoItem = normalizarDescricaoItem(sku);
+    if (descricaoItem.length < MIN_ITEM_DESCRIPTION_CHARS) {
+      toast({
+        title: "Descricao muito curta",
+        description: `Informe pelo menos ${MIN_ITEM_DESCRIPTION_CHARS} caracteres com referencia do item. Ex: espelho, mochila, cor ou modelo.`,
+        variant: "destructive",
+      });
+      return;
+    }
+
     if (!photo) {
       toast({
         title: "Foto obrigatoria",
@@ -406,7 +423,7 @@ const Index = () => {
 
     const ok = await addProduct({
       barcode,
-      sku,
+      sku: descricaoItem,
       photo,
       quantity: Number(quantity),
       secao: productInfo?.secao,
@@ -451,6 +468,8 @@ const Index = () => {
   ];
 
   const flagBadge = { bg: "hsl(var(--primary)/0.10)", border: "hsl(var(--primary)/0.20)", text: "hsl(var(--primary))" };
+  const descricaoItemLength = normalizarDescricaoItem(sku).length;
+  const descricaoItemInvalida = descricaoItemLength > 0 && descricaoItemLength < MIN_ITEM_DESCRIPTION_CHARS;
 
   return (
     <div className={`min-h-screen flex flex-col ${modoDesktop ? "max-w-6xl mx-auto" : "max-w-md mx-auto"}`} style={{ background: "hsl(var(--background))" }}>
@@ -704,8 +723,21 @@ const Index = () => {
               </div>
 
               <div data-tut="scanner-descricao">
-                <label style={S.label}>SKU</label>
-                <input type="text" placeholder="Ex: BM-5050" value={sku} onChange={(e) => setSku(e.target.value)} style={S.inputBase} />
+                <label style={S.label}>Descricao do item *</label>
+                <input
+                  type="text"
+                  minLength={MIN_ITEM_DESCRIPTION_CHARS}
+                  placeholder="Ex: BOM-9108 rocadeira com rodinha"
+                  value={sku}
+                  onChange={(e) => setSku(e.target.value)}
+                  style={{
+                    ...S.inputBase,
+                    border: descricaoItemInvalida ? "1.5px solid hsl(var(--destructive))" : S.inputBase.border,
+                  }}
+                />
+                <p style={{ marginTop: 5, fontSize: 11, color: descricaoItemInvalida ? "hsl(var(--destructive))" : "hsl(var(--muted-foreground))" }}>
+                  Minimo {MIN_ITEM_DESCRIPTION_CHARS} caracteres com referencia do item. {Math.min(descricaoItemLength, MIN_ITEM_DESCRIPTION_CHARS)}/{MIN_ITEM_DESCRIPTION_CHARS}
+                </p>
               </div>
 
               <div>
