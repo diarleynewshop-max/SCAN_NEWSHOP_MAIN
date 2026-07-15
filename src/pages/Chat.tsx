@@ -15,6 +15,7 @@ import {
   X,
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
+import type { Empresa } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import {
   LIMITE_MENSAGEM,
@@ -90,21 +91,41 @@ function formatarMoeda(valor: number | null | undefined): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(numero);
 }
 
+const EMPRESAS_CHAT: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
+const LIMITE_ENVIOS_MINUTO = 8;
+
+type ResumoConversaEmpresa = ResumoConversa & { empresa: Empresa };
+
+function normalizarEmpresaChat(value: string | null | undefined, fallback: Empresa): Empresa {
+  const normalized = String(value ?? "").trim().toUpperCase();
+  return EMPRESAS_CHAT.includes(normalized as Empresa) ? (normalized as Empresa) : fallback;
+}
+
+function chaveConversa(empresa: Empresa, nome: string): string {
+  return `${empresa}::${nome}`;
+}
+
 export default function Chat() {
   const { loginSalvo } = useAuth();
   const { toast } = useToast();
   const [params, setParams] = useSearchParams();
-  const empresa = loginSalvo?.empresa ?? "NEWSHOP";
+  const empresaLogin = loginSalvo?.empresa ?? "NEWSHOP";
   const meuNome = String(loginSalvo?.nomePessoa ?? "").trim();
   const flag = loginSalvo?.flag ?? "loja";
+  const empresaInicial = normalizarEmpresaChat(params.get("empresa"), empresaLogin);
 
-  const [usuarios, setUsuarios] = useState<UsuarioChat[]>([]);
-  const [resumos, setResumos] = useState<Record<string, ResumoConversa>>({});
+  const [usuariosPorEmpresa, setUsuariosPorEmpresa] = useState<Partial<Record<Empresa, UsuarioChat[]>>>({});
+  const [resumos, setResumos] = useState<Record<string, ResumoConversaEmpresa>>({});
   const [ativo, setAtivo] = useState<string>(params.get("com") ?? "");
+  const [empresaConversa, setEmpresaConversa] = useState<Empresa>(empresaInicial);
   const [mensagens, setMensagens] = useState<Mensagem[]>([]);
   const [recomendacoes, setRecomendacoes] = useState<Record<string, RecomendacaoSubstituicao>>({});
   const [texto, setTexto] = useState("");
   const [filtro, setFiltro] = useState("");
+  const [filtroNovaConversa, setFiltroNovaConversa] = useState("");
+  const [buscandoNovaConversa, setBuscandoNovaConversa] = useState(false);
+  const [empresaBusca, setEmpresaBusca] = useState<Empresa>(empresaInicial);
+  const [carregandoUsuarios, setCarregandoUsuarios] = useState(false);
   const [enviando, setEnviando] = useState(false);
   const [atualizando, setAtualizando] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
@@ -116,24 +137,40 @@ export default function Chat() {
   const fimRef = useRef<HTMLDivElement>(null);
   const carregarConversaRef = useRef<() => Promise<void>>(async () => undefined);
   const carregarResumoRef = useRef<() => Promise<void>>(async () => undefined);
+  const enviosRecentesRef = useRef<number[]>([]);
 
-  const carregarUsuarios = useCallback(async () => {
-    if (!meuNome) return;
+  const carregarUsuarios = useCallback(async (empresaAlvo: Empresa) => {
+    if (!meuNome) return [];
     try {
-      setUsuarios(await listarUsuariosChat(empresa, meuNome));
+      setCarregandoUsuarios(true);
+      const lista = await listarUsuariosChat(empresaAlvo, meuNome);
+      setUsuariosPorEmpresa((prev) => ({ ...prev, [empresaAlvo]: lista }));
+      return lista;
     } catch (err) {
       console.error("[Chat] falha ao listar usuarios:", err);
+      return [];
+    } finally {
+      setCarregandoUsuarios(false);
     }
-  }, [empresa, meuNome]);
+  }, [meuNome]);
 
   const carregarResumo = useCallback(async () => {
     if (!meuNome) return;
     try {
-      setResumos(await listarResumoConversas(empresa, meuNome));
+      const resultados = await Promise.all(
+        EMPRESAS_CHAT.map(async (empresaItem) => [empresaItem, await listarResumoConversas(empresaItem, meuNome)] as const)
+      );
+      const novoResumo: Record<string, ResumoConversaEmpresa> = {};
+      for (const [empresaItem, resumoEmpresa] of resultados) {
+        for (const resumo of Object.values(resumoEmpresa)) {
+          novoResumo[chaveConversa(empresaItem, resumo.nome)] = { ...resumo, empresa: empresaItem };
+        }
+      }
+      setResumos(novoResumo);
     } catch (err) {
       console.error("[Chat] falha ao listar resumo:", err);
     }
-  }, [empresa, meuNome]);
+  }, [meuNome]);
 
   const carregarConversa = useCallback(async () => {
     if (!meuNome || !ativo) {
@@ -141,22 +178,29 @@ export default function Chat() {
       return;
     }
     try {
-      const data = await listarConversa(empresa, meuNome, ativo);
+      const data = await listarConversa(empresaConversa, meuNome, ativo);
       setMensagens(data);
-      await marcarConversaLida(empresa, meuNome, ativo);
+      await marcarConversaLida(empresaConversa, meuNome, ativo);
       await carregarResumoRef.current();
     } catch (err) {
       console.error("[Chat] falha ao carregar conversa:", err);
     }
-  }, [ativo, empresa, meuNome]);
+  }, [ativo, empresaConversa, meuNome]);
 
   carregarConversaRef.current = carregarConversa;
   carregarResumoRef.current = carregarResumo;
 
   useEffect(() => {
-    void carregarUsuarios();
     void carregarResumo();
-  }, [carregarResumo, carregarUsuarios]);
+  }, [carregarResumo]);
+
+  useEffect(() => {
+    if (ativo) void carregarUsuarios(empresaConversa);
+  }, [ativo, carregarUsuarios, empresaConversa]);
+
+  useEffect(() => {
+    if (buscandoNovaConversa && !usuariosPorEmpresa[empresaBusca]) void carregarUsuarios(empresaBusca);
+  }, [buscandoNovaConversa, carregarUsuarios, empresaBusca, usuariosPorEmpresa]);
 
   useEffect(() => {
     void carregarConversa();
@@ -167,23 +211,24 @@ export default function Chat() {
     setAtualizando(true);
     try {
       await Promise.all([
-        carregarUsuarios(),
+        ativo ? carregarUsuarios(empresaConversa) : Promise.resolve([]),
+        buscandoNovaConversa ? carregarUsuarios(empresaBusca) : Promise.resolve([]),
         carregarResumoRef.current(),
         carregarConversaRef.current(),
       ]);
     } finally {
       setAtualizando(false);
     }
-  }, [carregarUsuarios, meuNome]);
+  }, [ativo, buscandoNovaConversa, carregarUsuarios, empresaBusca, empresaConversa, meuNome]);
 
   useEffect(() => {
     if (!meuNome) return;
-    const unsub = subscribeMensagens(empresa, () => {
+    const unsubs = EMPRESAS_CHAT.map((empresaItem) => subscribeMensagens(empresaItem, () => {
       void carregarResumoRef.current();
       void carregarConversaRef.current();
-    });
-    return unsub;
-  }, [empresa, meuNome]);
+    }));
+    return () => unsubs.forEach((unsub) => unsub());
+  }, [meuNome]);
 
   useEffect(() => {
     fimRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -218,24 +263,56 @@ export default function Chat() {
 
   const contatos = useMemo(() => {
     const busca = filtro.trim().toLowerCase();
-    return usuarios
+    return Object.values(resumos)
+      .filter((resumo) => {
+        if (!busca) return true;
+        return `${resumo.nome} ${resumo.empresa} ${resumo.ultimaMensagem}`.toLowerCase().includes(busca);
+      })
+      .sort((a, b) => {
+        const dataA = a.ultimoHorario ? new Date(a.ultimoHorario ?? "").getTime() : 0;
+        const dataB = b.ultimoHorario ? new Date(b.ultimoHorario ?? "").getTime() : 0;
+        if (dataA !== dataB) return dataB - dataA;
+        return a.nome.localeCompare(b.nome);
+      });
+  }, [filtro, resumos]);
+
+  const usuariosBusca = usuariosPorEmpresa[empresaBusca] ?? [];
+  const usuariosFiltrados = useMemo(() => {
+    const busca = filtroNovaConversa.trim().toLowerCase();
+    return usuariosBusca
       .filter((u) => {
         if (!busca) return true;
         return `${u.nome} ${u.login} ${u.role}`.toLowerCase().includes(busca);
       })
-      .sort((a, b) => {
-        const dataA = resumos[a.nome]?.ultimoHorario ? new Date(resumos[a.nome].ultimoHorario ?? "").getTime() : 0;
-        const dataB = resumos[b.nome]?.ultimoHorario ? new Date(resumos[b.nome].ultimoHorario ?? "").getTime() : 0;
-        if (dataA !== dataB) return dataB - dataA;
-        return a.nome.localeCompare(b.nome);
+      .sort((a, b) => a.nome.localeCompare(b.nome));
+  }, [filtroNovaConversa, usuariosBusca]);
+
+  const usuarioAtivo = useMemo(
+    () => (usuariosPorEmpresa[empresaConversa] ?? []).find((u) => u.nome === ativo),
+    [ativo, empresaConversa, usuariosPorEmpresa]
+  );
+
+  const podeEnviarAgora = (): boolean => {
+    const agora = Date.now();
+    enviosRecentesRef.current = enviosRecentesRef.current.filter((time) => agora - time < 60_000);
+    if (enviosRecentesRef.current.length >= LIMITE_ENVIOS_MINUTO) {
+      toast({
+        title: "Muitas mensagens seguidas",
+        description: "Aguarde um pouco antes de enviar de novo.",
+        variant: "destructive",
       });
-  }, [filtro, resumos, usuarios]);
+      return false;
+    }
+    enviosRecentesRef.current.push(agora);
+    return true;
+  };
 
-  const usuarioAtivo = useMemo(() => usuarios.find((u) => u.nome === ativo), [ativo, usuarios]);
-
-  const selecionar = (nome: string) => {
+  const selecionar = (nome: string, empresaSelecionada: Empresa) => {
     setAtivo(nome);
-    setParams({ com: nome });
+    setEmpresaConversa(empresaSelecionada);
+    setBuscandoNovaConversa(false);
+    setFiltroNovaConversa("");
+    setParams({ com: nome, empresa: empresaSelecionada });
   };
 
   const voltarParaLista = () => {
@@ -246,9 +323,10 @@ export default function Chat() {
   const enviarTexto = async () => {
     const conteudo = texto.trim();
     if (!conteudo || !ativo || enviando) return;
+    if (!podeEnviarAgora()) return;
     setEnviando(true);
     try {
-      await enviarMensagem({ empresa, remetente: meuNome, destinatario: ativo, conteudo });
+      await enviarMensagem({ empresa: empresaConversa, remetente: meuNome, destinatario: ativo, conteudo });
       setTexto("");
       await carregarConversa();
     } catch (err) {
@@ -260,10 +338,11 @@ export default function Chat() {
 
   const enviarFoto = async (file: File) => {
     if (!ativo) return;
+    if (!podeEnviarAgora()) return;
     setEnviando(true);
     try {
       const dataUrl = await lerArquivoComoDataUrl(file);
-      await enviarMensagem({ empresa, remetente: meuNome, destinatario: ativo, fotoDataUrl: dataUrl, conteudo: texto.trim() });
+      await enviarMensagem({ empresa: empresaConversa, remetente: meuNome, destinatario: ativo, fotoDataUrl: dataUrl, conteudo: texto.trim() });
       setTexto("");
       await carregarConversa();
     } catch (err) {
@@ -277,13 +356,14 @@ export default function Chat() {
     setShowScanner(false);
     const cod = codigo.trim();
     if (!cod || !ativo) return;
+    if (!podeEnviarAgora()) return;
     setEnviando(true);
     try {
       let descricao: string | null = null;
       let foto: string | null = null;
       let resumoItem = texto.trim();
       try {
-        const prod = await buscarProdutoVarejoFacil(cod, { empresa, flag });
+        const prod = await buscarProdutoVarejoFacil(cod, { empresa: empresaConversa, flag });
         if (prod) {
           descricao = prod.descricao ?? null;
           foto = prod.imagem ?? null;
@@ -301,7 +381,7 @@ export default function Chat() {
         // item no chat e best-effort; mensagem ainda pode ser enviada sem dados do ERP
       }
       await enviarMensagem({
-        empresa,
+        empresa: empresaConversa,
         remetente: meuNome,
         destinatario: ativo,
         item: { codigo: cod, descricao, foto },
@@ -358,7 +438,7 @@ export default function Chat() {
     try {
       await editarMensagemChat({
         id: mensagem.id,
-        empresa,
+        empresa: empresaConversa,
         remetente: meuNome,
         conteudo,
       });
@@ -381,7 +461,7 @@ export default function Chat() {
     try {
       await apagarMensagemChat({
         id: mensagem.id,
-        empresa,
+        empresa: empresaConversa,
         remetente: meuNome,
       });
       await carregarConversa();
@@ -405,7 +485,7 @@ export default function Chat() {
         <div className="shrink-0 border-b border-border px-4 py-3">
           <div className="mb-3 flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Chat - {empresa}</p>
+              <p className="text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">Chat interno</p>
               <h1 className="truncate text-xl font-black text-foreground">Conversas</h1>
             </div>
             <button
@@ -417,37 +497,102 @@ export default function Chat() {
               <RefreshCw className={`h-4 w-4 ${atualizando ? "animate-spin" : ""}`} />
             </button>
           </div>
-          <div className="flex h-10 items-center gap-2 rounded-full bg-background px-3 text-muted-foreground ring-1 ring-border focus-within:ring-primary/60">
-            <Search className="h-4 w-4 shrink-0" />
-            <input
-              value={filtro}
-              onChange={(e) => setFiltro(e.target.value)}
-              placeholder="Buscar pessoa"
-              className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-            />
-          </div>
+          <button
+            onClick={() => setBuscandoNovaConversa((value) => !value)}
+            className="mb-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-full bg-emerald-500 px-4 text-sm font-black text-white"
+          >
+            <Users className="h-4 w-4" />
+            Iniciar conversa
+          </button>
+          {buscandoNovaConversa ? (
+            <div className="space-y-3">
+              <div className="grid grid-cols-3 gap-1 rounded-full bg-background p-1 ring-1 ring-border">
+                {EMPRESAS_CHAT.map((empresaItem) => (
+                  <button
+                    key={empresaItem}
+                    onClick={() => {
+                      setEmpresaBusca(empresaItem);
+                      if (!usuariosPorEmpresa[empresaItem]) void carregarUsuarios(empresaItem);
+                    }}
+                    className={`h-8 rounded-full text-[11px] font-black ${
+                      empresaBusca === empresaItem ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"
+                    }`}
+                  >
+                    {empresaItem}
+                  </button>
+                ))}
+              </div>
+              <div className="flex h-10 items-center gap-2 rounded-full bg-background px-3 text-muted-foreground ring-1 ring-border focus-within:ring-primary/60">
+                <Search className="h-4 w-4 shrink-0" />
+                <input
+                  value={filtroNovaConversa}
+                  onChange={(e) => setFiltroNovaConversa(e.target.value)}
+                  placeholder={`Buscar em ${empresaBusca}`}
+                  className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+            </div>
+          ) : (
+            <div className="flex h-10 items-center gap-2 rounded-full bg-background px-3 text-muted-foreground ring-1 ring-border focus-within:ring-primary/60">
+              <Search className="h-4 w-4 shrink-0" />
+              <input
+                value={filtro}
+                onChange={(e) => setFiltro(e.target.value)}
+                placeholder="Buscar nas conversas"
+                className="min-w-0 flex-1 bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+              />
+            </div>
+          )}
         </div>
 
         <div className="min-h-0 flex-1 overflow-y-auto">
-          {contatos.length === 0 ? (
+          {buscandoNovaConversa ? (
+            carregandoUsuarios && usuariosFiltrados.length === 0 ? (
+              <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
+                Carregando usuarios...
+              </div>
+            ) : usuariosFiltrados.length === 0 ? (
+              <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
+                <Users className="h-8 w-8" />
+                Nenhuma pessoa encontrada em {empresaBusca}.
+              </div>
+            ) : (
+              usuariosFiltrados.map((u) => (
+                <button
+                  key={`${empresaBusca}-${u.login}`}
+                  onClick={() => selecionar(u.nome, empresaBusca)}
+                  className="flex w-full items-center gap-3 border-b border-border/60 px-4 py-3 text-left transition hover:bg-muted/60"
+                >
+                  <AvatarPessoa nome={u.nome} fotoUrl={u.fotoUrl} className="h-12 w-12 shrink-0 rounded-full" />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2">
+                      <p className="min-w-0 flex-1 truncate text-sm font-bold text-foreground">{u.nome}</p>
+                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-black text-muted-foreground">{empresaBusca}</span>
+                    </div>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{u.role || u.login}</p>
+                  </div>
+                </button>
+              ))
+            )
+          ) : contatos.length === 0 ? (
             <div className="flex h-full flex-col items-center justify-center gap-2 px-6 text-center text-sm text-muted-foreground">
               <Users className="h-8 w-8" />
-              Nenhuma conversa encontrada.
+              Nenhuma conversa ainda. Clique em Iniciar conversa.
             </div>
           ) : (
-            contatos.map((u) => {
-              const resumo = resumos[u.nome];
-              const selecionado = ativo === u.nome;
+            contatos.map((resumo) => {
+              const detalhe = (usuariosPorEmpresa[resumo.empresa] ?? []).find((u) => u.nome === resumo.nome);
+              const selecionado = ativo === resumo.nome && empresaConversa === resumo.empresa;
               return (
                 <button
-                  key={u.login}
-                  onClick={() => selecionar(u.nome)}
+                  key={chaveConversa(resumo.empresa, resumo.nome)}
+                  onClick={() => selecionar(resumo.nome, resumo.empresa)}
                   className={`flex w-full items-center gap-3 border-b border-border/60 px-4 py-3 text-left transition ${
                     selecionado ? "bg-primary/10" : "hover:bg-muted/60"
                   }`}
                 >
                   <div className="relative h-12 w-12 shrink-0">
-                    <AvatarPessoa nome={u.nome} fotoUrl={u.fotoUrl} className="h-12 w-12 rounded-full" />
+                    <AvatarPessoa nome={resumo.nome} fotoUrl={detalhe?.fotoUrl} className="h-12 w-12 rounded-full" />
                     {resumo?.naoLidas ? (
                       <span className="absolute -right-1 -top-1 min-w-5 rounded-full bg-emerald-500 px-1.5 py-0.5 text-center text-[10px] font-black text-white ring-2 ring-card">
                         {resumo.naoLidas}
@@ -456,7 +601,8 @@ export default function Chat() {
                   </div>
                   <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2">
-                      <p className="min-w-0 flex-1 truncate text-sm font-bold text-foreground">{u.nome}</p>
+                      <p className="min-w-0 flex-1 truncate text-sm font-bold text-foreground">{resumo.nome}</p>
+                      <span className="shrink-0 rounded-full bg-muted px-2 py-0.5 text-[10px] font-black text-muted-foreground">{resumo.empresa}</span>
                       <span className="shrink-0 text-[11px] text-muted-foreground">{horaMsg(resumo?.ultimoHorario ?? null)}</span>
                     </div>
                     <p className="mt-0.5 truncate text-xs text-muted-foreground">{previewMensagem(resumo)}</p>
@@ -492,7 +638,9 @@ export default function Chat() {
               <AvatarPessoa nome={ativo} fotoUrl={usuarioAtivo?.fotoUrl} className="h-11 w-11 shrink-0 rounded-full" />
               <div className="min-w-0 flex-1">
                 <p className="truncate text-sm font-black text-foreground">{ativo}</p>
-                <p className="truncate text-xs text-muted-foreground">{usuarioAtivo?.role || "Conversa interna"}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {empresaConversa} · {usuarioAtivo?.role || "Conversa interna"}
+                </p>
               </div>
               <button
                 onClick={() => void atualizarTudo()}
