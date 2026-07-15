@@ -363,7 +363,7 @@ async function buscarPorTermo(baseUrl: string, auth: ErpAuth, termo: string, lim
       if (byId.size >= limit) break;
     }
 
-    if (byId.size >= limit) break;
+    if (byId.size > 0) break;
   }
 
   return [...byId.values()].slice(0, limit).map((produto) => ({
@@ -413,7 +413,7 @@ async function buscarPorCadastroWeb(empresa: EmpresaKey, termo: string, limit: n
       labels.set(item.codigo, `cadastro:${candidate}`);
     }
 
-    if (byId.size >= limit) break;
+    if (byId.size > 0) break;
   }
 
   return [...byId.values()].slice(0, limit).map((produto) => ({
