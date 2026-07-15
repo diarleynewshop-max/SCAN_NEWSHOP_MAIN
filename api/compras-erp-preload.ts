@@ -15,6 +15,7 @@ type CompraRow = {
   foto_url: string | null;
   updated_at: string | null;
   erp_sync_at?: string | null;
+  tem_fornecedor?: boolean;
 };
 
 type ErpListResponse<T> = { items?: T[] };
@@ -35,6 +36,24 @@ type ErpProduto = {
   imagens?: Array<string | { url?: string; imagem?: string; src?: string }>;
 };
 type ErpSecao = { id?: number; descricao?: string };
+type ErpFornecedorProduto = { fornecedorId?: number; nivel?: string };
+type ErpFornecedor = {
+  id?: number;
+  nome?: string;
+  fantasia?: string;
+  cnpj?: string;
+  cpfCnpj?: string;
+  cnpjCpf?: string;
+  cpfcnpj?: string;
+  documento?: string;
+};
+type FornecedorProdutoSyncInput = {
+  fornecedorId: string;
+  nome: string;
+  fantasia?: string | null;
+  documento?: string | null;
+  principal?: boolean;
+};
 
 const HOSTS: Record<ErpEmpresa, string> = {
   NEWSHOP: "newshop.varejofacil.com",
@@ -195,6 +214,100 @@ async function buscarSecao(baseUrl: string, token: string, secaoId?: number): Pr
   }
 }
 
+function extrairDocumentoFornecedor(fornecedor: ErpFornecedor | null | undefined): string | null {
+  if (!fornecedor) return null;
+  const documento = fornecedor.cnpj ?? fornecedor.cpfCnpj ?? fornecedor.cnpjCpf ?? fornecedor.cpfcnpj ?? fornecedor.documento ?? null;
+  return String(documento ?? "").trim() || null;
+}
+
+async function buscarFornecedoresProduto(baseUrl: string, token: string, produtoId: string): Promise<FornecedorProdutoSyncInput[]> {
+  const referenciasData = await fetchErpJson<ErpListResponse<ErpFornecedorProduto>>(
+    baseUrl,
+    token,
+    `/v1/produto/produtos/${encodeURIComponent(produtoId)}/fornecedores`
+  );
+  const referencias = referenciasData?.items ?? [];
+  const fornecedorIds = [...new Set(referencias.map((ref) => ref.fornecedorId).filter((id): id is number => Boolean(id)))];
+  if (fornecedorIds.length === 0) return [];
+
+  const detalhes: FornecedorProdutoSyncInput[] = [];
+  for (const id of fornecedorIds) {
+    try {
+      const fornecedor = await fetchErpJson<ErpFornecedor>(baseUrl, token, `/v1/pessoa/fornecedores/${id}`);
+      detalhes.push({
+        fornecedorId: String(id),
+        nome: fornecedor?.fantasia?.trim() || fornecedor?.nome?.trim() || `Fornecedor ${id}`,
+        fantasia: fornecedor?.fantasia?.trim() || null,
+        documento: extrairDocumentoFornecedor(fornecedor),
+        principal: referencias.some((ref) => String(ref.fornecedorId ?? "") === String(id) && ref.nivel === "PRINCIPAL"),
+      });
+    } catch {
+      detalhes.push({
+        fornecedorId: String(id),
+        nome: `Fornecedor ${id}`,
+        fantasia: null,
+        documento: null,
+        principal: referencias.some((ref) => String(ref.fornecedorId ?? "") === String(id) && ref.nivel === "PRINCIPAL"),
+      });
+    }
+  }
+  return detalhes;
+}
+
+async function sincronizarFornecedoresProdutoCompras(supabase: any, params: {
+  empresa: EmpresaCompras;
+  produtoKey: string;
+  codigo: string;
+  sku?: string | null;
+  produtoErpId?: string | null;
+  fornecedores: FornecedorProdutoSyncInput[];
+}): Promise<number | null> {
+  const key = String(params.produtoKey ?? "").trim();
+  if (!key) return null;
+
+  const deleteResult = await supabase
+    .from("compras_produto_fornecedores")
+    .delete()
+    .eq("empresa", params.empresa)
+    .eq("produto_key", key);
+  if (deleteResult.error) {
+    console.warn("[compras-erp-preload] fornecedor: tabela/cache indisponivel", errorMessage(deleteResult.error));
+    return null;
+  }
+
+  const base = {
+    empresa: params.empresa,
+    produto_key: key,
+    codigo: String(params.codigo ?? "").trim(),
+    sku: String(params.sku ?? "").trim() || null,
+    produto_erp_id: String(params.produtoErpId ?? "").trim() || null,
+    synced_at: new Date().toISOString(),
+  };
+  const rows = params.fornecedores.length > 0
+    ? params.fornecedores.map((fornecedor) => ({
+        ...base,
+        fornecedor_id: String(fornecedor.fornecedorId ?? "").trim(),
+        fornecedor_nome: String(fornecedor.nome ?? "").trim() || null,
+        fornecedor_fantasia: String(fornecedor.fantasia ?? "").trim() || null,
+        fornecedor_documento: String(fornecedor.documento ?? "").trim() || null,
+        principal: Boolean(fornecedor.principal),
+        placeholder: false,
+      }))
+    : [{
+        ...base,
+        fornecedor_id: "SEM_FORNECEDOR",
+        fornecedor_nome: "Sem fornecedor cadastrado",
+        fornecedor_fantasia: null,
+        fornecedor_documento: null,
+        principal: false,
+        placeholder: true,
+      }];
+
+  const insertResult = await supabase.from("compras_produto_fornecedores").insert(rows);
+  if (insertResult.error) throw insertResult.error;
+  return rows.length;
+}
+
 function extrairImagemProduto(produto: ErpProduto): string | undefined {
   const imagemDaLista = produto.imagens?.find(Boolean);
   if (typeof imagemDaLista === "string") return imagemDaLista;
@@ -275,6 +388,7 @@ function isDescricaoReal(descricao: string | null | undefined, codigo: string | 
 
 function precisaSincronizar(row: CompraRow): boolean {
   if (row.erp_sync_at && row.updated_at && row.updated_at > row.erp_sync_at) return true;
+  if (row.tem_fornecedor === false) return true;
   if (!row.secao || !row.foto_url) return true;
   if (!isDescricaoReal(row.descricao, row.codigo)) return true;
   return false;
@@ -351,7 +465,22 @@ async function carregarCandidatos(supabase: any, empresas: EmpresaCompras[], sca
     }
 
     if (error) throw error;
-    candidatos.push(...((data ?? []) as CompraRow[]).filter(precisaSincronizar));
+    const rows = (data ?? []) as CompraRow[];
+    const keys = [...new Set(rows.map((row) => row.produto_key).filter(Boolean))];
+    if (keys.length > 0) {
+      const fornecedores = await supabase
+        .from("compras_produto_fornecedores")
+        .select("produto_key")
+        .eq("empresa", empresa)
+        .in("produto_key", keys);
+      if (!fornecedores.error) {
+        const keysComFornecedor = new Set(((fornecedores.data ?? []) as Array<{ produto_key: string }>).map((row) => row.produto_key));
+        rows.forEach((row) => {
+          row.tem_fornecedor = keysComFornecedor.has(row.produto_key);
+        });
+      }
+    }
+    candidatos.push(...rows.filter(precisaSincronizar));
   }
 
   return { candidatos, hasSyncColumns };
@@ -408,6 +537,15 @@ async function runComprasErpPreload() {
       const produto = encontrado.produto;
       const descricao = produto.descricao?.trim() || produto.codigoInterno?.trim() || null;
       const secao = await buscarSecao(baseUrl, token, produto.secaoId);
+      const fornecedores = await buscarFornecedoresProduto(baseUrl, token, String(produto.id));
+      const fornecedoresSalvos = await sincronizarFornecedoresProdutoCompras(supabase, {
+        empresa: item.empresa,
+        produtoKey: item.produto_key,
+        codigo: item.codigo,
+        sku: item.sku,
+        produtoErpId: String(produto.id),
+        fornecedores,
+      });
       let fotoUrl: string | null = null;
 
       if (!item.foto_url) {
@@ -439,7 +577,7 @@ async function runComprasErpPreload() {
       }
 
       resultado.sucesso += 1;
-      resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp });
+      resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp, fornecedores: fornecedoresSalvos });
     } catch (err) {
       const message = errorMessage(err);
       if (hasSyncColumns) {
