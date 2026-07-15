@@ -476,7 +476,12 @@ export const comprasErpPreload = schedules.task({
     }
 
     const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } }) as any;
-    const locked = await tryLock(supabase);
+    let locked = true;
+    try {
+      locked = await tryLock(supabase);
+    } catch (err) {
+      console.warn("[compras-erp-preload] lock indisponivel; seguindo sem lock duravel", errorMessage(err));
+    }
     if (!locked) return { skipped: true, reason: "job ja esta rodando" };
 
     const maxItems = intEnv("COMPRAS_ERP_PRELOAD_MAX_ITEMS", DEFAULT_MAX_ITEMS_PER_RUN);
