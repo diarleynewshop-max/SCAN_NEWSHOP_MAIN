@@ -38,7 +38,7 @@ const ConsultaPreco = () => {
     async (codigoInformado = codigo) => {
       const codigoLimpo = codigoInformado.trim();
       if (!codigoLimpo) {
-        toast({ title: "Informe o codigo", description: "Digite ou leia um codigo de barras." });
+        toast({ title: "Informe o codigo ou SKU", description: "Digite um SKU ou leia um codigo de barras." });
         return;
       }
 
@@ -55,7 +55,7 @@ const ConsultaPreco = () => {
         );
 
         if (!resultado) {
-          setError("Produto nao encontrado.");
+          setError("Produto nao encontrado para esse codigo/SKU.");
           return;
         }
 

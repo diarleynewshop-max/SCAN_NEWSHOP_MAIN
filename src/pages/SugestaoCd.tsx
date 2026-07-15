@@ -134,7 +134,7 @@ export default function SugestaoCd() {
   const adicionarCodigo = useCallback(async (codigoInformado = codigo) => {
     const codigoLimpo = codigoInformado.trim();
     if (!codigoLimpo) {
-      toast({ title: "Informe o codigo", description: "Digite ou escaneie um codigo." });
+      toast({ title: "Informe o codigo ou SKU", description: "Digite um SKU ou escaneie um codigo." });
       return;
     }
 
@@ -147,7 +147,7 @@ export default function SugestaoCd() {
       ]);
 
       if (!produto) {
-        toast({ title: "Produto nao encontrado", description: "O ERP nao retornou esse codigo.", variant: "destructive" });
+        toast({ title: "Produto nao encontrado", description: "O ERP nao retornou esse codigo/SKU.", variant: "destructive" });
         return;
       }
 
@@ -335,7 +335,7 @@ export default function SugestaoCd() {
               <p className="text-[11px] font-mono uppercase tracking-[0.22em] text-muted-foreground">Gestao</p>
               <h1 className="mt-1 text-2xl font-black text-foreground">Sugestao do CD</h1>
               <p className="mt-2 text-sm text-muted-foreground">
-                Escaneie os itens do estoque, compare ERP x contado e monte a lista para mandar para a loja.
+                Escaneie ou digite SKU dos itens do estoque, compare ERP x contado e monte a lista para mandar para a loja.
               </p>
             </div>
 

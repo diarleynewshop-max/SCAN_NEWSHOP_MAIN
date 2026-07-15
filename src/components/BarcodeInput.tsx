@@ -6,9 +6,10 @@ interface BarcodeInputProps {
   onChange: (value: string) => void;
   onScanPress: () => void;
   onEnterPress?: () => void;
+  placeholder?: string;
 }
 
-const BarcodeInput = ({ value, onChange, onScanPress, onEnterPress }: BarcodeInputProps) => {
+const BarcodeInput = ({ value, onChange, onScanPress, onEnterPress, placeholder = "Codigo de barras ou SKU" }: BarcodeInputProps) => {
   const inputRef = useRef<HTMLInputElement>(null);
 
   const submitValue = () => {
@@ -32,8 +33,9 @@ const BarcodeInput = ({ value, onChange, onScanPress, onEnterPress }: BarcodeInp
     >
       <div style={{ flex: 1, position: "relative" }}>
         <ScanBarcode style={{ position: "absolute", left: 12, top: "50%", transform: "translateY(-50%)", width: 18, height: 18, color: "hsl(var(--primary))" }} />
-        <input ref={inputRef} type="text" inputMode="numeric" placeholder="000000000000" data-tut="barcode-input"
+        <input ref={inputRef} type="text" inputMode="search" placeholder={placeholder} data-tut="barcode-input"
           enterKeyHint="done"
+          autoCapitalize="characters"
           value={value} onChange={(e) => onChange(e.target.value)}
           onKeyDown={handleKeyDown}
           style={{

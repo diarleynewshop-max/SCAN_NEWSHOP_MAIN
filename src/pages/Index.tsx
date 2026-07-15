@@ -657,7 +657,7 @@ const Index = () => {
               )}
 
               <div>
-                <label style={S.label}>Codigo de Barras</label>
+                <label style={S.label}>Codigo de barras ou SKU</label>
                 {semEAN ? (
                   <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
                     <div style={{ flex: 1, height: 48, borderRadius: 10, border: "1.5px solid hsl(var(--warning) / 0.5)", background: "hsl(var(--warning) / 0.08)", display: "flex", alignItems: "center", padding: "0 14px", gap: 8 }}>

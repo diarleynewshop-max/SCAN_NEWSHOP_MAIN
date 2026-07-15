@@ -1419,7 +1419,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <div className="mt-4 space-y-3">
               <label className="block">
                 <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
-                  Codigo substituto
+                  Codigo/SKU substituto
                 </span>
                 <div className="mt-1 space-y-2">
                   <BarcodeInput
@@ -1690,7 +1690,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const buscarProdutoRecomendadoAtual = async () => {
     const codigo = codigoRecomendado.trim();
     if (!codigo) {
-      toast({ title: "Informe o codigo do substituto", variant: "destructive" });
+      toast({ title: "Informe o codigo/SKU do substituto", variant: "destructive" });
       return;
     }
 
@@ -1698,7 +1698,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     try {
       const produto = await buscarProdutoVarejoFacil(codigo, { empresa, flag });
       if (!produto) {
-        toast({ title: "Produto nao encontrado no ERP", variant: "destructive" });
+        toast({ title: "Produto nao encontrado no ERP", description: "Confira o codigo/SKU digitado.", variant: "destructive" });
         setProdutoRecomendado(null);
         return;
       }

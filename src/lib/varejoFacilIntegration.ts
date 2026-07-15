@@ -86,6 +86,21 @@ type ErpListResponse<T> = {
   items?: T[];
 };
 
+type CatalogoItemErp = {
+  produtoId?: number | string;
+  ean?: string;
+  descricao?: string;
+  varejo?: number;
+  atacado?: number;
+  foto?: string;
+};
+
+type CatalogoItemErpResponse = {
+  item?: CatalogoItemErp | null;
+  items?: CatalogoItemErp[];
+  error?: string;
+};
+
 const VAREJO_FACIL_HOSTS: Record<VarejoFacilEmpresa, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
@@ -185,6 +200,13 @@ const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpre
   return "NEWSHOP";
 };
 
+const getCatalogoItemContexto = (contexto: VarejoFacilLookupContext = {}) => {
+  const normalizada = (contexto.empresa ?? "").toUpperCase();
+  if (normalizada.includes("SOYE")) return { loja: "soye", lojaId: 1, erpBaseOverride: "soye" };
+  if (normalizada.includes("FACIL")) return { loja: "facil_atacado", lojaId: 1, erpBaseOverride: "facil_atacado" };
+  return { loja: "newshop", lojaId: 2, erpBaseOverride: "newshop" };
+};
+
 // Em producao, a consulta ERP volta para Vercel Functions (/api/*).
 // Em desenvolvimento, ainda permite usar Supabase Edge Functions como fallback.
 declare const __SUPABASE_URL_FALLBACK__: string;
@@ -231,10 +253,28 @@ const getSupabaseFunctionHeaders = (): Record<string, string> => {
   return headers;
 };
 
+const getCatalogoItemErpEndpoint = (): string => {
+  const functionsBase = getSupabaseFunctionsBase();
+  return functionsBase ? `${functionsBase}/catalogo-item-erp` : "";
+};
+
 const getHeadersForProxyEndpoint = (endpoint: string): Record<string, string> =>
   endpoint.includes("/functions/v1/")
     ? getSupabaseFunctionHeaders()
     : { Accept: "application/json" };
+
+const escolherCatalogoItem = (termo: string, itens: CatalogoItemErp[]): CatalogoItemErp | null => {
+  const normalizado = termo.trim().toLowerCase();
+  if (!normalizado) return null;
+
+  return (
+    itens.find((item) => String(item.ean ?? "").trim().toLowerCase() === normalizado) ||
+    itens.find((item) => String(item.produtoId ?? "").trim().toLowerCase() === normalizado) ||
+    itens.find((item) => String(item.descricao ?? "").trim().toLowerCase() === normalizado) ||
+    itens[0] ||
+    null
+  );
+};
 
 const fetchJson = async <T>(path: string, contexto: VarejoFacilLookupContext = {}) => {
   const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
@@ -259,6 +299,63 @@ const fetchJson = async <T>(path: string, contexto: VarejoFacilLookupContext = {
   }
 
   return (await response.json()) as T;
+};
+
+const buscarProdutoPorCatalogoItemErp = async (
+  termo: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<{ produto: ErpProduto; ean: string } | null> => {
+  const endpoint = getCatalogoItemErpEndpoint();
+  const codigo = termo.trim();
+  const anonKey = getSupabaseAnonKey();
+  if (!endpoint || !anonKey || !codigo) return null;
+
+  const response = await fetch(endpoint, {
+    method: "POST",
+    headers: {
+      ...getSupabaseFunctionHeaders(),
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      search: codigo,
+      exact: false,
+      limit: 8,
+      ...getCatalogoItemContexto(contexto),
+      lightweight: true,
+      includeIdentifiers: true,
+    }),
+  });
+
+  const data = (await response.json().catch(() => ({}))) as CatalogoItemErpResponse;
+
+  if (response.status === 503) {
+    throw new Error(data.error || "ERP temporariamente limitado. Tente novamente em instantes.");
+  }
+
+  if (!response.ok) {
+    console.warn("[VarejoFacil][SKU] Falha na rota catalogo-item-erp", {
+      status: response.status,
+      erro: data.error,
+    });
+    return null;
+  }
+
+  const selecionado = escolherCatalogoItem(codigo, data.items ?? (data.item ? [data.item] : []));
+  const produtoId = Number(selecionado?.produtoId);
+  if (!Number.isFinite(produtoId) || produtoId <= 0) return null;
+
+  let produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${produtoId}`, contexto).catch(() => null);
+  if (!produto?.id) {
+    produto = {
+      id: produtoId,
+      descricao: selecionado?.descricao,
+    };
+  }
+
+  return {
+    produto,
+    ean: selecionado?.ean?.trim() || codigo,
+  };
 };
 
 const normalizarPreco = (precoVenda?: number, precoOferta?: number) => {
@@ -464,7 +561,21 @@ const resolverProdutoErp = async (
   }
 
   if (!produto) {
-    produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/consulta/${encodeURIComponent(codigo)}`, contexto);
+    produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/consulta/${encodeURIComponent(codigo)}`, contexto).catch((err) => {
+      console.warn("[VarejoFacil][Produto] Consulta direta falhou, tentando SKU", {
+        codigo,
+        erro: err instanceof Error ? err.message : String(err),
+      });
+      return null;
+    });
+  }
+
+  if (!produto) {
+    const porSku = await buscarProdutoPorCatalogoItemErp(codigo, contexto);
+    if (porSku) {
+      produto = porSku.produto;
+      eanResolvido = porSku.ean;
+    }
   }
 
   if (!produto?.id) return null;
@@ -608,28 +719,9 @@ export const consultarPrecoProdutoVarejoFacil = async (
   const codigo = codigoBarras.trim();
   if (!codigo) return null;
 
-  const codigoAuxiliarEncontrado = await buscarCodigoAuxiliarPorEan(codigo, contexto);
-  let produto: ErpProduto | null = null;
-  let eanResolvido = codigo;
-
-  if (codigoAuxiliarEncontrado?.codigoAuxiliar.produtoId) {
-    produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/${codigoAuxiliarEncontrado.codigoAuxiliar.produtoId}`, contexto);
-    eanResolvido = codigoAuxiliarEncontrado.eanEncontrado;
-  }
-
-  if (!produto) {
-    const direto = await buscarProdutoPorCodigoBarras(codigo, contexto);
-    if (direto) {
-      produto = direto.produto;
-      eanResolvido = direto.ean;
-    }
-  }
-
-  if (!produto) {
-    produto = await fetchJson<ErpProduto>(`/v1/produto/produtos/consulta/${encodeURIComponent(codigo)}`, contexto);
-  }
-
-  if (!produto?.id) return null;
+  const resolvido = await resolverProdutoErp(codigo, contexto);
+  if (!resolvido) return null;
+  const { produto, eanResolvido } = resolvido;
 
   const [precos, secao, grupo] = await Promise.all([
     fetchJson<ErpPreco[]>(`/v1/produto/produtos/${produto.id}/precos`, contexto),

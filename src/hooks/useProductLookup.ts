@@ -48,7 +48,7 @@ export const useProductLookup = ({ enabled = true, empresa, flag }: UseProductLo
       return;
     }
 
-    console.log("Buscando produto com codigo:", barcode);
+    console.log("Buscando produto por codigo/SKU:", barcode);
     setLoading(true);
     setError(null);
 
@@ -73,7 +73,7 @@ export const useProductLookup = ({ enabled = true, empresa, flag }: UseProductLo
 
         setProductInfo(productData);
       } else {
-        setError("Produto nao encontrado na API Varejo Facil");
+        setError("Produto nao encontrado para esse codigo/SKU");
         setProductInfo(null);
       }
     } catch (err: any) {
