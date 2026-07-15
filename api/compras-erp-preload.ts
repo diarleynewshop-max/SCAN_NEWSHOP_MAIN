@@ -1,4 +1,4 @@
-import { schedules } from "@trigger.dev/sdk/v3";
+import type { VercelRequest, VercelResponse } from "@vercel/node";
 import { createClient } from "@supabase/supabase-js";
 
 type EmpresaCompras = "NEWSHOP" | "SF";
@@ -270,6 +270,20 @@ function precisaSincronizar(row: CompraRow): boolean {
   return false;
 }
 
+function setCors(res: VercelResponse) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Headers", "authorization, x-cron-secret, content-type");
+  res.setHeader("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
+}
+
+function hasCronAccess(req: VercelRequest): boolean {
+  const secret = process.env.CRON_SECRET || process.env.COMPRAS_ERP_PRELOAD_SECRET || "";
+  if (!secret) return true;
+  const authorization = Array.isArray(req.headers.authorization) ? req.headers.authorization[0] : req.headers.authorization;
+  const xSecret = Array.isArray(req.headers["x-cron-secret"]) ? req.headers["x-cron-secret"][0] : req.headers["x-cron-secret"];
+  return authorization === `Bearer ${secret}` || xSecret === secret;
+}
+
 async function tryLock(supabase: any): Promise<boolean> {
   const ttlMinutes = intEnv("COMPRAS_ERP_PRELOAD_LOCK_TTL_MINUTES", DEFAULT_LOCK_TTL_MINUTES);
   const { data, error } = await supabase.rpc("compras_erp_sync_try_lock", {
@@ -280,100 +294,112 @@ async function tryLock(supabase: any): Promise<boolean> {
   return data === true;
 }
 
-export const comprasErpPreload = schedules.task({
-  id: "compras-erp-preload",
-  cron: { pattern: "*/10 * * * *", timezone: "America/Sao_Paulo" },
-  maxDuration: 300,
-  run: async () => {
-    if (process.env.COMPRAS_ERP_PRELOAD_ENABLED === "false") {
-      return { skipped: true, reason: "COMPRAS_ERP_PRELOAD_ENABLED=false" };
-    }
+async function runComprasErpPreload() {
+  if (process.env.COMPRAS_ERP_PRELOAD_ENABLED === "false") {
+    return { skipped: true, reason: "COMPRAS_ERP_PRELOAD_ENABLED=false" };
+  }
 
-    const supabaseUrl = process.env.SUPABASE_URL ?? "";
-    const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
-    if (!supabaseUrl || !supabaseKey) {
-      return { skipped: true, reason: "SUPABASE_URL/SERVICE_ROLE ausente" };
-    }
+  const supabaseUrl = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const supabaseKey = process.env.SUPABASE_SERVICE_ROLE_KEY ?? "";
+  if (!supabaseUrl || !supabaseKey) {
+    return { skipped: true, reason: "SUPABASE_URL/SERVICE_ROLE ausente" };
+  }
 
-    const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } }) as any;
-    const locked = await tryLock(supabase);
-    if (!locked) return { skipped: true, reason: "job ja esta rodando" };
+  const supabase = createClient(supabaseUrl, supabaseKey, { auth: { persistSession: false } }) as any;
+  const locked = await tryLock(supabase);
+  if (!locked) return { skipped: true, reason: "job ja esta rodando" };
 
-    const maxItems = intEnv("COMPRAS_ERP_PRELOAD_MAX_ITEMS", DEFAULT_MAX_ITEMS_PER_RUN);
-    const scanLimit = intEnv("COMPRAS_ERP_PRELOAD_SCAN_LIMIT", DEFAULT_SCAN_LIMIT_PER_EMPRESA);
-    const delayMs = intEnv("COMPRAS_ERP_PRELOAD_DELAY_MS", DEFAULT_DELAY_MS);
-    const empresas: EmpresaCompras[] = ["NEWSHOP", "SF"];
-    const candidatos: CompraRow[] = [];
+  const maxItems = intEnv("COMPRAS_ERP_PRELOAD_MAX_ITEMS", DEFAULT_MAX_ITEMS_PER_RUN);
+  const scanLimit = intEnv("COMPRAS_ERP_PRELOAD_SCAN_LIMIT", DEFAULT_SCAN_LIMIT_PER_EMPRESA);
+  const delayMs = intEnv("COMPRAS_ERP_PRELOAD_DELAY_MS", DEFAULT_DELAY_MS);
+  const empresas: EmpresaCompras[] = ["NEWSHOP", "SF"];
+  const candidatos: CompraRow[] = [];
 
-    for (const empresa of empresas) {
-      const { data, error } = await supabase
-        .from("compras")
-        .select("id,empresa,produto_key,codigo,sku,descricao,secao,foto_url,updated_at,erp_sync_at")
-        .eq("empresa", empresa)
-        .order("erp_sync_at", { ascending: true, nullsFirst: true })
-        .limit(scanLimit);
-      if (error) throw error;
-      candidatos.push(...((data ?? []) as CompraRow[]).filter(precisaSincronizar));
-    }
+  for (const empresa of empresas) {
+    const { data, error } = await supabase
+      .from("compras")
+      .select("id,empresa,produto_key,codigo,sku,descricao,secao,foto_url,updated_at,erp_sync_at")
+      .eq("empresa", empresa)
+      .order("erp_sync_at", { ascending: true, nullsFirst: true })
+      .limit(scanLimit);
+    if (error) throw error;
+    candidatos.push(...((data ?? []) as CompraRow[]).filter(precisaSincronizar));
+  }
 
-    const itens = candidatos.slice(0, maxItems);
-    const resultado = { total: itens.length, sucesso: 0, falha: 0, pulado: candidatos.length - itens.length, detalhes: [] as Array<Record<string, unknown>> };
+  const itens = candidatos.slice(0, maxItems);
+  const resultado = { total: itens.length, sucesso: 0, falha: 0, pulado: candidatos.length - itens.length, detalhes: [] as Array<Record<string, unknown>> };
 
-    for (const item of itens) {
-      const empresaErp = erpEmpresa(item.empresa);
-      const baseUrl = apiBaseUrl(empresaErp);
-      const origin = originFromApi(baseUrl);
+  for (const item of itens) {
+    const empresaErp = erpEmpresa(item.empresa);
+    const baseUrl = apiBaseUrl(empresaErp);
+    const origin = originFromApi(baseUrl);
 
-      try {
-        const token = await getErpToken(empresaErp, baseUrl);
-        let encontrado = await buscarProdutoErp(baseUrl, token, item.codigo);
-        if (!encontrado?.produto?.id && item.sku) encontrado = await buscarProdutoErp(baseUrl, token, item.sku);
-        if (!encontrado?.produto?.id) throw new Error("Produto nao encontrado no ERP");
+    try {
+      const token = await getErpToken(empresaErp, baseUrl);
+      let encontrado = await buscarProdutoErp(baseUrl, token, item.codigo);
+      if (!encontrado?.produto?.id && item.sku) encontrado = await buscarProdutoErp(baseUrl, token, item.sku);
+      if (!encontrado?.produto?.id) throw new Error("Produto nao encontrado no ERP");
 
-        const produto = encontrado.produto;
-        const descricao = produto.descricao?.trim() || produto.codigoInterno?.trim() || null;
-        const secao = await buscarSecao(baseUrl, token, produto.secaoId);
-        let fotoUrl: string | null = null;
+      const produto = encontrado.produto;
+      const descricao = produto.descricao?.trim() || produto.codigoInterno?.trim() || null;
+      const secao = await buscarSecao(baseUrl, token, produto.secaoId);
+      let fotoUrl: string | null = null;
 
-        if (!item.foto_url) {
-          const imagem = await baixarImagemErp(origin, token, String(produto.id), extrairImagemProduto(produto));
-          if (imagem) {
-            const path = safeStoragePath(item.empresa, item.produto_key, item.codigo);
-            const upload = await supabase.storage.from(FOTO_BUCKET).upload(path, imagem.buffer, {
-              contentType: imagem.contentType,
-              upsert: true,
-            });
-            if (upload.error) throw upload.error;
-            fotoUrl = supabase.storage.from(FOTO_BUCKET).getPublicUrl(path).data.publicUrl;
-          }
+      if (!item.foto_url) {
+        const imagem = await baixarImagemErp(origin, token, String(produto.id), extrairImagemProduto(produto));
+        if (imagem) {
+          const path = safeStoragePath(item.empresa, item.produto_key, item.codigo);
+          const upload = await supabase.storage.from(FOTO_BUCKET).upload(path, imagem.buffer, {
+            contentType: imagem.contentType,
+            upsert: true,
+          });
+          if (upload.error) throw upload.error;
+          fotoUrl = supabase.storage.from(FOTO_BUCKET).getPublicUrl(path).data.publicUrl;
         }
-
-        const update: Record<string, unknown> = {
-          erp_sync_at: new Date().toISOString(),
-          erp_sync_error: null,
-        };
-        if (descricao) update.descricao = descricao;
-        if (secao) update.secao = secao;
-        if (fotoUrl) update.foto_url = fotoUrl;
-
-        const { error } = await supabase.from("compras").update(update).eq("id", item.id);
-        if (error) throw error;
-
-        resultado.sucesso += 1;
-        resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp });
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        await supabase
-          .from("compras")
-          .update({ erp_sync_at: new Date().toISOString(), erp_sync_error: message.slice(0, 500) })
-          .eq("id", item.id);
-        resultado.falha += 1;
-        resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: false, erro: message, base: empresaErp });
       }
 
-      await sleep(delayMs);
+      const update: Record<string, unknown> = {
+        erp_sync_at: new Date().toISOString(),
+        erp_sync_error: null,
+      };
+      if (descricao) update.descricao = descricao;
+      if (secao) update.secao = secao;
+      if (fotoUrl) update.foto_url = fotoUrl;
+
+      const { error } = await supabase.from("compras").update(update).eq("id", item.id);
+      if (error) throw error;
+
+      resultado.sucesso += 1;
+      resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: true, base: empresaErp });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      await supabase
+        .from("compras")
+        .update({ erp_sync_at: new Date().toISOString(), erp_sync_error: message.slice(0, 500) })
+        .eq("id", item.id);
+      resultado.falha += 1;
+      resultado.detalhes.push({ id: item.id, empresa: item.empresa, codigo: item.codigo, ok: false, erro: message, base: empresaErp });
     }
 
-    return resultado;
-  },
-});
+    await sleep(delayMs);
+  }
+
+  return resultado;
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  setCors(res);
+  if (req.method === "OPTIONS") return res.status(204).end();
+  if (req.method !== "GET" && req.method !== "POST") {
+    return res.status(405).json({ error: "Metodo nao permitido" });
+  }
+  if (!hasCronAccess(req)) return res.status(401).json({ error: "Nao autorizado" });
+
+  try {
+    const result = await runComprasErpPreload();
+    return res.status(200).json(result);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    return res.status(500).json({ error: message });
+  }
+}
