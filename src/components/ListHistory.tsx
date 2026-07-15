@@ -284,7 +284,9 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
         flag:        listaParaEnviar.flag ?? "loja",
         empresa:     listaParaEnviar.empresa ?? "",
         pessoa:      listaParaEnviar.person,
-        titulo:      listaParaEnviar.title,
+        titulo:      [listaParaEnviar.person?.trim(), listaParaEnviar.title?.trim()]
+          .filter(Boolean)
+          .join(" - ") || listaParaEnviar.title,
         totalItens:  listaParaEnviar.products.length,
         dataCriacao: listaParaEnviar.createdAt.toISOString(),
         produtos:    hydratedProducts.map(({ product, photoDataUrl }) => ({
