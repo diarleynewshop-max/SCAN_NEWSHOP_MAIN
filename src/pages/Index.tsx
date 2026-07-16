@@ -10,6 +10,7 @@ import { useToast } from "@/hooks/use-toast";
 import { getLightModeEnabled } from "@/lib/lightMode";
 import { getHistoricoComprasEnabled } from "@/lib/historicoCompras";
 import { consultarHistoricoItem } from "@/lib/historicoItem";
+import { hasPermission } from "@/lib/accessControl";
 interface HistoricoItemOcorrencia {
   data: string;
   dataFormatada: string;
@@ -144,7 +145,11 @@ const Index = () => {
   const [photo, setPhoto] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
   const [view, setView] = useState<"scan" | "list" | "conference">(
-    initialTab === "conference" ? "conference" : initialTab === "list" ? "list" : "scan"
+    initialTab === "conference" && hasPermission(currentLogin, "conferencia")
+      ? "conference"
+      : initialTab === "list" && hasPermission(currentLogin, "lista")
+        ? "list"
+        : "scan"
   );
   const [showScanner, setShowScanner] = useState(false);
   const [showProductInfo, setShowProductInfo] = useState(false);
@@ -458,12 +463,12 @@ const Index = () => {
     setView(key);
   };
 
-  const extraTab = currentLogin?.role === "compras" ? [{ key: "compras" as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
+  const extraTab = hasPermission(currentLogin, "compras") ? [{ key: "compras" as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
   const tabs = [
-    { key: "consultaPreco" as const, label: "Consulta", Icon: BadgeDollarSign },
-    { key: "scan" as const, label: "Escanear", Icon: ScanBarcode },
-    { key: "list" as const, label: "Lista", Icon: ClipboardList },
-    { key: "conference" as const, label: "Conferencia", Icon: GitCompare },
+    ...(hasPermission(currentLogin, "consulta_preco") ? [{ key: "consultaPreco" as const, label: "Consulta", Icon: BadgeDollarSign }] : []),
+    ...(hasPermission(currentLogin, "scanner") ? [{ key: "scan" as const, label: "Escanear", Icon: ScanBarcode }] : []),
+    ...(hasPermission(currentLogin, "lista") ? [{ key: "list" as const, label: "Lista", Icon: ClipboardList }] : []),
+    ...(hasPermission(currentLogin, "conferencia") ? [{ key: "conference" as const, label: "Conferencia", Icon: GitCompare }] : []),
     ...extraTab,
   ];
 

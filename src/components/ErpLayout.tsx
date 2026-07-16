@@ -7,7 +7,6 @@ import {
   MessageSquare, Bell,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
-import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import type { LoginData } from "@/hooks/useAuth";
 
 interface NavItemDef {
@@ -86,8 +85,8 @@ export function ErpLayout({
   });
 
   const currentPath = location.pathname + location.search;
-  const isPriv = !!loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']);
-  const isAdm = !!loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']);
+  const isPriv = !!loginSalvo?.role && (loginSalvo.role === "compras" || loginSalvo.role === "admin" || loginSalvo.role === "super");
+  const isAdm = !!loginSalvo?.role && (loginSalvo.role === "admin" || loginSalvo.role === "super");
   const flag = loginSalvo?.flag ?? 'loja';
 
   const groups: { key: string; label: string; items: NavItemDef[] }[] = [

@@ -52,30 +52,30 @@ const App = () => (
             {/* Home gerencia o próprio DesktopShell (tem dashboard + modais embutidos) */}
             <Route path="/login" element={<Home loginOnly />} />
             <Route path="/" element={
-              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+              <ProtectedRoute requiredPermission="scanner">
                 <Home />
               </ProtectedRoute>
             } />
 
             <Route path="/scanner" element={
-              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+              <ProtectedRoute requiredPermission="consulta_preco">
                 <DesktopShell pageTitle="Scanner"><Index /></DesktopShell>
               </ProtectedRoute>
             } />
             <Route path="/consulta-preco" element={
-              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+              <ProtectedRoute requiredPermission="fazer_pedido">
                 <DesktopShell pageTitle="Consulta Preço"><ConsultaPreco /></DesktopShell>
               </ProtectedRoute>
             } />
 
             <Route path="/meus-pedidos" element={
-              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+              <ProtectedRoute requiredPermission="chat">
                 <DesktopShell pageTitle="Meus Pedidos"><MeusPedidos /></DesktopShell>
               </ProtectedRoute>
             } />
 
             <Route path="/chat" element={
-              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+              <ProtectedRoute requiredPermission="notificacoes">
                 <DesktopShell pageTitle="Chat"><Chat /></DesktopShell>
               </ProtectedRoute>
             } />
@@ -88,31 +88,31 @@ const App = () => (
 
             {/* Rotas protegidas por role */}
             <Route path="/analytics" element={
-              <ProtectedRoute requiredRole={['admin', 'super']}>
+              <ProtectedRoute requiredPermission="analytics">
                 <DesktopShell pageTitle="Analytics"><Analytics /></DesktopShell>
               </ProtectedRoute>
             } />
 
             <Route path="/compras" element={
-              <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
+              <ProtectedRoute requiredPermission="compras">
                 <DesktopShell pageTitle="Compras"><Compras /></DesktopShell>
               </ProtectedRoute>
             } />
 
             <Route path="/sugestao-cd" element={
-              <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
+              <ProtectedRoute requiredPermission="sugestao_cd">
                 <DesktopShell pageTitle="Sugestao do CD"><SugestaoCd /></DesktopShell>
               </ProtectedRoute>
             } />
 
             <Route path="/dashboard" element={
-              <ProtectedRoute requiredRole={['compras', 'admin', 'super']}>
+              <ProtectedRoute requiredPermission="dashboard">
                 <DesktopShell pageTitle="Dashboard"><Dashboard /></DesktopShell>
               </ProtectedRoute>
             } />
 
             <Route path="/usuarios" element={
-              <ProtectedRoute requiredRole={['admin', 'super']}>
+              <ProtectedRoute requiredPermission="usuarios">
                 <DesktopShell pageTitle="Usuarios"><Usuarios /></DesktopShell>
               </ProtectedRoute>
             } />

@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from "react";
 import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLoginContext } from "@/hooks/useAuth";
 import { alterarMinhaSenha, LIMITE_FOTO_PERFIL_BYTES, salvarMinhaFotoPerfil } from "@/lib/usuarios";
 import CriarContaModal from "@/components/CriarContaModal";
-import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
+import { hasPermission, type AccessPermission } from "@/lib/accessControl";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
 import { HISTORICO_COMPRAS_KEY, getHistoricoComprasEnabled } from "@/lib/historicoCompras";
 import { useToast } from "@/hooks/use-toast";
@@ -33,27 +33,27 @@ function getStorageSize(): { kb: number; hasData: boolean; listCount: number; ha
 }
 
 // Menu base (sempre visível)
-const baseMenuItems = [
-  { Icon: ScanBarcode,  label: "Escanear",    description: "Leia códigos e registre produtos",    path: "/scanner",                  accent: "hsl(var(--primary))"     },
-  { Icon: BadgeDollarSign, label: "Consulta Preço", description: "Consulte varejo, atacado e grupo", path: "/consulta-preco", accent: "hsl(var(--warning))" },
-  { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))"     },
-  { Icon: Package,      label: "Meus Pedidos", description: "Acompanhe o status dos seus pedidos",  path: "/meus-pedidos",              accent: "hsl(var(--indigo))"      },
-  { Icon: Bell,         label: "Notificações", description: "Trocas, avisos e mensagens",          path: "/notificacoes",              accent: "hsl(var(--warning))"     },
-  { Icon: MessageSquare, label: "Chat",        description: "Converse com a equipe",               path: "/chat",                      accent: "hsl(var(--success))"     },
-  { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))" },
+const baseMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string | null; accent: string; permission?: AccessPermission }> = [
+  { Icon: ScanBarcode,  label: "Escanear",    description: "Leia códigos e registre produtos",    path: "/scanner",                  accent: "hsl(var(--primary))", permission: "scanner" },
+  { Icon: BadgeDollarSign, label: "Consulta Preço", description: "Consulte varejo, atacado e grupo", path: "/consulta-preco", accent: "hsl(var(--warning))", permission: "consulta_preco" },
+  { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))", permission: "lista" },
+  { Icon: Package,      label: "Meus Pedidos", description: "Acompanhe o status dos seus pedidos",  path: "/meus-pedidos",              accent: "hsl(var(--indigo))", permission: "fazer_pedido" },
+  { Icon: Bell,         label: "Notificações", description: "Trocas, avisos e mensagens",          path: "/notificacoes",              accent: "hsl(var(--warning))", permission: "notificacoes" },
+  { Icon: MessageSquare, label: "Chat",        description: "Converse com a equipe",               path: "/chat",                      accent: "hsl(var(--success))", permission: "chat" },
+  { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))", permission: "conferencia" },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },
   { Icon: Settings,     label: "Configuração", description: "Tema, layout e Modo Leve", path: null, accent: "hsl(var(--indigo))" },
 ];
 
 // Menu para compras (compras, admin, super)
-const comprasMenuItems = [
-  { Icon: ShoppingCart, label: "Compras",     description: "Gestão de reposição e itens faltantes", path: "/compras", accent: "hsl(var(--indigo))" },
-  { Icon: Boxes,        label: "Sugestao do CD", description: "Itens do CD para sugerir envio para a loja", path: "/sugestao-cd", accent: "hsl(var(--warning))" },
+const comprasMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string; accent: string; permission: AccessPermission }> = [
+  { Icon: ShoppingCart, label: "Compras",     description: "Gestão de reposição e itens faltantes", path: "/compras", accent: "hsl(var(--indigo))", permission: "compras" },
+  { Icon: Boxes,        label: "Sugestao do CD", description: "Itens do CD para sugerir envio para a loja", path: "/sugestao-cd", accent: "hsl(var(--warning))", permission: "sugestao_cd" },
 ];
 
 // Menu para analytics (admin, super)
-const analyticsMenuItems = [
-  { Icon: BarChart3,    label: "Dashboard",   description: "Relatórios e gráficos de conferência",  path: "/dashboard", accent: "hsl(var(--violet))" },
+const analyticsMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string; accent: string; permission: AccessPermission }> = [
+  { Icon: BarChart3,    label: "Dashboard",   description: "Relatórios e gráficos de conferência",  path: "/dashboard", accent: "hsl(var(--violet))", permission: "dashboard" },
 ];
 
 // Menu exclusivo admin (admin, super) — vazio ate a proxima ferramenta admin-only ser criada.
@@ -625,14 +625,13 @@ const Home = ({ loginOnly = false }: HomeProps) => {
         }}>
           {/* Cards base — filtrados por flag para operadores */}
           {baseMenuItems
-            .filter(({ label }) => {
-              const isPrivileged = loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']);
-              if (isPrivileged) return true;
+            .filter(({ label, permission }) => {
+              if (!permission) return true;
+              if (!hasPermission(loginSalvo, permission)) return false;
               const userFlag = loginSalvo?.flag ?? 'loja';
-              if (label === 'Escanear' || label === 'Lista') return true;
-              if (label === 'Conferência') return userFlag === 'cd';
-              if (label === 'Meus Pedidos') return userFlag === 'loja';
-              return true; // Consulta Preço, Perfil, Configuração sempre visíveis
+              if (label === 'Conferência') return userFlag === 'cd' || hasPermission(loginSalvo, "compras");
+              if (label === 'Meus Pedidos') return userFlag === 'loja' || hasPermission(loginSalvo, "compras");
+              return true;
             })
             .map(({ Icon, label, description, path, accent }) => (
             <div key={label}>
@@ -650,8 +649,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
           ))}
           
           {/* Cards para compras (se tiver acesso) */}
-          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
-            comprasMenuItems.map(({ Icon, label, description, path, accent }) => (
+          {comprasMenuItems.filter((item) => hasPermission(loginSalvo, item.permission)).map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard 
                   Icon={Icon}
@@ -664,12 +662,10 @@ const Home = ({ loginOnly = false }: HomeProps) => {
                   setMostrarConfiguracoes={setMostrarConfiguracoes}
                 />
               </div>
-            ))
-          )}
+            ))}
           
           {/* Cards para analytics (se tiver acesso) */}
-          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['compras', 'admin', 'super']) && (
-            analyticsMenuItems.map(({ Icon, label, description, path, accent }) => (
+          {analyticsMenuItems.filter((item) => hasPermission(loginSalvo, item.permission)).map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard
                   Icon={Icon}
@@ -682,11 +678,10 @@ const Home = ({ loginOnly = false }: HomeProps) => {
                   setMostrarConfiguracoes={setMostrarConfiguracoes}
                 />
               </div>
-            ))
-          )}
+            ))}
 
           {/* Cards exclusivos admin */}
-          {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
+          {hasPermission(loginSalvo, "usuarios") && (
             adminMenuItems.map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard
@@ -1480,7 +1475,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
               </div>
 
 
-              {loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ['admin', 'super']) && (
+              {hasPermission(loginSalvo, "usuarios") && (
                 <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
                   <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 10 }}>Gestao de Usuarios</p>
                   <button

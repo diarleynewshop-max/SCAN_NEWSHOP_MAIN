@@ -1,10 +1,12 @@
 import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import type { UserRole } from "@/hooks/useAuth";
+import { hasAnyPermission, hasPermission, type AccessPermission } from "@/lib/accessControl";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
-  requiredRole: UserRole | UserRole[];
+  requiredRole?: UserRole | UserRole[];
+  requiredPermission?: AccessPermission | AccessPermission[];
   fallbackPath?: string;
 }
 
@@ -18,6 +20,7 @@ interface ProtectedRouteProps {
 export function ProtectedRoute({ 
   children, 
   requiredRole, 
+  requiredPermission,
   fallbackPath = "/" 
 }: ProtectedRouteProps) {
   const { loginSalvo } = useAuth();
@@ -28,9 +31,16 @@ export function ProtectedRoute({
   }
   
   // Verifica se o usuário tem o role necessário
-  const hasAccess = Array.isArray(requiredRole) 
-    ? requiredRole.includes(loginSalvo.role)
-    : loginSalvo.role === requiredRole;
+  let hasAccess = true;
+  if (requiredPermission) {
+    hasAccess = Array.isArray(requiredPermission)
+      ? hasAnyPermission(loginSalvo, requiredPermission)
+      : hasPermission(loginSalvo, requiredPermission);
+  } else if (requiredRole) {
+    hasAccess = Array.isArray(requiredRole)
+      ? requiredRole.includes(loginSalvo.role)
+      : loginSalvo.role === requiredRole;
+  }
     
   // Se não tiver acesso, redireciona
   if (!hasAccess) {

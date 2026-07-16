@@ -1,5 +1,6 @@
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 import type { Empresa, LoginFlag, UserRole } from "@/hooks/useAuth";
+import { normalizarPermissoes, type AccessPermissionMap } from "@/lib/accessControl";
 
 export interface UsuarioAdmin {
   id: string;
@@ -11,6 +12,8 @@ export interface UsuarioAdmin {
   secoesCompras: string[];
   secaoPadrao?: string;
   fotoUrl?: string;
+  grupoAcessoId?: string;
+  grupoAcessoNome?: string;
   ativo: boolean;
   createdAt: string;
   updatedAt: string;
@@ -30,6 +33,25 @@ export interface UsuarioFormPayload {
   flagDefault: LoginFlag;
   secoesCompras: string[];
   secaoPadrao: string;
+  grupoAcessoId: string;
+  ativo: boolean;
+}
+
+export interface GrupoAcesso {
+  id: string;
+  nome: string;
+  descricao?: string;
+  permissoes: AccessPermissionMap;
+  ativo: boolean;
+  usuariosVinculados: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface GrupoAcessoPayload {
+  nome: string;
+  descricao: string;
+  permissoes: AccessPermissionMap;
   ativo: boolean;
 }
 
@@ -43,7 +65,20 @@ type UsuarioRpcRow = {
   secoes_compras?: string[];
   secao_padrao?: string | null;
   foto_url?: string | null;
+  grupo_acesso_id?: string | null;
+  grupo_acesso_nome?: string | null;
   ativo?: boolean;
+  created_at?: string;
+  updated_at?: string;
+};
+
+type GrupoAcessoRpcRow = {
+  id?: string;
+  nome?: string;
+  descricao?: string | null;
+  permissoes?: unknown;
+  ativo?: boolean;
+  usuarios_vinculados?: number;
   created_at?: string;
   updated_at?: string;
 };
@@ -92,7 +127,22 @@ function mapUsuario(row: UsuarioRpcRow): UsuarioAdmin {
     secoesCompras: normalizarArray(row.secoes_compras),
     secaoPadrao: normalizarTextoOpcional(row.secao_padrao),
     fotoUrl: normalizarTextoOpcional(row.foto_url),
+    grupoAcessoId: normalizarTextoOpcional(row.grupo_acesso_id),
+    grupoAcessoNome: normalizarTextoOpcional(row.grupo_acesso_nome),
     ativo: row.ativo !== false,
+    createdAt: String(row.created_at ?? ""),
+    updatedAt: String(row.updated_at ?? ""),
+  };
+}
+
+function mapGrupoAcesso(row: GrupoAcessoRpcRow): GrupoAcesso {
+  return {
+    id: String(row.id ?? ""),
+    nome: String(row.nome ?? ""),
+    descricao: normalizarTextoOpcional(row.descricao),
+    permissoes: normalizarPermissoes(row.permissoes),
+    ativo: row.ativo !== false,
+    usuariosVinculados: Number(row.usuarios_vinculados ?? 0),
     createdAt: String(row.created_at ?? ""),
     updatedAt: String(row.updated_at ?? ""),
   };
@@ -124,6 +174,7 @@ export async function criarUsuario(actor: ActorCredenciais, payload: UsuarioForm
     p_flag_default: payload.flagDefault,
     p_secoes: payload.secoesCompras,
     p_secao_padrao: payload.secaoPadrao,
+    p_grupo_acesso_id: payload.grupoAcessoId || null,
   });
   if (error) throw error;
   return String(data ?? "");
@@ -140,6 +191,40 @@ export async function atualizarUsuario(actor: ActorCredenciais, id: string, payl
     p_flag_default: payload.flagDefault,
     p_secoes: payload.secoesCompras,
     p_secao_padrao: payload.secaoPadrao,
+    p_ativo: payload.ativo,
+    p_grupo_acesso_id: payload.grupoAcessoId || null,
+  });
+  if (error) throw error;
+}
+
+export async function listarGruposAcesso(actor: ActorCredenciais): Promise<GrupoAcesso[]> {
+  assertSupabase();
+  const { data, error } = await supabase.rpc("admin_listar_grupos_acesso", actorParams(actor));
+  if (error) throw error;
+  return ((data ?? []) as GrupoAcessoRpcRow[]).map(mapGrupoAcesso);
+}
+
+export async function criarGrupoAcesso(actor: ActorCredenciais, payload: GrupoAcessoPayload): Promise<string> {
+  assertSupabase();
+  const { data, error } = await supabase.rpc("admin_criar_grupo_acesso", {
+    ...actorParams(actor),
+    p_nome: payload.nome,
+    p_descricao: payload.descricao,
+    p_permissoes: payload.permissoes,
+    p_ativo: payload.ativo,
+  });
+  if (error) throw error;
+  return String(data ?? "");
+}
+
+export async function atualizarGrupoAcesso(actor: ActorCredenciais, id: string, payload: GrupoAcessoPayload): Promise<void> {
+  assertSupabase();
+  const { error } = await supabase.rpc("admin_atualizar_grupo_acesso", {
+    ...actorParams(actor),
+    p_id: id,
+    p_nome: payload.nome,
+    p_descricao: payload.descricao,
+    p_permissoes: payload.permissoes,
     p_ativo: payload.ativo,
   });
   if (error) throw error;

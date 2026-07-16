@@ -1,6 +1,7 @@
 import { useState, useEffect } from "react";
 import { applyCompanyTheme } from "@/lib/companyTheme";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
+import { normalizarPermissoes, type AccessPermissionMap } from "@/lib/accessControl";
 
 export type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
 export type LoginFlag = "loja" | "cd";
@@ -18,6 +19,9 @@ export interface LoginData {
   login?: string;
   empresasPermitidas?: Empresa[];
   fotoUrl?: string;
+  grupoAcessoId?: string;
+  grupoAcessoNome?: string;
+  permissoes?: AccessPermissionMap;
 }
 
 export interface UsuarioLoginContext {
@@ -30,6 +34,9 @@ export interface UsuarioLoginContext {
   secoesCompras: string[];
   secaoPadrao?: string;
   fotoUrl?: string;
+  grupoAcessoId?: string;
+  grupoAcessoNome?: string;
+  permissoes?: AccessPermissionMap;
 }
 
 export interface LoginRequest {
@@ -60,6 +67,9 @@ type LoginUsuarioRow = {
   secoes_compras?: string[];
   secao_padrao?: string | null;
   foto_url?: string | null;
+  grupo_acesso_id?: string | null;
+  grupo_acesso_nome?: string | null;
+  permissoes?: unknown;
 };
 
 const normalizarEmpresa = (value: unknown): Empresa | null => {
@@ -107,6 +117,9 @@ function montarContextoUsuario(row: LoginUsuarioRow): UsuarioLoginContext | null
     secoesCompras: toStringArray(row.secoes_compras),
     secaoPadrao: normalizarTextoOpcional(row.secao_padrao),
     fotoUrl: normalizarTextoOpcional(row.foto_url),
+    grupoAcessoId: normalizarTextoOpcional(row.grupo_acesso_id),
+    grupoAcessoNome: normalizarTextoOpcional(row.grupo_acesso_nome),
+    permissoes: normalizarPermissoes(row.permissoes),
   };
 }
 
@@ -143,6 +156,9 @@ export function obterLoginSalvo(): LoginData | null {
       login: dados.login ? String(dados.login) : undefined,
       empresasPermitidas: empresasPermitidas.length > 0 ? empresasPermitidas : [empresa],
       fotoUrl: normalizarTextoOpcional(dados.fotoUrl),
+      grupoAcessoId: normalizarTextoOpcional(dados.grupoAcessoId),
+      grupoAcessoNome: normalizarTextoOpcional(dados.grupoAcessoNome),
+      permissoes: normalizarPermissoes(dados.permissoes),
     };
   } catch {
     return null;
@@ -234,6 +250,9 @@ export function useAuth() {
       login: contexto.login,
       empresasPermitidas: contexto.empresasPermitidas,
       fotoUrl: contexto.fotoUrl,
+      grupoAcessoId: contexto.grupoAcessoId,
+      grupoAcessoNome: contexto.grupoAcessoNome,
+      permissoes: contexto.permissoes,
     };
 
     salvarLogin(dados);
