@@ -25,6 +25,8 @@ import {
 import {
   gerarPdfPedidoFornecedor,
   baixarPdfNoNavegador,
+  gerarExcelPedidoFornecedor,
+  baixarExcelNoNavegador,
   type ItemPedidoPdf,
 } from "@/lib/pedidoFornecedorPdf";
 import {
@@ -60,6 +62,11 @@ type FotoFonte = "SUPABASE" | "ERP" | "CLICKUP_TASK" | "CLICKUP_LIST";
 type FotoOpcao = {
   src: string;
   fonte: FotoFonte;
+};
+
+type PedidoMeta = {
+  quantidadePedido: string;
+  unidadesPorCaixa: string;
 };
 
 type StatusFiltro = "todos" | "todo" | "produto_ruim" | "produto_bom" | "fazer_pedido";
@@ -324,6 +331,19 @@ function getImagemErroKey(produtoId: string, fonte: FotoFonte, foto: string | nu
   return `${produtoId}:${fonte}:${foto || "sem-foto"}`;
 }
 
+function parsePedidoNumero(valor: string): number | null {
+  const limpo = valor.trim().replace(",", ".");
+  if (!limpo) return null;
+  const numero = Number(limpo);
+  if (!Number.isFinite(numero) || numero <= 0) return null;
+  return numero;
+}
+
+function calcularCaixasPedido(quantidadePedido: number | null, unidadesPorCaixa: number | null): number | null {
+  if (!quantidadePedido || !unidadesPorCaixa) return null;
+  return Math.ceil(quantidadePedido / unidadesPorCaixa);
+}
+
 function montarOpcoesFoto(
   produto: ProdutoComprar,
   produtoErp: VarejoFacilProduct | null | undefined,
@@ -380,6 +400,7 @@ const Compras = () => {
   const [marcasFornecedor, setMarcasFornecedor] = useState<MarcaFornecedor[]>([]);
   const [vinculosMarcaFornecedor, setVinculosMarcaFornecedor] = useState<MarcaFornecedorVinculo[]>([]);
   const [itensSelecionadosPedido, setItensSelecionadosPedido] = useState<Set<string>>(new Set());
+  const [pedidoMetaPorProduto, setPedidoMetaPorProduto] = useState<Record<string, PedidoMeta>>({});
   const [gerandoPedidos, setGerandoPedidos] = useState(false);
   const [baixandoPdfPedido, setBaixandoPdfPedido] = useState<string | null>(null);
   const [analiseAberta, setAnaliseAberta] = useState(false);
@@ -534,21 +555,68 @@ const Compras = () => {
     }
   };
 
-  const toggleSelecaoPedido = (produtoId: string) => {
+  const toggleSelecaoPedido = (produto: ProdutoComprar) => {
     setItensSelecionadosPedido((prev) => {
       const next = new Set(prev);
-      if (next.has(produtoId)) next.delete(produtoId);
-      else next.add(produtoId);
+      if (next.has(produto.id)) {
+        next.delete(produto.id);
+        setPedidoMetaPorProduto((metaAtual) => {
+          const nextMeta = { ...metaAtual };
+          delete nextMeta[produto.id];
+          return nextMeta;
+        });
+      } else {
+        next.add(produto.id);
+        setPedidoMetaPorProduto((metaAtual) => ({
+          ...metaAtual,
+          [produto.id]: metaAtual[produto.id] ?? {
+            quantidadePedido: String(Math.max(1, produto.vezesPedido || 1)),
+            unidadesPorCaixa: "",
+          },
+        }));
+      }
       return next;
     });
   };
 
+  const atualizarPedidoMeta = (produtoId: string, campo: keyof PedidoMeta, valor: string) => {
+    setPedidoMetaPorProduto((prev) => ({
+      ...prev,
+      [produtoId]: {
+        quantidadePedido: prev[produtoId]?.quantidadePedido ?? "",
+        unidadesPorCaixa: prev[produtoId]?.unidadesPorCaixa ?? "",
+        [campo]: valor,
+      },
+    }));
+  };
+
   const SEM_FORNECEDOR_KEY = "SEM_FORNECEDOR";
 
+  const produtosSelecionadosPedido = useMemo(() => (
+    produtos.filter((produto) => itensSelecionadosPedido.has(produto.id))
+  ), [itensSelecionadosPedido, produtos]);
+
+  const montarItemPedido = (produto: ProdutoComprar): ItemPedidoPdf => {
+    const produtoErp = produtosErp[produto.id];
+    const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
+    const meta = pedidoMetaPorProduto[produto.id];
+    const quantidadePedido = parsePedidoNumero(meta?.quantidadePedido ?? "");
+    const unidadesPorCaixa = parsePedidoNumero(meta?.unidadesPorCaixa ?? "");
+    return {
+      codigo: produto.codigo,
+      sku: produto.sku,
+      descricao: getDescricaoExibicao(produto, produtoErp),
+      foto: fotoSelecionada?.src ?? null,
+      secao: formatarSecao(produto.secao ?? produtoErp?.secao),
+      quantidadePedido,
+      unidadesPorCaixa,
+      caixasPedido: calcularCaixasPedido(quantidadePedido, unidadesPorCaixa),
+    };
+  };
+
   // Pra cada item selecionado: resolve o fornecedor PRINCIPAL no ERP, agrupa por
-  // fornecedor, gera 1 PDF (foto+codigo+descricao) por grupo, baixa no navegador
-  // e marca pedido_feito no Supabase.
-  const gerarPedidosPorFornecedor = async () => {
+  // fornecedor, gera 1 arquivo por grupo e marca pedido_feito no Supabase.
+  const exportarPedidosPorFornecedor = async (formato: "pdf" | "excel") => {
     const idsSelecionados = Array.from(itensSelecionadosPedido);
     if (idsSelecionados.length === 0) return;
 
@@ -596,24 +664,21 @@ const Compras = () => {
 
       let totalProcessado = 0;
       const erros: string[] = [];
+      let totalArquivos = 0;
 
       for (const [fornecedorId, grupo] of grupos) {
-        const itensPdf: ItemPedidoPdf[] = grupo.itens.map((produto) => {
-          const produtoErp = produtosErp[produto.id];
-          const fotoSelecionada = selecionarFotoProduto(produto, produtoErp, fotosClickUp, imagemComErro);
-          return {
-            codigo: produto.codigo,
-            descricao: getDescricaoExibicao(produto, produtoErp),
-            foto: fotoSelecionada?.src ?? null,
-          };
-        });
-
-        let pdf;
+        const itensPedido: ItemPedidoPdf[] = grupo.itens.map(montarItemPedido);
         try {
-          pdf = await gerarPdfPedidoFornecedor(fornecedorId, grupo.nome, itensPdf);
-          baixarPdfNoNavegador(pdf);
+          if (formato === "pdf") {
+            const pdf = await gerarPdfPedidoFornecedor(empresa, fornecedorId, grupo.nome, itensPedido);
+            baixarPdfNoNavegador(pdf);
+          } else {
+            const excel = await gerarExcelPedidoFornecedor(empresa, fornecedorId, grupo.nome, itensPedido);
+            baixarExcelNoNavegador(excel);
+          }
+          totalArquivos += 1;
         } catch (err) {
-          erros.push(`${grupo.nome}: falha ao gerar PDF (${err instanceof Error ? err.message : String(err)})`);
+          erros.push(`${grupo.nome}: falha ao gerar ${formato.toUpperCase()} (${err instanceof Error ? err.message : String(err)})`);
           continue;
         }
 
@@ -634,10 +699,11 @@ const Compras = () => {
       }
 
       setItensSelecionadosPedido(new Set());
+      setPedidoMetaPorProduto({});
 
       if (totalProcessado > 0) {
         toast({
-          title: `${grupos.size} PDF(s) gerado(s)`,
+          title: `${totalArquivos} arquivo(s) ${formato.toUpperCase()} gerado(s)`,
           description: `${totalProcessado} item(ns) marcado(s) como Pedido Feito.`,
         });
       }
@@ -672,10 +738,15 @@ const Compras = () => {
         }
       }
 
-      const pdf = await gerarPdfPedidoFornecedor(fornecedorId, fornecedorNome, [{
+      const pdf = await gerarPdfPedidoFornecedor(empresa, fornecedorId, fornecedorNome, [{
         codigo: produto.codigo,
+        sku: produto.sku,
         descricao: getDescricaoExibicao(produto, produtoErp),
         foto: fotoSelecionada?.src ?? null,
+        secao: formatarSecao(produto.secao ?? produtoErp?.secao),
+        quantidadePedido: Math.max(1, produto.vezesPedido || 1),
+        unidadesPorCaixa: null,
+        caixasPedido: null,
       }]);
       baixarPdfNoNavegador(pdf);
     } catch (err) {
@@ -1845,18 +1916,71 @@ const Compras = () => {
             {!loading && !error && filteredProdutos.length > 0 && (
               <div className="space-y-4">
                 {itensSelecionadosPedido.size > 0 && (
-                  <div className="flex items-center justify-between gap-3 p-3 bg-indigo-50 border border-indigo-200 rounded-lg flex-wrap">
-                    <span className="text-sm font-medium text-indigo-900">
-                      {itensSelecionadosPedido.size} item(ns) selecionado(s)
-                    </span>
-                    <div className="flex items-center gap-2">
-                      <Button size="sm" variant="ghost" onClick={() => setItensSelecionadosPedido(new Set())} disabled={gerandoPedidos}>
-                        Limpar selecao
-                      </Button>
-                      <Button size="sm" onClick={gerarPedidosPorFornecedor} disabled={gerandoPedidos}>
-                        {gerandoPedidos ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
-                        Gerar Pedido(s) em PDF
-                      </Button>
+                  <div className="rounded-xl border border-indigo-200 bg-indigo-50 p-3 space-y-3">
+                    <div className="flex items-center justify-between gap-3 flex-wrap">
+                      <span className="text-sm font-medium text-indigo-900">
+                        {itensSelecionadosPedido.size} item(ns) selecionado(s) para relatorio
+                      </span>
+                      <div className="flex items-center gap-2">
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          onClick={() => {
+                            setItensSelecionadosPedido(new Set());
+                            setPedidoMetaPorProduto({});
+                          }}
+                          disabled={gerandoPedidos}
+                        >
+                          Limpar selecao
+                        </Button>
+                        <Button size="sm" variant="outline" onClick={() => void exportarPedidosPorFornecedor("excel")} disabled={gerandoPedidos}>
+                          {gerandoPedidos ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+                          Gerar Excel
+                        </Button>
+                        <Button size="sm" onClick={() => void exportarPedidosPorFornecedor("pdf")} disabled={gerandoPedidos}>
+                          {gerandoPedidos ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <FileDown className="h-4 w-4 mr-2" />}
+                          Gerar PDF
+                        </Button>
+                      </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      {produtosSelecionadosPedido.map((produto) => {
+                        const produtoErp = produtosErp[produto.id];
+                        const meta = pedidoMetaPorProduto[produto.id] ?? { quantidadePedido: "", unidadesPorCaixa: "" };
+                        const quantidadePedido = parsePedidoNumero(meta.quantidadePedido);
+                        const unidadesPorCaixa = parsePedidoNumero(meta.unidadesPorCaixa);
+                        const caixasPedido = calcularCaixasPedido(quantidadePedido, unidadesPorCaixa);
+                        const descricao = getDescricaoExibicao(produto, produtoErp);
+
+                        return (
+                          <div key={produto.id} className="grid gap-2 rounded-lg border border-indigo-100 bg-white p-3 md:grid-cols-[minmax(0,1.7fr)_140px_140px_120px] md:items-center">
+                            <div className="min-w-0">
+                              <div className="truncate text-sm font-semibold text-gray-900">{descricao}</div>
+                              <div className="truncate text-xs font-mono text-gray-500">{produto.codigo}</div>
+                            </div>
+                            <Input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={meta.quantidadePedido}
+                              onChange={(e) => atualizarPedidoMeta(produto.id, "quantidadePedido", e.target.value)}
+                              placeholder="Qtd. a pedir"
+                            />
+                            <Input
+                              type="number"
+                              min="1"
+                              step="1"
+                              value={meta.unidadesPorCaixa}
+                              onChange={(e) => atualizarPedidoMeta(produto.id, "unidadesPorCaixa", e.target.value)}
+                              placeholder="Un. por caixa"
+                            />
+                            <div className="rounded-md border border-dashed border-indigo-200 px-3 py-2 text-sm text-indigo-900">
+                              Caixas: {caixasPedido ?? "-"}
+                            </div>
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
                 )}
@@ -1888,7 +2012,7 @@ const Compras = () => {
                             type="checkbox"
                             className="shrink-0 h-5 w-5"
                             checked={itensSelecionadosPedido.has(produto.id)}
-                            onChange={() => toggleSelecaoPedido(produto.id)}
+                            onChange={() => toggleSelecaoPedido(produto)}
                             aria-label={`Selecionar ${produto.codigo} para gerar pedido`}
                           />
                         )}

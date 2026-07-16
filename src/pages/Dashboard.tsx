@@ -9,6 +9,7 @@ import {
   PackageCheck,
   RefreshCw,
   Search,
+  X,
   Users,
   XCircle,
 } from "lucide-react";
@@ -447,6 +448,75 @@ function KpiCard(props: {
       </div>
       <div className="mt-3 text-3xl font-black text-foreground">{formatNumber(props.value)}</div>
       <div className="mt-1 text-xs text-muted-foreground">{props.hint}</div>
+      {itemDetalhe && (
+        <div
+          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-4"
+          onClick={() => setItemDetalhe(null)}
+        >
+          <div
+            className="grid max-h-[90vh] w-full max-w-4xl gap-5 overflow-auto rounded-3xl border border-border bg-card p-5 shadow-2xl md:grid-cols-[320px_minmax(0,1fr)]"
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div>
+              {itemDetalhe.fotoUrl ? (
+                <img
+                  src={itemDetalhe.fotoUrl}
+                  alt={itemDetalhe.codigo}
+                  className="h-[320px] w-full rounded-2xl border border-border bg-background object-cover"
+                />
+              ) : (
+                <div className="flex h-[320px] w-full items-center justify-center rounded-2xl border border-border bg-background">
+                  <Package className="h-10 w-10 text-muted-foreground" />
+                </div>
+              )}
+            </div>
+
+            <div>
+              <div className="mb-4 flex items-start justify-between gap-4">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Item frequente
+                  </p>
+                  <h3 className="mt-2 text-2xl font-black text-foreground">{itemDetalhe.sku}</h3>
+                  <p className="mt-2 font-mono text-sm text-muted-foreground">{itemDetalhe.codigo}</p>
+                  <p className="mt-1 text-sm text-muted-foreground">{itemDetalhe.secao}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setItemDetalhe(null)}
+                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background text-foreground transition hover:bg-accent"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-2xl border border-border bg-background px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Ocorrencias</div>
+                  <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(itemDetalhe.vezes)}</div>
+                </div>
+                <div className="rounded-2xl border border-border bg-background px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Em compras</div>
+                  <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(itemDetalhe.vezesComprado)}</div>
+                </div>
+                <div className="rounded-2xl border border-border bg-background px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Volume pedido</div>
+                  <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(itemDetalhe.totalPedido)}</div>
+                </div>
+                <div className="rounded-2xl border border-border bg-background px-4 py-3">
+                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Volume real</div>
+                  <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(itemDetalhe.totalReal)}</div>
+                </div>
+              </div>
+
+              <div className="mt-4 rounded-2xl border border-border bg-background px-4 py-3">
+                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Status atual em compras</div>
+                <div className="mt-2 text-lg font-bold text-foreground">{labelStatusCompra(itemDetalhe.statusCompra)}</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -516,7 +586,7 @@ export default function Dashboard() {
   const [itensStatusFiltro, setItensStatusFiltro] = useState("todos");
   const [itensMinVezes, setItensMinVezes] = useState("1");
   const [itensMinCompras, setItensMinCompras] = useState("0");
-  const [itensExpandido, setItensExpandido] = useState(false);
+  const [itemDetalhe, setItemDetalhe] = useState<DashboardItemResumo | null>(null);
 
   const carregamentoRef = useRef(0);
   const carregarRef = useRef<(silent?: boolean) => Promise<void>>(async () => undefined);
@@ -1230,14 +1300,10 @@ export default function Dashboard() {
                         <option value="compra_realizada">Compra realizada</option>
                         <option value="concluido">Concluido</option>
                       </select>
-                      <button
-                        type="button"
-                        onClick={() => setItensExpandido((value) => !value)}
-                        className="inline-flex h-10 items-center justify-center rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground transition hover:bg-accent"
-                      >
-                        {itensExpandido ? "Ver menor" : "Ver maior"}
-                      </button>
                     </div>
+                    <p className="mb-4 text-xs text-muted-foreground">
+                      Clique no item para abrir foto maior e detalhes completos.
+                    </p>
 
                     {itensFrequentesFiltrados.length === 0 ? (
                       <div className="rounded-2xl border border-dashed border-border bg-background px-4 py-10 text-center text-sm text-muted-foreground">
@@ -1245,10 +1311,12 @@ export default function Dashboard() {
                       </div>
                     ) : (
                       <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {itensFrequentesFiltrados.slice(0, itensExpandido ? itensFrequentesFiltrados.length : 12).map((item) => (
-                      <article
+                        {itensFrequentesFiltrados.slice(0, 12).map((item) => (
+                      <button
                         key={`${item.codigo}-${item.sku}`}
-                        className="rounded-2xl border border-border bg-background p-3"
+                        type="button"
+                        onClick={() => setItemDetalhe(item)}
+                        className="rounded-2xl border border-border bg-background p-3 text-left transition hover:border-primary/50 hover:bg-accent/40"
                       >
                         <div className="flex items-start gap-3">
                           {item.fotoUrl ? (
@@ -1315,7 +1383,7 @@ export default function Dashboard() {
                             </div>
                           </div>
                         </div>
-                          </article>
+                          </button>
                         ))}
                       </div>
                     )}
