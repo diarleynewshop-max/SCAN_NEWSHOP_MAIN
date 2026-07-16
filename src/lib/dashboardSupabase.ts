@@ -85,6 +85,16 @@ export interface DashboardItemFrequenciaRow {
   foto_url: string | null;
 }
 
+export interface DashboardCompraItemRow {
+  empresa: "NEWSHOP" | "SF";
+  codigo: string;
+  sku: string;
+  secao: string;
+  status: string;
+  vezes_pedido: number;
+  foto_url: string | null;
+}
+
 export const DASHBOARD_EMPRESA_FILTROS: Record<
   DashboardEmpresaFiltroKey,
   { label: string; empresas: Empresa[] }
@@ -172,6 +182,16 @@ type DashboardItemFrequenciaRowRaw = {
   foto_url: string | null;
 };
 
+type DashboardCompraItemRowRaw = {
+  empresa: string | null;
+  codigo: string | null;
+  sku: string | null;
+  secao: string | null;
+  status: string | null;
+  vezes_pedido: number | null;
+  foto_url: string | null;
+};
+
 function normalizarEmpresa(value: unknown): Empresa {
   const empresa = String(value ?? "NEWSHOP").trim().toUpperCase();
   if (empresa.includes("SOYE")) return "SOYE";
@@ -196,6 +216,15 @@ function toNumber(value: unknown): number {
 function toText(value: unknown, fallback: string): string {
   const text = String(value ?? "").trim();
   return text || fallback;
+}
+
+function empresasDashboardParaCompras(empresas: Empresa[]): Array<"NEWSHOP" | "SF"> {
+  const hasNewshop = empresas.includes("NEWSHOP");
+  const hasSf = empresas.includes("SOYE") || empresas.includes("FACIL");
+  const lista: Array<"NEWSHOP" | "SF"> = [];
+  if (hasNewshop) lista.push("NEWSHOP");
+  if (hasSf) lista.push("SF");
+  return lista;
 }
 
 function withBaseFilters(query: any, params: DashboardConsultaParams, dateColumn?: string) {
@@ -440,6 +469,41 @@ export async function listarDashboardItemFrequencia(
     vezes: toNumber(row.vezes),
     total_pedido: toNumber(row.total_pedido),
     total_real: toNumber(row.total_real),
+    foto_url: row.foto_url || null,
+  }));
+}
+
+export async function listarDashboardItensCompras(
+  params: DashboardConsultaParams,
+  codigos: string[]
+): Promise<DashboardCompraItemRow[]> {
+  if (!canQuery(params)) return [];
+
+  const empresasCompras = empresasDashboardParaCompras(normalizarEmpresas(params.empresas));
+  const chaves = [...new Set(codigos.map((codigo) => String(codigo ?? "").trim()).filter(Boolean))];
+  if (empresasCompras.length === 0 || chaves.length === 0) return [];
+
+  const pageSize = 200;
+  const rows: DashboardCompraItemRowRaw[] = [];
+
+  for (let from = 0; from < chaves.length; from += pageSize) {
+    const lote = chaves.slice(from, from + pageSize);
+    const { data, error } = await supabase
+      .from("compras")
+      .select("empresa,codigo,sku,secao,status,vezes_pedido,foto_url")
+      .in("empresa", empresasCompras)
+      .in("codigo", lote);
+    if (error) throw error;
+    rows.push(...((data ?? []) as DashboardCompraItemRowRaw[]));
+  }
+
+  return rows.map((row) => ({
+    empresa: String(row.empresa ?? "").toUpperCase() === "SF" ? "SF" : "NEWSHOP",
+    codigo: toText(row.codigo, ""),
+    sku: toText(row.sku, ""),
+    secao: toText(row.secao, "Sem secao"),
+    status: toText(row.status, "todo"),
+    vezes_pedido: toNumber(row.vezes_pedido),
     foto_url: row.foto_url || null,
   }));
 }

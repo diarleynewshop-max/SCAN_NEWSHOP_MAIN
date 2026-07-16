@@ -34,6 +34,7 @@ import {
   getDashboardEmpresaFiltroLabel,
   getDashboardEmpresasFiltro,
   getDashboardFiltrosPermitidos,
+  listarDashboardItensCompras,
   listarDashboardDiario,
   listarDashboardItemFrequencia,
   listarDashboardPedidosStatus,
@@ -44,6 +45,7 @@ import {
   type DashboardDiarioRow,
   type DashboardEmpresaFiltroKey,
   type DashboardFlagFiltro,
+  type DashboardCompraItemRow,
   type DashboardItemFrequenciaRow,
   type DashboardPedidosStatusRow,
   type DashboardPorConferenteRow,
@@ -81,6 +83,7 @@ interface DashboardPayload {
   porConferente: DashboardPorConferenteRow[];
   porSecao: DashboardPorSecaoRow[];
   itemFrequencia: DashboardItemFrequenciaRow[];
+  comprasItens: DashboardCompraItemRow[];
 }
 
 interface DashboardResumo {
@@ -107,6 +110,8 @@ interface DashboardItemResumo {
   totalPedido: number;
   totalReal: number;
   fotoUrl: string | null;
+  vezesComprado: number;
+  statusCompra: string;
 }
 
 const EMPTY_DATA: DashboardPayload = {
@@ -116,6 +121,7 @@ const EMPTY_DATA: DashboardPayload = {
   porConferente: [],
   porSecao: [],
   itemFrequencia: [],
+  comprasItens: [],
 };
 
 function formatDateLabel(value: string): string {
@@ -339,6 +345,8 @@ function montarItensFrequentes(rows: DashboardItemFrequenciaRow[]): DashboardIte
       totalPedido: 0,
       totalReal: 0,
       fotoUrl: row.foto_url,
+      vezesComprado: 0,
+      statusCompra: "todo",
     };
 
     atual.vezes += row.vezes;
@@ -351,6 +359,49 @@ function montarItensFrequentes(rows: DashboardItemFrequenciaRow[]): DashboardIte
   return Array.from(porItem.values()).sort(
     (a, b) => b.vezes - a.vezes || b.totalPedido - a.totalPedido
   );
+}
+
+function enriquecerItensComCompras(
+  itens: DashboardItemResumo[],
+  comprasItens: DashboardCompraItemRow[]
+): DashboardItemResumo[] {
+  const mapaCompras = new Map<string, DashboardCompraItemRow>();
+
+  for (const row of comprasItens) {
+    const key = `${row.codigo}::${row.sku}`;
+    const atual = mapaCompras.get(key);
+    if (!atual || row.vezes_pedido > atual.vezes_pedido) {
+      mapaCompras.set(key, row);
+    }
+
+    if (!mapaCompras.has(row.codigo)) {
+      mapaCompras.set(row.codigo, row);
+    }
+  }
+
+  return itens.map((item) => {
+    const compra = mapaCompras.get(`${item.codigo}::${item.sku}`) ?? mapaCompras.get(item.codigo);
+    if (!compra) return item;
+
+    return {
+      ...item,
+      secao: item.secao || compra.secao,
+      fotoUrl: item.fotoUrl || compra.foto_url,
+      vezesComprado: compra.vezes_pedido,
+      statusCompra: compra.status,
+    };
+  });
+}
+
+function labelStatusCompra(status: string): string {
+  const s = String(status ?? "").trim().toLowerCase();
+  if (s === "produto_bom") return "Tem no galpao";
+  if (s === "produto_ruim") return "Produto ruim";
+  if (s === "fazer_pedido") return "Fazer pedido";
+  if (s === "pedido_andamento") return "Pedido em andamento";
+  if (s === "compra_realizada") return "Compra realizada";
+  if (s === "concluido") return "Concluido";
+  return "Pendente";
 }
 
 function montarPareto(items: DashboardItemResumo[]) {
@@ -520,6 +571,11 @@ export default function Dashboard() {
           listarDashboardItemFrequencia(params),
         ]);
 
+      const comprasItens = await listarDashboardItensCompras(
+        params,
+        itemFrequencia.map((item) => item.codigo)
+      );
+
       if (requestId !== carregamentoRef.current) return;
 
       setDados({
@@ -529,6 +585,7 @@ export default function Dashboard() {
         porConferente,
         porSecao,
         itemFrequencia,
+        comprasItens,
       });
       setError(null);
     } catch (err) {
@@ -577,8 +634,8 @@ export default function Dashboard() {
     [dados.porConferente]
   );
   const itensFrequentes = useMemo(
-    () => montarItensFrequentes(dados.itemFrequencia),
-    [dados.itemFrequencia]
+    () => enriquecerItensComCompras(montarItensFrequentes(dados.itemFrequencia), dados.comprasItens),
+    [dados.comprasItens, dados.itemFrequencia]
   );
   const pareto = useMemo(() => montarPareto(itensFrequentes), [itensFrequentes]);
   const semConferencias = dados.diario.length === 0;
@@ -1099,7 +1156,7 @@ export default function Dashboard() {
                   </div>
                 ) : (
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {itensFrequentes.slice(0, 12).map((item) => (
+                    {itensFrequentes.map((item) => (
                       <article
                         key={`${item.codigo}-${item.sku}`}
                         className="rounded-2xl border border-border bg-background p-3"
@@ -1138,7 +1195,7 @@ export default function Dashboard() {
                         <div className="mt-3 grid grid-cols-2 gap-2 text-xs">
                           <div className="rounded-xl border border-border px-3 py-2">
                             <div className="font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                              Total pedido
+                              Volume pedido
                             </div>
                             <div className="mt-1 text-sm font-bold text-foreground">
                               {formatNumber(item.totalPedido)}
@@ -1146,10 +1203,26 @@ export default function Dashboard() {
                           </div>
                           <div className="rounded-xl border border-border px-3 py-2">
                             <div className="font-semibold uppercase tracking-[0.12em] text-muted-foreground">
-                              Total real
+                              Volume real
                             </div>
                             <div className="mt-1 text-sm font-bold text-foreground">
                               {formatNumber(item.totalReal)}
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-border px-3 py-2">
+                            <div className="font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                              Em compras
+                            </div>
+                            <div className="mt-1 text-sm font-bold text-foreground">
+                              {formatNumber(item.vezesComprado)}
+                            </div>
+                          </div>
+                          <div className="rounded-xl border border-border px-3 py-2">
+                            <div className="font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                              Status compras
+                            </div>
+                            <div className="mt-1 text-sm font-bold text-foreground">
+                              {labelStatusCompra(item.statusCompra)}
                             </div>
                           </div>
                         </div>
