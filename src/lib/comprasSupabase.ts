@@ -194,6 +194,19 @@ export async function atualizarStatusPorId(
   if (error) throw error;
 }
 
+// Exclui diretamente do Supabase. Esta acao administrativa nao depende de
+// localizar ou validar o produto no ERP.
+export async function excluirCompraPorId(id: string): Promise<void> {
+  if (!isSupabaseConfigured) return;
+  const { data, error } = await supabase
+    .from('compras')
+    .delete()
+    .eq('id', id)
+    .select('id');
+  if (error) throw error;
+  if (!data || data.length === 0) throw new Error('Item nao encontrado no Supabase para excluir');
+}
+
 // Marca "pedido feito" (equivale a gerar o PDF do pedido ao fornecedor). Grava
 // pedido_feito = 1; o trigger no banco move o item para 'pedido_andamento'
 // automaticamente.

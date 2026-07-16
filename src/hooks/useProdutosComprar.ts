@@ -6,6 +6,7 @@ import {
   atualizarStatusPorId,
   atualizarSecaoPorId,
   atualizarDescricaoPorId,
+  excluirCompraPorId,
   marcarPedidoFeitoPorId,
   persistirFotoCompra,
   isFotoStorage,
@@ -47,6 +48,7 @@ interface UseProdutosComprarReturn {
   persistirFoto: (produtoId: string, dataUrl: string) => void;
   marcarPedidoFeito: (produtoId: string) => Promise<void>;
   atualizarStatus: (produtoId: string, status: CompraStatusApp) => Promise<void>;
+  excluirProduto: (produtoId: string) => Promise<void>;
   refetch: () => Promise<void>;
   like: (taskId: string) => Promise<void>;
   dislike: (taskId: string) => Promise<void>;
@@ -324,6 +326,20 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     }
   }, [fetchProdutos, produtos]);
 
+  const excluirProduto = useCallback(async (produtoId: string) => {
+    const anterior = produtos.find((produto) => produto.id === produtoId);
+    if (!anterior) return;
+
+    setProdutos((prev) => prev.filter((produto) => produto.id !== produtoId));
+    try {
+      await excluirCompraPorId(produtoId);
+      await fetchProdutos(true);
+    } catch (err) {
+      setProdutos((prev) => deduplicarProdutos([...prev, anterior]));
+      throw err;
+    }
+  }, [fetchProdutos, produtos]);
+
   // Persiste a secao (vinda do ERP na primeira carga) no Supabase, para nao
   // precisar reconsultar o ERP so pela secao nas proximas vezes. Best-effort.
   const persistirSecao = useCallback((produtoId: string, secao: string) => {
@@ -414,6 +430,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
     persistirFoto,
     marcarPedidoFeito,
     atualizarStatus,
+    excluirProduto,
     refetch: () => fetchProdutos(true),
     like,
     dislike,

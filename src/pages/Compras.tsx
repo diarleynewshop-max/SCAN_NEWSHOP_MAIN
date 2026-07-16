@@ -2,11 +2,12 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown, MoreVertical, Barcode, Tags, Link2, Building2 } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown, MoreVertical, Barcode, Tags, Link2, Building2, Trash2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
 import { obterLoginSalvo } from "@/hooks/useAuth";
+import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import { getSecoesFixasPorEmpresa } from "@/lib/secoesCompras";
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { useToast } from "@/hooks/use-toast";
@@ -357,6 +358,10 @@ const Compras = () => {
   // trocar de perfil recarrega a pagina, entao nao muda durante o uso da tela.
   const secoesCompras = useMemo(() => obterLoginSalvo()?.secoesCompras ?? [], []);
   const temSecoesCompras = secoesCompras.length > 0;
+  const isAdminPlus = useMemo(() => {
+    const role = obterLoginSalvo()?.role;
+    return !!role && hasAnyRoleAccess(role, ["admin", "super"]);
+  }, []);
   const [searchTerm, setSearchTerm] = useState("");
   const [filtroFornecedor, setFiltroFornecedor] = useState("");
   const [filtroMarca, setFiltroMarca] = useState("todos");
@@ -412,6 +417,7 @@ const Compras = () => {
     persistirFoto,
     marcarPedidoFeito,
     atualizarStatus,
+    excluirProduto,
   } = useProdutosComprar();
 
   useEffect(() => {
@@ -1406,6 +1412,12 @@ const Compras = () => {
     void executarAcao(actionKey, action, sucesso).finally(() => setProdutoDetalhe(null));
   };
 
+  const excluirProdutoSemErp = (produto: ProdutoComprar) => {
+    const descricao = produto.descricao?.trim() || produto.codigo;
+    if (!window.confirm(`Excluir "${descricao}" da lista de Compras?\n\nA exclusao sera direta, sem consulta ao ERP.`)) return;
+    acaoDetalhe(`${produto.id}:EXCLUIR`, () => excluirProduto(produto.id), "Item excluido de Compras");
+  };
+
   // Botoes de acao do item (usados no modal de detalhes), conforme o status atual.
   const renderAcoesProduto = (produto: ProdutoComprar) => {
     const isActionLoading = (acao: string) => acaoEmAndamento === `${produto.id}:${acao}`;
@@ -2377,6 +2389,21 @@ const Compras = () => {
 
                 <div className="flex flex-col gap-2 pt-2">
                   {renderAcoesProduto(produtoDetalhe)}
+                  {isAdminPlus && (
+                    <Button
+                      className="w-full justify-center text-red-700 border-red-200 hover:bg-red-50"
+                      variant="outline"
+                      disabled={!!acaoEmAndamento}
+                      onClick={() => excluirProdutoSemErp(produtoDetalhe)}
+                    >
+                      {acaoEmAndamento === `${produtoDetalhe.id}:EXCLUIR` ? (
+                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                      ) : (
+                        <Trash2 className="h-4 w-4 mr-2" />
+                      )}
+                      Excluir item sem consultar ERP
+                    </Button>
+                  )}
                 </div>
               </div>
             </div>
