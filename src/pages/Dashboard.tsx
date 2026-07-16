@@ -8,6 +8,7 @@ import {
   Package,
   PackageCheck,
   RefreshCw,
+  Search,
   Users,
   XCircle,
 } from "lucide-react";
@@ -404,6 +405,12 @@ function labelStatusCompra(status: string): string {
   return "Pendente";
 }
 
+function getSecoesItens(items: DashboardItemResumo[]): string[] {
+  return Array.from(new Set(items.map((item) => item.secao).filter(Boolean))).sort((a, b) =>
+    a.localeCompare(b, "pt-BR")
+  );
+}
+
 function montarPareto(items: DashboardItemResumo[]) {
   const totalVezes = items.reduce((acc, item) => acc + item.vezes, 0);
   let acumulado = 0;
@@ -504,6 +511,12 @@ export default function Dashboard() {
   const [periodo, setPeriodo] = useState<PeriodoFiltro>("30");
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
+  const [itensBusca, setItensBusca] = useState("");
+  const [itensSecaoFiltro, setItensSecaoFiltro] = useState("todas");
+  const [itensStatusFiltro, setItensStatusFiltro] = useState("todos");
+  const [itensMinVezes, setItensMinVezes] = useState("1");
+  const [itensMinCompras, setItensMinCompras] = useState("0");
+  const [itensExpandido, setItensExpandido] = useState(false);
 
   const carregamentoRef = useRef(0);
   const carregarRef = useRef<(silent?: boolean) => Promise<void>>(async () => undefined);
@@ -637,6 +650,21 @@ export default function Dashboard() {
     () => enriquecerItensComCompras(montarItensFrequentes(dados.itemFrequencia), dados.comprasItens),
     [dados.comprasItens, dados.itemFrequencia]
   );
+  const secoesItens = useMemo(() => getSecoesItens(itensFrequentes), [itensFrequentes]);
+  const itensFrequentesFiltrados = useMemo(() => {
+    const busca = itensBusca.trim().toLowerCase();
+    const minVezes = Math.max(0, Number(itensMinVezes) || 0);
+    const minCompras = Math.max(0, Number(itensMinCompras) || 0);
+
+    return itensFrequentes.filter((item) => {
+      if (itensSecaoFiltro !== "todas" && item.secao !== itensSecaoFiltro) return false;
+      if (itensStatusFiltro !== "todos" && item.statusCompra !== itensStatusFiltro) return false;
+      if (item.vezes < minVezes) return false;
+      if (item.vezesComprado < minCompras) return false;
+      if (!busca) return true;
+      return `${item.sku} ${item.codigo} ${item.secao}`.toLowerCase().includes(busca);
+    });
+  }, [itensBusca, itensFrequentes, itensMinCompras, itensMinVezes, itensSecaoFiltro, itensStatusFiltro]);
   const pareto = useMemo(() => montarPareto(itensFrequentes), [itensFrequentes]);
   const semConferencias = dados.diario.length === 0;
   const resumoPeriodo = getPeriodoResumo(periodo, dataInicio, dataFim);
@@ -1148,15 +1176,76 @@ export default function Dashboard() {
 
               <SectionCard
                 title="Itens frequentes"
-                description="Fotos, código, SKU, seção e volume consolidado do período."
+                description="Todos os itens do período com filtros por seção, ocorrência, compras e status."
               >
                 {itensFrequentes.length === 0 ? (
                   <div className="rounded-2xl border border-dashed border-border bg-background px-4 py-10 text-center text-sm text-muted-foreground">
                     Sem itens frequentes neste recorte.
                   </div>
                 ) : (
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {itensFrequentes.map((item) => (
+                  <>
+                    <div className="mb-4 grid gap-3 lg:grid-cols-[minmax(0,1.6fr)_minmax(0,1fr)_120px_120px_minmax(0,1fr)_auto]">
+                      <div className="relative">
+                        <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+                        <Input
+                          value={itensBusca}
+                          onChange={(event) => setItensBusca(event.target.value)}
+                          placeholder="Buscar por SKU, codigo ou secao"
+                          className="pl-9"
+                        />
+                      </div>
+                      <select
+                        value={itensSecaoFiltro}
+                        onChange={(event) => setItensSecaoFiltro(event.target.value)}
+                        className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground"
+                      >
+                        <option value="todas">Todas as secoes</option>
+                        {secoesItens.map((secao) => (
+                          <option key={secao} value={secao}>{secao}</option>
+                        ))}
+                      </select>
+                      <Input
+                        value={itensMinVezes}
+                        onChange={(event) => setItensMinVezes(event.target.value)}
+                        inputMode="numeric"
+                        placeholder="Min. vezes"
+                      />
+                      <Input
+                        value={itensMinCompras}
+                        onChange={(event) => setItensMinCompras(event.target.value)}
+                        inputMode="numeric"
+                        placeholder="Min. compras"
+                      />
+                      <select
+                        value={itensStatusFiltro}
+                        onChange={(event) => setItensStatusFiltro(event.target.value)}
+                        className="h-10 rounded-xl border border-border bg-background px-3 text-sm text-foreground"
+                      >
+                        <option value="todos">Todos os status</option>
+                        <option value="todo">Pendente</option>
+                        <option value="produto_bom">Tem no galpao</option>
+                        <option value="produto_ruim">Produto ruim</option>
+                        <option value="fazer_pedido">Fazer pedido</option>
+                        <option value="pedido_andamento">Pedido em andamento</option>
+                        <option value="compra_realizada">Compra realizada</option>
+                        <option value="concluido">Concluido</option>
+                      </select>
+                      <button
+                        type="button"
+                        onClick={() => setItensExpandido((value) => !value)}
+                        className="inline-flex h-10 items-center justify-center rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground transition hover:bg-accent"
+                      >
+                        {itensExpandido ? "Ver menor" : "Ver maior"}
+                      </button>
+                    </div>
+
+                    {itensFrequentesFiltrados.length === 0 ? (
+                      <div className="rounded-2xl border border-dashed border-border bg-background px-4 py-10 text-center text-sm text-muted-foreground">
+                        Nenhum item encontrado com os filtros atuais.
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {itensFrequentesFiltrados.slice(0, itensExpandido ? itensFrequentesFiltrados.length : 12).map((item) => (
                       <article
                         key={`${item.codigo}-${item.sku}`}
                         className="rounded-2xl border border-border bg-background p-3"
@@ -1226,9 +1315,11 @@ export default function Dashboard() {
                             </div>
                           </div>
                         </div>
-                      </article>
-                    ))}
-                  </div>
+                          </article>
+                        ))}
+                      </div>
+                    )}
+                  </>
                 )}
               </SectionCard>
             </>
