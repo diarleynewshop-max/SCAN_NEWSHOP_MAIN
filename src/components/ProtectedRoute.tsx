@@ -22,9 +22,9 @@ export function ProtectedRoute({
 }: ProtectedRouteProps) {
   const { loginSalvo } = useAuth();
   
-  // Se não estiver logado, redireciona para home
+  // Se nao estiver logado, redireciona para a pagina de login.
   if (!loginSalvo || !loginSalvo.role) {
-    return <Navigate to={fallbackPath} replace />;
+    return <Navigate to="/login" replace />;
   }
   
   // Verifica se o usuário tem o role necessário

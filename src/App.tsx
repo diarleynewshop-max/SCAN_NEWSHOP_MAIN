@@ -50,13 +50,22 @@ const App = () => (
         <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Carregando...</div>}>
           <Routes>
             {/* Home gerencia o próprio DesktopShell (tem dashboard + modais embutidos) */}
-            <Route path="/" element={<Home />} />
+            <Route path="/login" element={<Home loginOnly />} />
+            <Route path="/" element={
+              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+                <Home />
+              </ProtectedRoute>
+            } />
 
             <Route path="/scanner" element={
-              <DesktopShell pageTitle="Scanner"><Index /></DesktopShell>
+              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+                <DesktopShell pageTitle="Scanner"><Index /></DesktopShell>
+              </ProtectedRoute>
             } />
             <Route path="/consulta-preco" element={
-              <DesktopShell pageTitle="Consulta Preço"><ConsultaPreco /></DesktopShell>
+              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
+                <DesktopShell pageTitle="Consulta Preço"><ConsultaPreco /></DesktopShell>
+              </ProtectedRoute>
             } />
 
             <Route path="/meus-pedidos" element={

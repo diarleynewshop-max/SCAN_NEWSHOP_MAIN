@@ -175,7 +175,11 @@ const MenuCard: React.FC<MenuCardProps> = ({
   );
 };
 
-const Home = () => {
+interface HomeProps {
+  loginOnly?: boolean;
+}
+
+const Home = ({ loginOnly = false }: HomeProps) => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const [storage, setStorage] = useState(getStorageSize());
@@ -230,6 +234,10 @@ const Home = () => {
     fazerLogout,
     atualizarLoginSalvo
   } = useAuth();
+
+  useEffect(() => {
+    if (loginOnly && loginSalvo) navigate("/", { replace: true });
+  }, [loginOnly, loginSalvo, navigate]);
 
   const handleFotoPerfil = async (file: File | undefined) => {
     if (!file) return;
@@ -518,6 +526,7 @@ const Home = () => {
   return (
     <div className="min-h-screen flex flex-col max-w-md mx-auto" style={{ background: "hsl(var(--background))" }}>
 
+      {!loginOnly && <>
       {/* Layout ERP Desktop (auto em telas ≥1024px) */}
       {isDesktop && (
         <div style={{ position: "fixed", inset: 0, zIndex: 50 }}>
@@ -801,6 +810,7 @@ const Home = () => {
 
       {/* â”€â”€ Modal Confirmação â”€â”€ */}
       </div>{/* fim conteúdo mobile */}
+      </>}
 
       {confirmOpen && (
         <div
@@ -857,13 +867,13 @@ const Home = () => {
       )}
 
       {/* â”€â”€ Modal de Login â”€â”€ */}
-      {mostrarModalLogin && (
+      {(mostrarModalLogin || (loginOnly && !loginSalvo)) && (
         <div
-          onClick={(e) => { if (e.target === e.currentTarget) setMostrarModalLogin(false); }}
+          onClick={(e) => { if (!loginOnly && e.target === e.currentTarget) setMostrarModalLogin(false); }}
           style={{
-            position: "fixed", inset: 0, background: "rgba(0,0,0,0.6)",
-            backdropFilter: "blur(4px)", display: "flex",
-            alignItems: modoDesktop ? "center" : "flex-end", 
+            position: "fixed", inset: 0, background: loginOnly ? "hsl(var(--background))" : "rgba(0,0,0,0.6)",
+            backdropFilter: loginOnly ? undefined : "blur(4px)", display: "flex",
+            alignItems: loginOnly || modoDesktop ? "center" : "flex-end",
             justifyContent: "center", 
             zIndex: 1000,
           }}
@@ -871,13 +881,13 @@ const Home = () => {
           <div style={{
             background: "hsl(var(--card))",
             width: "100%", 
-            maxWidth: modoDesktop ? 500 : 430,
-            borderRadius: modoDesktop ? 20 : "20px 20px 0 0", 
-            padding: modoDesktop ? "32px" : "24px 20px 36px",
-             animation: modoDesktop ? "fadeIn 0.28s ease" : "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
-            margin: modoDesktop ? "auto" : "0",
-            maxHeight: modoDesktop ? "90vh" : "auto",
-            overflowY: modoDesktop ? "auto" : "visible",
+            maxWidth: loginOnly || modoDesktop ? 500 : 430,
+            borderRadius: loginOnly || modoDesktop ? 20 : "20px 20px 0 0",
+            padding: loginOnly || modoDesktop ? "32px" : "24px 20px 36px",
+             animation: loginOnly || modoDesktop ? "fadeIn 0.28s ease" : "slideUp 0.28s cubic-bezier(0.32,0.72,0,1)",
+            margin: loginOnly || modoDesktop ? "auto" : "0",
+            maxHeight: loginOnly || modoDesktop ? "90vh" : "auto",
+            overflowY: loginOnly || modoDesktop ? "auto" : "visible",
           }}>
             <style>{`
               @keyframes slideUp{from{transform:translateY(60px);opacity:0}to{transform:translateY(0);opacity:1}}

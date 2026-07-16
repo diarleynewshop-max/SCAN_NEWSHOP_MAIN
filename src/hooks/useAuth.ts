@@ -45,6 +45,7 @@ export type LoginResult =
   | { sucesso: false; motivo: "supabase_nao_configurado" | "credencial_invalida" | "empresa_nao_permitida" | "titulo_obrigatorio" | "selecionar_empresa"; contexto?: UsuarioLoginContext };
 
 const STORAGE_KEY = "scan_newshop_login";
+const AUTH_CHANGE_EVENT = "scan-newshop-auth-change";
 
 const EMPRESAS_VALIDAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
 const ROLES_VALIDOS: UserRole[] = ["operador", "compras", "admin", "super"];
@@ -153,6 +154,10 @@ export function removerLogin(): void {
   applyCompanyTheme("NEWSHOP");
 }
 
+function notificarMudancaAuth(): void {
+  window.dispatchEvent(new Event(AUTH_CHANGE_EVENT));
+}
+
 export function useAuth() {
   const [loginSalvo, setLoginSalvo] = useState<LoginData | null>(() => obterLoginSalvo());
   const [mostrarModalLogin, setMostrarModalLogin] = useState(false);
@@ -160,6 +165,20 @@ export function useAuth() {
   useEffect(() => {
     if (!loginSalvo) setMostrarModalLogin(true);
   }, [loginSalvo]);
+
+  useEffect(() => {
+    const sincronizarLogin = () => setLoginSalvo(obterLoginSalvo());
+    const sincronizarStorage = (event: StorageEvent) => {
+      if (event.key === STORAGE_KEY) sincronizarLogin();
+    };
+
+    window.addEventListener(AUTH_CHANGE_EVENT, sincronizarLogin);
+    window.addEventListener("storage", sincronizarStorage);
+    return () => {
+      window.removeEventListener(AUTH_CHANGE_EVENT, sincronizarLogin);
+      window.removeEventListener("storage", sincronizarStorage);
+    };
+  }, []);
 
   const fazerLogin = async (request: LoginRequest): Promise<LoginResult> => {
     if (!isSupabaseConfigured) {
@@ -220,6 +239,7 @@ export function useAuth() {
     salvarLogin(dados);
     setLoginSalvo(dados);
     setMostrarModalLogin(false);
+    notificarMudancaAuth();
     return { sucesso: true, loginSalvo: dados };
   };
 
@@ -227,15 +247,16 @@ export function useAuth() {
     removerLogin();
     setLoginSalvo(null);
     setMostrarModalLogin(true);
+    notificarMudancaAuth();
   };
 
   const atualizarLoginSalvo = (updates: Partial<LoginData>): void => {
-    setLoginSalvo((atual) => {
-      if (!atual) return atual;
-      const proximo = { ...atual, ...updates };
-      salvarLogin(proximo);
-      return proximo;
-    });
+    const atual = obterLoginSalvo();
+    if (!atual) return;
+    const proximo = { ...atual, ...updates };
+    salvarLogin(proximo);
+    setLoginSalvo(proximo);
+    notificarMudancaAuth();
   };
 
   return {
