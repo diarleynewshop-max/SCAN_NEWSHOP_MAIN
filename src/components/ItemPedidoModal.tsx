@@ -1,4 +1,5 @@
-import { Repeat, ShoppingCart, X } from "lucide-react";
+import { useEffect } from "react";
+import { ChevronLeft, ChevronRight, Repeat, ShoppingCart, X } from "lucide-react";
 import type { PedidoFilaItem } from "@/lib/pedidosFila";
 import type { CatalogoItemInfo } from "@/lib/comprasSupabase";
 
@@ -25,6 +26,10 @@ interface ItemPedidoModalProps {
   nomePedido: string;
   fotoUrl: string | null;
   onClose: () => void;
+  onPrevious?: () => void;
+  onNext?: () => void;
+  currentPosition?: number;
+  totalItems?: number;
 }
 
 function Campo(props: { label: string; children: React.ReactNode }) {
@@ -38,7 +43,28 @@ function Campo(props: { label: string; children: React.ReactNode }) {
   );
 }
 
-export function ItemPedidoModal({ item, info, nomePedido, fotoUrl, onClose }: ItemPedidoModalProps) {
+export function ItemPedidoModal({
+  item,
+  info,
+  nomePedido,
+  fotoUrl,
+  onClose,
+  onPrevious,
+  onNext,
+  currentPosition = 0,
+  totalItems = 0,
+}: ItemPedidoModalProps) {
+  useEffect(() => {
+    if (!item) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "ArrowLeft" && onPrevious) onPrevious();
+      if (event.key === "ArrowRight" && onNext) onNext();
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [item, onClose, onNext, onPrevious]);
+
   if (!item) return null;
 
   const descricao = String(item.descricao ?? "").trim() || info?.descricao || item.sku || item.codigo;
@@ -62,7 +88,10 @@ export function ItemPedidoModal({ item, info, nomePedido, fotoUrl, onClose }: It
               Detalhe do item
             </p>
             <h2 className="mt-1 truncate text-xl font-black text-foreground">{descricao}</h2>
-            <p className="mt-1 truncate text-sm text-muted-foreground">Pedido de {nomePedido}</p>
+            <p className="mt-1 truncate text-sm text-muted-foreground">
+              Pedido de {nomePedido}
+              {totalItems > 1 ? ` · Item ${currentPosition} de ${totalItems}` : ""}
+            </p>
           </div>
           <button
             type="button"
@@ -76,7 +105,18 @@ export function ItemPedidoModal({ item, info, nomePedido, fotoUrl, onClose }: It
 
         <div className="overflow-y-auto px-5 py-4">
           <div className="grid gap-5 md:grid-cols-2">
-            <div className="flex items-center justify-center rounded-2xl border border-border bg-background p-3">
+            <div className="relative flex items-center justify-center rounded-2xl border border-border bg-background p-3">
+              {totalItems > 1 && onPrevious && (
+                <button
+                  type="button"
+                  onClick={onPrevious}
+                  className="absolute left-3 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card/95 text-foreground shadow-lg transition hover:bg-accent"
+                  aria-label="Produto anterior"
+                  title="Produto anterior"
+                >
+                  <ChevronLeft className="h-6 w-6" />
+                </button>
+              )}
               {fotoUrl ? (
                 <img
                   src={fotoUrl}
@@ -87,6 +127,17 @@ export function ItemPedidoModal({ item, info, nomePedido, fotoUrl, onClose }: It
                 <div className="flex h-56 w-full items-center justify-center rounded-xl bg-muted text-sm text-muted-foreground">
                   Sem foto disponivel
                 </div>
+              )}
+              {totalItems > 1 && onNext && (
+                <button
+                  type="button"
+                  onClick={onNext}
+                  className="absolute right-3 z-10 inline-flex h-11 w-11 items-center justify-center rounded-full border border-border bg-card/95 text-foreground shadow-lg transition hover:bg-accent"
+                  aria-label="Proximo produto"
+                  title="Proximo produto"
+                >
+                  <ChevronRight className="h-6 w-6" />
+                </button>
               )}
             </div>
 

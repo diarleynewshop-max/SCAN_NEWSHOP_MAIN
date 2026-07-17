@@ -106,7 +106,11 @@ export default function MeusPedidos() {
   // Catalogo (foto + vezes_pedido + status de compra) por produto_key, compartilhado.
   const [catalogo, setCatalogo] = useState<Record<string, CatalogoItemInfo>>({});
   // Item aberto no modal de tela cheia.
-  const [itemModal, setItemModal] = useState<{ item: PedidoFilaItem; nomePedido: string } | null>(null);
+  const [itemModal, setItemModal] = useState<{
+    item: PedidoFilaItem;
+    pedidoId: string;
+    nomePedido: string;
+  } | null>(null);
   const [recomendacoesPendentes, setRecomendacoesPendentes] = useState<RecomendacaoSubstituicao[]>([]);
   const [popupRecomendacaoAberto, setPopupRecomendacaoAberto] = useState(false);
   const [respondendoRecomendacaoId, setRespondendoRecomendacaoId] = useState<string | null>(null);
@@ -147,6 +151,17 @@ export default function MeusPedidos() {
         return next;
       });
     }
+  };
+
+  const navegarItemModal = (direcao: -1 | 1) => {
+    setItemModal((atual) => {
+      if (!atual) return null;
+      const itens = itensPorPedido[atual.pedidoId] ?? [];
+      if (itens.length < 2) return atual;
+      const indiceAtual = itens.findIndex((item) => item.id === atual.item.id);
+      const proximoIndice = (Math.max(indiceAtual, 0) + direcao + itens.length) % itens.length;
+      return { ...atual, item: itens[proximoIndice] };
+    });
   };
 
   const empresa = loginSalvo?.empresa ?? "NEWSHOP";
@@ -621,7 +636,7 @@ export default function MeusPedidos() {
                             </div>
                             <button
                               type="button"
-                              onClick={() => setItemModal({ item, nomePedido: nome })}
+                              onClick={() => setItemModal({ item, pedidoId: pedido.id, nomePedido: nome })}
                               className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-lg text-muted-foreground transition hover:bg-accent"
                               aria-label="Mais informacoes do item"
                               title="Mais informacoes"
@@ -666,6 +681,17 @@ export default function MeusPedidos() {
             : null
         }
         onClose={() => setItemModal(null)}
+        onPrevious={() => navegarItemModal(-1)}
+        onNext={() => navegarItemModal(1)}
+        currentPosition={
+          itemModal
+            ? Math.max(
+                1,
+                (itensPorPedido[itemModal.pedidoId] ?? []).findIndex((item) => item.id === itemModal.item.id) + 1
+              )
+            : 0
+        }
+        totalItems={itemModal ? (itensPorPedido[itemModal.pedidoId] ?? []).length : 0}
       />
 
       {popupRecomendacaoAberto && recomendacoesPendentes.length > 0 && (
