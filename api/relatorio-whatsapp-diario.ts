@@ -108,6 +108,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({
       error: "Evolution API nao configurada",
       codigo: evolutionError?.code || "SEM_REGISTRO",
+      banco: (() => { try { return new URL(url).host; } catch { return "URL_INVALIDA"; } })(),
     });
   }
   const { data: configs, error } = await supabase.from("relatorio_whatsapp_config").select("*").eq("ativo", true);
