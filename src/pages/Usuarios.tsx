@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
-import { Check, Eye, EyeOff, Pencil, Plus, RefreshCw, RotateCcw, Save, Shield, Users } from "lucide-react";
+import { Check, Eye, EyeOff, Pencil, Plus, RefreshCw, RotateCcw, Save, Shield, Trash2, Users } from "lucide-react";
 import { useAuth, type Empresa, type LoginFlag, type UserRole } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { buscarSecoesComprasDisponiveis, getSecoesFixasPorEmpresa } from "@/lib/secoesCompras";
@@ -8,6 +8,7 @@ import {
   atualizarUsuario,
   criarGrupoAcesso,
   criarUsuario,
+  excluirUsuario,
   listarGruposAcesso,
   listarUsuarios,
   redefinirSenhaUsuario,
@@ -67,6 +68,7 @@ export default function Usuarios() {
   const [editandoUsuarioId, setEditandoUsuarioId] = useState<string | null>(null);
   const [editandoGrupoId, setEditandoGrupoId] = useState<string | null>(null);
   const [resetId, setResetId] = useState<string | null>(null);
+  const [excluindoId, setExcluindoId] = useState<string | null>(null);
   const [novaSenha, setNovaSenha] = useState("");
   const [buscaUsuario, setBuscaUsuario] = useState("");
   const [buscaGrupo, setBuscaGrupo] = useState("");
@@ -313,6 +315,32 @@ export default function Usuarios() {
       });
     } finally {
       setCarregando(false);
+    }
+  }
+
+  async function excluirConta(usuario: UsuarioAdmin) {
+    if (!actor || loginSalvo?.role !== "super") return;
+    if (usuario.id === loginSalvo.usuarioId) {
+      toast({ title: "Sua propria conta nao pode ser excluida", variant: "destructive" });
+      return;
+    }
+    if (!window.confirm(`Excluir permanentemente a conta de ${usuario.nome} (${usuario.login})?`)) return;
+
+    setExcluindoId(usuario.id);
+    try {
+      await excluirUsuario(actor, usuario.id);
+      if (editandoUsuarioId === usuario.id) limparUsuarioForm();
+      setResetId((id) => id === usuario.id ? null : id);
+      setUsuarios((lista) => lista.filter((item) => item.id !== usuario.id));
+      toast({ title: "Conta excluida" });
+    } catch (err) {
+      toast({
+        title: "Falha ao excluir conta",
+        description: err instanceof Error ? err.message : "Erro desconhecido.",
+        variant: "destructive",
+      });
+    } finally {
+      setExcluindoId(null);
     }
   }
 
@@ -606,6 +634,15 @@ export default function Usuarios() {
                       <div style={{ display: "flex", gap: 8, marginTop: 12, flexWrap: "wrap" }}>
                         <button onClick={() => editarUsuario(usuario)} style={secondaryButtonStyle}><Pencil size={15} /> Editar</button>
                         <button onClick={() => { setResetId(usuario.id); setNovaSenha(""); }} style={secondaryButtonStyle}>Senha</button>
+                        {loginSalvo?.role === "super" && usuario.id !== loginSalvo.usuarioId && (
+                          <button
+                            onClick={() => excluirConta(usuario)}
+                            disabled={excluindoId === usuario.id}
+                            style={dangerButtonStyle}
+                          >
+                            <Trash2 size={15} /> {excluindoId === usuario.id ? "Excluindo..." : "Excluir conta"}
+                          </button>
+                        )}
                       </div>
                     )}
                   </article>
@@ -755,6 +792,13 @@ const secondaryButtonStyle: React.CSSProperties = {
   gap: 7,
   fontWeight: 700,
   cursor: "pointer",
+};
+
+const dangerButtonStyle: React.CSSProperties = {
+  ...secondaryButtonStyle,
+  border: "1px solid hsl(var(--destructive) / 0.4)",
+  background: "hsl(var(--destructive) / 0.08)",
+  color: "hsl(var(--destructive))",
 };
 
 const primaryIconButtonStyle: React.CSSProperties = {

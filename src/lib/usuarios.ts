@@ -240,6 +240,16 @@ export async function redefinirSenhaUsuario(actor: ActorCredenciais, id: string,
   if (error) throw error;
 }
 
+export async function excluirUsuario(actor: ActorCredenciais, id: string): Promise<void> {
+  assertSupabase();
+  const { data, error } = await supabase.rpc("super_excluir_usuario", {
+    ...actorParams(actor),
+    p_id: id,
+  });
+  if (error) throw error;
+  if (data !== true) throw new Error("Nao foi possivel excluir a conta.");
+}
+
 export interface CriarContaPayload {
   login: string;
   nome: string;
