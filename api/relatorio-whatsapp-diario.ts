@@ -104,7 +104,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     .eq("id", true)
     .single();
   if (evolutionError || !evolution) {
-    return res.status(500).json({ error: "Evolution API nao configurada" });
+    console.error("Falha ao carregar integracao Evolution", evolutionError);
+    return res.status(500).json({
+      error: "Evolution API nao configurada",
+      codigo: evolutionError?.code || "SEM_REGISTRO",
+    });
   }
   const { data: configs, error } = await supabase.from("relatorio_whatsapp_config").select("*").eq("ativo", true);
   if (error) return res.status(500).json({ error: error.message });
