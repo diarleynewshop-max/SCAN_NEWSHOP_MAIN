@@ -448,75 +448,85 @@ function KpiCard(props: {
       </div>
       <div className="mt-3 text-3xl font-black text-foreground">{formatNumber(props.value)}</div>
       <div className="mt-1 text-xs text-muted-foreground">{props.hint}</div>
-      {itemDetalhe && (
-        <div
-          className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-4"
-          onClick={() => setItemDetalhe(null)}
-        >
-          <div
-            className="grid max-h-[90vh] w-full max-w-4xl gap-5 overflow-auto rounded-3xl border border-border bg-card p-5 shadow-2xl md:grid-cols-[320px_minmax(0,1fr)]"
-            onClick={(event) => event.stopPropagation()}
-          >
-            <div>
-              {itemDetalhe.fotoUrl ? (
-                <img
-                  src={itemDetalhe.fotoUrl}
-                  alt={itemDetalhe.codigo}
-                  className="h-[320px] w-full rounded-2xl border border-border bg-background object-cover"
-                />
-              ) : (
-                <div className="flex h-[320px] w-full items-center justify-center rounded-2xl border border-border bg-background">
-                  <Package className="h-10 w-10 text-muted-foreground" />
-                </div>
-              )}
+    </div>
+  );
+}
+
+function ItemDetalheModal({
+  item,
+  onClose,
+}: {
+  item: DashboardItemResumo;
+  onClose: () => void;
+}) {
+  return (
+    <div
+      className="fixed inset-0 z-[80] flex items-center justify-center bg-black/65 p-4"
+      onClick={onClose}
+    >
+      <div
+        className="grid max-h-[90vh] w-full max-w-4xl gap-5 overflow-auto rounded-3xl border border-border bg-card p-5 shadow-2xl md:grid-cols-[320px_minmax(0,1fr)]"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <div>
+          {item.fotoUrl ? (
+            <img
+              src={item.fotoUrl}
+              alt={item.codigo}
+              className="h-[320px] w-full rounded-2xl border border-border bg-background object-cover"
+            />
+          ) : (
+            <div className="flex h-[320px] w-full items-center justify-center rounded-2xl border border-border bg-background">
+              <Package className="h-10 w-10 text-muted-foreground" />
             </div>
+          )}
+        </div>
 
+        <div>
+          <div className="mb-4 flex items-start justify-between gap-4">
             <div>
-              <div className="mb-4 flex items-start justify-between gap-4">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                    Item frequente
-                  </p>
-                  <h3 className="mt-2 text-2xl font-black text-foreground">{itemDetalhe.sku}</h3>
-                  <p className="mt-2 font-mono text-sm text-muted-foreground">{itemDetalhe.codigo}</p>
-                  <p className="mt-1 text-sm text-muted-foreground">{itemDetalhe.secao}</p>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setItemDetalhe(null)}
-                  className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background text-foreground transition hover:bg-accent"
-                >
-                  <X className="h-4 w-4" />
-                </button>
-              </div>
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Item frequente
+              </p>
+              <h3 className="mt-2 text-2xl font-black text-foreground">{item.sku}</h3>
+              <p className="mt-2 font-mono text-sm text-muted-foreground">{item.codigo}</p>
+              <p className="mt-1 text-sm text-muted-foreground">{item.secao}</p>
+            </div>
+            <button
+              type="button"
+              onClick={onClose}
+              className="inline-flex h-10 w-10 items-center justify-center rounded-xl border border-border bg-background text-foreground transition hover:bg-accent"
+              aria-label="Fechar detalhes do item"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
 
-              <div className="grid gap-3 sm:grid-cols-2">
-                <div className="rounded-2xl border border-border bg-background px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Ocorrencias</div>
-                  <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(itemDetalhe.vezes)}</div>
-                </div>
-                <div className="rounded-2xl border border-border bg-background px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Em compras</div>
-                  <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(itemDetalhe.vezesComprado)}</div>
-                </div>
-                <div className="rounded-2xl border border-border bg-background px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Volume pedido</div>
-                  <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(itemDetalhe.totalPedido)}</div>
-                </div>
-                <div className="rounded-2xl border border-border bg-background px-4 py-3">
-                  <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Volume real</div>
-                  <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(itemDetalhe.totalReal)}</div>
-                </div>
-              </div>
-
-              <div className="mt-4 rounded-2xl border border-border bg-background px-4 py-3">
-                <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Status atual em compras</div>
-                <div className="mt-2 text-lg font-bold text-foreground">{labelStatusCompra(itemDetalhe.statusCompra)}</div>
-              </div>
+          <div className="grid gap-3 sm:grid-cols-2">
+            <div className="rounded-2xl border border-border bg-background px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Ocorrencias</div>
+              <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(item.vezes)}</div>
+            </div>
+            <div className="rounded-2xl border border-border bg-background px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Em compras</div>
+              <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(item.vezesComprado)}</div>
+            </div>
+            <div className="rounded-2xl border border-border bg-background px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Volume pedido</div>
+              <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(item.totalPedido)}</div>
+            </div>
+            <div className="rounded-2xl border border-border bg-background px-4 py-3">
+              <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Volume real</div>
+              <div className="mt-1 text-2xl font-black text-foreground">{formatNumber(item.totalReal)}</div>
             </div>
           </div>
+
+          <div className="mt-4 rounded-2xl border border-border bg-background px-4 py-3">
+            <div className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">Status atual em compras</div>
+            <div className="mt-2 text-lg font-bold text-foreground">{labelStatusCompra(item.statusCompra)}</div>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -1393,6 +1403,9 @@ export default function Dashboard() {
             </>
           )}
         </>
+      )}
+      {itemDetalhe && (
+        <ItemDetalheModal item={itemDetalhe} onClose={() => setItemDetalhe(null)} />
       )}
     </div>
   );
