@@ -91,7 +91,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   const cronVercel = req.headers["x-vercel-cron"] === "1";
   const secretValido = Boolean(secret) && req.headers.authorization === `Bearer ${secret}`;
   if (!cronVercel && !secretValido) return res.status(401).json({ error: "Nao autorizado" });
-  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  // O app usa a instancia propria definida em VITE_SUPABASE_URL. Evita uma
+  // SUPABASE_URL legada da Vercel apontar a rotina para outro banco.
+  const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
   if (!url || !key) return res.status(500).json({ error: "Supabase nao configurado" });
   const supabase = createClient(url, key, { auth: { persistSession: false } });
