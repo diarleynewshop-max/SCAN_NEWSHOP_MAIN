@@ -9,6 +9,7 @@ import {
   PackageCheck,
   RefreshCw,
   Search,
+  Settings,
   X,
   Users,
   XCircle,
@@ -30,6 +31,7 @@ import {
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart";
+import { RelatorioWhatsappConfigDialog } from "@/components/RelatorioWhatsappConfig";
 import { Input } from "@/components/ui/input";
 import { useAuth, type Empresa, type LoginFlag } from "@/hooks/useAuth";
 import {
@@ -597,6 +599,7 @@ export default function Dashboard() {
   const [itensMinVezes, setItensMinVezes] = useState("1");
   const [itensMinCompras, setItensMinCompras] = useState("0");
   const [itemDetalhe, setItemDetalhe] = useState<DashboardItemResumo | null>(null);
+  const [configRelatorioAberta, setConfigRelatorioAberta] = useState(false);
 
   const carregamentoRef = useRef(0);
   const carregarRef = useRef<(silent?: boolean) => Promise<void>>(async () => undefined);
@@ -774,15 +777,28 @@ export default function Dashboard() {
             </p>
           </div>
 
-          <button
-            type="button"
-            onClick={() => void carregar(true)}
-            disabled={loading || refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
-            Atualizar
-          </button>
+          <div className="flex flex-wrap items-center gap-2">
+            {loginSalvo?.role === "super" && loginSalvo.login ? (
+              <button
+                type="button"
+                onClick={() => setConfigRelatorioAberta(true)}
+                className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-accent"
+              >
+                <Settings className="h-4 w-4" />
+                Configuracao
+              </button>
+            ) : null}
+
+            <button
+              type="button"
+              onClick={() => void carregar(true)}
+              disabled={loading || refreshing}
+              className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
+              Atualizar
+            </button>
+          </div>
         </div>
 
         <div className="mt-4 rounded-2xl border border-border bg-background p-4">
@@ -1404,6 +1420,12 @@ export default function Dashboard() {
           )}
         </>
       )}
+      {configRelatorioAberta && loginSalvo?.role === "super" && loginSalvo.login ? (
+        <RelatorioWhatsappConfigDialog
+          login={loginSalvo}
+          onClose={() => setConfigRelatorioAberta(false)}
+        />
+      ) : null}
       {itemDetalhe && (
         <ItemDetalheModal item={itemDetalhe} onClose={() => setItemDetalhe(null)} />
       )}

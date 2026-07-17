@@ -8,6 +8,7 @@ export interface RelatorioWhatsappConfig {
   flag: "loja" | "cd" | "todos";
   secoes: string[];
   numeroWhatsapp: string;
+  criterio: "diario" | "semanal" | "mensal";
   ativo: boolean;
 }
 
@@ -25,6 +26,7 @@ export async function obterRelatoriosWhatsapp(actor: ActorCredenciais): Promise<
     flag: row.flag === "cd" || row.flag === "todos" ? row.flag : "loja",
     secoes: Array.isArray(row.secoes) ? row.secoes : [],
     numeroWhatsapp: String(row.numero_whatsapp ?? ""),
+    criterio: row.criterio === "semanal" || row.criterio === "mensal" ? row.criterio : "diario",
     ativo: row.ativo !== false,
   }));
 }
@@ -41,6 +43,7 @@ export async function salvarRelatorioWhatsapp(
     p_flag: config.flag,
     p_secoes: config.secoes,
     p_numero: config.numeroWhatsapp,
+    p_criterio: config.criterio,
     p_ativo: config.ativo,
   });
   if (error) throw error;

@@ -19,7 +19,6 @@ import {
   type UsuarioFormPayload,
 } from "@/lib/usuarios";
 import { ACCESS_PERMISSION_GROUPS, ACCESS_PERMISSION_LABELS, contarPermissoesAtivas, type AccessPermission } from "@/lib/accessControl";
-import { RelatorioWhatsappConfigPanel } from "@/components/RelatorioWhatsappConfig";
 
 const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
 const ROLES: UserRole[] = ["operador", "compras", "admin", "super"];
@@ -365,12 +364,6 @@ export default function Usuarios() {
           </div>
         )}
       </div>
-
-      {confirmado && loginSalvo?.role === "super" && actor && (
-        <div style={{ marginBottom: 18 }}>
-          <RelatorioWhatsappConfigPanel actor={actor} />
-        </div>
-      )}
 
       {!confirmado ? (
         <section style={{ maxWidth: 420, background: "hsl(var(--card))", border: "1px solid hsl(var(--border))", borderRadius: 14, padding: 18 }}>
