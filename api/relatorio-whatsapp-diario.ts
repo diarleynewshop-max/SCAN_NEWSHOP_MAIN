@@ -6,6 +6,9 @@ type Config = {
   id: string; empresas: string[]; flag: string; secoes: string[];
   numero_whatsapp: string; ativo: boolean;
 };
+type EvolutionConfig = {
+  base_url: string; api_key: string; instance_name: string;
+};
 type SecaoRow = {
   empresa: string; flag: string; data: string; secao: string;
   total: number; separado: number; nao_tem: number; parcial: number; pendente: number;
@@ -58,62 +61,68 @@ function pdfBuffer(config: Config, data: string, rows: SecaoRow[]): Promise<Buff
   });
 }
 
-async function enviarMeta(pdf: Buffer, numero: string, data: string): Promise<string> {
-  const token = process.env.WHATSAPP_ACCESS_TOKEN || "";
-  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
-  const version = process.env.WHATSAPP_GRAPH_VERSION || "v24.0";
-  const template = process.env.WHATSAPP_TEMPLATE_NAME || "relatorio_diario_pdf";
-  if (!token || !phoneId) throw new Error("Credenciais da Meta ainda nao configuradas");
-
-  const form = new FormData();
-  form.append("messaging_product", "whatsapp");
-  form.append("file", new Blob([pdf], { type: "application/pdf" }), `relatorio_${data}.pdf`);
-  const upload = await fetch(`https://graph.facebook.com/${version}/${phoneId}/media`, {
-    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form,
-  });
-  const media = await upload.json() as any;
-  if (!upload.ok || !media.id) throw new Error(`Meta upload: ${media.error?.message || upload.status}`);
-
-  const send = await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, {
+async function enviarEvolution(
+  evolution: EvolutionConfig, pdf: Buffer, numero: string, data: string,
+): Promise<string> {
+  const baseUrl = evolution.base_url.replace(/\/$/, "");
+  if (!baseUrl || !evolution.api_key || !evolution.instance_name) {
+    throw new Error("Evolution API ainda nao configurada");
+  }
+  const send = await fetch(`${baseUrl}/message/sendMedia/${encodeURIComponent(evolution.instance_name)}`, {
     method: "POST",
-    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    headers: { apikey: evolution.api_key, "Content-Type": "application/json" },
     body: JSON.stringify({
-      messaging_product: "whatsapp", to: numero, type: "template",
-      template: {
-        name: template, language: { code: "pt_BR" },
-        components: [
-          { type: "header", parameters: [{ type: "document", document: { id: media.id, filename: `relatorio_${data}.pdf` } }] },
-          { type: "body", parameters: [{ type: "text", text: data.split("-").reverse().join("/") }] },
-        ],
-      },
+      number: numero,
+      mediatype: "document",
+      mimetype: "application/pdf",
+      caption: `Relatorio diario de conferencia - ${data.split("-").reverse().join("/")}`,
+      media: pdf.toString("base64"),
+      fileName: `relatorio_${data}.pdf`,
     }),
   });
   const result = await send.json() as any;
-  if (!send.ok) throw new Error(`Meta envio: ${result.error?.message || send.status}`);
-  return String(result.messages?.[0]?.id || "");
+  if (!send.ok) throw new Error(`Evolution envio: ${result.message || result.error || send.status}`);
+  return String(result.key?.id || result.messageId || "");
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET" && req.method !== "POST") return res.status(405).json({ error: "Metodo nao permitido" });
   const secret = process.env.CRON_SECRET || "";
-  if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Nao autorizado" });
+  const cronVercel = req.headers["x-vercel-cron"] === "1";
+  const secretValido = Boolean(secret) && req.headers.authorization === `Bearer ${secret}`;
+  if (!cronVercel && !secretValido) return res.status(401).json({ error: "Nao autorizado" });
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
   if (!url || !key) return res.status(500).json({ error: "Supabase nao configurado" });
   const supabase = createClient(url, key, { auth: { persistSession: false } });
   const data = ontemSaoPaulo();
+  const { data: evolution, error: evolutionError } = await supabase
+    .from("relatorio_whatsapp_integracao")
+    .select("base_url,api_key,instance_name")
+    .eq("id", true)
+    .single();
+  if (evolutionError || !evolution) {
+    return res.status(500).json({ error: "Evolution API nao configurada" });
+  }
   const { data: configs, error } = await supabase.from("relatorio_whatsapp_config").select("*").eq("ativo", true);
   if (error) return res.status(500).json({ error: error.message });
   const resultados: any[] = [];
   for (const config of (configs ?? []) as Config[]) {
     try {
+      const { data: jaEnviado } = await supabase.from("relatorio_whatsapp_envios")
+        .select("mensagem_id").eq("config_id", config.id).eq("data_relatorio", data)
+        .eq("status", "enviado").maybeSingle();
+      if (jaEnviado) {
+        resultados.push({ id: config.id, ok: true, ignorado: true, motivo: "ja_enviado" });
+        continue;
+      }
       let query = supabase.from("dashboard_por_secao").select("*").eq("data", data).in("empresa", config.empresas);
       if (config.flag !== "todos") query = query.eq("flag", config.flag);
       if (config.secoes.length) query = query.in("secao", config.secoes);
       const { data: rows, error: rowsError } = await query.order("empresa").order("secao");
       if (rowsError) throw rowsError;
       const pdf = await pdfBuffer(config, data, (rows ?? []) as SecaoRow[]);
-      const messageId = await enviarMeta(pdf, config.numero_whatsapp, data);
+      const messageId = await enviarEvolution(evolution as EvolutionConfig, pdf, config.numero_whatsapp, data);
       await supabase.from("relatorio_whatsapp_envios").insert({
         config_id: config.id, data_relatorio: data, numero_whatsapp: config.numero_whatsapp,
         status: "enviado", mensagem_id: messageId,

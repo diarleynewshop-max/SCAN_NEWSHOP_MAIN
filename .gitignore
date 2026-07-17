@@ -29,3 +29,6 @@ dist-ssr
 !docs/PLANO_EXECUCAO_CODEX.md
 
 .vercel
+
+# Artefatos temporarios de autenticacao da Evolution API
+artifacts/evolution-qr.png
