@@ -2,8 +2,17 @@
   "functions": {
     "api/compras-erp-preload.ts": {
       "maxDuration": 60
+    },
+    "api/relatorio-whatsapp-diario.ts": {
+      "maxDuration": 60
     }
   },
+  "crons": [
+    {
+      "path": "/api/relatorio-whatsapp-diario",
+      "schedule": "0 10 * * *"
+    }
+  ],
   "headers": [
     {
       "source": "/",

@@ -1,0 +1,132 @@
+import type { VercelRequest, VercelResponse } from "@vercel/node";
+import { createClient } from "@supabase/supabase-js";
+import PDFDocument from "pdfkit";
+
+type Config = {
+  id: string; empresas: string[]; flag: string; secoes: string[];
+  numero_whatsapp: string; ativo: boolean;
+};
+type SecaoRow = {
+  empresa: string; flag: string; data: string; secao: string;
+  total: number; separado: number; nao_tem: number; parcial: number; pendente: number;
+  total_pedido: number; total_real: number;
+};
+
+function ontemSaoPaulo(): string {
+  const hoje = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "America/Sao_Paulo", year: "numeric", month: "2-digit", day: "2-digit",
+  }).format(new Date());
+  const data = new Date(`${hoje}T12:00:00Z`);
+  data.setUTCDate(data.getUTCDate() - 1);
+  return data.toISOString().slice(0, 10);
+}
+
+function pdfBuffer(config: Config, data: string, rows: SecaoRow[]): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    const doc = new PDFDocument({ size: "A4", margin: 42 });
+    const chunks: Buffer[] = [];
+    doc.on("data", (chunk) => chunks.push(Buffer.from(chunk)));
+    doc.on("end", () => resolve(Buffer.concat(chunks)));
+    doc.on("error", reject);
+    doc.fontSize(20).text("Relatorio diario de conferencia", { align: "center" });
+    doc.moveDown(0.4).fontSize(11).fillColor("#555").text(`Data: ${data.split("-").reverse().join("/")}`, { align: "center" });
+    doc.text(`Empresas: ${config.empresas.join(", ")} | Origem: ${config.flag.toUpperCase()}`, { align: "center" });
+    doc.moveDown().fillColor("#111");
+    const total = rows.reduce((a, r) => a + Number(r.total || 0), 0);
+    const separado = rows.reduce((a, r) => a + Number(r.separado || 0), 0);
+    const faltas = rows.reduce((a, r) => a + Number(r.nao_tem || 0), 0);
+    doc.fontSize(13).text(`Itens: ${total}   Separados: ${separado}   Nao tem: ${faltas}`);
+    doc.moveDown();
+    doc.fontSize(10).font("Helvetica-Bold")
+      .text("Secao", 42, doc.y, { continued: true, width: 180 })
+      .text("Total", 230, doc.y, { continued: true, width: 60 })
+      .text("Separado", 300, doc.y, { continued: true, width: 70 })
+      .text("Nao tem", 380, doc.y, { continued: true, width: 65 })
+      .text("Parcial", 455, doc.y, { width: 60 });
+    doc.moveDown(0.4).font("Helvetica");
+    rows.forEach((row) => {
+      if (doc.y > 750) doc.addPage();
+      doc.text(`${row.empresa} - ${row.secao}`, 42, doc.y, { continued: true, width: 180 })
+        .text(String(row.total), 230, doc.y, { continued: true, width: 60 })
+        .text(String(row.separado), 300, doc.y, { continued: true, width: 70 })
+        .text(String(row.nao_tem), 380, doc.y, { continued: true, width: 65 })
+        .text(String(row.parcial), 455, doc.y, { width: 60 });
+      doc.moveDown(0.25);
+    });
+    if (!rows.length) doc.fontSize(12).text("Sem dados para o recorte configurado.", { align: "center" });
+    doc.end();
+  });
+}
+
+async function enviarMeta(pdf: Buffer, numero: string, data: string): Promise<string> {
+  const token = process.env.WHATSAPP_ACCESS_TOKEN || "";
+  const phoneId = process.env.WHATSAPP_PHONE_NUMBER_ID || "";
+  const version = process.env.WHATSAPP_GRAPH_VERSION || "v24.0";
+  const template = process.env.WHATSAPP_TEMPLATE_NAME || "relatorio_diario_pdf";
+  if (!token || !phoneId) throw new Error("Credenciais da Meta ainda nao configuradas");
+
+  const form = new FormData();
+  form.append("messaging_product", "whatsapp");
+  form.append("file", new Blob([pdf], { type: "application/pdf" }), `relatorio_${data}.pdf`);
+  const upload = await fetch(`https://graph.facebook.com/${version}/${phoneId}/media`, {
+    method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form,
+  });
+  const media = await upload.json() as any;
+  if (!upload.ok || !media.id) throw new Error(`Meta upload: ${media.error?.message || upload.status}`);
+
+  const send = await fetch(`https://graph.facebook.com/${version}/${phoneId}/messages`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify({
+      messaging_product: "whatsapp", to: numero, type: "template",
+      template: {
+        name: template, language: { code: "pt_BR" },
+        components: [
+          { type: "header", parameters: [{ type: "document", document: { id: media.id, filename: `relatorio_${data}.pdf` } }] },
+          { type: "body", parameters: [{ type: "text", text: data.split("-").reverse().join("/") }] },
+        ],
+      },
+    }),
+  });
+  const result = await send.json() as any;
+  if (!send.ok) throw new Error(`Meta envio: ${result.error?.message || send.status}`);
+  return String(result.messages?.[0]?.id || "");
+}
+
+export default async function handler(req: VercelRequest, res: VercelResponse) {
+  if (req.method !== "GET" && req.method !== "POST") return res.status(405).json({ error: "Metodo nao permitido" });
+  const secret = process.env.CRON_SECRET || "";
+  if (!secret || req.headers.authorization !== `Bearer ${secret}`) return res.status(401).json({ error: "Nao autorizado" });
+  const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!url || !key) return res.status(500).json({ error: "Supabase nao configurado" });
+  const supabase = createClient(url, key, { auth: { persistSession: false } });
+  const data = ontemSaoPaulo();
+  const { data: configs, error } = await supabase.from("relatorio_whatsapp_config").select("*").eq("ativo", true);
+  if (error) return res.status(500).json({ error: error.message });
+  const resultados: any[] = [];
+  for (const config of (configs ?? []) as Config[]) {
+    try {
+      let query = supabase.from("dashboard_por_secao").select("*").eq("data", data).in("empresa", config.empresas);
+      if (config.flag !== "todos") query = query.eq("flag", config.flag);
+      if (config.secoes.length) query = query.in("secao", config.secoes);
+      const { data: rows, error: rowsError } = await query.order("empresa").order("secao");
+      if (rowsError) throw rowsError;
+      const pdf = await pdfBuffer(config, data, (rows ?? []) as SecaoRow[]);
+      const messageId = await enviarMeta(pdf, config.numero_whatsapp, data);
+      await supabase.from("relatorio_whatsapp_envios").insert({
+        config_id: config.id, data_relatorio: data, numero_whatsapp: config.numero_whatsapp,
+        status: "enviado", mensagem_id: messageId,
+      });
+      resultados.push({ id: config.id, ok: true, messageId });
+    } catch (err) {
+      const mensagem = err instanceof Error ? err.message : "Erro desconhecido";
+      await supabase.from("relatorio_whatsapp_envios").insert({
+        config_id: config.id, data_relatorio: data, numero_whatsapp: config.numero_whatsapp,
+        status: "erro", erro: mensagem.slice(0, 1000),
+      });
+      resultados.push({ id: config.id, ok: false, erro: mensagem });
+    }
+  }
+  return res.status(200).json({ data, resultados });
+}
