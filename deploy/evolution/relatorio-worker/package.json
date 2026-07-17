@@ -1,0 +1,9 @@
+{
+  "name": "scan-newshop-relatorio-worker",
+  "private": true,
+  "type": "module",
+  "dependencies": {
+    "pdfkit": "0.19.1",
+    "pg": "8.16.3"
+  }
+}

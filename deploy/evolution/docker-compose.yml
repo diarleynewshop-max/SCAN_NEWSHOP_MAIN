@@ -41,6 +41,21 @@ services:
       - evolution_redis:/data
     networks: [evolution]
 
+  relatorio-worker:
+    build: ./relatorio-worker
+    container_name: evolution_relatorio_worker
+    profiles: [worker]
+    restart: "no"
+    environment:
+      SUPABASE_DB_HOST: supabase-db
+      SUPABASE_DB_PORT: 5432
+      SUPABASE_DB_NAME: postgres
+      SUPABASE_DB_USER: ${SUPABASE_DB_USER:-relatorio_worker}
+      SUPABASE_DB_PASSWORD: ${SUPABASE_DB_PASSWORD}
+      TZ: America/Sao_Paulo
+    env_file: .env
+    networks: [evolution, supabase]
+
 volumes:
   evolution_instances:
   evolution_postgres:
@@ -49,4 +64,6 @@ volumes:
 networks:
   evolution:
     name: evolution_network
-
+  supabase:
+    external: true
+    name: supabase_default
