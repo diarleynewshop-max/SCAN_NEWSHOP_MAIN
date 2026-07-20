@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "react";
 import { useLocation } from "react-router-dom";
 import { registerSW } from "virtual:pwa-register";
+import { limparCacheBusterDaUrl } from "@/lib/appUpdate";
 
 const CHECK_INTERVAL_MS = 2 * 60 * 1000;
 const PENDING_RETRY_MS = 15 * 1000;
@@ -50,6 +51,10 @@ export function AppUpdateManager() {
   useEffect(() => {
     pathnameRef.current = location.pathname;
   }, [location.pathname]);
+
+  useEffect(() => {
+    limparCacheBusterDaUrl();
+  }, []);
 
   useEffect(() => {
     const limparTimer = () => {

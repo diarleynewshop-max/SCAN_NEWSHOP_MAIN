@@ -1,5 +1,5 @@
 ﻿import { useNavigate, useSearchParams } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLoginContext } from "@/hooks/useAuth";
@@ -8,6 +8,7 @@ import CriarContaModal from "@/components/CriarContaModal";
 import { hasPermission, type AccessPermission } from "@/lib/accessControl";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
 import { HISTORICO_COMPRAS_KEY, getHistoricoComprasEnabled } from "@/lib/historicoCompras";
+import { forcarAtualizacaoApp, recarregarAppAtualizado } from "@/lib/appUpdate";
 import { useToast } from "@/hooks/use-toast";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 import { ErpLayout } from "@/components/ErpLayout";
@@ -303,6 +304,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
   const [modoLeve, setModoLeve] = useState(() => getLightModeEnabled());
   const [historicoCompras, setHistoricoCompras] = useState(() => getHistoricoComprasEnabled());
   const [mostrarConfiguracoes, setMostrarConfiguracoes] = useState(false);
+  const [atualizandoApp, setAtualizandoApp] = useState(false);
   const logoEmpresa = getCompanyLogo(loginSalvo?.empresa ?? empresa);
   const nomeEmpresaLogo = getCompanyName(loginSalvo?.empresa ?? empresa);
 
@@ -399,6 +401,27 @@ const Home = ({ loginOnly = false }: HomeProps) => {
     localStorage.setItem(HISTORICO_COMPRAS_KEY, novo.toString());
   };
 
+  const handleForcarAtualizacaoApp = async () => {
+    if (atualizandoApp) return;
+    setAtualizandoApp(true);
+    toast({
+      title: "Atualizando app",
+      description: "Limpando cache do app e buscando a ultima versao.",
+    });
+
+    try {
+      await forcarAtualizacaoApp();
+      setTimeout(() => recarregarAppAtualizado(), 450);
+    } catch (err) {
+      console.error("[AppUpdate] Falha ao forcar atualizacao:", err);
+      toast({
+        title: "Falha ao atualizar",
+        description: "Tente fechar e abrir o app novamente.",
+        variant: "destructive",
+      });
+      setAtualizandoApp(false);
+    }
+  };
 
   const baixarAtalhoApp = () => {
     const appUrl = `${window.location.origin}/`;
@@ -1471,6 +1494,37 @@ const Home = ({ loginOnly = false }: HomeProps) => {
                   {historicoCompras
                     ? "Lista de compras carregada ao abrir o scanner. Cada produto exibe se já foi pedido e qual o status atual."
                     : "Quando ativado, consulta a lista de compras do ClickUp uma vez e exibe o status por produto. Pode pesar em celular fraco."}
+                </p>
+              </div>
+
+
+              {/* Atualizacao do App */}
+              <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 12 }}>
+                  <div style={{ width: 40, height: 40, borderRadius: 10, background: "hsl(var(--primary) / 0.1)", display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+                    <RefreshCw style={{ width: 18, height: 18, color: "hsl(var(--primary))" }} />
+                  </div>
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: 15, fontWeight: 600, color: "hsl(var(--foreground))" }}>Atualizacao do App</p>
+                    <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))" }}>Forca a ultima versao no celular</p>
+                  </div>
+                </div>
+                <button
+                  onClick={handleForcarAtualizacaoApp}
+                  disabled={atualizandoApp}
+                  style={{
+                    width: "100%", height: 44, background: "hsl(var(--primary))",
+                    color: "hsl(var(--primary-foreground))", border: "none",
+                    borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 800,
+                    cursor: atualizandoApp ? "wait" : "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    opacity: atualizandoApp ? 0.72 : 1,
+                  }}
+                >
+                  {atualizandoApp ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw style={{ width: 17, height: 17 }} />}
+                  {atualizandoApp ? "Atualizando..." : "Forcar atualizacao"}
+                </button>
+                <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", paddingTop: 8, marginTop: 12, borderTop: "1px solid hsl(var(--border))" }}>
+                  Limpa apenas o cache do app e recarrega. Login, configuracoes e listas salvas continuam no aparelho.
                 </p>
               </div>
 
