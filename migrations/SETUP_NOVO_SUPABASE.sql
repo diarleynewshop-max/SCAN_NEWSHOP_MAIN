@@ -435,22 +435,7 @@ where status = 'concluido'
   and data_conferencia is not null
 group by empresa, flag, data_conferencia;
 
-create or replace view public.dashboard_item_frequencia as
-select
-  p.empresa,
-  p.flag,
-  p.data_conferencia                         as data,
-  i.codigo,
-  max(i.sku)                                 as sku,
-  max(i.secao)                               as secao,
-  count(*)                                   as vezes,
-  coalesce(sum(i.quantidade_pedida), 0)      as total_pedido,
-  coalesce(sum(i.quantidade_real), 0)        as total_real
-from public.pedido_itens i
-join public.pedidos p on p.id = i.pedido_id
-where p.status = 'concluido'
-  and p.data_conferencia is not null
-group by p.empresa, p.flag, p.data_conferencia, i.codigo;
+-- dashboard_item_frequencia e criada na versao final da secao 012.
 
 create or replace view public.dashboard_pedidos_status as
 select
@@ -589,30 +574,7 @@ where p.status = 'concluido'
 group by p.empresa, p.flag, p.data_conferencia,
          coalesce(nullif(i.secao, ''), 'Sem categoria');
 
-create or replace view public.dashboard_item_frequencia as
-select
-  p.empresa,
-  p.flag,
-  p.data_conferencia                                 as data,
-  i.codigo,
-  max(i.sku)                                         as sku,
-  max(i.secao)                                       as secao,
-  count(*)                                           as vezes,
-  coalesce(sum(i.quantidade_pedida), 0)              as total_pedido,
-  coalesce(sum(i.quantidade_real), 0)                as total_real,
-  coalesce(
-    max(i.foto_url),
-    (select c.foto_url
-       from public.compras c
-      where c.codigo = i.codigo
-        and c.foto_url is not null
-      limit 1)
-  )                                                  as foto_url
-from public.pedido_itens i
-join public.pedidos p on p.id = i.pedido_id
-where p.status = 'concluido'
-  and p.data_conferencia is not null
-group by p.empresa, p.flag, p.data_conferencia, i.codigo;
+-- dashboard_item_frequencia e criada na versao final da secao 012.
 
 
 -- #######################################################################
