@@ -116,6 +116,8 @@ const ConferenceFileSchemaPadrao = z.object({
     z.object({
       codigo: z.string().min(1, "Código do produto não pode ser vazio."),
       sku: z.string().optional().default(""),
+      descricao: z.string().nullable().optional(),
+      description: z.string().nullable().optional(),
       secao: z.string().nullable().optional(),
       quantidade: z.number().int().positive("Quantidade deve ser um número inteiro positivo."),
       photo: z.string().nullable().optional(),
@@ -133,6 +135,7 @@ const PendentesSchema = z.object({
     z.object({
       codigo: z.string().min(1),
       sku: z.string().optional().default(""),
+      descricao: z.string().nullable().optional(),
       secao: z.string().nullable().optional(),
       quantidadePedida: z.number().int().positive(),
     })
@@ -158,6 +161,7 @@ function parseConferenceJson(raw: unknown):
         items: pendentes.data.itens.map((i) => ({
           codigo: i.codigo,
           sku: i.sku,
+          descricao: i.descricao ?? null,
           secao: i.secao,
           quantidade: i.quantidadePedida,
           photo: null,
@@ -774,6 +778,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         id: item.id || crypto.randomUUID(),
         codigo: item.codigo,
         sku: item.sku ?? "",
+        descricao: item.descricao ?? null,
         secao: item.secao ?? null,
         quantidadePedida: item.quantidadePedida,
         quantidadeReal: item.quantidadeReal,
@@ -908,6 +913,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           id: crypto.randomUUID(),
           codigo: String(p.barcode).trim(),
           sku: p.sku ?? "",
+          descricao: String(p.description ?? p.descricao ?? "").trim() || null,
           secao: p.secao ?? null,
           quantidadePedida: Number(p.quantidade),
           quantidadeReal: null,
@@ -943,6 +949,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         id: crypto.randomUUID(),
         codigo: item.codigo,
         sku: item.sku ?? "",
+        descricao: item.descricao ?? item.description ?? null,
         secao: item.secao ?? null,
         quantidadePedida: item.quantidade,
         quantidadeReal: null,
@@ -1137,6 +1144,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             id: crypto.randomUUID(),
             codigo: item.codigo,
             sku: item.sku ?? "",
+            descricao: item.descricao ?? item.description ?? null,
             secao: item.secao ?? null,
             quantidadePedida: item.quantidade,
             quantidadeReal: null,
@@ -1288,6 +1296,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     itens: items.map((i) => ({
       codigo: i.codigo,
       sku: i.sku,
+      descricao: i.descricao ?? null,
       secao: i.secao ?? null,
       quantidadePedida: i.quantidadePedida,
       quantidadeReal: i.quantidadeReal,
@@ -1320,6 +1329,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       id: i.id,
       codigo: i.codigo,
       sku: i.sku,
+      descricao: i.descricao ?? null,
       secao: i.secao ?? null,
       quantidadePedida: i.quantidadePedida,
       quantidadeReal: i.quantidadeReal,
@@ -1912,6 +1922,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       items: items.map((i) => ({
         codigo: i.codigo,
         sku: i.sku,
+        descricao: i.descricao ?? null,
         secao: i.secao ?? null,
         quantidade: i.quantidadePedida,
         quantidadeReal: i.quantidadeReal,
@@ -2640,9 +2651,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             const StatusIcon = label.icon;
             return (
               <div key={item.id} className={`rounded-xl p-3 shadow-sm flex gap-3 items-center ${getStatusColor(item.status)}`}>
-                {item.photo && <img src={item.photo} alt={item.codigo} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />}
+                {item.photo && <img src={item.photo} alt={item.descricao || item.codigo} className="w-12 h-12 rounded-lg object-cover flex-shrink-0" />}
                 <div className="flex-1 min-w-0">
                   <p className="text-xs text-muted-foreground">#{idx + 1}</p>
+                  {item.descricao && <p className="text-sm font-bold text-foreground leading-snug break-words">{item.descricao}</p>}
                   <p className="text-sm font-mono font-bold text-foreground">{item.codigo}</p>
                   {item.sku && <p className="text-xs text-muted-foreground">SKU: {item.sku}</p>}
                   <p className="text-xs text-muted-foreground">
@@ -2709,9 +2721,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                 onClick={() => { setViewMode("card"); setCurrentIndex(idx); }}
                 className={`rounded-xl p-3 flex gap-3 items-center cursor-pointer active:scale-[0.99] transition-transform ${getStatusColor(item.status)}`}
               >
-                {item.photo && <img src={item.photo} alt={item.codigo} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />}
+                {item.photo && <img src={item.photo} alt={item.descricao || item.codigo} className="w-10 h-10 rounded-lg object-cover flex-shrink-0" />}
                 <div className="flex-1 min-w-0">
                   <p className="text-[10px] text-muted-foreground font-mono">#{idx + 1}</p>
+                  {item.descricao && <p className="text-sm font-bold text-foreground leading-snug break-words">{item.descricao}</p>}
                   <p className="text-sm font-mono font-bold text-foreground truncate">{item.codigo}</p>
                   {item.sku && <p className="text-[11px] text-muted-foreground">SKU: {item.sku}</p>}
                   <p className="text-[11px] text-muted-foreground">Pedido: <strong>{item.quantidadePedida}</strong>{item.quantidadeReal !== null ? ` · Real: ${item.quantidadeReal}` : ""}</p>
@@ -2729,7 +2742,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         <div className={`rounded-xl p-4 space-y-4 shadow-md ${getStatusColor(currentItem.status)}`}>
           {currentItem.photo ? (
             <div className="flex justify-center">
-              <img src={currentItem.photo} alt={currentItem.codigo} className="w-40 h-40 rounded-xl object-cover shadow-sm border border-border" />
+              <img src={currentItem.photo} alt={currentItem.descricao || currentItem.codigo} className="w-40 h-40 rounded-xl object-cover shadow-sm border border-border" />
             </div>
           ) : (
             <div className="flex justify-center">
@@ -2740,6 +2753,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           )}
           <div className="text-center space-y-1">
             <p className="text-xs text-muted-foreground font-semibold">ITEM {currentIndex + 1}</p>
+            {currentItem.descricao && (
+              <p className="text-base font-black text-foreground leading-snug break-words">{currentItem.descricao}</p>
+            )}
             <p className="text-2xl font-mono font-black text-foreground tracking-wider">{currentItem.codigo}</p>
             {currentItem.sku && <p className="text-sm text-muted-foreground">SKU: <strong className="text-foreground">{currentItem.sku}</strong></p>}
             <p className="text-sm text-muted-foreground">

@@ -152,6 +152,8 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       items: hydratedProducts.map(({ product, photoDataUrl }) => ({
         codigo: product.barcode,
         sku: product.sku || "",
+        descricao: product.description || null,
+        description: product.description || null,
         quantidade: product.quantity,
         photo: photoDataUrl,
       })),
@@ -292,6 +294,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
         produtos:    hydratedProducts.map(({ product, photoDataUrl }) => ({
           barcode:    product.barcode,
           sku:        product.sku || "",
+          description: product.description || "",
           quantidade: product.quantity,
           removeTag:  product.removeTag ?? false,
           secao:      product.secao || null,

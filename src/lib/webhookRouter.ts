@@ -21,6 +21,7 @@ export interface WebhookPayload {
   produtos: Array<{
     barcode: string;
     sku: string;
+    description?: string;
     quantidade: number;
     removeTag: boolean;
     secao?: string | null;

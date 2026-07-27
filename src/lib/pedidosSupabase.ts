@@ -78,6 +78,7 @@ export const DASHBOARD_EMPRESA_FILTROS: Record<DashboardEmpresaFiltroKey, { labe
 interface ConferenciaSupabaseItem {
   codigo: string;
   sku?: string | null;
+  descricao?: string | null;
   secao?: string | null;
   quantidadePedida: number;
   quantidadeReal: number | null;
@@ -277,6 +278,7 @@ export async function enviarConferenciaParaSupabase(payload: EnviarConferenciaSu
       pedido_id: pedidoId,
       codigo: String(item.codigo ?? '').trim(),
       sku: item.sku || null,
+      descricao: String(item.descricao ?? '').trim() || null,
       secao: item.secao || null,
       quantidade_pedida: Number(item.quantidadePedida ?? 0),
       quantidade_real: item.quantidadeReal == null ? null : Number(item.quantidadeReal),

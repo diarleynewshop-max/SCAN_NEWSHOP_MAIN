@@ -185,6 +185,7 @@ export interface FecharConferenciaItemPayload {
   id?: string | null;
   codigo: string;
   sku?: string | null;
+  descricao?: string | null;
   secao?: string | null;
   quantidadePedida: number;
   quantidadeReal: number | null;
@@ -573,6 +574,7 @@ async function buildPedidoItemRows(
   pedido_id: string;
   codigo: string;
   sku: string | null;
+  descricao: string | null;
   secao: string | null;
   quantidade_pedida: number;
   quantidade_real: number | null;
@@ -592,6 +594,7 @@ async function buildPedidoItemRows(
       pedido_id: pedidoId,
       codigo: String(item.codigo ?? '').trim(),
       sku: String(item.sku ?? '').trim() || null,
+      descricao: String(item.descricao ?? '').trim() || null,
       secao: String(item.secao ?? '').trim() || null,
       quantidade_pedida: toInt(item.quantidadePedida),
       quantidade_real: item.quantidadeReal == null ? null : toInt(item.quantidadeReal),
