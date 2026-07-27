@@ -101,7 +101,7 @@ function formatarMoeda(valor: number | null | undefined): string {
   return new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" }).format(numero);
 }
 
-const EMPRESAS_CHAT: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
+const EMPRESAS_CHAT: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
 const LIMITE_ENVIOS_MINUTO = 8;
 const EMOJIS_CHAT = ["👍", "🙏", "😂", "😅", "❤️", "👏", "🔥", "✅", "❌", "👀", "📦", "🛒", "💰", "🚚", "⚠️", "🤝"];
 const MIDIAS_CHAT_PERMITIDAS = new Set([

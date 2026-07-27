@@ -119,7 +119,7 @@ begin
     update public.usuarios
        set empresas = array[empresa]
      where empresas = '{}'::text[]
-       and empresa in ('NEWSHOP','SOYE','FACIL');
+       and empresa in ('NEWSHOP','SOYE','FACIL','SEFULY');
   end if;
 
   if exists (
@@ -139,7 +139,7 @@ update public.usuarios u
          select upper(btrim(value)) as e
            from unnest(u.empresas) as value
        ) s
-      where e in ('NEWSHOP','SOYE','FACIL')
+      where e in ('NEWSHOP','SOYE','FACIL','SEFULY')
    ), '{}'::text[]);
 
 update public.usuarios
@@ -167,7 +167,7 @@ alter table public.usuarios add constraint usuarios_flag_default_chk
 
 alter table public.usuarios drop constraint if exists usuarios_empresas_validas_chk;
 alter table public.usuarios add constraint usuarios_empresas_validas_chk
-  check (empresas <@ array['NEWSHOP','SOYE','FACIL']::text[]) not valid;
+  check (empresas <@ array['NEWSHOP','SOYE','FACIL','SEFULY']::text[]) not valid;
 
 create or replace function public.set_updated_at()
 returns trigger language plpgsql as $$
@@ -190,7 +190,7 @@ values (
   'Administrador',
   crypt('trocar123', gen_salt('bf')),
   'super',
-  array['NEWSHOP','SOYE','FACIL'],
+  array['NEWSHOP','SOYE','FACIL','SEFULY'],
   'loja',
   '{}'::text[],
   true
@@ -248,7 +248,7 @@ as $$
       select upper(trim(value)) as e
         from unnest(coalesce(p_empresas, '{}'::text[])) as value
     ) s
-   where e in ('NEWSHOP','SOYE','FACIL');
+   where e in ('NEWSHOP','SOYE','FACIL','SEFULY');
 $$;
 
 revoke all on function public.admin_normalizar_empresas(text[]) from public;
@@ -730,7 +730,7 @@ begin
     raise exception 'senha obrigatoria';
   end if;
 
-  -- normaliza/valida empresas (só NEWSHOP/SOYE/FACIL); precisa de pelo menos uma
+  -- normaliza/valida empresas; precisa de pelo menos uma
   v_empresas := public.admin_normalizar_empresas(p_empresas);
   if array_length(v_empresas, 1) is null then
     raise exception 'selecione ao menos uma empresa';

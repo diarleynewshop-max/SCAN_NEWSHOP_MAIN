@@ -3,7 +3,7 @@ import { applyCompanyTheme } from "@/lib/companyTheme";
 import { isSupabaseConfigured, supabase } from "@/lib/supabaseClient";
 import { normalizarPermissoes, type AccessPermissionMap } from "@/lib/accessControl";
 
-export type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
+export type Empresa = "NEWSHOP" | "SOYE" | "FACIL" | "SEFULY";
 export type LoginFlag = "loja" | "cd";
 export type UserRole = "operador" | "compras" | "admin" | "super";
 
@@ -54,7 +54,7 @@ export type LoginResult =
 const STORAGE_KEY = "scan_newshop_login";
 const AUTH_CHANGE_EVENT = "scan-newshop-auth-change";
 
-const EMPRESAS_VALIDAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
+const EMPRESAS_VALIDAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
 const ROLES_VALIDOS: UserRole[] = ["operador", "compras", "admin", "super"];
 
 type LoginUsuarioRow = {
@@ -74,6 +74,7 @@ type LoginUsuarioRow = {
 
 const normalizarEmpresa = (value: unknown): Empresa | null => {
   const normalized = String(value ?? "").trim().toUpperCase();
+  if (normalized.includes("SEFULY")) return "SEFULY";
   if (normalized.includes("NEWSHOP")) return "NEWSHOP";
   if (normalized.includes("SOYE")) return "SOYE";
   if (normalized.includes("FACIL")) return "FACIL";

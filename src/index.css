@@ -123,6 +123,14 @@
     --primary-foreground: 30 12% 12%;
     --ring: 220 9% 72%;
   }
+
+  :root.empresa-sefuly,
+  .dark.empresa-sefuly {
+    --primary: 348 78% 73%;
+    --primary-foreground: 0 0% 100%;
+    --ring: 348 78% 73%;
+    --warning: 348 78% 73%;
+  }
 }
 
 * { box-sizing: border-box; }

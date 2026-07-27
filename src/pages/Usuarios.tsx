@@ -20,7 +20,7 @@ import {
 } from "@/lib/usuarios";
 import { ACCESS_PERMISSION_GROUPS, ACCESS_PERMISSION_LABELS, contarPermissoesAtivas, type AccessPermission } from "@/lib/accessControl";
 
-const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
+const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
 const ROLES: UserRole[] = ["operador", "compras", "admin", "super"];
 const FLAGS: LoginFlag[] = ["loja", "cd"];
 

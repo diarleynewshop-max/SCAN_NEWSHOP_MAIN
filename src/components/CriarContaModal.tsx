@@ -3,7 +3,7 @@ import { UserPlus, Loader2, Eye, EyeOff, Check } from "lucide-react";
 import type { Empresa, LoginFlag } from "@/hooks/useAuth";
 import { criarMinhaConta } from "@/lib/usuarios";
 
-const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
+const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
 
 interface Props {
   modoDesktop: boolean;

@@ -38,7 +38,7 @@ begin
     raise exception 'senha obrigatoria';
   end if;
 
-  -- normaliza/valida empresas (só NEWSHOP/SOYE/FACIL); precisa de pelo menos uma
+  -- normaliza/valida empresas; precisa de pelo menos uma
   v_empresas := public.admin_normalizar_empresas(p_empresas);
   if array_length(v_empresas, 1) is null then
     raise exception 'selecione ao menos uma empresa';

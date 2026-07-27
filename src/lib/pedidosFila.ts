@@ -8,7 +8,7 @@ const EXPEDICAO_SYNC_TASK_ID = 'expedicao-sync';
 const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined;
 const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined;
 
-export type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL';
+export type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL' | 'SEFULY';
 export type FlagKey = 'loja' | 'cd';
 
 interface PedidoFilaRow {
@@ -223,6 +223,7 @@ export interface EnviarListaParaConferenciaResult {
 
 function normalizarEmpresa(value: unknown): EmpresaKey {
   const empresa = String(value ?? 'NEWSHOP').trim().toUpperCase();
+  if (empresa.includes('SEFULY')) return 'SEFULY';
   if (empresa.includes('SOYE')) return 'SOYE';
   if (empresa.includes('FACIL')) return 'FACIL';
   return 'NEWSHOP';

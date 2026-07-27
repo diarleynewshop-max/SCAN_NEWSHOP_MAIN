@@ -2,7 +2,7 @@ import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
 import { enviarListaParaConferencia } from "@/lib/pedidosFila";
 import { produtoKey } from "@/lib/comprasSupabase";
 
-export type SugestaoCdEmpresa = "NEWSHOP" | "SOYE" | "FACIL";
+export type SugestaoCdEmpresa = "NEWSHOP" | "SOYE" | "FACIL" | "SEFULY";
 
 export interface SugestaoCdItem {
   id: string;

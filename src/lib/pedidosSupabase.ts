@@ -64,14 +64,15 @@ export interface RelatorioDataOption {
 
 type ConferenceStatusSupabase = 'separado' | 'nao_tem' | 'nao_tem_tudo' | 'pendente';
 
-export type DashboardEmpresaFiltroKey = 'NEWSHOP' | 'SO_FACIL' | 'SO_SOYE' | 'SOYE_FACIL' | 'TUDO';
+export type DashboardEmpresaFiltroKey = 'NEWSHOP' | 'SO_FACIL' | 'SO_SOYE' | 'SOYE_FACIL' | 'SEFULY' | 'TUDO';
 
 export const DASHBOARD_EMPRESA_FILTROS: Record<DashboardEmpresaFiltroKey, { label: string; empresas: EmpresaKey[] }> = {
   NEWSHOP: { label: 'NEWSHOP', empresas: ['NEWSHOP'] },
   SO_FACIL: { label: 'SO FACIL', empresas: ['FACIL'] },
   SO_SOYE: { label: 'SO SOYE', empresas: ['SOYE'] },
   SOYE_FACIL: { label: 'SOYE+FACIL', empresas: ['SOYE', 'FACIL'] },
-  TUDO: { label: 'TUDO', empresas: ['NEWSHOP', 'SOYE', 'FACIL'] },
+  SEFULY: { label: 'SEFULY', empresas: ['SEFULY'] },
+  TUDO: { label: 'TUDO', empresas: ['NEWSHOP', 'SOYE', 'FACIL', 'SEFULY'] },
 };
 
 interface ConferenciaSupabaseItem {
@@ -140,6 +141,7 @@ interface PedidoItemRow {
 
 function normalizarEmpresa(value: unknown): EmpresaKey {
   const empresa = String(value ?? 'NEWSHOP').trim().toUpperCase();
+  if (empresa.includes('SEFULY')) return 'SEFULY';
   if (empresa.includes('SOYE')) return 'SOYE';
   if (empresa.includes('FACIL')) return 'FACIL';
   return 'NEWSHOP';
@@ -222,7 +224,8 @@ export function getDashboardFiltrosPermitidos(empresasPermitidas: EmpresaKey[]):
   if (set.has('FACIL')) filtros.push('SO_FACIL');
   if (set.has('SOYE')) filtros.push('SO_SOYE');
   if (set.has('SOYE') && set.has('FACIL')) filtros.push('SOYE_FACIL');
-  if (set.has('NEWSHOP') && set.has('SOYE') && set.has('FACIL')) filtros.push('TUDO');
+  if (set.has('SEFULY')) filtros.push('SEFULY');
+  if (set.size > 1) filtros.push('TUDO');
   return filtros.length > 0 ? filtros : ['NEWSHOP'];
 }
 

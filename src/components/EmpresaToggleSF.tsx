@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { Repeat } from "lucide-react";
-import { obterLoginSalvo } from "@/hooks/useAuth";
+import { obterLoginSalvo, type Empresa } from "@/hooks/useAuth";
 import { applyCompanyTheme } from "@/lib/companyTheme";
 
 const STORAGE_KEY = "scan_newshop_login";
@@ -18,7 +18,7 @@ export function EmpresaToggleSF() {
   const elevado = login.role === "compras" || login.role === "admin" || login.role === "super";
   if (!elevado) return null;
 
-  const CICLO: Array<"NEWSHOP" | "SOYE" | "FACIL"> =
+  const CICLO: Empresa[] =
     login.empresasPermitidas && login.empresasPermitidas.length > 0
       ? login.empresasPermitidas
       : [login.empresa];

@@ -4,6 +4,7 @@ const SENHAS: Record<EmpresaKey, string> = {
   NEWSHOP: "n91",
   SOYE: "s91",
   FACIL: "f91",
+  SEFULY: "sf91",
 };
 
 export function obterSenhaPadrao(empresa: EmpresaKey, _flag: FlagKey = "loja"): string {

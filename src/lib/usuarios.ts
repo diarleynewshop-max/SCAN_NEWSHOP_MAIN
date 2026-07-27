@@ -84,7 +84,7 @@ type GrupoAcessoRpcRow = {
 };
 
 const ROLES: UserRole[] = ["operador", "compras", "admin", "super"];
-const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
+const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
 
 function assertSupabase() {
   if (!isSupabaseConfigured) {

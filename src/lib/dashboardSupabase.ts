@@ -2,7 +2,7 @@ import type { Empresa, LoginFlag } from "@/hooks/useAuth";
 import { isSupabaseConfigured, supabase } from "./supabaseClient";
 
 export type DashboardFlagFiltro = LoginFlag | "todos";
-export type DashboardEmpresaFiltroKey = "NEWSHOP" | "SO_FACIL" | "SO_SOYE" | "SOYE_FACIL" | "TUDO";
+export type DashboardEmpresaFiltroKey = "NEWSHOP" | "SO_FACIL" | "SO_SOYE" | "SOYE_FACIL" | "SEFULY" | "TUDO";
 
 export interface DashboardConsultaParams {
   empresas: Empresa[];
@@ -103,10 +103,11 @@ export const DASHBOARD_EMPRESA_FILTROS: Record<
   SO_FACIL: { label: "SO FACIL", empresas: ["FACIL"] },
   SO_SOYE: { label: "SO SOYE", empresas: ["SOYE"] },
   SOYE_FACIL: { label: "SOYE+FACIL", empresas: ["SOYE", "FACIL"] },
-  TUDO: { label: "TUDO", empresas: ["NEWSHOP", "SOYE", "FACIL"] },
+  SEFULY: { label: "SEFULY", empresas: ["SEFULY"] },
+  TUDO: { label: "TUDO", empresas: ["NEWSHOP", "SOYE", "FACIL", "SEFULY"] },
 };
 
-const EMPRESA_ORDEM: Empresa[] = ["NEWSHOP", "SOYE", "FACIL"];
+const EMPRESA_ORDEM: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
 
 type DashboardDiarioRowRaw = {
   empresa: string | null;
@@ -194,6 +195,7 @@ type DashboardCompraItemRowRaw = {
 
 function normalizarEmpresa(value: unknown): Empresa {
   const empresa = String(value ?? "NEWSHOP").trim().toUpperCase();
+  if (empresa.includes("SEFULY")) return "SEFULY";
   if (empresa.includes("SOYE")) return "SOYE";
   if (empresa.includes("FACIL")) return "FACIL";
   return "NEWSHOP";
@@ -291,7 +293,8 @@ export function getDashboardFiltrosPermitidos(empresasPermitidas: Empresa[]): Da
   if (set.has("FACIL")) filtros.push("SO_FACIL");
   if (set.has("SOYE")) filtros.push("SO_SOYE");
   if (set.has("SOYE") && set.has("FACIL")) filtros.push("SOYE_FACIL");
-  if (set.has("NEWSHOP") && set.has("SOYE") && set.has("FACIL")) filtros.push("TUDO");
+  if (set.has("SEFULY")) filtros.push("SEFULY");
+  if (set.size > 1) filtros.push("TUDO");
 
   return filtros.length > 0 ? filtros : ["NEWSHOP"];
 }

@@ -1042,7 +1042,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       let empresaDetectada: string | null = null;
       let flagDetectada: string | null = null;
 
-      if (n.includes("NEWSHOP")) empresaDetectada = "NEWSHOP";
+      if (n.includes("SEFULY")) empresaDetectada = "SEFULY";
+      else if (n.includes("NEWSHOP")) empresaDetectada = "NEWSHOP";
       else if (n.includes("FACIL"))   empresaDetectada = "FACIL";
       else if (n.includes("SOYE"))    empresaDetectada = "SOYE";
 
@@ -1869,6 +1870,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       NEWSHOP: { bg: "hsl(var(--primary)/0.12)", border: "hsl(var(--primary)/0.4)", text: "hsl(var(--primary))" },
       SOYE:    { bg: "hsl(142 72% 29%/0.12)",    border: "hsl(142 72% 29%/0.4)",    text: "hsl(142 72% 29%)"    },
       FACIL:   { bg: "hsl(30 95% 50%/0.12)",     border: "hsl(30 95% 50%/0.4)",     text: "hsl(30 95% 50%)"    },
+      SEFULY:  { bg: "hsl(348 78% 73%/0.14)",    border: "hsl(348 78% 73%/0.45)",   text: "hsl(348 78% 60%)"   },
     };
     const colors = empresaColors[empresa] ?? empresaColors["NEWSHOP"];
     return (
@@ -1890,6 +1892,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       { value: "NEWSHOP", label: "NEWSHOP", color: "hsl(var(--primary))"  },
       { value: "SOYE",    label: "SOYE",    color: "hsl(142 72% 29%)"     },
       { value: "FACIL",   label: "FACIL",   color: "hsl(30 95% 50%)"      },
+      { value: "SEFULY",  label: "SEFULY",  color: "hsl(348 78% 60%)"     },
     ].filter((opt) => empresasPermitidas.length === 0 || empresasPermitidas.includes(opt.value as (typeof empresasPermitidas)[number]));
 
     return (
