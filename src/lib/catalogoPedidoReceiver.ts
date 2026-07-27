@@ -215,9 +215,8 @@ export function buildCatalogoPedidoPayload(body: Record<string, unknown>): Catal
   };
 }
 
-function createSupabase(): RpcClient {
+function createSupabaseClient(key: string): RpcClient {
   const url = process.env.VITE_SUPABASE_URL || process.env.SUPABASE_URL || "";
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
   if (!url || !key) {
     throw Object.assign(new Error("Supabase nao configurado."), { statusCode: 500 });
   }
@@ -225,13 +224,39 @@ function createSupabase(): RpcClient {
   return createClient(url, key, { auth: { persistSession: false } });
 }
 
+function uniqueKeys(keys: string[]): string[] {
+  return [...new Set(keys.map(asString).filter(Boolean))];
+}
+
+function createSupabaseClients(): RpcClient[] {
+  const keys = uniqueKeys([
+    process.env.SUPABASE_SERVICE_ROLE_KEY || "",
+    process.env.VITE_SUPABASE_ANON_KEY || "",
+    process.env.SUPABASE_ANON_KEY || "",
+    process.env.VITE_SUPABASE_PUBLISHABLE_KEY || "",
+  ]);
+
+  if (keys.length === 0) {
+    throw Object.assign(new Error("Supabase nao configurado."), { statusCode: 500 });
+  }
+
+  return keys.map(createSupabaseClient);
+}
+
+function isUnauthorizedSupabaseError(error: unknown): boolean {
+  return getCatalogoPedidoErrorMessage(error).toLowerCase() === "unauthorized";
+}
+
 export async function receiveCatalogoPedido(
   body: Record<string, unknown>,
-  supabase: RpcClient = createSupabase()
+  supabase?: RpcClient
 ): Promise<CatalogoPedidoResult> {
   const payload = buildCatalogoPedidoPayload(body);
+  const clients = supabase ? [supabase] : createSupabaseClients();
+  let data: unknown = null;
+  let lastError: unknown = null;
 
-  const { data, error } = await supabase.rpc("receber_pedido_catalogo", {
+  const args = {
     p_conference_id: payload.conferenceId,
     p_empresa: payload.empresa,
     p_flag: payload.flag,
@@ -240,9 +265,26 @@ export async function receiveCatalogoPedido(
     p_titulo: payload.titulo,
     p_itens: payload.itens,
     p_payload: body,
-  });
+  };
 
-  if (error) throw error;
+  for (let index = 0; index < clients.length; index += 1) {
+    const { data: rpcData, error } = await clients[index].rpc("receber_pedido_catalogo", args);
+    if (!error) {
+      data = rpcData;
+      lastError = null;
+      break;
+    }
+
+    lastError = error;
+    if (isUnauthorizedSupabaseError(error) && index + 1 < clients.length) {
+      console.warn("[catalogo-pedido] SUPABASE_SERVICE_ROLE_KEY recusada; tentando fallback anon.");
+      continue;
+    }
+
+    break;
+  }
+
+  if (lastError) throw lastError;
 
   const result = (data ?? {}) as Record<string, unknown>;
   const bloqueado = Boolean(result.bloqueado);
