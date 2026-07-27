@@ -20,6 +20,7 @@ interface PedidoFilaRow {
   observacao: string | null;
   created_at: string | null;
   clickup_task_id: string | null;
+  pedido_numero: number | null;
 }
 
 interface MeuPedidoRow {
@@ -37,6 +38,7 @@ interface MeuPedidoRow {
   resumo_nao_tem: number | null;
   resumo_parcial: number | null;
   resumo_pendente: number | null;
+  pedido_numero: number | null;
 }
 
 interface PedidoFilaItemRow {
@@ -51,6 +53,7 @@ interface PedidoFilaItemRow {
   status: 'separado' | 'nao_tem' | 'nao_tem_tudo' | 'pendente';
   foto_url: string | null;
   ordem: number | null;
+  conferido_em: string | null;
 }
 
 interface PedidoBaseResumoRow {
@@ -83,6 +86,7 @@ export interface PedidoParaConferencia {
   date_created: string;
   emAndamento: boolean;
   clickupTaskId: string | null;
+  numeroPedido: number | null;
   undoMergeDisponivel?: boolean;
   description?: string;
   attachments?: any[];
@@ -122,6 +126,7 @@ export interface PedidoFilaItem {
   status: 'separado' | 'nao_tem' | 'nao_tem_tudo' | 'pendente';
   photo: string | null;
   ordem: number;
+  conferidoEm: string | null;
 }
 
 export interface MeuPedidoResumo {
@@ -139,6 +144,7 @@ export interface MeuPedidoResumo {
   resumoNaoTem: number;
   resumoParcial: number;
   resumoPendente: number;
+  numeroPedido: number | null;
 }
 
 export interface PendenteConsolidado {
@@ -176,6 +182,7 @@ export interface ListarPedidosFiltro {
 }
 
 export interface FecharConferenciaItemPayload {
+  id?: string | null;
   codigo: string;
   sku?: string | null;
   secao?: string | null;
@@ -231,6 +238,19 @@ function normalizarEmpresa(value: unknown): EmpresaKey {
 
 function normalizarFlag(value: unknown): FlagKey {
   return String(value ?? 'loja').trim().toLowerCase() === 'cd' ? 'cd' : 'loja';
+}
+
+export function formatarNumeroPedido(numero: number | null | undefined): string {
+  const value = toInt(numero);
+  return value > 0 ? `#${String(value).padStart(5, '0')}` : '';
+}
+
+export function formatarTituloPedido(titulo: string, numero: number | null | undefined): string {
+  const numeroFormatado = formatarNumeroPedido(numero);
+  const nome = String(titulo ?? '').trim();
+  if (!numeroFormatado) return nome;
+  if (nome.includes(numeroFormatado)) return nome;
+  return nome ? `${nome} -- ${numeroFormatado}` : numeroFormatado;
 }
 
 const MERGE_UNDO_PREFIX = 'mergeUndo=';
@@ -590,7 +610,7 @@ export async function listarPedidosParaConferencia(
 
   const { data, error } = await supabase
     .from('pedidos')
-    .select('id,titulo,listeiro,pessoa,status,observacao,created_at,clickup_task_id')
+    .select('id,titulo,listeiro,pessoa,status,observacao,created_at,clickup_task_id,pedido_numero')
     .eq('empresa', normalizarEmpresa(empresa))
     .eq('flag', normalizarFlag(flag))
     .in('status', ['analisado', 'em_andamento'])
@@ -605,6 +625,7 @@ export async function listarPedidosParaConferencia(
     date_created: pedido.created_at ? String(new Date(pedido.created_at).getTime()) : '',
     emAndamento: pedido.status === 'em_andamento',
     clickupTaskId: pedido.clickup_task_id ?? null,
+    numeroPedido: pedido.pedido_numero == null ? null : toInt(pedido.pedido_numero),
     undoMergeDisponivel: Boolean(extrairMergeUndoMeta(pedido.observacao)),
   }));
 }
@@ -625,6 +646,7 @@ function mapMeuPedido(row: MeuPedidoRow): MeuPedidoResumo {
     resumoNaoTem: toInt(row.resumo_nao_tem),
     resumoParcial: toInt(row.resumo_parcial),
     resumoPendente: toInt(row.resumo_pendente),
+    numeroPedido: row.pedido_numero == null ? null : toInt(row.pedido_numero),
   };
 }
 
@@ -643,6 +665,7 @@ const MEU_PEDIDO_SELECT_COLUMNS = [
   'resumo_nao_tem',
   'resumo_parcial',
   'resumo_pendente',
+  'pedido_numero',
 ].join(',');
 
 export async function listarPedidos(f: ListarPedidosFiltro): Promise<MeuPedidoResumo[]> {
@@ -966,7 +989,7 @@ export async function carregarItensDoPedido(pedidoId: string): Promise<PedidoFil
 
   const { data, error } = await supabase
     .from('pedido_itens')
-    .select('id,pedido_id,codigo,sku,descricao,secao,quantidade_pedida,quantidade_real,status,foto_url,ordem')
+    .select('id,pedido_id,codigo,sku,descricao,secao,quantidade_pedida,quantidade_real,status,foto_url,ordem,conferido_em')
     .eq('pedido_id', pedidoId)
     .order('ordem', { ascending: true });
 
@@ -984,6 +1007,7 @@ export async function carregarItensDoPedido(pedidoId: string): Promise<PedidoFil
     status: item.status,
     photo: item.foto_url ?? null,
     ordem: item.ordem ?? index + 1,
+    conferidoEm: item.conferido_em ?? null,
   }));
 }
 
@@ -1119,6 +1143,68 @@ export async function atualizarQuantidadePedidoItem(
     .eq("id", pedidoItemId);
 
   if (error) throw error;
+}
+
+export async function atualizarStatusPedidoItem(
+  pedidoId: string,
+  pedidoItemId: string,
+  input: {
+    status: FecharConferenciaItemPayload['status'];
+    quantidadePedida?: number | null;
+    quantidadeReal?: number | null;
+  }
+): Promise<void> {
+  if (!isSupabaseConfigured) return;
+
+  const pedido = String(pedidoId ?? '').trim();
+  const itemId = String(pedidoItemId ?? '').trim();
+  if (!pedido || !itemId) throw new Error('Pedido/item invalido.');
+
+  const status = toStatusConferencia(input.status);
+  let quantidadePedida = toInt(input.quantidadePedida);
+
+  if (quantidadePedida <= 0) {
+    const { data, error } = await supabase
+      .from('pedido_itens')
+      .select('quantidade_pedida')
+      .eq('id', itemId)
+      .eq('pedido_id', pedido)
+      .maybeSingle();
+    if (error) throw error;
+    quantidadePedida = toInt((data as { quantidade_pedida?: number } | null)?.quantidade_pedida);
+  }
+
+  if (quantidadePedida <= 0) throw new Error('Quantidade pedida invalida.');
+
+  let quantidadeReal = input.quantidadeReal == null ? null : toInt(input.quantidadeReal);
+  if (status === 'separado') quantidadeReal = quantidadePedida;
+  if (status === 'nao_tem') quantidadeReal = 0;
+  if (status === 'pendente') quantidadeReal = null;
+  if (status === 'nao_tem_tudo') {
+    if (quantidadeReal == null || quantidadeReal <= 0) {
+      throw new Error('Informe a quantidade separada para item parcial.');
+    }
+    if (quantidadeReal >= quantidadePedida) {
+      throw new Error('Use Separado quando a quantidade real for igual ao pedido.');
+    }
+  }
+
+  const payload: Record<string, unknown> = {
+    status,
+    quantidade_real: quantidadeReal,
+    conferido_em: new Date().toISOString(),
+  };
+  if (input.quantidadePedida != null) payload.quantidade_pedida = quantidadePedida;
+
+  const { error } = await supabase
+    .from('pedido_itens')
+    .update(payload)
+    .eq('id', itemId)
+    .eq('pedido_id', pedido);
+  if (error) throw error;
+
+  const { error: rpcError } = await supabase.rpc('recalcular_resumo_pedido', { p_pedido_id: pedido });
+  if (rpcError) throw rpcError;
 }
 
 // Renomeia o pedido (titulo). Usado no "Editar pedido" (admin/super).

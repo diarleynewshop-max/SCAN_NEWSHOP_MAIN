@@ -181,13 +181,16 @@ function normalizeConferenceId(empresa: EmpresaKey, numeroPedido: string, explic
 function buildPayload(body: Record<string, unknown>): CatalogoPedidoPayload {
   const numeroPedido = asString(pick(body, [
     "numeroPedido",
+    "codigoPedido",
+    "codigo_pedido",
+    "pedidoCodigo",
     "numero_pedido",
     "numeroDoPedido",
     "pedidoNumero",
     "orderNumber",
     "numero",
   ]));
-  const empresa = normalizeEmpresa(pick(body, ["loja", "empresa", "lojaDestino", "empresaDestino"]));
+  const empresa = normalizeEmpresa(pick(body, ["loja", "empresa", "lojaDestino", "empresaDestino", "lojaId", "loja_id", "idLoja"]));
   const clienteNome = asString(pick(body, ["nomeCliente", "nome_cliente", "cliente", "customerName"]));
   const flag = normalizeFlag(pick(body, ["flag", "tipo", "origem"]));
 

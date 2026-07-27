@@ -34,12 +34,14 @@ import jsPDF from "jspdf";
 import JSZip from "jszip";
 import {
   atualizarQuantidadePedidoItem,
+  atualizarStatusPedidoItem,
   atualizarTituloPedido,
   removerItemPedido,
   desfazerJuntarPedidos,
   carregarItensDoPedido,
   dispararExpedicaoConferencia,
   fecharConferenciaExistente,
+  formatarTituloPedido,
   gerarPedidoPendentes,
   liberarPedido,
   liberarPedidoEmSegundoPlano,
@@ -283,6 +285,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [itensDetalheTask, setItensDetalheTask] = useState<ConferenceItem[]>([]);
   const [loadingDetalheTask, setLoadingDetalheTask] = useState(false);
   const [salvandoQuantidadeItemId, setSalvandoQuantidadeItemId] = useState<string | null>(null);
+  const [salvandoStatusItemId, setSalvandoStatusItemId] = useState<string | null>(null);
   const [nomeEditPedido, setNomeEditPedido] = useState("");
   const [salvandoNomePedido, setSalvandoNomePedido] = useState(false);
   const [removendoItemId, setRemovendoItemId] = useState<string | null>(null);
@@ -543,7 +546,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         secao: item.secao ?? null,
         quantidadePedida: item.quantidadePedida,
         quantidadeReal: item.quantidadeReal,
-        status: item.status === "pendente" && item.quantidadeReal == null ? "aguardando" : item.status,
+        status: item.status === "pendente" && item.quantidadeReal == null && !item.conferidoEm ? "aguardando" : item.status,
         photo: item.photo ?? null,
         digito: null,
       }));
@@ -574,7 +577,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           secao: item.secao ?? null,
           quantidadePedida: item.quantidadePedida,
           quantidadeReal: item.quantidadeReal,
-          status: item.status,
+          status: item.status === "pendente" && item.quantidadeReal == null && !item.conferidoEm ? "aguardando" : item.status,
           photo: item.photo ?? null,
           digito: null,
         }))
@@ -612,6 +615,21 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     } finally {
       setSalvandoQuantidadeItemId(null);
     }
+  };
+
+  const salvarStatusDetalhe = async (item: ConferenceItem, status: ConferenceStatus) => {
+    const task = modalDetalharTask;
+    if (!task) return;
+
+    if (status === "nao_tem_tudo" && (!item.quantidadeReal || item.quantidadeReal <= 0)) {
+      toast({ title: "Digite a quantidade parcial", variant: "destructive" });
+      return;
+    }
+
+    const atualizado = aplicarStatusItem(item, status, item.quantidadeReal ?? undefined);
+    setItensDetalheTask((prev) => prev.map((it) => (it.id === item.id ? atualizado : it)));
+    setItems((prev) => prev.map((it) => (it.id === item.id ? atualizado : it)));
+    await persistirStatusItem(atualizado, task.id);
   };
 
   // Editar pedido (admin/super): renomear o pedido.
@@ -759,7 +777,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         secao: item.secao ?? null,
         quantidadePedida: item.quantidadePedida,
         quantidadeReal: item.quantidadeReal,
-        status: item.status === "pendente" && item.quantidadeReal == null ? "aguardando" : item.status,
+        status: item.status === "pendente" && item.quantidadeReal == null && !item.conferidoEm ? "aguardando" : item.status,
         photo: item.photo ?? null,
         digito: null,
       }));
@@ -841,6 +859,31 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       void supabase.removeChannel(channel);
     };
   }, [taskSelecionada?.id]);
+
+  const pedidoRealtimeId = taskSelecionada?.id ?? modalDetalharTask?.id ?? null;
+  useEffect(() => {
+    if (!pedidoRealtimeId) return;
+
+    const channel = supabase
+      .channel(`pedido-itens-conferencia:${pedidoRealtimeId}`)
+      .on(
+        "postgres_changes",
+        {
+          event: "*",
+          schema: "public",
+          table: "pedido_itens",
+          filter: `pedido_id=eq.${pedidoRealtimeId}`,
+        },
+        () => {
+          void carregarItensTaskAtual(pedidoRealtimeId);
+        }
+      )
+      .subscribe();
+
+    return () => {
+      void supabase.removeChannel(channel);
+    };
+  }, [pedidoRealtimeId]);
 
   const processJsonText = (text: string): boolean => {
     try {
@@ -1164,17 +1207,47 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     setPhase("finished");
   };
 
+  const aplicarStatusItem = (item: ConferenceItem, status: ConferenceStatus, quantidadeReal?: number): ConferenceItem => {
+    if (status === "separado") return { ...item, status, quantidadeReal: item.quantidadePedida };
+    if (status === "nao_tem") return { ...item, status, quantidadeReal: 0 };
+    if (status === "pendente") return { ...item, status, quantidadeReal: null };
+    if (status === "nao_tem_tudo") return { ...item, status, quantidadeReal: quantidadeReal ?? item.quantidadeReal ?? null };
+    return { ...item, status, quantidadeReal: quantidadeReal ?? item.quantidadeReal ?? null };
+  };
+
+  const statusProntoParaPersistir = (item: ConferenceItem) =>
+    item.status !== "aguardando" &&
+    (item.status !== "nao_tem_tudo" || (item.quantidadeReal !== null && item.quantidadeReal > 0));
+
+  const persistirStatusItem = async (item: ConferenceItem, pedidoIdParam?: string) => {
+    if (apenasVisualizar || !statusProntoParaPersistir(item)) return;
+    const pedidoId = pedidoIdParam ?? pedidoReservadoIdsRef.current[0] ?? pedidoOrigemIdsRef.current[0] ?? taskSelecionada?.id;
+    if (!pedidoId) return;
+
+    setSalvandoStatusItemId(item.id);
+    try {
+      await atualizarStatusPedidoItem(pedidoId, item.id, {
+        status: item.status,
+        quantidadePedida: item.quantidadePedida,
+        quantidadeReal: item.quantidadeReal,
+      });
+    } catch (err) {
+      toast({
+        title: "Falha ao salvar item",
+        description: err instanceof Error ? err.message : "O status ficou local, mas nao gravou no Supabase.",
+        variant: "destructive",
+      });
+    } finally {
+      setSalvandoStatusItemId((current) => (current === item.id ? null : current));
+    }
+  };
+
   const setStatus = (id: string, status: ConferenceStatus, quantidadeReal?: number) => {
-    setItems((prev) =>
-      prev.map((item) => {
-        if (item.id !== id) return item;
-        if (status === "separado") return { ...item, status, quantidadeReal: item.quantidadePedida };
-        if (status === "nao_tem") return { ...item, status, quantidadeReal: 0 };
-        if (status === "pendente") return { ...item, status, quantidadeReal: null };
-        if (status === "nao_tem_tudo") return { ...item, status, quantidadeReal: quantidadeReal ?? null };
-        return { ...item, status, quantidadeReal: quantidadeReal ?? null };
-      })
-    );
+    const atual = items.find((item) => item.id === id);
+    if (!atual) return;
+    const atualizado = aplicarStatusItem(atual, status, quantidadeReal);
+    setItems((prev) => prev.map((item) => (item.id === id ? atualizado : item)));
+    void persistirStatusItem(atualizado);
   };
 
   const handleQuantityChange = (id: string, value: string) => {
@@ -1194,7 +1267,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       toast({ title: "Use 'Separado' se tem tudo", description: `Pedido: ${item.quantidadePedida}`, variant: "destructive" });
       return;
     }
-    setItems((prev) => prev.map((i) => (i.id === id ? { ...i, quantidadeReal: num, status: "nao_tem_tudo" } : i)));
+    const atualizado: ConferenceItem = { ...item, quantidadeReal: num, status: "nao_tem_tudo" };
+    setItems((prev) => prev.map((i) => (i.id === id ? atualizado : i)));
+    void persistirStatusItem(atualizado);
   };
 
   const getResumo = () => ({
@@ -1242,6 +1317,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     setSendStatus("sending");
     const pedidoId = pedidoReservadoIdsRef.current[0];
     const itensFechamento = items.map((i) => ({
+      id: i.id,
       codigo: i.codigo,
       sku: i.sku,
       secao: i.secao ?? null,
@@ -2100,7 +2176,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
               <p className="font-bold text-foreground text-base text-center">Como deseja abrir este pedido?</p>
-              <p className="text-xs text-muted-foreground text-center truncate">{modalModoAberturaTask.name}</p>
+              <p className="text-xs text-muted-foreground text-center truncate">{formatarTituloPedido(modalModoAberturaTask.name, modalModoAberturaTask.numeroPedido)}</p>
               <div className="flex flex-col gap-3 pt-1">
                 <button
                   onClick={() => { const f = forcarReservaAndamento; setForcarReservaAndamento(false); abrirTaskComModo(modalModoAberturaTask, "visualizar", f); }}
@@ -2135,7 +2211,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
             <div className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4">
               <p className="font-bold text-foreground text-base text-center">Acoes do pedido</p>
-              <p className="text-xs text-muted-foreground text-center truncate">{modalAcoesTask.name}</p>
+              <p className="text-xs text-muted-foreground text-center truncate">{formatarTituloPedido(modalAcoesTask.name, modalAcoesTask.numeroPedido)}</p>
               <div className="flex flex-col gap-3 pt-1">
                 <button
                   onClick={() => void abrirDetalhamentoTask(modalAcoesTask)}
@@ -2173,7 +2249,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <div className="bg-card rounded-2xl p-6 w-full max-w-sm shadow-2xl space-y-4" onClick={(e) => e.stopPropagation()}>
               <div className="text-center space-y-1">
                 <p className="text-base font-bold text-destructive">Excluir lista</p>
-                <p className="text-xs text-muted-foreground truncate">{modalExcluirTask.name}</p>
+                <p className="text-xs text-muted-foreground truncate">{formatarTituloPedido(modalExcluirTask.name, modalExcluirTask.numeroPedido)}</p>
               </div>
               <div className="rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-foreground">
                 Isso apaga o pedido e todos os itens dele do Supabase. <b>Não dá pra desfazer.</b>
@@ -2212,6 +2288,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           {tasks.map((task) => {
             const isLoading = loadingJson && taskSelecionada?.id === task.id;
             const emAndamento = task.emAndamento === true;
+            const tituloPedido = formatarTituloPedido(task.name, task.numeroPedido);
             const data = task.date_created
               ? new Date(Number(task.date_created)).toLocaleString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
               : "";
@@ -2231,7 +2308,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
               >
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
-                    <p className="text-sm font-bold text-foreground truncate">{task.name}</p>
+                    <p className="text-sm font-bold text-foreground truncate">{tituloPedido}</p>
                     {emAndamento && (
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-warning/15 text-warning border border-warning/30 flex-shrink-0">🔒 EM ANDAMENTO</span>
                     )}
@@ -2354,41 +2431,84 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                               )}
                               </div>
                             </div>
-                            <div className="grid w-full grid-cols-2 gap-2 lg:flex lg:w-auto">
-                              <input
-                                type="number"
-                                min="1"
-                                value={item.quantidadePedida}
-                                onChange={(event) => {
-                                  const valor = Number(event.target.value);
-                                  setItensDetalheTask((prev) => prev.map((it) => it.id === item.id ? { ...it, quantidadePedida: Number.isFinite(valor) && valor > 0 ? valor : it.quantidadePedida } : it));
-                                }}
-                                className="h-11 w-full rounded-xl border border-input bg-card px-3 text-sm font-bold text-foreground outline-none lg:w-24"
-                              />
-                              <button
-                                type="button"
-                                onClick={() => void salvarQuantidadeDetalhe(item.id, item.quantidadePedida)}
-                                disabled={salvandoQuantidadeItemId === item.id}
-                                className="h-11 rounded-xl border border-border bg-card px-3 text-xs font-bold text-foreground disabled:opacity-60"
-                              >
-                                {salvandoQuantidadeItemId === item.id ? "Salvando..." : "Salvar qtd"}
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => abrirModalRecomendacao(item)}
-                                className="h-11 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground"
-                              >
-                                Recomendar troca
-                              </button>
-                              <button
-                                type="button"
-                                onClick={() => void excluirItemDetalhe(item.id)}
-                                disabled={removendoItemId === item.id}
-                                title="Excluir item"
-                                className="h-11 rounded-xl border border-destructive/40 bg-destructive/5 px-3 text-xs font-bold text-destructive disabled:opacity-60"
-                              >
-                                {removendoItemId === item.id ? "..." : "🗑️ Excluir"}
-                              </button>
+                            <div className="w-full space-y-3 lg:w-[480px]">
+                              <div className="grid grid-cols-2 gap-2">
+                                <label className="block">
+                                  <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Qtd pedido/pendente</span>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    value={item.quantidadePedida}
+                                    onChange={(event) => {
+                                      const valor = Number(event.target.value);
+                                      setItensDetalheTask((prev) => prev.map((it) => it.id === item.id ? { ...it, quantidadePedida: Number.isFinite(valor) && valor > 0 ? Math.trunc(valor) : it.quantidadePedida } : it));
+                                    }}
+                                    className="mt-1 h-10 w-full rounded-xl border border-input bg-card px-3 text-sm font-bold text-foreground outline-none"
+                                  />
+                                </label>
+                                <label className="block">
+                                  <span className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Qtd parcial</span>
+                                  <input
+                                    type="number"
+                                    min="1"
+                                    max={Math.max(1, item.quantidadePedida - 1)}
+                                    value={item.quantidadeReal ?? ""}
+                                    onChange={(event) => {
+                                      const valor = event.target.value === "" ? null : Number(event.target.value);
+                                      setItensDetalheTask((prev) => prev.map((it) => it.id === item.id ? { ...it, quantidadeReal: valor !== null && Number.isFinite(valor) && valor > 0 ? Math.trunc(valor) : null } : it));
+                                    }}
+                                    className="mt-1 h-10 w-full rounded-xl border border-input bg-card px-3 text-sm font-bold text-foreground outline-none"
+                                  />
+                                </label>
+                              </div>
+                              <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+                                {([
+                                  ["separado", "Separado"],
+                                  ["nao_tem", "Nao tem"],
+                                  ["pendente", "Pendente"],
+                                  ["nao_tem_tudo", "Parcial"],
+                                ] as Array<[ConferenceStatus, string]>).map(([status, texto]) => (
+                                  <button
+                                    key={status}
+                                    type="button"
+                                    onClick={() => void salvarStatusDetalhe(item, status)}
+                                    disabled={salvandoStatusItemId === item.id}
+                                    className={`h-10 rounded-xl border px-2 text-xs font-bold transition disabled:opacity-60 ${
+                                      item.status === status
+                                        ? "border-primary bg-primary text-primary-foreground"
+                                        : "border-border bg-card text-foreground hover:bg-accent"
+                                    }`}
+                                  >
+                                    {salvandoStatusItemId === item.id ? "..." : texto}
+                                  </button>
+                                ))}
+                              </div>
+                              <div className="grid grid-cols-2 gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() => void salvarQuantidadeDetalhe(item.id, item.quantidadePedida)}
+                                  disabled={salvandoQuantidadeItemId === item.id}
+                                  className="h-10 rounded-xl border border-border bg-card px-3 text-xs font-bold text-foreground disabled:opacity-60"
+                                >
+                                  {salvandoQuantidadeItemId === item.id ? "Salvando..." : "Salvar qtd"}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => abrirModalRecomendacao(item)}
+                                  className="h-10 rounded-xl bg-primary px-3 text-xs font-bold text-primary-foreground"
+                                >
+                                  Recomendar troca
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => void excluirItemDetalhe(item.id)}
+                                  disabled={removendoItemId === item.id}
+                                  title="Excluir item"
+                                  className="col-span-2 h-10 rounded-xl border border-destructive/40 bg-destructive/5 px-3 text-xs font-bold text-destructive disabled:opacity-60"
+                                >
+                                  {removendoItemId === item.id ? "..." : "Excluir item"}
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </div>
@@ -2511,7 +2631,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             {sendStatus === "sending" ? "Enviando…" :
              sendStatus === "sent"    ? "Enviado!" :
              sendStatus === "error"   ? "Tentar de novo" :
-             "ClickUp"}
+             "Concluir"}
           </button>
         </div>
         <div className="space-y-2">

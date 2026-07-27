@@ -17,6 +17,7 @@ import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import {
   carregarItensDoPedido,
+  formatarTituloPedido,
   listarPedidos,
   type MeuPedidoResumo,
   type PedidoFilaItem,
@@ -512,6 +513,7 @@ export default function MeusPedidos() {
         ) : (
           pedidos.slice(0, visiveis).map((pedido) => {
             const nome = nomePessoaPedido(pedido);
+            const tituloPedido = formatarTituloPedido(pedido.titulo || nome, pedido.numeroPedido);
             const aberto = expandido.has(pedido.id);
             const itens = itensPorPedido[pedido.id];
             const carregando = carregandoItens.has(pedido.id);
@@ -522,7 +524,7 @@ export default function MeusPedidos() {
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                       <User className="h-5 w-5 shrink-0 text-muted-foreground" />
-                      <h2 className="truncate text-lg font-black text-foreground">{nome}</h2>
+                      <h2 className="truncate text-lg font-black text-foreground">{tituloPedido}</h2>
                       <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
                         Concluido
                       </span>
