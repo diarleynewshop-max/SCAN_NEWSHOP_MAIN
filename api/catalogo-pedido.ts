@@ -85,6 +85,30 @@ function asString(value: unknown): string {
   return String(value).trim();
 }
 
+function getErrorMessage(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const err = error as Record<string, unknown>;
+    const directMessage =
+      asString(err.message)
+      || asString(err.details)
+      || asString(err.hint)
+      || asString(err.code)
+      || asString(err.error_description)
+      || asString(err.error);
+
+    if (directMessage) return directMessage;
+
+    try {
+      const serialized = JSON.stringify(err);
+      if (serialized && serialized !== "{}") return serialized.slice(0, 500);
+    } catch {
+      // Ignore serialization failures and fall through to the generic message.
+    }
+  }
+  return asString(error) || "Erro desconhecido.";
+}
+
 function normalizeText(value: unknown): string {
   return asString(value)
     .normalize("NFD")
@@ -271,7 +295,11 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
   } catch (error) {
     const statusCode = Number((error as { statusCode?: number }).statusCode ?? 400);
-    const message = error instanceof Error ? error.message : "Erro desconhecido.";
+    const message = getErrorMessage(error);
+    console.error("[catalogo-pedido] falha ao receber pedido", {
+      message,
+      error,
+    });
     return res.status(statusCode >= 400 && statusCode < 600 ? statusCode : 500).json({
       ok: false,
       error: message,
