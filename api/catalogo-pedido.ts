@@ -3,7 +3,7 @@ import { timingSafeEqual } from "crypto";
 import {
   getCatalogoPedidoErrorMessage,
   receiveCatalogoPedido,
-} from "../src/lib/catalogoPedidoReceiver";
+} from "../src/lib/catalogoPedidoReceiver.js";
 
 function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
