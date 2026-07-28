@@ -16,6 +16,7 @@ interface HistoricoItemOcorrencia {
   dataFormatada: string;
   status: string;
   listeiro: string;
+  titulo: string;
 }
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
@@ -170,6 +171,7 @@ const Index = () => {
     emConferencia: { titulo: string; pessoa: string; status: string } | null;
     conferidoRecente: { dataFormatada: string; diasAtras: number } | null;
   } | null>(null);
+  const [historicoCompletoAberto, setHistoricoCompletoAberto] = useState(false);
   // Bloqueio persistente (independe do popup estar aberto): item em pedido nao
   // concluido barra a inclusao no novo pedido.
   const [bloqueioConferencia, setBloqueioConferencia] = useState<{ titulo: string; pessoa: string } | null>(null);
@@ -195,6 +197,7 @@ const Index = () => {
       const cod = code.trim();
       if (!cod || consultaBloqueadaPorFlag) {
         setPopupCompras(null);
+        setHistoricoCompletoAberto(false);
         setBloqueioConferencia(null);
         return;
       }
@@ -204,6 +207,7 @@ const Index = () => {
           r.emConferencia ? { titulo: r.emConferencia.titulo, pessoa: r.emConferencia.pessoa } : null
         );
         if (r.emConferencia || r.ocorrencias.length > 0) {
+          setHistoricoCompletoAberto(false);
           setPopupCompras({
             ocorrencias: r.ocorrencias,
             carregando: false,
@@ -212,10 +216,12 @@ const Index = () => {
           });
         } else {
           setPopupCompras(null);
+          setHistoricoCompletoAberto(false);
         }
       } catch (err) {
         console.error("[Index] Falha ao consultar historico do item:", err);
         setPopupCompras(null);
+        setHistoricoCompletoAberto(false);
         setBloqueioConferencia(null);
       }
     },
@@ -265,6 +271,7 @@ const Index = () => {
     if (!barcode.trim()) {
       popupMostradoParaRef.current = null;
       setPopupCompras(null);
+      setHistoricoCompletoAberto(false);
       setBloqueioConferencia(null);
     }
   }, [barcode]);
@@ -952,7 +959,10 @@ const Index = () => {
             background: "rgba(0,0,0,0.55)",
             display: "flex", alignItems: "center", justifyContent: "center", padding: 20,
           }}
-          onClick={() => setPopupCompras(null)}
+          onClick={() => {
+            setPopupCompras(null);
+            setHistoricoCompletoAberto(false);
+          }}
         >
           <div
             style={{
@@ -960,6 +970,8 @@ const Index = () => {
               border: "1px solid hsl(var(--border))",
               borderRadius: 16, padding: 24, width: "100%", maxWidth: 360,
               boxShadow: "0 8px 32px rgba(0,0,0,0.25)",
+              maxHeight: "86vh",
+              overflowY: "auto",
             }}
             onClick={(e) => e.stopPropagation()}
           >
@@ -967,8 +979,13 @@ const Index = () => {
               const bloqueado = !!popupCompras.emConferencia;
               const recente = popupCompras.conferidoRecente;
               const corTema = bloqueado ? "0 84% 60%" : "262 80% 50%";
+              const ocorrenciasVisiveis = historicoCompletoAberto
+                ? popupCompras.ocorrencias
+                : popupCompras.ocorrencias.slice(0, 3);
+              const totalOculto = Math.max(0, popupCompras.ocorrencias.length - 3);
               const limparTudo = () => {
                 setPopupCompras(null);
+                setHistoricoCompletoAberto(false);
                 setBarcode("");
                 setSemEAN(false);
                 setSku("");
@@ -1015,19 +1032,48 @@ const Index = () => {
                   )}
 
                   {/* Ocorrências */}
-                  {popupCompras.ocorrencias.map((oc, i) => {
+                  {ocorrenciasVisiveis.map((oc, i) => {
                     const corStatus = oc.status === "separado" ? "#22c55e" : oc.status === "nao_tem" ? "#ef4444" : oc.status === "parcial" ? "#eab308" : "#9ca3af";
                     const labelSt = oc.status === "separado" ? "Separado" : oc.status === "nao_tem" ? "Não tinha" : oc.status === "parcial" ? "Parcial" : oc.status;
                     return (
                       <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", background: "hsl(var(--secondary))", borderRadius: 8, padding: "8px 12px", marginBottom: 6 }}>
-                        <div>
+                        <div style={{ minWidth: 0, flex: 1, paddingRight: 8 }}>
                           <p style={{ fontSize: 13, fontWeight: 700, color: "hsl(var(--foreground))" }}>{oc.dataFormatada}</p>
-                          {oc.listeiro && <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))" }}>{oc.listeiro}</p>}
+                          {oc.titulo && <p style={{ fontSize: 11, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{oc.titulo}</p>}
+                          {oc.listeiro && <p style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{oc.listeiro}</p>}
                         </div>
-                        <span style={{ fontSize: 12, fontWeight: 700, color: corStatus, background: `${corStatus}22`, borderRadius: 6, padding: "3px 8px" }}>{labelSt}</span>
+                        <span style={{ flexShrink: 0, fontSize: 12, fontWeight: 700, color: corStatus, background: `${corStatus}22`, borderRadius: 6, padding: "3px 8px" }}>{labelSt}</span>
                       </div>
                     );
                   })}
+
+                  {totalOculto > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setHistoricoCompletoAberto((value) => !value)}
+                      style={{
+                        width: "100%",
+                        minHeight: 42,
+                        marginTop: 10,
+                        border: "1px solid hsl(262 80% 50% / 0.25)",
+                        borderRadius: 10,
+                        background: "hsl(262 80% 50% / 0.08)",
+                        color: "hsl(262 80% 42%)",
+                        cursor: "pointer",
+                        fontSize: 13,
+                        fontWeight: 800,
+                        fontFamily: "var(--font-sans)",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "center",
+                        gap: 8,
+                        padding: "8px 12px",
+                      }}
+                    >
+                      <ClipboardList style={{ width: 16, height: 16, flexShrink: 0 }} />
+                      {historicoCompletoAberto ? "Mostrar apenas os 3 ultimos" : `Ver historico completo (+${totalOculto})`}
+                    </button>
+                  )}
 
                   {bloqueado ? (
                     <button
@@ -1049,7 +1095,10 @@ const Index = () => {
                           Não
                         </button>
                         <button
-                          onClick={() => setPopupCompras(null)}
+                          onClick={() => {
+                            setPopupCompras(null);
+                            setHistoricoCompletoAberto(false);
+                          }}
                           style={{ flex: 1, height: 46, background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", border: "none", borderRadius: 10, fontSize: 15, fontWeight: 700, cursor: "pointer", fontFamily: "var(--font-sans)" }}
                         >
                           Sim, pedir

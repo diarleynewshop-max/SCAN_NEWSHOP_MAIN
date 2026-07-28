@@ -10,6 +10,7 @@ export interface HistoricoOcorrencia {
   dataFormatada: string; // dd/mm/aaaa
   status: string;        // separado | nao_tem | parcial | pendente
   listeiro: string;
+  titulo: string;
 }
 
 export interface HistoricoItemResultado {
@@ -115,6 +116,7 @@ export async function consultarHistoricoItem(
         dataFormatada: label,
         status: statusExibicao(row.status),
         listeiro: String(p.listeiro ?? p.pessoa ?? p.conferente ?? "").trim(),
+        titulo: String(p.titulo ?? "").trim(),
       });
 
       if (p.data_conferencia) {
@@ -132,7 +134,7 @@ export async function consultarHistoricoItem(
   ocorrencias.sort((a, b) => (b.data || "").localeCompare(a.data || ""));
 
   return {
-    ocorrencias: ocorrencias.slice(0, 10),
+    ocorrencias,
     emConferencia,
     conferidoRecente,
     totalConcluidas: ocorrencias.length,
