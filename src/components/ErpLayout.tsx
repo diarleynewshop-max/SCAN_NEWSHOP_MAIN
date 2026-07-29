@@ -87,6 +87,7 @@ export function ErpLayout({
   const currentPath = location.pathname + location.search;
   const isPriv = !!loginSalvo?.role && (loginSalvo.role === "compras" || loginSalvo.role === "admin" || loginSalvo.role === "super");
   const isAdm = !!loginSalvo?.role && (loginSalvo.role === "admin" || loginSalvo.role === "super");
+  const isSuper = loginSalvo?.role === "super";
   const flag = loginSalvo?.flag ?? 'loja';
 
   const groups: { key: string; label: string; items: NavItemDef[] }[] = [
@@ -118,7 +119,7 @@ export function ErpLayout({
       label: "Admin",
       items: [
         { icon: Users, label: "Usuarios", path: "/usuarios" },
-        { icon: MessageSquareText, label: "Feedback", path: "/feedback" },
+        ...(isSuper ? [{ icon: MessageSquareText, label: "Feedback", path: "/feedback" }] : []),
       ],
     }] : []),
   ];

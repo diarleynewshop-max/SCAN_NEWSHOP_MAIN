@@ -41,7 +41,7 @@ export const ACCESS_PERMISSION_GROUPS: Array<{
 }> = [
   { titulo: "Operacional", permissoes: ["scanner", "lista", "fazer_pedido", "conferencia", "consulta_preco", "chat", "notificacoes"] },
   { titulo: "Gestao", permissoes: ["compras", "sugestao_cd", "dashboard", "analytics"] },
-  { titulo: "Admin", permissoes: ["usuarios", "feedback"] },
+  { titulo: "Admin", permissoes: ["usuarios"] },
 ];
 
 const ALL_FALSE = ACCESS_PERMISSIONS.reduce<Record<AccessPermission, boolean>>((acc, permission) => {
@@ -92,7 +92,6 @@ export const ROLE_PERMISSION_DEFAULTS: Record<UserRole, Record<AccessPermission,
     dashboard: true,
     analytics: true,
     usuarios: true,
-    feedback: true,
   },
   super: { ...ALL_TRUE },
 };

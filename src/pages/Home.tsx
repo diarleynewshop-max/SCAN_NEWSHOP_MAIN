@@ -704,7 +704,9 @@ const Home = ({ loginOnly = false }: HomeProps) => {
             ))}
 
           {/* Cards exclusivos admin */}
-          {adminMenuItems.filter((item) => hasPermission(loginSalvo, item.permission)).map(({ Icon, label, description, path, accent }) => (
+          {adminMenuItems
+            .filter((item) => hasPermission(loginSalvo, item.permission) && (item.permission !== "feedback" || loginSalvo?.role === "super"))
+            .map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard
                   Icon={Icon}
@@ -1547,7 +1549,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
                 </div>
               )}
 
-              {hasPermission(loginSalvo, "feedback") && (
+              {loginSalvo?.role === "super" && (
                 <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
                   <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 10 }}>Feedback do SCAN</p>
                   <button

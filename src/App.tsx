@@ -121,7 +121,7 @@ const App = () => (
             } />
 
             <Route path="/feedback" element={
-              <ProtectedRoute requiredPermission="feedback">
+              <ProtectedRoute requiredRole="super">
                 <DesktopShell pageTitle="Feedback"><Feedback /></DesktopShell>
               </ProtectedRoute>
             } />

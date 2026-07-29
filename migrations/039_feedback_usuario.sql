@@ -290,8 +290,15 @@ declare
   v_empresa text := nullif(upper(btrim(coalesce(p_empresa, ''))), '');
   v_limite integer := least(greatest(coalesce(p_limite, 500), 1), 1000);
 begin
-  if not public.usuario_admin_autorizado(p_actor_login, p_actor_senha) then
-    raise exception 'nao autorizado';
+  if not exists (
+    select 1
+      from public.usuarios u
+     where u.login = lower(trim(p_actor_login))
+       and u.ativo
+       and u.role = 'super'
+       and u.senha_hash = crypt(p_actor_senha, u.senha_hash)
+  ) then
+    raise exception 'apenas usuario super pode ver feedback';
   end if;
 
   if v_empresa is not null and v_empresa not in ('NEWSHOP','SOYE','FACIL','SEFULY') then
