@@ -13,6 +13,7 @@ export const ACCESS_PERMISSIONS = [
   "dashboard",
   "analytics",
   "usuarios",
+  "feedback",
 ] as const;
 
 export type AccessPermission = (typeof ACCESS_PERMISSIONS)[number];
@@ -31,6 +32,7 @@ export const ACCESS_PERMISSION_LABELS: Record<AccessPermission, string> = {
   dashboard: "Dashboard",
   analytics: "Analytics",
   usuarios: "Tela de usuarios",
+  feedback: "Feedback interno",
 };
 
 export const ACCESS_PERMISSION_GROUPS: Array<{
@@ -39,7 +41,7 @@ export const ACCESS_PERMISSION_GROUPS: Array<{
 }> = [
   { titulo: "Operacional", permissoes: ["scanner", "lista", "fazer_pedido", "conferencia", "consulta_preco", "chat", "notificacoes"] },
   { titulo: "Gestao", permissoes: ["compras", "sugestao_cd", "dashboard", "analytics"] },
-  { titulo: "Admin", permissoes: ["usuarios"] },
+  { titulo: "Admin", permissoes: ["usuarios", "feedback"] },
 ];
 
 const ALL_FALSE = ACCESS_PERMISSIONS.reduce<Record<AccessPermission, boolean>>((acc, permission) => {
@@ -90,6 +92,7 @@ export const ROLE_PERMISSION_DEFAULTS: Record<UserRole, Record<AccessPermission,
     dashboard: true,
     analytics: true,
     usuarios: true,
+    feedback: true,
   },
   super: { ...ALL_TRUE },
 };

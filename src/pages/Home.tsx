@@ -1,5 +1,5 @@
 ﻿import { useNavigate, useSearchParams } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw, MessageSquareText } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLoginContext } from "@/hooks/useAuth";
@@ -57,9 +57,9 @@ const analyticsMenuItems: Array<{ Icon: LucideIcon; label: string; description: 
   { Icon: BarChart3,    label: "Dashboard",   description: "Relatórios e gráficos de conferência",  path: "/dashboard", accent: "hsl(var(--violet))", permission: "dashboard" },
 ];
 
-// Menu exclusivo admin (admin, super) — vazio ate a proxima ferramenta admin-only ser criada.
-const adminMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string; accent: string }> = [
-  { Icon: Shield, label: "Usuários", description: "Cadastro e acesso por loja", path: "/usuarios", accent: "hsl(var(--destructive))" },
+const adminMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string; accent: string; permission: AccessPermission }> = [
+  { Icon: Shield, label: "Usuários", description: "Cadastro e acesso por loja", path: "/usuarios", accent: "hsl(var(--destructive))", permission: "usuarios" },
+  { Icon: MessageSquareText, label: "Feedback", description: "Notas e sugestões dos usuários", path: "/feedback", accent: "hsl(var(--primary))", permission: "feedback" },
 ];
 
 // Componente de card do menu
@@ -704,8 +704,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
             ))}
 
           {/* Cards exclusivos admin */}
-          {hasPermission(loginSalvo, "usuarios") && (
-            adminMenuItems.map(({ Icon, label, description, path, accent }) => (
+          {adminMenuItems.filter((item) => hasPermission(loginSalvo, item.permission)).map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard
                   Icon={Icon}
@@ -718,8 +717,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
                   setMostrarConfiguracoes={setMostrarConfiguracoes}
                 />
               </div>
-            ))
-          )}
+            ))}
         </div>
 
       {/* â”€â”€ Storage Card â”€â”€ */}
@@ -1545,6 +1543,26 @@ const Home = ({ loginOnly = false }: HomeProps) => {
                     }}
                   >
                     <Shield style={{ width: 17, height: 17 }} /> Abrir Usuarios
+                  </button>
+                </div>
+              )}
+
+              {hasPermission(loginSalvo, "feedback") && (
+                <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
+                  <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 10 }}>Feedback do SCAN</p>
+                  <button
+                    onClick={() => {
+                      setMostrarConfiguracoes(false);
+                      navigate("/feedback");
+                    }}
+                    style={{
+                      width: "100%", height: 44, background: "hsl(var(--primary))",
+                      color: "hsl(var(--primary-foreground))", border: "none",
+                      borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 800,
+                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                    }}
+                  >
+                    <MessageSquareText style={{ width: 17, height: 17 }} /> Abrir Feedback
                   </button>
                 </div>
               )}

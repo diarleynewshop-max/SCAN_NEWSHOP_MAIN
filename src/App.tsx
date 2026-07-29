@@ -13,6 +13,7 @@ import { ThemeToggle } from "@/components/ui/theme-toggle";
 import TourGuide from "@/components/TourGuide";
 import { EmpresaToggleSF } from "@/components/EmpresaToggleSF";
 import { AppUpdateManager } from "@/components/AppUpdateManager";
+import { FeedbackPrompt } from "@/components/FeedbackPrompt";
 
 const Home = lazy(() => import("./pages/Home"));
 const Index = lazy(() => import("./pages/Index"));
@@ -26,6 +27,7 @@ const MeusPedidos = lazy(() => import("./pages/MeusPedidos"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Chat = lazy(() => import("./pages/Chat"));
 const Notificacoes = lazy(() => import("./pages/Notificacoes"));
+const Feedback = lazy(() => import("./pages/Feedback"));
 
 const queryClient = new QueryClient();
 
@@ -45,6 +47,7 @@ const App = () => (
 
       <BrowserRouter>
         <AppUpdateManager />
+        <FeedbackPrompt />
         {/* TourGuide DENTRO do Router para useLocation funcionar */}
         <TourGuide />
         <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Carregando...</div>}>
@@ -114,6 +117,12 @@ const App = () => (
             <Route path="/usuarios" element={
               <ProtectedRoute requiredPermission="usuarios">
                 <DesktopShell pageTitle="Usuarios"><Usuarios /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/feedback" element={
+              <ProtectedRoute requiredPermission="feedback">
+                <DesktopShell pageTitle="Feedback"><Feedback /></DesktopShell>
               </ProtectedRoute>
             } />
 

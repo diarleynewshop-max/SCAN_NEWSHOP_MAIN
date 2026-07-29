@@ -22,6 +22,7 @@ export interface LoginData {
   grupoAcessoId?: string;
   grupoAcessoNome?: string;
   permissoes?: AccessPermissionMap;
+  feedbackPendente?: boolean;
 }
 
 export interface UsuarioLoginContext {
@@ -37,6 +38,7 @@ export interface UsuarioLoginContext {
   grupoAcessoId?: string;
   grupoAcessoNome?: string;
   permissoes?: AccessPermissionMap;
+  feedbackPendente?: boolean;
 }
 
 export interface LoginRequest {
@@ -70,6 +72,7 @@ type LoginUsuarioRow = {
   grupo_acesso_id?: string | null;
   grupo_acesso_nome?: string | null;
   permissoes?: unknown;
+  feedback_pendente?: boolean | null;
 };
 
 const normalizarEmpresa = (value: unknown): Empresa | null => {
@@ -121,6 +124,7 @@ function montarContextoUsuario(row: LoginUsuarioRow): UsuarioLoginContext | null
     grupoAcessoId: normalizarTextoOpcional(row.grupo_acesso_id),
     grupoAcessoNome: normalizarTextoOpcional(row.grupo_acesso_nome),
     permissoes: normalizarPermissoes(row.permissoes),
+    feedbackPendente: row.feedback_pendente !== false,
   };
 }
 
@@ -160,6 +164,7 @@ export function obterLoginSalvo(): LoginData | null {
       grupoAcessoId: normalizarTextoOpcional(dados.grupoAcessoId),
       grupoAcessoNome: normalizarTextoOpcional(dados.grupoAcessoNome),
       permissoes: normalizarPermissoes(dados.permissoes),
+      feedbackPendente: dados.feedbackPendente !== false,
     };
   } catch {
     return null;
@@ -254,6 +259,7 @@ export function useAuth() {
       grupoAcessoId: contexto.grupoAcessoId,
       grupoAcessoNome: contexto.grupoAcessoNome,
       permissoes: contexto.permissoes,
+      feedbackPendente: contexto.feedbackPendente !== false,
     };
 
     salvarLogin(dados);

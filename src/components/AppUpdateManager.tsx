@@ -14,6 +14,7 @@ const ROTAS_SEGURAS = new Set([
   "/analytics",
   "/notificacoes",
   "/usuarios",
+  "/feedback",
 ]);
 
 function temInteracaoAberta(): boolean {
