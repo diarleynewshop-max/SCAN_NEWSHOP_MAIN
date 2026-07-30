@@ -54,6 +54,8 @@ import {
   type PedidoParaConferencia,
 } from "@/lib/pedidosFila";
 import { enviarConferenciaParaSupabase } from "@/lib/pedidosSupabase";
+import { descreverFalhaPrevenda, enfileirarPrevendaConferencia } from "@/lib/pdvFila";
+import { lojaEnviaPrevendaParaPdv } from "@/lib/lojaFeatures";
 import { supabase } from "@/lib/supabaseClient";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import { obterSenhaPadrao, validarSenha } from "@/lib/senhaConferencia";
@@ -1367,6 +1369,40 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         });
       } catch (expedicaoErr) {
         console.error("[conferencia] Falha ao disparar expedicao (nao bloqueia fechamento):", expedicaoErr);
+      }
+
+      // Pre-venda direto para o PDV (SYSpdv). So nas lojas com a feature
+      // ligada (hoje SEFULY). Best-effort: nao bloqueia o fechamento, mas
+      // avisa em tela quando nao deu — o caixa depende disso.
+      if (lojaEnviaPrevendaParaPdv(empresa)) {
+        try {
+          const prevenda = await enfileirarPrevendaConferencia({
+            empresa,
+            pedidoId: pedidoId ?? null,
+            conferenceId,
+            conferente,
+            itens: itensFechamento,
+          });
+
+          if (prevenda.ok) {
+            const total = Number(prevenda.valorTotal ?? 0).toLocaleString("pt-BR", {
+              style: "currency",
+              currency: "BRL",
+            });
+            toast({
+              title: "🧾 Pre-venda enviada ao PDV",
+              description: `${prevenda.nomeArquivo} — ${prevenda.totalItens} item(ns), total ${total}.`,
+            });
+          } else {
+            const aviso = descreverFalhaPrevenda(prevenda);
+            if (aviso) {
+              console.warn("[conferencia] Pre-venda PDV nao enfileirada:", prevenda);
+              toast({ title: "⚠️ PDV", description: aviso, variant: "destructive" });
+            }
+          }
+        } catch (pdvErr) {
+          console.error("[conferencia] Falha inesperada ao enfileirar pre-venda PDV:", pdvErr);
+        }
       }
 
       try {

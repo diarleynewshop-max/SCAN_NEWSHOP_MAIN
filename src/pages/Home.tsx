@@ -6,6 +6,7 @@ import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLo
 import { alterarMinhaSenha, LIMITE_FOTO_PERFIL_BYTES, salvarMinhaFotoPerfil } from "@/lib/usuarios";
 import CriarContaModal from "@/components/CriarContaModal";
 import { hasPermission, type AccessPermission } from "@/lib/accessControl";
+import { loginTemFeature, type LojaFeature } from "@/lib/lojaFeatures";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
 import { HISTORICO_COMPRAS_KEY, getHistoricoComprasEnabled } from "@/lib/historicoCompras";
 import { forcarAtualizacaoApp, recarregarAppAtualizado } from "@/lib/appUpdate";
@@ -47,9 +48,10 @@ const baseMenuItems: Array<{ Icon: LucideIcon; label: string; description: strin
 ];
 
 // Menu para compras (compras, admin, super)
-const comprasMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string; accent: string; permission: AccessPermission }> = [
+const comprasMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string; accent: string; permission: AccessPermission; lojaFeature?: LojaFeature }> = [
   { Icon: ShoppingCart, label: "Compras",     description: "Gestão de reposição e itens faltantes", path: "/compras", accent: "hsl(var(--indigo))", permission: "compras" },
-  { Icon: Boxes,        label: "Sugestao do CD", description: "Itens do CD para sugerir envio para a loja", path: "/sugestao-cd", accent: "hsl(var(--warning))", permission: "sugestao_cd" },
+  // `lojaFeature` esconde o card em lojas que nao operam o recurso (SEFULY nao tem CD).
+  { Icon: Boxes,        label: "Sugestao do CD", description: "Itens do CD para sugerir envio para a loja", path: "/sugestao-cd", accent: "hsl(var(--warning))", permission: "sugestao_cd", lojaFeature: "sugestao_cd" },
 ];
 
 // Menu para analytics (admin, super)
@@ -672,7 +674,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
           ))}
           
           {/* Cards para compras (se tiver acesso) */}
-          {comprasMenuItems.filter((item) => hasPermission(loginSalvo, item.permission)).map(({ Icon, label, description, path, accent }) => (
+          {comprasMenuItems.filter((item) => hasPermission(loginSalvo, item.permission) && (!item.lojaFeature || loginTemFeature(loginSalvo, item.lojaFeature))).map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard 
                   Icon={Icon}

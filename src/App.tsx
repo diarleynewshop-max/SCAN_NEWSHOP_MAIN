@@ -103,7 +103,7 @@ const App = () => (
             } />
 
             <Route path="/sugestao-cd" element={
-              <ProtectedRoute requiredPermission="sugestao_cd">
+              <ProtectedRoute requiredPermission="sugestao_cd" requiredLojaFeature="sugestao_cd">
                 <DesktopShell pageTitle="Sugestao do CD"><SugestaoCd /></DesktopShell>
               </ProtectedRoute>
             } />

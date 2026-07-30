@@ -2,11 +2,14 @@ import { Navigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import type { UserRole } from "@/hooks/useAuth";
 import { hasAnyPermission, hasPermission, type AccessPermission } from "@/lib/accessControl";
+import { loginTemFeature, type LojaFeature } from "@/lib/lojaFeatures";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
   requiredRole?: UserRole | UserRole[];
   requiredPermission?: AccessPermission | AccessPermission[];
+  /** Recurso que a LOJA precisa operar (independente do role/permissao). */
+  requiredLojaFeature?: LojaFeature;
   fallbackPath?: string;
 }
 
@@ -17,19 +20,26 @@ interface ProtectedRouteProps {
  * <ProtectedRoute requiredRole="admin">...</ProtectedRoute>
  * <ProtectedRoute requiredRole={['admin', 'super']}>...</ProtectedRoute>
  */
-export function ProtectedRoute({ 
-  children, 
-  requiredRole, 
+export function ProtectedRoute({
+  children,
+  requiredRole,
   requiredPermission,
-  fallbackPath = "/" 
+  requiredLojaFeature,
+  fallbackPath = "/"
 }: ProtectedRouteProps) {
   const { loginSalvo } = useAuth();
-  
+
   // Se nao estiver logado, redireciona para a pagina de login.
   if (!loginSalvo || !loginSalvo.role) {
     return <Navigate to="/login" replace />;
   }
-  
+
+  // Trava por loja: mesmo com permissao, a loja pode nao operar o recurso
+  // (ex.: SEFULY nao tem Sugestao do CD). Vale inclusive para `super`.
+  if (requiredLojaFeature && !loginTemFeature(loginSalvo, requiredLojaFeature)) {
+    return <Navigate to={fallbackPath} replace />;
+  }
+
   // Verifica se o usuário tem o role necessário
   let hasAccess = true;
   if (requiredPermission) {

@@ -2,12 +2,14 @@
 import { supabase, isSupabaseConfigured } from './supabaseClient';
 import type { ProdutoComprar, CompraStatusApp } from '@/hooks/useProdutosComprar';
 
-type Empresa = 'NEWSHOP' | 'SOYE' | 'FACIL';
+type Empresa = 'NEWSHOP' | 'SOYE' | 'FACIL' | 'SEFULY';
 
 // No dominio de Compras, Soye e Facil sao a MESMA empresa (SF): mesmo preco e
 // mesmo setor de compras. Por isso a tabela `compras` usa 'NEWSHOP' e 'SF'.
-type EmpresaCompras = 'NEWSHOP' | 'SF';
+// SEFULY tem setor de compras PROPRIO (nao compartilha com ninguem): base isolada.
+export type EmpresaCompras = 'NEWSHOP' | 'SF' | 'SEFULY';
 function empresaCompras(empresa: Empresa): EmpresaCompras {
+  if (empresa === 'SEFULY') return 'SEFULY';
   return empresa === 'NEWSHOP' ? 'NEWSHOP' : 'SF';
 }
 
@@ -112,8 +114,9 @@ export interface CatalogoItemInfo {
   statusCompra: CompraStatusApp | null;
 }
 
-function empresaComprasDeString(empresa: string): EmpresaCompras {
+export function empresaComprasDeString(empresa: string): EmpresaCompras {
   const e = String(empresa ?? '').toUpperCase();
+  if (e.includes('SEFULY') || e === 'SEFULY') return 'SEFULY';
   return e.includes('SOYE') || e.includes('FACIL') ? 'SF' : 'NEWSHOP';
 }
 

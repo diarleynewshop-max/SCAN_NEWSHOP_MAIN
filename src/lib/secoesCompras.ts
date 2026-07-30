@@ -21,8 +21,15 @@ export const SECOES_FIXAS_SF = [
   "CONSUMO",
 ];
 
+// SEFULY trabalha uma unica secao (Bijuteria e Semijoia); os subgrupos (anel,
+// brinco, ...) chegam do banco via buscarSecoesComprasDisponiveis.
+export const SECOES_FIXAS_SEFULY = ["BIJUTERIA E SEMIJOIA"];
+
 export function getSecoesFixasPorEmpresa(empresa: string): string[] {
   const empresaNormalizada = empresa.toUpperCase();
+  if (empresaNormalizada.includes("SEFULY")) {
+    return SECOES_FIXAS_SEFULY;
+  }
   if (empresaNormalizada.includes("FACIL") || empresaNormalizada.includes("SOYE")) {
     return SECOES_FIXAS_SF;
   }
@@ -33,8 +40,10 @@ export function getSecoesFixasPorEmpresa(empresa: string): string[] {
 // ── Secoes REAIS vindas do banco (tabela compras) ────────────────────────────
 // No dominio de Compras, Soye e Facil sao a mesma empresa (SF). Mapeia a empresa
 // do perfil para a chave usada em `compras.empresa`.
-function empresaComprasKey(empresa: string): "NEWSHOP" | "SF" {
+// SEFULY nao entra em nenhum dos dois grupos: tem base de compras propria.
+function empresaComprasKey(empresa: string): "NEWSHOP" | "SF" | "SEFULY" {
   const e = String(empresa ?? "").toUpperCase();
+  if (e.includes("SEFULY")) return "SEFULY";
   return e.includes("FACIL") || e.includes("SOYE") ? "SF" : "NEWSHOP";
 }
 

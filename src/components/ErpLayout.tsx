@@ -8,6 +8,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { LoginData } from "@/hooks/useAuth";
+import { loginTemFeature } from "@/lib/lojaFeatures";
 
 interface NavItemDef {
   icon: LucideIcon;
@@ -89,6 +90,8 @@ export function ErpLayout({
   const isAdm = !!loginSalvo?.role && (loginSalvo.role === "admin" || loginSalvo.role === "super");
   const isSuper = loginSalvo?.role === "super";
   const flag = loginSalvo?.flag ?? 'loja';
+  // SEFULY nao opera CD: o item some do menu independente do role.
+  const temSugestaoCd = loginTemFeature(loginSalvo, "sugestao_cd");
 
   const groups: { key: string; label: string; items: NavItemDef[] }[] = [
     {
@@ -110,7 +113,7 @@ export function ErpLayout({
       label: "Gestão",
       items: [
         { icon: ShoppingCart, label: "Compras", path: "/compras" },
-        { icon: Boxes, label: "Sugestao do CD", path: "/sugestao-cd" },
+        ...(temSugestaoCd ? [{ icon: Boxes, label: "Sugestao do CD", path: "/sugestao-cd" }] : []),
         { icon: BarChart3, label: "Dashboard", path: "/dashboard" },
       ],
     }] : []),

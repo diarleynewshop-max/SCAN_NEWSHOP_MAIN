@@ -1,7 +1,8 @@
 import { supabase, isSupabaseConfigured } from "@/lib/supabaseClient";
 
-type Empresa = "NEWSHOP" | "SOYE" | "FACIL";
-type EmpresaCompras = "NEWSHOP" | "SF";
+type Empresa = "NEWSHOP" | "SOYE" | "FACIL" | "SEFULY";
+// SEFULY tem setor de compras proprio: base isolada (ver comprasSupabase.ts).
+type EmpresaCompras = "NEWSHOP" | "SF" | "SEFULY";
 
 export interface FornecedorCacheItem {
   id: string;
@@ -78,6 +79,7 @@ type MarcaFornecedorVinculoRow = {
 
 function empresaCompras(empresa: Empresa | string): EmpresaCompras {
   const valor = String(empresa ?? "").toUpperCase();
+  if (valor.includes("SEFULY")) return "SEFULY";
   return valor.includes("SOYE") || valor.includes("FACIL") || valor === "SF" ? "SF" : "NEWSHOP";
 }
 

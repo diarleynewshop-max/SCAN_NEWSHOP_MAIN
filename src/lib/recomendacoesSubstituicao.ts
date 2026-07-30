@@ -172,6 +172,8 @@ function empresasComprasCandidatas(empresa: string): string[] {
   if (atual === "NEWSHOP") return ["NEWSHOP"];
   if (atual === "SOYE") return ["SF", "SOYE"];
   if (atual === "FACIL") return ["SF", "FACIL"];
+  // SEFULY tem base de compras propria: nao busca em SF nem NEWSHOP.
+  if (atual === "SEFULY") return ["SEFULY"];
   return [atual].filter(Boolean);
 }
 

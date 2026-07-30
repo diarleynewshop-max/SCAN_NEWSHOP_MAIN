@@ -86,7 +86,7 @@ export interface DashboardItemFrequenciaRow {
 }
 
 export interface DashboardCompraItemRow {
-  empresa: "NEWSHOP" | "SF";
+  empresa: "NEWSHOP" | "SF" | "SEFULY";
   codigo: string;
   sku: string;
   secao: string;
@@ -220,12 +220,20 @@ function toText(value: unknown, fallback: string): string {
   return text || fallback;
 }
 
-function empresasDashboardParaCompras(empresas: Empresa[]): Array<"NEWSHOP" | "SF"> {
+function empresaComprasRow(value: unknown): "NEWSHOP" | "SF" | "SEFULY" {
+  const empresa = String(value ?? "").toUpperCase();
+  if (empresa === "SEFULY") return "SEFULY";
+  return empresa === "SF" ? "SF" : "NEWSHOP";
+}
+
+function empresasDashboardParaCompras(empresas: Empresa[]): Array<"NEWSHOP" | "SF" | "SEFULY"> {
   const hasNewshop = empresas.includes("NEWSHOP");
   const hasSf = empresas.includes("SOYE") || empresas.includes("FACIL");
-  const lista: Array<"NEWSHOP" | "SF"> = [];
+  const lista: Array<"NEWSHOP" | "SF" | "SEFULY"> = [];
   if (hasNewshop) lista.push("NEWSHOP");
   if (hasSf) lista.push("SF");
+  // SEFULY tem base de compras propria (nao entra no bucket SF nem NEWSHOP).
+  if (empresas.includes("SEFULY")) lista.push("SEFULY");
   return lista;
 }
 
@@ -501,7 +509,7 @@ export async function listarDashboardItensCompras(
   }
 
   return rows.map((row) => ({
-    empresa: String(row.empresa ?? "").toUpperCase() === "SF" ? "SF" : "NEWSHOP",
+    empresa: empresaComprasRow(row.empresa),
     codigo: toText(row.codigo, ""),
     sku: toText(row.sku, ""),
     secao: toText(row.secao, "Sem secao"),

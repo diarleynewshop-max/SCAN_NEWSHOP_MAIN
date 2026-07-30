@@ -42,7 +42,7 @@ interface UseProdutosComprarReturn {
   loading: boolean;
   error: string | null;
   ultimaAtualizacao: Date | null;
-  empresa: 'NEWSHOP' | 'SOYE' | 'FACIL';
+  empresa: EmpresaComprasApp;
   persistirSecao: (produtoId: string, secao: string) => void;
   persistirDescricao: (produtoId: string, descricao: string) => void;
   persistirFoto: (produtoId: string, dataUrl: string) => void;
@@ -60,9 +60,13 @@ interface UseProdutosComprarReturn {
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
 
-function getEmpresaAtual(): 'NEWSHOP' | 'SOYE' | 'FACIL' {
+// Empresa do usuario logado no contexto de Compras. SOYE/FACIL compartilham a
+// mesma base (mapeado para 'SF' em comprasSupabase); SEFULY tem base propria.
+export type EmpresaComprasApp = 'NEWSHOP' | 'SOYE' | 'FACIL' | 'SEFULY';
+
+function getEmpresaAtual(): EmpresaComprasApp {
   const login = obterLoginSalvo();
-  if (login?.empresa === 'SOYE' || login?.empresa === 'FACIL') {
+  if (login?.empresa === 'SOYE' || login?.empresa === 'FACIL' || login?.empresa === 'SEFULY') {
     return login.empresa;
   }
   return 'NEWSHOP';
@@ -158,11 +162,11 @@ function getErrorMessage(err: unknown, fallback: string): string {
   return fallback;
 }
 
-function getProdutosCacheKey(empresa: 'NEWSHOP' | 'SOYE' | 'FACIL'): string {
+function getProdutosCacheKey(empresa: EmpresaComprasApp): string {
   return `compras:produtos:${empresa}`;
 }
 
-function readProdutosCache(empresa: 'NEWSHOP' | 'SOYE' | 'FACIL'): { produtos: ProdutoComprar[]; updatedAt: number } | null {
+function readProdutosCache(empresa: EmpresaComprasApp): { produtos: ProdutoComprar[]; updatedAt: number } | null {
   try {
     const raw = window.localStorage.getItem(getProdutosCacheKey(empresa));
     if (!raw) return null;
@@ -179,7 +183,7 @@ function readProdutosCache(empresa: 'NEWSHOP' | 'SOYE' | 'FACIL'): { produtos: P
   }
 }
 
-function writeProdutosCache(empresa: 'NEWSHOP' | 'SOYE' | 'FACIL', produtos: ProdutoComprar[]) {
+function writeProdutosCache(empresa: EmpresaComprasApp, produtos: ProdutoComprar[]) {
   try {
     window.localStorage.setItem(
       getProdutosCacheKey(empresa),
@@ -195,7 +199,7 @@ export const useProdutosComprar = (): UseProdutosComprarReturn => {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [ultimaAtualizacao, setUltimaAtualizacao] = useState<Date | null>(null);
-  const [empresa, setEmpresa] = useState<'NEWSHOP' | 'SOYE' | 'FACIL'>(() => getEmpresaAtual());
+  const [empresa, setEmpresa] = useState<EmpresaComprasApp>(() => getEmpresaAtual());
   const requestControllerRef = useRef<AbortController | null>(null);
 
   const fetchProdutos = useCallback(async (force = false) => {
