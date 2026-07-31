@@ -3,8 +3,8 @@
  * Conector de pre-venda SCAN -> SYSpdv (Casa Magalhaes).
  *
  * Roda no SERVIDOR LOCAL (retaguarda Windows). Faz polling na fila do Supabase
- * (public.pdv_prevenda_fila), grava o arquivo RPX*.ECF na pasta de importacao do
- * SYSpdv e marca a linha como entregue.
+ * (public.pdv_prevenda_fila), transforma payload_json em RPX*.ECF, grava o
+ * arquivo na pasta de importacao do SYSpdv e marca a linha como entregue.
  *
  * Por que polling e nao webhook: a retaguarda fica atras de NAT, sem IP publico.
  * O conector PUXA, entao nao precisa abrir porta nem tunel.
@@ -25,6 +25,7 @@ import fs from "node:fs";
 import path from "node:path";
 import os from "node:os";
 import { fileURLToPath } from "node:url";
+import { gerarArquivoPrevenda } from "./pdv-prevenda.mjs";
 
 const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const ARGS = new Set(process.argv.slice(2));
@@ -63,8 +64,8 @@ const CONFIG = {
   pastaArquivo: process.env.PDV_PASTA_ARQUIVO || "",
   intervaloMs: Number(process.env.PDV_INTERVALO_MS || 15000),
   lote: Number(process.env.PDV_LOTE || 5),
-  // Arquivos legado do SYSpdv nao sao UTF-8. O conteudo gerado pelo app ja e
-  // ASCII puro (acentos removidos), entao latin1 e seguro e explicito.
+  // Arquivos legado do SYSpdv nao sao UTF-8. O gerador local entrega ASCII
+  // puro (acentos removidos), entao latin1 e seguro e explicito.
   encoding: process.env.PDV_ENCODING || "latin1",
   host: process.env.PDV_HOST || os.hostname(),
   logFile: process.env.PDV_LOG_FILE || "",
@@ -120,7 +121,7 @@ function headers(extra = {}) {
 
 async function buscarPendentes() {
   const query = new URLSearchParams({
-    select: "id,numero_prevenda,nome_arquivo,conteudo,total_itens,valor_total,cliente_nome,tentativas",
+    select: "id,numero_prevenda,nome_arquivo,conteudo,payload_json,total_itens,valor_total,cliente_nome,tentativas",
     empresa: `eq.${CONFIG.empresa}`,
     status: "eq.pendente",
     order: "created_at.asc",
@@ -182,31 +183,83 @@ function nomeDisponivel(pasta, nomeArquivo) {
   throw new Error(`Nao ha nome livre para ${nomeArquivo} em ${pasta}`);
 }
 
+function normalizarPayloadJson(item) {
+  if (item.payload_json && typeof item.payload_json === "object") {
+    return item.payload_json.input && typeof item.payload_json.input === "object"
+      ? item.payload_json.input
+      : item.payload_json;
+  }
+
+  if (typeof item.payload_json === "string" && item.payload_json.trim()) {
+    const parsed = JSON.parse(item.payload_json);
+    return parsed.input && typeof parsed.input === "object" ? parsed.input : parsed;
+  }
+
+  return null;
+}
+
+function montarArquivoDoItem(item) {
+  if (typeof item.conteudo === "string" && item.conteudo.length > 0) {
+    return {
+      nomeArquivo: item.nome_arquivo,
+      conteudo: item.conteudo,
+      totalItens: item.total_itens,
+      valorTotal: item.valor_total,
+      fonte: "conteudo_legado",
+    };
+  }
+
+  const payload = normalizarPayloadJson(item);
+  if (!payload) {
+    throw new Error("fila sem payload_json nem conteudo legado");
+  }
+
+  const arquivo = gerarArquivoPrevenda({
+    ...payload,
+    numeroPrevenda: payload.numeroPrevenda ?? item.numero_prevenda,
+  });
+
+  return {
+    nomeArquivo: item.nome_arquivo || arquivo.nomeArquivo,
+    conteudo: arquivo.conteudo,
+    totalItens: item.total_itens ?? arquivo.totalItens,
+    valorTotal: item.valor_total ?? arquivo.valorTotal,
+    fonte: "payload_json",
+  };
+}
+
 async function processarItem(item) {
   const rotulo = { id: item.id, prevenda: item.numero_prevenda, arquivo: item.nome_arquivo };
+  let arquivo;
 
-  if (typeof item.conteudo !== "string" || item.conteudo.length === 0) {
+  try {
+    arquivo = montarArquivoDoItem(item);
+  } catch (erro) {
     await rpc("pdv_prevenda_marcar_erro", {
       p_id: item.id,
-      p_erro: "conteudo vazio na fila",
+      p_erro: erro.message,
       p_host: CONFIG.host,
     });
-    log("ERRO", "Conteudo vazio, marcado como erro", rotulo);
+    log("ERRO", "Payload invalido, marcado como erro", rotulo);
     return false;
   }
 
   if (DRY_RUN) {
-    log("INFO", `[dry-run] escreveria ${item.conteudo.length} bytes`, rotulo);
+    log("INFO", `[dry-run] geraria ${arquivo.conteudo.length} bytes`, {
+      ...rotulo,
+      arquivo: arquivo.nomeArquivo,
+      fonte: arquivo.fonte,
+    });
     return true;
   }
 
-  const nomeFinal = nomeDisponivel(CONFIG.pastaDestino, item.nome_arquivo);
-  const destino = gravarArquivoAtomico(CONFIG.pastaDestino, nomeFinal, item.conteudo);
+  const nomeFinal = nomeDisponivel(CONFIG.pastaDestino, arquivo.nomeArquivo);
+  const destino = gravarArquivoAtomico(CONFIG.pastaDestino, nomeFinal, arquivo.conteudo);
 
   if (CONFIG.pastaArquivo) {
     try {
       const copia = `${String(item.numero_prevenda).padStart(10, "0")}_${nomeFinal}`;
-      gravarArquivoAtomico(CONFIG.pastaArquivo, copia, item.conteudo);
+      gravarArquivoAtomico(CONFIG.pastaArquivo, copia, arquivo.conteudo);
     } catch (erro) {
       log("AVISO", `Falha na copia de auditoria: ${erro.message}`, rotulo);
     }
@@ -220,8 +273,9 @@ async function processarItem(item) {
   if (baixou === false) {
     log("AVISO", "Outro conector ja havia dado baixa nesse item", { ...rotulo, arquivo: destino });
   } else {
-    log("INFO", `Entregue: ${destino} (${item.total_itens} itens, R$ ${item.valor_total})`, {
+    log("INFO", `Entregue: ${destino} (${arquivo.totalItens} itens, R$ ${arquivo.valorTotal})`, {
       ...rotulo,
+      fonte: arquivo.fonte,
       cliente: item.cliente_nome,
     });
   }

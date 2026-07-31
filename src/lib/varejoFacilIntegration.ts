@@ -1,4 +1,5 @@
-export type VarejoFacilEmpresa = "NEWSHOP" | "FACIL" | "SOYE";
+// #GEMINI Adicionado SEFULY
+export type VarejoFacilEmpresa = "NEWSHOP" | "FACIL" | "SOYE" | "SEFULY";
 export type VarejoFacilFlag = "loja" | "cd";
 
 export interface VarejoFacilLookupContext {
@@ -116,12 +117,16 @@ const VAREJO_FACIL_HOSTS: Record<VarejoFacilEmpresa, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
   SOYE: "facil.varejofacil.com",
+  // #GEMINI Adicionado SEFULY
+  SEFULY: "sefuly.varejofacil.com",
 };
 
 const ERP_LOJA_BY_EMPRESA: Record<VarejoFacilEmpresa, number> = {
   FACIL: 1,
   NEWSHOP: 2,
   SOYE: 1,
+  // #GEMINI Adicionado SEFULY, assumindo loja 1 inicialmente
+  SEFULY: 1,
 };
 
 const ERP_LOJAS_CONFERENCIA: ReadonlyArray<{ loja: VarejoFacilEstoqueConferencia["loja"]; lojaId: number }> = [
@@ -208,6 +213,8 @@ const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpre
   // SOYE e FACIL usam a mesma base ERP.
   if (normalizada.includes("SOYE")) return "FACIL";
   if (normalizada.includes("FACIL")) return "FACIL";
+  // #GEMINI Adicionado tratamento da SEFULY
+  if (normalizada.includes("SEFULY")) return "SEFULY";
   return "NEWSHOP";
 };
 
@@ -215,6 +222,8 @@ const getCatalogoItemContexto = (contexto: VarejoFacilLookupContext = {}) => {
   const normalizada = (contexto.empresa ?? "").toUpperCase();
   if (normalizada.includes("SOYE")) return { loja: "soye", lojaId: 1, erpBaseOverride: "soye" };
   if (normalizada.includes("FACIL")) return { loja: "facil_atacado", lojaId: 1, erpBaseOverride: "facil_atacado" };
+  // #GEMINI Adicionado contexto SEFULY
+  if (normalizada.includes("SEFULY")) return { loja: "sefuly", lojaId: 1, erpBaseOverride: "sefuly" };
   return { loja: "newshop", lojaId: 2, erpBaseOverride: "newshop" };
 };
 

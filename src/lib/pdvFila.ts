@@ -1,8 +1,8 @@
 // Enfileira a conferencia concluida como pre-venda para o PDV (SYSpdv).
 //
-// O conteudo posicional e montado aqui (src/lib/pdvPrevenda.ts) e gravado na
-// tabela public.pdv_prevenda_fila. Quem entrega no disco da retaguarda e o
-// conector local (scripts/pdv-connector), que so escreve os bytes.
+// O SCAN web monta apenas o JSON operacional e grava na tabela
+// public.pdv_prevenda_fila. Quem roda no PC/servidor local e transforma esse
+// JSON no arquivo aceito pela retaguarda/PDV.
 //
 // REGRA DE DINHEIRO: a pre-venda vira venda no caixa. Se falta preco em algum
 // item vendavel, esta funcao NAO enfileira nada e devolve o motivo. Enviar a
@@ -11,7 +11,6 @@
 
 import { isSupabaseConfigured, supabase } from "./supabaseClient";
 import {
-  gerarArquivoPrevenda,
   type PdvPrevendaCliente,
   type PdvPrevendaItem,
   type PdvTipoPessoa,
@@ -59,6 +58,26 @@ export interface EnfileirarPrevendaResult {
   detalhe?: string;
 }
 
+interface PdvPrevendaPayloadJson {
+  version: 1;
+  formato: "syspdv_rpx_ecf";
+  origem: {
+    sistema: "SCAN";
+    tipo: "conferencia";
+    empresa: string;
+    pedidoId: string | null;
+    conferenceId: string | null;
+    numeroCatalogo: string | null;
+  };
+  numeroPrevenda: number;
+  dataEmissao: string;
+  codigoFuncionario: string;
+  nomeVendedor: string | null;
+  observacao: string;
+  cliente: PdvPrevendaCliente;
+  itens: PdvPrevendaItem[];
+}
+
 function toInt(value: unknown): number {
   const numero = Number(value ?? 0);
   return Number.isFinite(numero) ? Math.trunc(numero) : 0;
@@ -66,6 +85,24 @@ function toInt(value: unknown): number {
 
 function texto(value: unknown): string {
   return String(value ?? "").trim();
+}
+
+function numeroPrevendaFormatado(value: number): string {
+  return String(Math.trunc(value)).replace(/\D/g, "").padStart(10, "0").slice(-10);
+}
+
+function nomeArquivoPrevenda(numeroPrevenda: number): string {
+  const digitos = String(Math.trunc(numeroPrevenda)).replace(/\D/g, "").padStart(7, "0").slice(-7);
+  return `RPX${digitos}.ECF`;
+}
+
+function calcularValorTotal(itens: PdvPrevendaItem[]): number {
+  const total = itens.reduce((acc, item) => {
+    const bruto = Number(item.quantidade ?? 0) * Number(item.valorUnitario ?? 0);
+    const desconto = Number(item.valorDesconto ?? 0);
+    return acc + bruto - desconto;
+  }, 0);
+  return Math.round(total * 100) / 100;
 }
 
 /**
@@ -255,8 +292,19 @@ export async function enfileirarPrevendaConferencia(
     }));
 
     const numeroCatalogo = texto(pedido?.catalogo_numero_pedido);
-    const arquivo = gerarArquivoPrevenda({
+    const payloadJson: PdvPrevendaPayloadJson = {
+      version: 1,
+      formato: "syspdv_rpx_ecf",
+      origem: {
+        sistema: "SCAN",
+        tipo: "conferencia",
+        empresa: texto(params.empresa).toUpperCase(),
+        pedidoId: params.pedidoId,
+        conferenceId: texto(params.conferenceId) || pedido?.conference_id || null,
+        numeroCatalogo: numeroCatalogo || null,
+      },
       numeroPrevenda,
+      dataEmissao: new Date().toISOString(),
       codigoFuncionario: CODIGO_FUNCIONARIO,
       nomeVendedor: texto(params.conferente) || null,
       observacao: [
@@ -265,7 +313,10 @@ export async function enfileirarPrevendaConferencia(
       ].filter(Boolean).join(" "),
       cliente,
       itens,
-    });
+    };
+
+    const nomeArquivo = nomeArquivoPrevenda(numeroPrevenda);
+    const valorTotal = calcularValorTotal(itens);
 
     const { data: inserido, error: insertError } = await supabase
       .from("pdv_prevenda_fila")
@@ -274,10 +325,11 @@ export async function enfileirarPrevendaConferencia(
         pedido_id: params.pedidoId,
         conference_id: texto(params.conferenceId) || pedido?.conference_id || null,
         numero_prevenda: numeroPrevenda,
-        nome_arquivo: arquivo.nomeArquivo,
-        conteudo: arquivo.conteudo,
-        total_itens: arquivo.totalItens,
-        valor_total: arquivo.valorTotal,
+        nome_arquivo: nomeArquivo,
+        payload_json: payloadJson,
+        conteudo: null,
+        total_itens: itens.length,
+        valor_total: valorTotal,
         conferente: texto(params.conferente) || null,
         cliente_nome: cliente.nome,
       })
@@ -289,10 +341,10 @@ export async function enfileirarPrevendaConferencia(
     return {
       ok: true,
       id: String(inserido?.id ?? ""),
-      numeroPrevenda: arquivo.numeroPrevenda,
-      nomeArquivo: arquivo.nomeArquivo,
-      totalItens: arquivo.totalItens,
-      valorTotal: arquivo.valorTotal,
+      numeroPrevenda: numeroPrevendaFormatado(numeroPrevenda),
+      nomeArquivo,
+      totalItens: itens.length,
+      valorTotal,
     };
   } catch (error) {
     return {

@@ -2,17 +2,17 @@
 -- Fila de pre-venda para o PDV (SYSpdv / Casa Magalhaes)
 --
 -- Fluxo:
---   App (conferencia concluida) --insert--> public.pdv_prevenda_fila
---   Conector local (Windows, retaguarda) --polling--> escreve RPX*.ECF na pasta
+--   App (conferencia concluida) --insert JSON--> public.pdv_prevenda_fila
+--   Conector local (Windows, retaguarda) --polling--> gera e escreve RPX*.ECF
 --   Conector marca a linha como 'entregue'
 --
 -- Por que fila e nao POST direto no servidor: a retaguarda fica atras de NAT
 -- (sem IP publico/porta aberta). O conector PUXA, entao nao precisa expor nada.
 --
--- O conteudo posicional do arquivo e gerado no app (src/lib/pdvPrevenda.ts, com
--- teste comparando campo a campo com o exemplo do layout oficial). O conector e
--- burro de proposito: so escreve os bytes no disco. Uma unica implementacao do
--- layout, testada.
+-- O app web grava somente o JSON operacional. A transformacao para o arquivo
+-- posicional acontece no PC/servidor local, dentro do conector. A coluna
+-- `conteudo` fica como compatibilidade para filas antigas que ja tenham o
+-- RPX*.ECF pronto.
 -- =====================================================================
 
 -- Numero da pre-venda: sequencia global. O layout aceita 9 digitos (campo 2) e
@@ -29,9 +29,10 @@ create table if not exists public.pdv_prevenda_fila (
 
   numero_prevenda bigint not null unique,
   nome_arquivo text not null,
-  -- Conteudo posicional COMPLETO do RPX*.ECF (Registro 1 + Registros 2),
-  -- linhas separadas por CRLF. O conector grava exatamente isso.
-  conteudo text not null,
+  -- JSON completo necessario para o conector local gerar o RPX*.ECF.
+  payload_json jsonb,
+  -- Compatibilidade legado: conteudo posicional COMPLETO do RPX*.ECF.
+  conteudo text,
 
   total_itens integer not null check (total_itens > 0),
   valor_total numeric(12,2) not null check (valor_total >= 0),
@@ -48,7 +49,10 @@ create table if not exists public.pdv_prevenda_fila (
   updated_at timestamptz not null default now(),
   entregue_em timestamptz,
   -- Hostname do conector que gravou o arquivo (auditoria: qual servidor pegou).
-  entregue_por text
+  entregue_por text,
+
+  constraint pdv_prevenda_fila_tem_payload
+    check (payload_json is not null or conteudo is not null)
 );
 
 -- O conector busca sempre "pendente mais antigo primeiro" por loja.

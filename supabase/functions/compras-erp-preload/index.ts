@@ -1,7 +1,8 @@
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2";
 
-type EmpresaCompras = "NEWSHOP" | "SF";
-type ErpEmpresa = "NEWSHOP" | "FACIL";
+// #GEMINI Adicionado SEFULY
+type EmpresaCompras = "NEWSHOP" | "SF" | "SEFULY";
+type ErpEmpresa = "NEWSHOP" | "FACIL" | "SEFULY";
 
 type CompraRow = {
   id: string;
@@ -57,6 +58,8 @@ type FornecedorProdutoSyncInput = {
 const HOSTS: Record<ErpEmpresa, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
+  // #GEMINI Adicionado SEFULY
+  SEFULY: "sefuly.varejofacil.com",
 };
 
 const FOTO_BUCKET = "compras-fotos";
@@ -109,6 +112,8 @@ function hasCronAccess(req: Request): boolean {
 }
 
 function erpEmpresa(empresa: EmpresaCompras): ErpEmpresa {
+  // #GEMINI Adicionado SEFULY
+  if (empresa === "SEFULY") return "SEFULY";
   return empresa === "NEWSHOP" ? "NEWSHOP" : "FACIL";
 }
 
@@ -503,7 +508,8 @@ async function runComprasErpPreload() {
   const maxItems = intEnv("COMPRAS_ERP_PRELOAD_MAX_ITEMS", DEFAULT_MAX_ITEMS_PER_RUN);
   const scanLimit = intEnv("COMPRAS_ERP_PRELOAD_SCAN_LIMIT", DEFAULT_SCAN_LIMIT_PER_EMPRESA);
   const delayMs = intEnv("COMPRAS_ERP_PRELOAD_DELAY_MS", DEFAULT_DELAY_MS);
-  const empresas: EmpresaCompras[] = ["NEWSHOP", "SF"];
+  // #GEMINI Adicionado SEFULY na lista de varredura
+  const empresas: EmpresaCompras[] = ["NEWSHOP", "SF", "SEFULY"];
   const { candidatos, hasSyncColumns } = await carregarCandidatos(supabase, empresas, scanLimit);
 
   const itens = candidatos.slice(0, maxItems);
