@@ -33,11 +33,15 @@ type ErpCliente = {
   fantasia?: string;
   numeroDoDocumento?: string;
   tipoDePessoa?: "FISICA" | "JURIDICA" | "ESTRANGEIRO";
+  tipoContribuinte?: TipoContribuinteCliente;
+  inscricaoEstadual?: string;
   telefone1?: string;
   telefone2?: string;
   email?: string;
   enderecos?: ErpEndereco[];
 };
+
+type TipoContribuinteCliente = "ISENTO" | "NAO_CONTRIBUINTE" | "CONTRIBUINTE";
 
 type ErpEndereco = {
   cep?: string;
@@ -249,6 +253,18 @@ function inferirTipoPessoa(documento: string): "F" | "J" {
   return documento.replace(/\D/g, "").length > 11 ? "J" : "F";
 }
 
+function normalizarTipoContribuinte(value: unknown): TipoContribuinteCliente {
+  const normalized = getString(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .trim()
+    .toUpperCase()
+    .replace(/[\s-]+/g, "_");
+  if (normalized === "CONTRIBUINTE") return "CONTRIBUINTE";
+  if (normalized === "NAO_CONTRIBUINTE" || normalized === "NAOCONTRIBUINTE") return "NAO_CONTRIBUINTE";
+  return "ISENTO";
+}
+
 function toClientePdv(cliente: ErpCliente) {
   const endereco = cliente.enderecos?.[0] ?? null;
   const documento = soDigitos(cliente.numeroDoDocumento);
@@ -263,6 +279,8 @@ function toClientePdv(cliente: ErpCliente) {
     tipoPessoa: cliente.tipoDePessoa === "JURIDICA" ? "J" : inferirTipoPessoa(documento),
     telefone: soDigitos(cliente.telefone1 || cliente.telefone2) || null,
     email: getString(cliente.email) || null,
+    tipoContribuinte: cliente.tipoContribuinte ?? null,
+    inscricaoEstadual: getString(cliente.inscricaoEstadual) || null,
     endereco: getString(endereco?.logradouro) || null,
     numeroEndereco: getString(endereco?.numero) || null,
     bairro: getString(endereco?.bairro) || null,
@@ -275,7 +293,7 @@ function toClientePdv(cliente: ErpCliente) {
   };
 }
 
-async function buscarClientes(empresa: EmpresaKey, search: string, limit: number) {
+async function buscarClientes(empresa: EmpresaKey, search: string, limit: number, start = 0) {
   const byId = new Map<string, ReturnType<typeof toClientePdv>>();
   const clean = sanitizeSearchTerm(search);
   const digits = soDigitos(clean);
@@ -294,8 +312,8 @@ async function buscarClientes(empresa: EmpresaKey, search: string, limit: number
   }
 
   const paths = queries.length
-    ? queries.map((q) => `/v1/pessoa/clientes?q=${encodeURIComponent(q)}&sort=nome&start=0&count=${limit}`)
-    : [`/v1/pessoa/clientes?sort=nome&start=0&count=${limit}`];
+    ? queries.map((q) => `/v1/pessoa/clientes?q=${encodeURIComponent(q)}&sort=nome&start=${start}&count=${limit}`)
+    : [`/v1/pessoa/clientes?sort=nome&start=${start}&count=${limit}`];
 
   for (const path of paths) {
     const { data } = await fetchErpJson<ErpListResponse<ErpCliente>>(empresa, path);
@@ -310,19 +328,42 @@ async function buscarClientes(empresa: EmpresaKey, search: string, limit: number
   return [...byId.values()].slice(0, limit);
 }
 
-function montarPayloadCadastro(empresa: EmpresaKey, body: Record<string, unknown>) {
+export function montarPayloadCadastro(empresa: EmpresaKey, body: Record<string, unknown>) {
   const nome = getString(body.nome);
-  const fantasia = getString(body.fantasia) || nome;
+  const fantasia = nome;
   const documento = soDigitos(body.cpfCnpj ?? body.numeroDoDocumento ?? body.documento);
-  const telefone = soDigitos(body.telefone);
+  const telefoneInformado = soDigitos(body.telefone);
+  const telefone = telefoneInformado || "99999999999";
   const email = getString(body.email) || process.env.ERP_CLIENTE_EMAIL_PADRAO || "cliente.scan@local";
+  const cep = soDigitos(body.cep);
+  const uf = getString(body.uf).slice(0, 2).toUpperCase();
+  const municipio = getString(body.cidade ?? body.municipio);
+  const codigoIbge = soDigitos(body.codigoIbge ?? body.codigo_ibge);
+  const logradouro = getString(body.endereco ?? body.logradouro);
+  const numero = getString(body.numeroEndereco ?? body.numero ?? body.numero_endereco);
+  const bairro = getString(body.bairro);
+  const complemento = getString(body.complemento);
 
   if (!nome) throw new Error("Nome do cliente obrigatorio.");
   if (![11, 14].includes(documento.length)) {
     throw new Error("CPF/CNPJ obrigatorio para cadastrar cliente no ERP.");
   }
+  if (telefoneInformado && telefoneInformado.length < 10) throw new Error("Telefone 1 invalido.");
+  if (cep.length !== 8) throw new Error("CEP obrigatorio para cadastrar cliente no ERP.");
+  if (!uf) throw new Error("UF obrigatoria para cadastrar cliente no ERP.");
+  if (!municipio) throw new Error("Cidade obrigatoria para cadastrar cliente no ERP.");
+  if (!codigoIbge) throw new Error("Codigo IBGE obrigatorio para cadastrar cliente no ERP.");
+  if (!logradouro) throw new Error("Logradouro obrigatorio para cadastrar cliente no ERP.");
+  if (!numero) throw new Error("Numero do logradouro obrigatorio para cadastrar cliente no ERP.");
+  if (!bairro) throw new Error("Bairro obrigatorio para cadastrar cliente no ERP.");
 
   const tipoDePessoa: ErpCliente["tipoDePessoa"] = documento.length > 11 ? "JURIDICA" : "FISICA";
+  const tipoContribuinte = tipoDePessoa === "FISICA" ? "ISENTO" : normalizarTipoContribuinte(body.tipoContribuinte);
+  const ieInformada = getString(body.inscricaoEstadual ?? body.ie ?? body.rgIe);
+  if (tipoContribuinte === "CONTRIBUINTE" && !ieInformada) {
+    throw new Error("RG/IE obrigatorio quando CNPJ for contribuinte.");
+  }
+  const inscricaoEstadual = tipoContribuinte === "CONTRIBUINTE" ? ieInformada : "ISENTO";
   const lojaId = getIntEnv(empresa, "ERP_CLIENTE_LOJA_ID", empresa === "NEWSHOP" ? 2 : 1);
 
   return {
@@ -335,11 +376,26 @@ function montarPayloadCadastro(empresa: EmpresaKey, body: Record<string, unknown
     holdingId: getIntEnv(empresa, "ERP_CLIENTE_HOLDING_ID", 1),
     nome,
     fantasia,
-    telefone1: telefone || undefined,
+    telefone1: telefone,
     lojaId,
-    tipoContribuinte: "NAO_CONTRIBUINTE",
+    tipoContribuinte,
     dataDeCadastro: new Date().toISOString().slice(0, 10),
     origemDeAlteracao: "SCAN",
+    inscricaoEstadual,
+    enderecos: [
+      {
+        id: 0,
+        cep,
+        uf,
+        codigoIbge,
+        municipio,
+        logradouro,
+        numero,
+        bairro,
+        complemento: complemento || undefined,
+        codigoDoPais: 1058,
+      },
+    ],
   };
 }
 
@@ -357,10 +413,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === "GET") {
       const empresa = normalizeEmpresa(req.query.empresa);
       const limitRaw = Number(getSingle(req.query.limit));
-      const limit = Number.isFinite(limitRaw) ? Math.min(30, Math.max(1, Math.trunc(limitRaw))) : 20;
+      const limit = Number.isFinite(limitRaw) ? Math.min(50, Math.max(1, Math.trunc(limitRaw))) : 20;
+      const startRaw = Number(getSingle(req.query.start));
+      const start = Number.isFinite(startRaw) ? Math.max(0, Math.trunc(startRaw)) : 0;
       const search = getSingle(req.query.search);
-      const items = await buscarClientes(empresa, search, limit);
-      return res.status(200).json({ items, empresa });
+      const items = await buscarClientes(empresa, search, limit, start);
+      return res.status(200).json({ items, empresa, start, limit });
     }
 
     if (req.method === "POST") {

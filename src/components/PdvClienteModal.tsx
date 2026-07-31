@@ -5,7 +5,9 @@ import {
   buscarClientesVarejoFacil,
   cadastrarClienteVarejoFacil,
   type ClientePdv,
+  type TipoContribuinteCliente,
 } from "@/lib/erpClientes";
+import { buscarEnderecoPorCep } from "@/lib/cepBrasil";
 
 interface PdvClienteModalProps {
   open: boolean;
@@ -61,14 +63,38 @@ function formatPhone(value?: string | null): string {
   return digits;
 }
 
+const TELEFONE_PADRAO_CLIENTE = "99999999999";
+
+const tipoContribuinteOptions: Array<{ value: TipoContribuinteCliente; label: string }> = [
+  { value: "ISENTO", label: "ISENTO" },
+  { value: "NAO_CONTRIBUINTE", label: "NAO CONTRIBUINTE" },
+  { value: "CONTRIBUINTE", label: "CONTRIBUINTE" },
+];
+
 export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButtonLabel = "Cadastrar e enviar" }: PdvClienteModalProps) {
   const [mode, setMode] = useState<"buscar" | "cadastrar">("buscar");
   const [search, setSearch] = useState("");
   const [clientes, setClientes] = useState<ClientePdv[]>([]);
   const [loading, setLoading] = useState(false);
+  const [cepLoading, setCepLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [form, setForm] = useState({ nome: "", cpfCnpj: "", telefone: "", email: "" });
+  const [form, setForm] = useState({
+    nome: "",
+    cpfCnpj: "",
+    telefone: "",
+    email: "",
+    tipoContribuinte: "ISENTO" as TipoContribuinteCliente,
+    inscricaoEstadual: "",
+    cep: "",
+    endereco: "",
+    numeroEndereco: "",
+    bairro: "",
+    cidade: "",
+    uf: "",
+    codigoIbge: "",
+    complemento: "",
+  });
 
   useEffect(() => {
     if (!open) return;
@@ -76,7 +102,23 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
     setSearch("");
     setError("");
     setClientes([]);
-    setForm({ nome: "", cpfCnpj: "", telefone: "", email: "" });
+    setCepLoading(false);
+    setForm({
+      nome: "",
+      cpfCnpj: "",
+      telefone: "",
+      email: "",
+      tipoContribuinte: "ISENTO",
+      inscricaoEstadual: "",
+      cep: "",
+      endereco: "",
+      numeroEndereco: "",
+      bairro: "",
+      cidade: "",
+      uf: "",
+      codigoIbge: "",
+      complemento: "",
+    });
   }, [open]);
 
   useEffect(() => {
@@ -104,15 +146,61 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
     };
   }, [open, mode, empresa, search]);
 
+  const preencherCep = async (cepValue = form.cep) => {
+    const cep = onlyDigits(cepValue);
+    if (cep.length !== 8) return;
+    setCepLoading(true);
+    setError("");
+    try {
+      const endereco = await buscarEnderecoPorCep(cep);
+      if (!endereco) {
+        setError("CEP nao encontrado. Preencha o endereco manualmente.");
+        return;
+      }
+      setForm((current) => ({
+        ...current,
+        cep: endereco.cep,
+        endereco: current.endereco || endereco.logradouro,
+        bairro: current.bairro || endereco.bairro,
+        cidade: current.cidade || endereco.cidade,
+        uf: current.uf || endereco.uf,
+        codigoIbge: current.codigoIbge || endereco.codigoIbge,
+      }));
+    } catch {
+      setError("Nao foi possivel consultar o CEP. Preencha o endereco manualmente.");
+    } finally {
+      setCepLoading(false);
+    }
+  };
+
+  const documentoAtual = onlyDigits(form.cpfCnpj);
+  const isCnpjForm = documentoAtual.length === 14;
+
   const cadastrar = async () => {
     if (saving) return;
     const documento = onlyDigits(form.cpfCnpj);
+    const telefoneInformado = onlyDigits(form.telefone);
+    const telefone = telefoneInformado || TELEFONE_PADRAO_CLIENTE;
+    const cep = onlyDigits(form.cep);
+    const isCnpj = documento.length === 14;
     if (!form.nome.trim()) {
       setError("Informe o nome do cliente.");
       return;
     }
     if (![11, 14].includes(documento.length)) {
       setError("Informe CPF ou CNPJ valido para cadastrar.");
+      return;
+    }
+    if (telefoneInformado && telefoneInformado.length < 10) {
+      setError("Telefone invalido.");
+      return;
+    }
+    if (isCnpj && form.tipoContribuinte === "CONTRIBUINTE" && !form.inscricaoEstadual.trim()) {
+      setError("Informe a IE quando o CNPJ for contribuinte.");
+      return;
+    }
+    if (cep.length !== 8 || !form.uf.trim() || !form.cidade.trim() || !form.codigoIbge.trim() || !form.endereco.trim() || !form.numeroEndereco.trim() || !form.bairro.trim()) {
+      setError("Preencha CEP, UF, cidade, codigo IBGE, logradouro, numero e bairro.");
       return;
     }
 
@@ -123,8 +211,18 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
         empresa,
         nome: form.nome,
         cpfCnpj: documento,
-        telefone: form.telefone,
+        telefone,
         email: form.email,
+        tipoContribuinte: isCnpj ? form.tipoContribuinte : "ISENTO",
+        inscricaoEstadual: isCnpj && form.tipoContribuinte === "CONTRIBUINTE" ? form.inscricaoEstadual : "ISENTO",
+        cep,
+        uf: form.uf,
+        cidade: form.cidade,
+        codigoIbge: form.codigoIbge,
+        endereco: form.endereco,
+        numeroEndereco: form.numeroEndereco,
+        bairro: form.bairro,
+        complemento: form.complemento,
       });
       onSelect(cliente);
     } catch (err) {
@@ -136,13 +234,13 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
-      <DialogContent aria-describedby={undefined} className="max-w-md" style={{ borderRadius: 16 }}>
+      <DialogContent aria-describedby={undefined} className="max-h-[92vh] max-w-lg overflow-y-auto" style={{ borderRadius: 16 }}>
         <DialogHeader>
           <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20 }}>
             Cliente do PDV
           </DialogTitle>
           <DialogDescription style={{ fontSize: 13 }}>
-            Selecione um cliente do Varejo Facil ou cadastre antes de enviar.
+            Selecione um cliente do Varejo Facil ou cadastre com os dados obrigatorios do ERP.
           </DialogDescription>
         </DialogHeader>
 
@@ -253,22 +351,91 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
               />
             </div>
             <div>
+              <label style={labelStyle}>Fantasia</label>
+              <input
+                value={form.nome}
+                readOnly
+                placeholder="Replica do nome"
+                style={{ ...fieldStyle, opacity: 0.78 }}
+              />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <div>
+                <label style={labelStyle}>Holding</label>
+                <input value="GERAL" readOnly style={{ ...fieldStyle, opacity: 0.78 }} />
+              </div>
+              <div>
+                <label style={labelStyle}>Pais</label>
+                <input value="BRASIL" readOnly style={{ ...fieldStyle, opacity: 0.78 }} />
+              </div>
+            </div>
+            <div>
               <label style={labelStyle}>CPF/CNPJ</label>
               <input
                 value={form.cpfCnpj}
-                onChange={(e) => setForm((current) => ({ ...current, cpfCnpj: e.target.value }))}
+                onChange={(e) => {
+                  const nextDoc = onlyDigits(e.target.value);
+                  setForm((current) => ({
+                    ...current,
+                    cpfCnpj: e.target.value,
+                    tipoContribuinte: nextDoc.length > 11 ? current.tipoContribuinte : "ISENTO",
+                    inscricaoEstadual: nextDoc.length > 11 ? current.inscricaoEstadual : "",
+                  }));
+                }}
                 placeholder="Somente numeros"
                 inputMode="numeric"
                 style={fieldStyle}
               />
             </div>
+            {isCnpjForm ? (
+              <div style={{ display: "grid", gridTemplateColumns: form.tipoContribuinte === "CONTRIBUINTE" ? "1fr 1fr" : "1fr", gap: 8 }}>
+                <div>
+                  <label style={labelStyle}>Tipo contribuinte</label>
+                  <select
+                    value={form.tipoContribuinte}
+                    onChange={(e) => setForm((current) => ({
+                      ...current,
+                      tipoContribuinte: e.target.value as TipoContribuinteCliente,
+                      inscricaoEstadual: e.target.value === "CONTRIBUINTE" ? current.inscricaoEstadual : "",
+                    }))}
+                    style={fieldStyle}
+                  >
+                    {tipoContribuinteOptions.map((option) => (
+                      <option key={option.value} value={option.value}>{option.label}</option>
+                    ))}
+                  </select>
+                </div>
+                {form.tipoContribuinte === "CONTRIBUINTE" && (
+                  <div>
+                    <label style={labelStyle}>RG/IE *</label>
+                    <input
+                      value={form.inscricaoEstadual}
+                      onChange={(e) => setForm((current) => ({ ...current, inscricaoEstadual: e.target.value }))}
+                      placeholder="Inscricao estadual"
+                      style={fieldStyle}
+                    />
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+                <div>
+                  <label style={labelStyle}>Tipo contribuinte</label>
+                  <input value="ISENTO" readOnly style={{ ...fieldStyle, opacity: 0.78 }} />
+                </div>
+                <div>
+                  <label style={labelStyle}>RG/IE</label>
+                  <input value="ISENTO" readOnly style={{ ...fieldStyle, opacity: 0.78 }} />
+                </div>
+              </div>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
               <div>
                 <label style={labelStyle}>Telefone</label>
                 <input
                   value={form.telefone}
                   onChange={(e) => setForm((current) => ({ ...current, telefone: e.target.value }))}
-                  placeholder="Opcional"
+                  placeholder="Opcional; vazio usa 99999999999"
                   inputMode="tel"
                   style={fieldStyle}
                 />
@@ -283,6 +450,107 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
                   style={fieldStyle}
                 />
               </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: 8, alignItems: "end" }}>
+              <div>
+                <label style={labelStyle}>CEP *</label>
+                <input
+                  value={form.cep}
+                  onChange={(e) => setForm((current) => ({ ...current, cep: e.target.value }))}
+                  onBlur={() => void preencherCep()}
+                  placeholder="Somente numeros"
+                  inputMode="numeric"
+                  style={fieldStyle}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => void preencherCep()}
+                disabled={cepLoading || onlyDigits(form.cep).length !== 8}
+                style={{
+                  height: 42,
+                  borderRadius: 8,
+                  border: "1.5px solid hsl(var(--border))",
+                  background: "hsl(var(--secondary))",
+                  color: "hsl(var(--foreground))",
+                  padding: "0 12px",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: cepLoading ? "not-allowed" : "pointer",
+                  opacity: cepLoading || onlyDigits(form.cep).length !== 8 ? 0.6 : 1,
+                }}
+              >
+                {cepLoading ? "..." : "Buscar"}
+              </button>
+            </div>
+            <div>
+              <label style={labelStyle}>Logradouro *</label>
+              <input
+                value={form.endereco}
+                onChange={(e) => setForm((current) => ({ ...current, endereco: e.target.value }))}
+                placeholder="Rua / Avenida"
+                style={fieldStyle}
+              />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "0.8fr 1.2fr", gap: 8 }}>
+              <div>
+                <label style={labelStyle}>Numero *</label>
+                <input
+                  value={form.numeroEndereco}
+                  onChange={(e) => setForm((current) => ({ ...current, numeroEndereco: e.target.value }))}
+                  placeholder="Numero"
+                  style={fieldStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Bairro *</label>
+                <input
+                  value={form.bairro}
+                  onChange={(e) => setForm((current) => ({ ...current, bairro: e.target.value }))}
+                  placeholder="Bairro"
+                  style={fieldStyle}
+                />
+              </div>
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 72px 1fr", gap: 8 }}>
+              <div>
+                <label style={labelStyle}>Municipio (IBGE) *</label>
+                <input
+                  value={form.cidade}
+                  onChange={(e) => setForm((current) => ({ ...current, cidade: e.target.value }))}
+                  placeholder="Cidade"
+                  style={fieldStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>UF *</label>
+                <input
+                  value={form.uf}
+                  onChange={(e) => setForm((current) => ({ ...current, uf: e.target.value.toUpperCase().slice(0, 2) }))}
+                  placeholder="UF"
+                  maxLength={2}
+                  style={fieldStyle}
+                />
+              </div>
+              <div>
+                <label style={labelStyle}>Codigo municipio *</label>
+                <input
+                  value={form.codigoIbge}
+                  onChange={(e) => setForm((current) => ({ ...current, codigoIbge: e.target.value }))}
+                  placeholder="Codigo"
+                  inputMode="numeric"
+                  style={fieldStyle}
+                />
+              </div>
+            </div>
+            <div>
+              <label style={labelStyle}>Complemento</label>
+              <input
+                value={form.complemento}
+                onChange={(e) => setForm((current) => ({ ...current, complemento: e.target.value }))}
+                placeholder="Opcional"
+                style={fieldStyle}
+              />
             </div>
             <button
               onClick={cadastrar}

@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
 import { ErpLayout } from "@/components/ErpLayout";
+import { loginEhSefuly } from "@/lib/lojaFeatures";
 
 interface DesktopShellProps {
   children: React.ReactNode;
@@ -37,7 +38,7 @@ export function DesktopShell({ children, pageTitle }: DesktopShellProps) {
         loginSalvo={loginSalvo}
         logoEmpresa={logoEmpresa}
         nomeEmpresaLogo={nomeEmpresaLogo}
-        setMostrarPerfil={() => navigate("/?modal=perfil")}
+        setMostrarPerfil={() => navigate(loginEhSefuly(loginSalvo) ? "/perfil" : "/?modal=perfil")}
         setMostrarConfiguracoes={() => navigate("/?modal=config")}
         fazerLogout={fazerLogout}
         pageTitle={pageTitle}

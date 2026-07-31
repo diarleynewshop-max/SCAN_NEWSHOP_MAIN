@@ -9,6 +9,7 @@ import {
 import type { LucideIcon } from "lucide-react";
 import type { LoginData } from "@/hooks/useAuth";
 import { loginEhSefuly, loginTemFeature } from "@/lib/lojaFeatures";
+import { hasPermission } from "@/lib/accessControl";
 
 interface NavItemDef {
   icon: LucideIcon;
@@ -100,6 +101,10 @@ export function ErpLayout({
       label: "Operacional",
       items: isSefuly ? [
         { icon: ScanBarcode, label: "Abrir pedido", path: "/scanner" },
+        ...(hasPermission(loginSalvo, "conferencia") ? [{ icon: GitCompare, label: "Conferência", path: "/scanner?tab=conference" }] : []),
+        ...(hasPermission(loginSalvo, "consulta_preco") ? [{ icon: BadgeDollarSign, label: "Consulta Preço", path: "/consulta-preco" }] : []),
+        { icon: Users, label: "Cliente", path: "/clientes" },
+        { icon: User, label: "Perfil", path: "/perfil" },
       ] : [
         { icon: HomeIcon, label: "Início", path: "/" },
         { icon: ScanBarcode, label: "Escanear", path: "/scanner" },

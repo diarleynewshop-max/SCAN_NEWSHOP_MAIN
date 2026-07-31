@@ -143,8 +143,6 @@ const Index = () => {
   const initialTab = searchParams.get("tab");
   const currentLogin = obterLoginSalvo();
   const isSefuly = loginEhSefuly(currentLogin);
-  const isSefulyPriv = isSefuly && ["compras", "admin", "super"].includes(currentLogin?.role ?? "");
-  const allowSefulyConferenceDirect = isSefulyPriv && initialTab === "conference";
 
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
   const [semEAN, setSemEAN] = useState(() => (sessionStorage.getItem("scan_barcode") ?? "").startsWith("SEM_EAN_"));
@@ -152,7 +150,7 @@ const Index = () => {
   const [photo, setPhoto] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
   const [view, setView] = useState<"scan" | "list" | "conference">(
-    initialTab === "conference" && (!isSefuly || allowSefulyConferenceDirect) && hasPermission(currentLogin, "conferencia")
+    initialTab === "conference" && hasPermission(currentLogin, "conferencia")
       ? "conference"
       : initialTab === "list" && hasPermission(currentLogin, "lista")
         ? "list"
@@ -196,10 +194,6 @@ const Index = () => {
     empresa: lookupEmpresa,
     flag: lookupFlag,
   });
-
-  useEffect(() => {
-    if (isSefuly && view === "conference" && !allowSefulyConferenceDirect) setView("scan");
-  }, [allowSefulyConferenceDirect, isSefuly, view]);
 
   useEffect(() => {
     if (!isSefuly) {
@@ -500,7 +494,6 @@ const Index = () => {
   };
 
   const handleTabChange = (key: "scan" | "list" | "conference" | "compras" | "consultaPreco") => {
-    if (isSefuly && key === "conference") return;
     if (key === "compras") {
       navigate("/compras");
       return;
@@ -514,10 +507,10 @@ const Index = () => {
 
   const extraTab = !isSefuly && hasPermission(currentLogin, "compras") ? [{ key: "compras" as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
   const tabs = [
-    ...(!isSefuly && hasPermission(currentLogin, "consulta_preco") ? [{ key: "consultaPreco" as const, label: "Consulta", Icon: BadgeDollarSign }] : []),
+    ...(hasPermission(currentLogin, "consulta_preco") ? [{ key: "consultaPreco" as const, label: "Consulta", Icon: BadgeDollarSign }] : []),
     ...(hasPermission(currentLogin, "scanner") ? [{ key: "scan" as const, label: isSefuly ? "Abrir pedido" : "Escanear", Icon: ScanBarcode }] : []),
     ...(hasPermission(currentLogin, "lista") ? [{ key: "list" as const, label: isSefuly ? "Pedidos" : "Lista", Icon: ClipboardList }] : []),
-    ...(!isSefuly && hasPermission(currentLogin, "conferencia") ? [{ key: "conference" as const, label: "Conferencia", Icon: GitCompare }] : []),
+    ...(hasPermission(currentLogin, "conferencia") ? [{ key: "conference" as const, label: "Conferencia", Icon: GitCompare }] : []),
     ...extraTab,
   ];
 
@@ -915,15 +908,14 @@ const Index = () => {
               </div>
             )}
           </div>
-        ) : view === "list" || (isSefuly && view !== "conference") ? (
+        ) : view === "list" ? (
           <Suspense fallback={LAZY_FALLBACK}>
             <ListHistory
               lists={lists}
               onUpdateList={updateList}
-              onStartConference={isSefuly ? undefined : () => setView("conference")}
+              onStartConference={() => setView("conference")}
               modoDesktop={modoDesktop}
               modoLeve={modoLeve}
-              ocultarConferencia={isSefuly}
             />
           </Suspense>
         ) : (

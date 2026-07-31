@@ -35,7 +35,8 @@ export function ProtectedRoute({
     return <Navigate to="/login" replace />;
   }
 
-  if (loginEhSefuly(loginSalvo) && location.pathname !== "/scanner") {
+  const sefulyAllowedPaths = new Set(["/scanner", "/consulta-preco", "/clientes", "/perfil"]);
+  if (loginEhSefuly(loginSalvo) && !sefulyAllowedPaths.has(location.pathname)) {
     return <Navigate to="/scanner" replace />;
   }
 

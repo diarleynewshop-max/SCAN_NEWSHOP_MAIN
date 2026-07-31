@@ -25,6 +25,8 @@ const Dashboard = lazy(() => import("./pages/Dashboard"));
 const Compras = lazy(() => import("./pages/Compras"));
 const SugestaoCd = lazy(() => import("./pages/SugestaoCd"));
 const ConsultaPreco = lazy(() => import("./pages/ConsultaPreco"));
+const Clientes = lazy(() => import("./pages/Clientes"));
+const Perfil = lazy(() => import("./pages/Perfil"));
 const MeusPedidos = lazy(() => import("./pages/MeusPedidos"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Chat = lazy(() => import("./pages/Chat"));
@@ -77,8 +79,20 @@ const App = () => (
               </ProtectedRoute>
             } />
             <Route path="/consulta-preco" element={
-              <ProtectedRoute requiredPermission="fazer_pedido">
+              <ProtectedRoute requiredPermission="consulta_preco">
                 <DesktopShell pageTitle="Consulta Preço"><ConsultaPreco /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/clientes" element={
+              <ProtectedRoute requiredPermission="fazer_pedido">
+                <DesktopShell pageTitle="Cliente"><Clientes /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/perfil" element={
+              <ProtectedRoute requiredPermission="scanner">
+                <DesktopShell pageTitle="Perfil"><Perfil /></DesktopShell>
               </ProtectedRoute>
             } />
 

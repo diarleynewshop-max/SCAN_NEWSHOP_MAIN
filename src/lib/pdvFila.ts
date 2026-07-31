@@ -320,7 +320,8 @@ export async function enfileirarPrevendaConferencia(
       };
     }
 
-    const cliente = normalizarClienteDireto(params.cliente) || montarCliente(pedido, texto(params.conferente) || "CONSUMIDOR");
+    const nomeVendedor = texto(pedido?.pessoa) || texto(pedido?.listeiro) || texto(params.conferente) || null;
+    const cliente = normalizarClienteDireto(params.cliente) || montarCliente(pedido, nomeVendedor || "CONSUMIDOR");
     if (!cliente) {
       return {
         ok: false,
@@ -360,7 +361,7 @@ export async function enfileirarPrevendaConferencia(
       numeroPrevenda,
       dataEmissao: new Date().toISOString(),
       codigoFuncionario: CODIGO_FUNCIONARIO,
-      nomeVendedor: texto(params.conferente) || null,
+      nomeVendedor,
       observacao: [
         `origem=${origemTipo}`,
         numeroCatalogo ? `pedido=${numeroCatalogo}` : "",

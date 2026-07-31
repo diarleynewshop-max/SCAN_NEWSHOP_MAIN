@@ -3,12 +3,16 @@ import type { PdvPrevendaCliente } from "./pdvPrevenda";
 export type ClientePdv = PdvPrevendaCliente & {
   fantasia?: string | null;
   email?: string | null;
+  tipoContribuinte?: TipoContribuinteCliente | null;
 };
+
+export type TipoContribuinteCliente = "ISENTO" | "NAO_CONTRIBUINTE" | "CONTRIBUINTE";
 
 export interface BuscarClientesParams {
   empresa: string;
   search?: string;
   limit?: number;
+  start?: number;
 }
 
 export interface CadastrarClienteParams {
@@ -18,6 +22,16 @@ export interface CadastrarClienteParams {
   telefone?: string;
   email?: string;
   fantasia?: string;
+  tipoContribuinte?: TipoContribuinteCliente;
+  inscricaoEstadual?: string;
+  cep: string;
+  uf: string;
+  cidade: string;
+  codigoIbge: string;
+  endereco: string;
+  numeroEndereco: string;
+  bairro: string;
+  complemento?: string;
 }
 
 const getConfiguredErpProxyBase = (): string =>
@@ -88,6 +102,7 @@ export async function buscarClientesVarejoFacil(params: BuscarClientesParams): P
   url.searchParams.set("empresa", params.empresa || "NEWSHOP");
   url.searchParams.set("search", params.search ?? "");
   url.searchParams.set("limit", String(params.limit ?? 20));
+  url.searchParams.set("start", String(params.start ?? 0));
 
   const response = await fetch(url.toString(), {
     headers: getHeadersForEndpoint(endpoint),
