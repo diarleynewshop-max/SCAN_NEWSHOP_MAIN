@@ -1,6 +1,7 @@
 import { useState, useCallback, useEffect, useRef } from "react";
 import { Product, ListData, ListFlag } from "@/components/ProductCard";
 import { useToast } from "@/hooks/use-toast";
+import type { ClientePdv } from "@/lib/erpClientes";
 import {
   dataUrlToBlob,
   isDataPhotoUrl,
@@ -16,6 +17,7 @@ interface OpenListParams {
   person: string;
   flag: ListFlag;
   empresa: string;
+  clientePdv?: ClientePdv | null;
 }
 
 interface AddProductParams {
@@ -27,6 +29,7 @@ interface AddProductParams {
   description?: string;
   secao?: string;
   erpProdutoId?: string;
+  precoUnitario?: number | null;
   erpPhotoMissing?: boolean;
   appPhotoWithoutErp?: boolean;
   importedFromSpreadsheet?: boolean;
@@ -297,7 +300,7 @@ export function useInventory() {
   }, [lists]);
 
   const openList = useCallback(
-    ({ title, person, flag, empresa }: OpenListParams): boolean => {
+    ({ title, person, flag, empresa, clientePdv }: OpenListParams): boolean => {
       const normalizedTitle = flag === "cd" ? (title.trim() || "CD") : title.trim();
 
       if (flag !== "cd" && !normalizedTitle) {
@@ -319,6 +322,7 @@ export function useInventory() {
         products: [],
         createdAt: new Date(),
         status: "open",
+        clientePdv: clientePdv ?? null,
       };
 
       setLists((prev) => [...prev, newList]);
@@ -383,6 +387,9 @@ export function useInventory() {
               ...(params.photo ? preparedPhoto : {}),
               ...(params.secao?.trim() ? { secao: params.secao.trim() } : {}),
               ...(params.erpProdutoId ? { erpProdutoId: params.erpProdutoId } : {}),
+              ...(typeof params.precoUnitario === "number" && params.precoUnitario > 0
+                ? { precoUnitario: params.precoUnitario }
+                : {}),
               erpPhotoMissing: params.erpPhotoMissing ?? false,
               appPhotoWithoutErp: params.appPhotoWithoutErp ?? false,
             };
@@ -398,6 +405,7 @@ export function useInventory() {
             secao: params.secao?.trim() || undefined,
             ...preparedPhoto,
             erpProdutoId: params.erpProdutoId,
+            precoUnitario: params.precoUnitario,
             erpPhotoMissing: params.erpPhotoMissing ?? false,
             appPhotoWithoutErp: params.appPhotoWithoutErp ?? false,
             quantity,

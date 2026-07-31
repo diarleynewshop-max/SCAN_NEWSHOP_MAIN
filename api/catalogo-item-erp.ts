@@ -20,7 +20,7 @@ async function fetchErpWithRetry(input: string | URL, init?: RequestInit): Promi
   }
 }
 
-type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
+type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE" | "SEFULY";
 
 type ErpProduto = {
   id?: number;
@@ -68,6 +68,7 @@ const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
   SOYE: "facil.varejofacil.com",
+  SEFULY: "sefuly.varejofacil.com",
 };
 
 const tokenCache = new Map<string, string>();
@@ -85,12 +86,14 @@ function getString(value: unknown): string {
 
 function normalizeEmpresa(body: Record<string, unknown>): EmpresaKey {
   const raw = `${getString(body.erpBaseOverride)} ${getString(body.loja)}`.toUpperCase();
+  if (raw.includes("SEFULY")) return "SEFULY";
   if (raw.includes("SOYE")) return "SOYE";
   if (raw.includes("FACIL")) return "FACIL";
   return "NEWSHOP";
 }
 
 function erpBaseEmpresa(empresa: EmpresaKey): EmpresaKey {
+  if (empresa === "SEFULY") return "NEWSHOP";
   return empresa === "SOYE" ? "FACIL" : empresa;
 }
 
@@ -447,7 +450,7 @@ async function buscarPorTermoNaEmpresa(empresa: EmpresaKey, termo: string, limit
 }
 
 async function buscarPorTermoTodasEmpresas(empresaInicial: EmpresaKey, termo: string, limit: number): Promise<CatalogoItem[]> {
-  const empresas = [empresaInicial, ...(["NEWSHOP", "FACIL", "SOYE"] as EmpresaKey[]).filter((item) => item !== empresaInicial)];
+  const empresas = [empresaInicial, ...(["NEWSHOP", "FACIL", "SOYE", "SEFULY"] as EmpresaKey[]).filter((item) => item !== empresaInicial)];
   const byKey = new Map<string, CatalogoItem>();
 
   for (const empresa of empresas) {

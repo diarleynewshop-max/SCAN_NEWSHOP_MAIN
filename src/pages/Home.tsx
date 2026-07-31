@@ -6,7 +6,7 @@ import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLo
 import { alterarMinhaSenha, LIMITE_FOTO_PERFIL_BYTES, salvarMinhaFotoPerfil } from "@/lib/usuarios";
 import CriarContaModal from "@/components/CriarContaModal";
 import { hasPermission, type AccessPermission } from "@/lib/accessControl";
-import { loginTemFeature, type LojaFeature } from "@/lib/lojaFeatures";
+import { loginEhSefuly, loginTemFeature, type LojaFeature } from "@/lib/lojaFeatures";
 import { getLightModeEnabled, setLightModeEnabled } from "@/lib/lightMode";
 import { HISTORICO_COMPRAS_KEY, getHistoricoComprasEnabled } from "@/lib/historicoCompras";
 import { forcarAtualizacaoApp, recarregarAppAtualizado } from "@/lib/appUpdate";
@@ -239,7 +239,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
   } = useAuth();
 
   useEffect(() => {
-    if (loginOnly && loginSalvo) navigate("/", { replace: true });
+    if (loginOnly && loginSalvo) navigate(loginEhSefuly(loginSalvo) ? "/scanner" : "/", { replace: true });
   }, [loginOnly, loginSalvo, navigate]);
 
   const handleFotoPerfil = async (file: File | undefined) => {

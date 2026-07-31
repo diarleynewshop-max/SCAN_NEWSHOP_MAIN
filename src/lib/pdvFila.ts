@@ -40,6 +40,8 @@ export interface EnfileirarPrevendaParams {
   pedidoId: string | null;
   conferenceId?: string | null;
   conferente?: string | null;
+  origemTipo?: "conferencia" | "pedido_direto";
+  cliente?: PdvPrevendaCliente | null;
   itens: PdvPrevendaConferenciaItem[];
 }
 
@@ -63,7 +65,7 @@ interface PdvPrevendaPayloadJson {
   formato: "syspdv_rpx_ecf";
   origem: {
     sistema: "SCAN";
-    tipo: "conferencia";
+    tipo: "conferencia" | "pedido_direto";
     empresa: string;
     pedidoId: string | null;
     conferenceId: string | null;
@@ -136,6 +138,37 @@ function pick(obj: Record<string, unknown> | null | undefined, keys: string[]): 
 
 function inferirTipoPessoa(cpfCnpj: string): PdvTipoPessoa {
   return cpfCnpj.replace(/\D/g, "").length > 11 ? "J" : "F";
+}
+
+function normalizarClienteDireto(cliente: PdvPrevendaCliente | null | undefined): PdvPrevendaCliente | null {
+  if (!cliente) return null;
+
+  const nome = texto(cliente.nome);
+  const cpfCnpj = texto(cliente.cpfCnpj).replace(/\D/g, "");
+  const codigo =
+    texto(cliente.codigo).replace(/\D/g, "") ||
+    cpfCnpj ||
+    CLIENTE_CODIGO_PADRAO.replace(/\D/g, "");
+
+  if (!nome || !codigo) return null;
+
+  return {
+    codigo,
+    nome,
+    cpfCnpj: cpfCnpj || null,
+    tipoPessoa: cliente.tipoPessoa === "J" || cpfCnpj.length > 11 ? "J" : "F",
+    endereco: texto(cliente.endereco) || null,
+    numeroEndereco: texto(cliente.numeroEndereco) || null,
+    complemento: texto(cliente.complemento) || null,
+    bairro: texto(cliente.bairro) || null,
+    cidade: texto(cliente.cidade) || null,
+    uf: texto(cliente.uf).slice(0, 2) || null,
+    cep: texto(cliente.cep).replace(/\D/g, "") || null,
+    telefone: texto(cliente.telefone).replace(/\D/g, "") || null,
+    inscricaoEstadual: texto(cliente.inscricaoEstadual) || null,
+    codigoIbge: texto(cliente.codigoIbge).replace(/\D/g, "") || null,
+    codigoPais: texto(cliente.codigoPais).replace(/\D/g, "") || null,
+  };
 }
 
 interface PedidoPdvRow {
@@ -257,6 +290,26 @@ export async function enfileirarPrevendaConferencia(
       carregarPrecos(params.pedidoId),
     ]);
 
+    const { data: existente, error: existenteError } = await supabase
+      .from("pdv_prevenda_fila")
+      .select("id,numero_prevenda,nome_arquivo,total_itens,valor_total,status")
+      .eq("pedido_id", params.pedidoId)
+      .neq("status", "erro")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (existenteError) throw existenteError;
+    if (existente?.id) {
+      return {
+        ok: true,
+        id: String(existente.id),
+        numeroPrevenda: numeroPrevendaFormatado(Number(existente.numero_prevenda ?? 0)),
+        nomeArquivo: String(existente.nome_arquivo ?? ""),
+        totalItens: Number(existente.total_itens ?? 0),
+        valorTotal: Number(existente.valor_total ?? 0),
+      };
+    }
+
     const semPreco = vendaveis.filter((entry) => !precos.has(texto(entry.item.codigo)));
     if (semPreco.length > 0) {
       const exemplos = semPreco.slice(0, 5).map((entry) => texto(entry.item.codigo)).join(", ");
@@ -267,7 +320,7 @@ export async function enfileirarPrevendaConferencia(
       };
     }
 
-    const cliente = montarCliente(pedido, texto(params.conferente) || "CONSUMIDOR");
+    const cliente = normalizarClienteDireto(params.cliente) || montarCliente(pedido, texto(params.conferente) || "CONSUMIDOR");
     if (!cliente) {
       return {
         ok: false,
@@ -292,12 +345,13 @@ export async function enfileirarPrevendaConferencia(
     }));
 
     const numeroCatalogo = texto(pedido?.catalogo_numero_pedido);
+    const origemTipo = params.origemTipo === "pedido_direto" ? "pedido_direto" : "conferencia";
     const payloadJson: PdvPrevendaPayloadJson = {
       version: 1,
       formato: "syspdv_rpx_ecf",
       origem: {
         sistema: "SCAN",
-        tipo: "conferencia",
+        tipo: origemTipo,
         empresa: texto(params.empresa).toUpperCase(),
         pedidoId: params.pedidoId,
         conferenceId: texto(params.conferenceId) || pedido?.conference_id || null,
@@ -308,7 +362,7 @@ export async function enfileirarPrevendaConferencia(
       codigoFuncionario: CODIGO_FUNCIONARIO,
       nomeVendedor: texto(params.conferente) || null,
       observacao: [
-        "origem=conferencia",
+        `origem=${origemTipo}`,
         numeroCatalogo ? `pedido=${numeroCatalogo}` : "",
       ].filter(Boolean).join(" "),
       cliente,

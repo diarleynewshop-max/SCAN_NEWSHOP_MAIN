@@ -1,4 +1,5 @@
 import { Package, Trash2, Camera, Hash, Minus, Plus, ArrowUp } from "lucide-react";
+import type { ClientePdv } from "@/lib/erpClientes";
 
 export interface Product {
   id: string;
@@ -10,6 +11,7 @@ export interface Product {
   photoBlob?: Blob | null;
   photoAssetId?: string | null;
   erpProdutoId?: string;
+  precoUnitario?: number | null;
   erpPhotoMissing?: boolean;
   appPhotoWithoutErp?: boolean;
   quantity: number;
@@ -31,6 +33,7 @@ export interface ListData {
   closedAt?: Date;
   status: "open" | "yellow" | "green" | "red";
   flag: ListFlag; // "loja" | "cd"
+  clientePdv?: ClientePdv | null;
   sentToConference?: boolean; // true depois do primeiro envio bem-sucedido
 }
 

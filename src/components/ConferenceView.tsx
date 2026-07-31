@@ -25,15 +25,18 @@ import {
   RefreshCw,
   ClipboardList,
   PackageSearch,
+  UserRound,
 } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import { EditarPendentesModal } from "@/components/EditarPendentesModal";
+import { PdvClienteModal } from "@/components/PdvClienteModal";
 import BarcodeInput from "@/components/BarcodeInput";
 import { hasAnyRoleAccess } from "@/components/ProtectedRoute";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
 import {
   atualizarQuantidadePedidoItem,
+  atualizarClientePdvPedido,
   atualizarStatusPedidoItem,
   atualizarTituloPedido,
   removerItemPedido,
@@ -58,6 +61,7 @@ import { descreverFalhaPrevenda, enfileirarPrevendaConferencia } from "@/lib/pdv
 import { lojaEnviaPrevendaParaPdv } from "@/lib/lojaFeatures";
 import { supabase } from "@/lib/supabaseClient";
 import { obterLoginSalvo } from "@/hooks/useAuth";
+import type { ClientePdv } from "@/lib/erpClientes";
 import { obterSenhaPadrao, validarSenha } from "@/lib/senhaConferencia";
 import {
   criarRecomendacaoSubstituicao,
@@ -89,6 +93,7 @@ export interface ConferenceItem {
   quantidadeReal: number | null;
   status: ConferenceStatus;
   photo?: string | null;
+  precoUnitario?: number | null;
   digito?: "S" | "M" | null;
 }
 
@@ -255,6 +260,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [loadingJson, setLoadingJson] = useState(false);
   const [pedidoOrigemIds, setPedidoOrigemIds] = useState<string[]>([]);
   const [taskOrigemIds, setTaskOrigemIds] = useState<string[]>([]);
+  const [clientePdv, setClientePdv] = useState<ClientePdv | null>(null);
+  const [clienteNomePedido, setClienteNomePedido] = useState("");
+  const [modalClienteAberto, setModalClienteAberto] = useState(false);
   const pedidoOrigemIdsRef = useRef<string[]>([]);
   const pedidoReservadoIdsRef = useRef<string[]>([]);
   const taskOrigemIdsRef = useRef<string[]>([]);
@@ -278,6 +286,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const fileInputRef = useRef<HTMLInputElement>(null);
   const { toast } = useToast();
   const isAdminPlus = !!loginSalvo?.role && hasAnyRoleAccess(loginSalvo.role, ["admin", "super"]);
+  const clientePdvHabilitado = lojaEnviaPrevendaParaPdv(empresa);
+  const clienteLabel = (clientePdv?.nome || clienteNomePedido || "").trim();
+  const clienteCodigoLabel = String(clientePdv?.codigo ?? "").trim();
+  const clienteDocLabel = String(clientePdv?.cpfCnpj ?? "").replace(/\D/g, "");
   const [recomendacoesPedido, setRecomendacoesPedido] = useState<RecomendacaoSubstituicao[]>([]);
   const [modalRecomendacaoAberto, setModalRecomendacaoAberto] = useState(false);
   const [itemSelecionadoRecomendacao, setItemSelecionadoRecomendacao] = useState<ConferenceItem | null>(null);
@@ -315,6 +327,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           photo: photo && !photo.startsWith("data:") ? photo : null,
         })),
         currentIndex, pedidoOrigemIds, taskOrigemIds, elapsedSeconds, apenasVisualizar,
+        clientePdv, clienteNomePedido,
         savedAt: Date.now(),
       };
       localStorage.setItem(DRAFT_KEY, JSON.stringify(draft));
@@ -324,6 +337,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   function limparRascunho() {
     localStorage.removeItem(DRAFT_KEY);
     setRascunhoDisponivel(false);
+  }
+
+  function limparClientePedido() {
+    setClientePdv(null);
+    setClienteNomePedido("");
   }
 
   function restaurarRascunho() {
@@ -345,6 +363,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       taskOrigemIdsRef.current = d.taskOrigemIds ?? [];
       setElapsedSeconds(d.elapsedSeconds ?? 0);
       setApenasVisualizar(d.apenasVisualizar ?? false);
+      setClientePdv(d.clientePdv ?? null);
+      setClienteNomePedido(d.clienteNomePedido ?? d.clientePdv?.nome ?? "");
       setRascunhoDisponivel(false);
       toast({ title: "Conferência restaurada!", description: `${(d.items ?? []).length} itens recuperados.` });
     } catch { limparRascunho(); }
@@ -354,7 +374,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   useEffect(() => {
     salvarRascunho();
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [items, phase, currentIndex, elapsedSeconds]);
+  }, [items, phase, currentIndex, elapsedSeconds, clientePdv, clienteNomePedido]);
 
   // Verifica rascunho no mount
   useEffect(() => {
@@ -403,6 +423,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     taskOrigemIdsRef.current = [];
     setPedidoOrigemIds([]);
     setTaskOrigemIds([]);
+    limparClientePedido();
   };
 
   const voltarLiberandoPedido = async () => {
@@ -554,6 +575,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         quantidadeReal: item.quantidadeReal,
         status: item.status === "pendente" && item.quantidadeReal == null && !item.conferidoEm ? "aguardando" : item.status,
         photo: item.photo ?? null,
+        precoUnitario: item.precoUnitario ?? null,
         digito: null,
       }));
       setItems(parsedSupabase);
@@ -585,6 +607,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           quantidadeReal: item.quantidadeReal,
           status: item.status === "pendente" && item.quantidadeReal == null && !item.conferidoEm ? "aguardando" : item.status,
           photo: item.photo ?? null,
+          precoUnitario: item.precoUnitario ?? null,
           digito: null,
         }))
       );
@@ -773,6 +796,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         toast({ title: "Pedido sem itens no Supabase", variant: "destructive" });
         setLoadingJson(false);
         setTaskSelecionada(null);
+        limparClientePedido();
         return;
       }
 
@@ -786,10 +810,13 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         quantidadeReal: item.quantidadeReal,
         status: item.status === "pendente" && item.quantidadeReal == null && !item.conferidoEm ? "aguardando" : item.status,
         photo: item.photo ?? null,
+        precoUnitario: item.precoUnitario ?? null,
         digito: null,
       }));
 
       setListeiro(task.listeiro || "");
+      setClientePdv(task.clientePdv ?? null);
+      setClienteNomePedido(task.clienteNome ?? task.clientePdv?.nome ?? "");
       setItems(parsedSupabase);
       setPedidoOrigemIds([task.id]);
       pedidoOrigemIdsRef.current = [task.id];
@@ -832,9 +859,81 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       toast({ title: "Erro ao carregar task", description: e.message, variant: "destructive" });
       await recarregarTasks().catch(() => undefined);
       setTaskSelecionada(null);
+      limparClientePedido();
     } finally {
       setLoadingJson(false);
     }
+  };
+
+  const selecionarClientePedido = async (cliente: ClientePdv) => {
+    setClientePdv(cliente);
+    setClienteNomePedido(cliente.nome);
+    setModalClienteAberto(false);
+
+    const pedidoId = pedidoReservadoIdsRef.current[0] ?? pedidoOrigemIdsRef.current[0] ?? taskSelecionada?.id ?? null;
+    if (!pedidoId) return;
+
+    try {
+      await atualizarClientePdvPedido(pedidoId, cliente);
+      setTasks((prev) =>
+        prev.map((task) =>
+          task.id === pedidoId
+            ? { ...task, clienteNome: cliente.nome, clientePdv: cliente }
+            : task
+        )
+      );
+    } catch (err) {
+      toast({
+        title: "Cliente selecionado, mas nao salvou no pedido",
+        description: err instanceof Error ? err.message : "O envio ainda usa o cliente escolhido nesta tela.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const clienteModal = (
+    <PdvClienteModal
+      open={modalClienteAberto}
+      empresa={empresa}
+      onCancel={() => setModalClienteAberto(false)}
+      onSelect={(cliente) => void selecionarClientePedido(cliente)}
+    />
+  );
+
+  const renderClienteConferencia = (compact = false) => {
+    if (!clientePdvHabilitado) return null;
+
+    const podeEditar = !apenasVisualizar && sendStatus !== "sent";
+    const detalhe = clientePdv
+      ? [
+          clienteCodigoLabel ? `Cod. ${clienteCodigoLabel}` : "",
+          clienteDocLabel || "Sem documento",
+        ].filter(Boolean).join(" | ")
+      : clienteLabel
+        ? "Sem codigo do PDV"
+        : "Obrigatorio para enviar ao PDV";
+
+    return (
+      <div className={`rounded-xl border ${clientePdv ? "border-border bg-card" : "border-destructive/30 bg-destructive/5"} p-3 ${compact ? "space-y-1.5" : "space-y-2"}`}>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0 flex-1">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Cliente</p>
+            <p className="truncate text-sm font-black text-foreground">{clienteLabel || "Nenhum cliente selecionado"}</p>
+            <p className={`mt-0.5 truncate text-xs ${clientePdv ? "text-muted-foreground" : "text-destructive"}`}>{detalhe}</p>
+          </div>
+          {podeEditar && (
+            <button
+              type="button"
+              onClick={() => setModalClienteAberto(true)}
+              className="inline-flex h-10 shrink-0 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-bold text-foreground hover:bg-accent"
+            >
+              <UserRound className="h-4 w-4" />
+              {clientePdv ? "Trocar" : "Selecionar"}
+            </button>
+          )}
+        </div>
+      </div>
+    );
   };
 
   useEffect(() => {
@@ -930,6 +1029,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         pedidoReservadoIdsRef.current = [];
         setTaskOrigemIds([]);
         taskOrigemIdsRef.current = [];
+        limparClientePedido();
         setPhase("ready");
         setCurrentIndex(0);
         toast({ title: `${parsed.length} itens importados!` });
@@ -966,6 +1066,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       pedidoReservadoIdsRef.current = [];
       setTaskOrigemIds([]);
       taskOrigemIdsRef.current = [];
+      limparClientePedido();
       setPhase("ready");
       setCurrentIndex(0);
       toast({ title: `${parsed.length} itens importados!` });
@@ -1046,6 +1147,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       pedidoReservadoIdsRef.current = [];
       setTaskOrigemIds([]);
       taskOrigemIdsRef.current = [];
+      limparClientePedido();
       setPhase("ready");
       setCurrentIndex(0);
       toast({ title: `${parsed.length} itens prontos após cruzamento com ERP!` });
@@ -1078,6 +1180,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     pedidoReservadoIdsRef.current = [];
     setTaskOrigemIds([]);
     taskOrigemIdsRef.current = [];
+    limparClientePedido();
     setPhase("ready");
     setCurrentIndex(0);
     toast({ title: `${parsed.length} itens importados!` });
@@ -1305,6 +1408,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       status: i.status,
       digito: i.digito ?? null,
       photo: i.photo ?? null,
+      precoUnitario: i.precoUnitario ?? null,
     })),
   });
 
@@ -1324,6 +1428,15 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       return;
     }
     if (sendStatus === "sending") return;
+    if (lojaEnviaPrevendaParaPdv(empresa) && !clientePdv) {
+      setModalClienteAberto(true);
+      toast({
+        title: "Cliente obrigatorio",
+        description: "Selecione ou cadastre o cliente antes de enviar ao PDV.",
+        variant: "destructive",
+      });
+      return;
+    }
 
     setSendStatus("sending");
     const pedidoId = pedidoReservadoIdsRef.current[0];
@@ -1337,6 +1450,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       quantidadeReal: i.quantidadeReal,
       status: i.status,
       photo: i.photo ?? null,
+      precoUnitario: i.precoUnitario ?? null,
     }));
 
     try {
@@ -1381,6 +1495,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             pedidoId: pedidoId ?? null,
             conferenceId,
             conferente,
+            cliente: clientePdv,
             itens: itensFechamento,
           });
 
@@ -1443,6 +1558,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       pedidoReservadoIdsRef.current = [];
       setTaskOrigemIds([]);
       taskOrigemIdsRef.current = [];
+      limparClientePedido();
       toast({ title: "✅ Conferência concluída!", description: `Pedido de ${conferente} enviado com sucesso.` });
     } catch (err) {
       setSendStatus("error");
@@ -2361,6 +2477,12 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                     )}
                   </div>
                   {data && <p className="text-xs text-muted-foreground mt-0.5">{data}</p>}
+                  {task.clienteNome && (
+                    <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
+                      <UserRound className="h-3.5 w-3.5" />
+                      Cliente: <span className="truncate text-foreground">{task.clienteNome}</span>
+                    </p>
+                  )}
                 </div>
                 {modoJuntar
                   ? <span className={`w-5 h-5 rounded-full border-2 flex-shrink-0 flex items-center justify-center text-[11px] font-bold ${selecionadosJuntar.has(task.id) ? "bg-primary border-primary text-primary-foreground" : "border-muted-foreground/40 text-transparent"}`}>✓</span>
@@ -2581,6 +2703,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
+        {renderClienteConferencia()}
         <div className="text-center py-10">
           <div className="mb-3"><EmpresaBadge /></div>
           <div className="w-16 h-16 rounded-full bg-[hsl(var(--success)/0.15)] flex items-center justify-center mx-auto mb-4">
@@ -2592,6 +2715,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             <Play className="w-6 h-6" /> Começar
           </button>
         </div>
+        {clienteModal}
       </div>
     );
   }
@@ -2606,6 +2730,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         <button onClick={voltarLiberandoPedido} className="flex items-center gap-2 text-sm font-medium text-muted-foreground hover:text-foreground transition-colors">
           <ArrowLeft className="w-4 h-4" /> Voltar
         </button>
+        {renderClienteConferencia()}
         <div className="text-center py-4">
           <div className="w-16 h-16 rounded-full bg-[hsl(var(--success)/0.15)] flex items-center justify-center mx-auto mb-3">
             <Flag className="w-8 h-8 text-[hsl(var(--success))]" />
@@ -2704,6 +2829,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             );
           })}
         </div>
+        {clienteModal}
       </div>
     );
   }
@@ -2728,6 +2854,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           {formatTime(elapsedSeconds)}
         </div>
       </div>
+
+      {renderClienteConferencia(true)}
 
       <div className="bg-card rounded-xl border border-border p-3 space-y-2">
         <div className="flex items-center justify-between text-sm">
@@ -2916,6 +3044,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         )}
       </div>}
 
+      {clienteModal}
       {recomendacaoOverlay}
     </div>
   );

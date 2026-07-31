@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Repeat } from "lucide-react";
 import { obterLoginSalvo, type Empresa } from "@/hooks/useAuth";
 import { applyCompanyTheme } from "@/lib/companyTheme";
+import { loginEhSefuly } from "@/lib/lojaFeatures";
 
 const STORAGE_KEY = "scan_newshop_login";
 
@@ -15,6 +16,7 @@ export function EmpresaToggleSF() {
   }, []);
 
   if (!login) return null;
+  if (loginEhSefuly(login)) return null;
   const elevado = login.role === "compras" || login.role === "admin" || login.role === "super";
   if (!elevado) return null;
 

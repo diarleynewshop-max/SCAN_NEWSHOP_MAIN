@@ -1,8 +1,8 @@
-import { Navigate } from "react-router-dom";
+import { Navigate, useLocation } from "react-router-dom";
 import { useAuth } from "@/hooks/useAuth";
 import type { UserRole } from "@/hooks/useAuth";
 import { hasAnyPermission, hasPermission, type AccessPermission } from "@/lib/accessControl";
-import { loginTemFeature, type LojaFeature } from "@/lib/lojaFeatures";
+import { loginEhSefuly, loginTemFeature, type LojaFeature } from "@/lib/lojaFeatures";
 
 interface ProtectedRouteProps {
   children: React.ReactNode;
@@ -28,10 +28,15 @@ export function ProtectedRoute({
   fallbackPath = "/"
 }: ProtectedRouteProps) {
   const { loginSalvo } = useAuth();
+  const location = useLocation();
 
   // Se nao estiver logado, redireciona para a pagina de login.
   if (!loginSalvo || !loginSalvo.role) {
     return <Navigate to="/login" replace />;
+  }
+
+  if (loginEhSefuly(loginSalvo) && location.pathname !== "/scanner") {
+    return <Navigate to="/scanner" replace />;
   }
 
   // Trava por loja: mesmo com permissao, a loja pode nao operar o recurso

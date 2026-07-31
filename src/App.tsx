@@ -14,6 +14,8 @@ import TourGuide from "@/components/TourGuide";
 import { EmpresaToggleSF } from "@/components/EmpresaToggleSF";
 import { AppUpdateManager } from "@/components/AppUpdateManager";
 import { FeedbackPrompt } from "@/components/FeedbackPrompt";
+import { useAuth } from "@/hooks/useAuth";
+import { loginEhSefuly } from "@/lib/lojaFeatures";
 
 const Home = lazy(() => import("./pages/Home"));
 const Index = lazy(() => import("./pages/Index"));
@@ -31,6 +33,17 @@ const Feedback = lazy(() => import("./pages/Feedback"));
 
 const queryClient = new QueryClient();
 
+const GlobalThemeToggle = () => {
+  const { loginSalvo } = useAuth();
+  if (loginEhSefuly(loginSalvo)) return null;
+
+  return (
+    <div className="fixed top-4 right-4 z-[60]">
+      <ThemeToggle />
+    </div>
+  );
+};
+
 const App = () => (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
@@ -38,9 +51,7 @@ const App = () => (
       <Sonner />
       
       {/* 2. COLOCAMOS O BOTÃO FLUTUANTE NO CANTO SUPERIOR DIREITO */}
-      <div className="fixed top-4 right-4 z-[60]">
-        <ThemeToggle />
-      </div>
+      <GlobalThemeToggle />
 
       {/* Botão SOYE ↔ FACIL (apenas para Compras/Admin logado em SOYE ou FACIL) */}
       <EmpresaToggleSF />
@@ -61,7 +72,7 @@ const App = () => (
             } />
 
             <Route path="/scanner" element={
-              <ProtectedRoute requiredPermission="consulta_preco">
+              <ProtectedRoute requiredPermission="scanner">
                 <DesktopShell pageTitle="Scanner"><Index /></DesktopShell>
               </ProtectedRoute>
             } />

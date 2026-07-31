@@ -8,7 +8,7 @@ import {
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { LoginData } from "@/hooks/useAuth";
-import { loginTemFeature } from "@/lib/lojaFeatures";
+import { loginEhSefuly, loginTemFeature } from "@/lib/lojaFeatures";
 
 interface NavItemDef {
   icon: LucideIcon;
@@ -90,6 +90,7 @@ export function ErpLayout({
   const isAdm = !!loginSalvo?.role && (loginSalvo.role === "admin" || loginSalvo.role === "super");
   const isSuper = loginSalvo?.role === "super";
   const flag = loginSalvo?.flag ?? 'loja';
+  const isSefuly = loginEhSefuly(loginSalvo);
   // SEFULY nao opera CD: o item some do menu independente do role.
   const temSugestaoCd = loginTemFeature(loginSalvo, "sugestao_cd");
 
@@ -97,7 +98,9 @@ export function ErpLayout({
     {
       key: "operacional",
       label: "Operacional",
-      items: [
+      items: isSefuly ? [
+        { icon: ScanBarcode, label: "Abrir pedido", path: "/scanner" },
+      ] : [
         { icon: HomeIcon, label: "Início", path: "/" },
         { icon: ScanBarcode, label: "Escanear", path: "/scanner" },
         { icon: ClipboardList, label: "Lista", path: "/scanner?tab=list" },
@@ -108,7 +111,7 @@ export function ErpLayout({
         { icon: Bell, label: "Notificações", path: "/notificacoes" },
       ],
     },
-    ...(isPriv ? [{
+    ...(!isSefuly && isPriv ? [{
       key: "gestao",
       label: "Gestão",
       items: [
@@ -117,7 +120,7 @@ export function ErpLayout({
         { icon: BarChart3, label: "Dashboard", path: "/dashboard" },
       ],
     }] : []),
-    ...(isAdm ? [{
+    ...(!isSefuly && isAdm ? [{
       key: "admin",
       label: "Admin",
       items: [
@@ -186,6 +189,7 @@ export function ErpLayout({
   }
 
   const sideW = collapsed ? 64 : 244;
+  const resolvedPageTitle = isSefuly && pageTitle === "Scanner" ? "Abrir pedido" : pageTitle;
 
   return (
     <div style={{
@@ -281,6 +285,7 @@ export function ErpLayout({
           ))}
 
           {/* Conta */}
+          {!isSefuly && (
           <div style={{ marginTop: 6 }}>
             {!collapsed && (
               <p style={{ ...LABEL_MONO, padding: "6px 8px 6px" }}>
@@ -290,6 +295,7 @@ export function ErpLayout({
             <NavBtn icon={User} label="Perfil" onClick={() => setMostrarPerfil(true)} />
             <NavBtn icon={Settings} label="Configurações" onClick={() => setMostrarConfiguracoes(true)} />
           </div>
+          )}
         </div>
 
         {/* User footer */}
@@ -366,7 +372,7 @@ export function ErpLayout({
               color: "hsl(var(--foreground))",
               fontFamily: "var(--font-sans)",
             }}>
-              {pageTitle}
+              {resolvedPageTitle}
             </p>
           </div>
           {loginSalvo && (

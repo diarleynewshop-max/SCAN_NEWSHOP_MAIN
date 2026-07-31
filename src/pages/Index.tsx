@@ -1,6 +1,6 @@
 ﻿import { useState, useCallback, useEffect, useRef, lazy, Suspense } from "react";
 import { obterLoginSalvo } from "@/hooks/useAuth";
-import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Loader2, AlertCircle, ShoppingCart, BadgeDollarSign } from "lucide-react";
+import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Loader2, AlertCircle, ShoppingCart, BadgeDollarSign, UserPlus } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
 import ProductCard from "@/components/ProductCard";
@@ -11,6 +11,9 @@ import { getLightModeEnabled } from "@/lib/lightMode";
 import { getHistoricoComprasEnabled } from "@/lib/historicoCompras";
 import { consultarHistoricoItem } from "@/lib/historicoItem";
 import { hasPermission } from "@/lib/accessControl";
+import { loginEhSefuly } from "@/lib/lojaFeatures";
+import { PdvClienteModal } from "@/components/PdvClienteModal";
+import type { ClientePdv } from "@/lib/erpClientes";
 interface HistoricoItemOcorrencia {
   data: string;
   dataFormatada: string;
@@ -139,6 +142,7 @@ const Index = () => {
   const [searchParams] = useSearchParams();
   const initialTab = searchParams.get("tab");
   const currentLogin = obterLoginSalvo();
+  const isSefuly = loginEhSefuly(currentLogin);
 
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
   const [semEAN, setSemEAN] = useState(() => (sessionStorage.getItem("scan_barcode") ?? "").startsWith("SEM_EAN_"));
@@ -146,12 +150,14 @@ const Index = () => {
   const [photo, setPhoto] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
   const [view, setView] = useState<"scan" | "list" | "conference">(
-    initialTab === "conference" && hasPermission(currentLogin, "conferencia")
+    initialTab === "conference" && !isSefuly && hasPermission(currentLogin, "conferencia")
       ? "conference"
       : initialTab === "list" && hasPermission(currentLogin, "lista")
         ? "list"
         : "scan"
   );
+  const [clientePedido, setClientePedido] = useState<ClientePdv | null>(null);
+  const [mostrarClienteModal, setMostrarClienteModal] = useState(false);
   const [showScanner, setShowScanner] = useState(false);
   const [showProductInfo, setShowProductInfo] = useState(false);
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
@@ -188,6 +194,19 @@ const Index = () => {
     empresa: lookupEmpresa,
     flag: lookupFlag,
   });
+
+  useEffect(() => {
+    if (isSefuly && view === "conference") setView("scan");
+  }, [isSefuly, view]);
+
+  useEffect(() => {
+    if (!isSefuly) {
+      setClientePedido(null);
+      setMostrarClienteModal(false);
+      return;
+    }
+    if (activeList?.clientePdv) setClientePedido(activeList.clientePdv);
+  }, [isSefuly, activeList?.id, activeList?.clientePdv]);
 
   // Consulta o historico do item no Supabase (em paralelo com o ERP) e decide
   // barrar (item em pedido nao concluido) / avisar (conferido <=7 dias) / mostrar
@@ -361,17 +380,29 @@ const Index = () => {
 
   const handleCloseList = () => {
     if (!activeList) return;
-    if (!window.confirm("Fechar lista atual?")) return;
+    if (!window.confirm(isSefuly ? "Fechar pedido atual?" : "Fechar lista atual?")) return;
     closeList();
-    toast({ title: "Lista fechada" });
+    if (isSefuly) {
+      setView("list");
+      setClientePedido(null);
+    }
+    toast({ title: isSefuly ? "Pedido fechado" : "Lista fechada" });
   };
 
   const handleOpenList = () => {
     const login = obterLoginSalvo();
     const isCD = login?.flag === "cd";
-    const titulo = isCD ? "CD" : login?.tituloPadrao?.trim();
+    const isSefulyLogin = loginEhSefuly(login);
+    const clienteNome = clientePedido?.nome?.trim() ?? "";
+    const titulo = isSefulyLogin ? (clienteNome ? `Pedido - ${clienteNome}` : "Pedido") : isCD ? "CD" : login?.tituloPadrao?.trim();
 
-    if (!login?.nomePessoa || (!isCD && !titulo)) {
+    if (isSefulyLogin && !clientePedido) {
+      setMostrarClienteModal(true);
+      toast({ title: "Selecione o cliente", description: "O pedido da SEFULY precisa de cliente para ir ao PDV.", variant: "destructive" });
+      return;
+    }
+
+    if (!login?.nomePessoa || (!isCD && !isSefulyLogin && !titulo)) {
       toast({
         title: "Configure seu perfil antes",
         description: isCD ? "Preencha o nome da pessoa." : "Preencha a secao e o nome da pessoa.",
@@ -385,10 +416,11 @@ const Index = () => {
       person: login.nomePessoa,
       flag: isCD ? "cd" : "loja",
       empresa: login.empresa,
+      clientePdv: isSefulyLogin ? clientePedido : null,
     });
 
     if (ok) {
-      toast({ title: "Lista aberta", description: `${titulo || "CD"} · ${login.nomePessoa}` });
+      toast({ title: isSefulyLogin ? "Pedido aberto" : "Lista aberta", description: `${titulo || "CD"} · ${login.nomePessoa}` });
     }
   };
 
@@ -440,6 +472,7 @@ const Index = () => {
       quantity: Number(quantity),
       secao: productInfo?.secao,
       erpProdutoId: productInfo?.erpProdutoId,
+      precoUnitario: productInfo?.precoVarejo || productInfo?.preco || null,
       erpPhotoMissing: !(productInfo?.hasErpImage),
       appPhotoWithoutErp: !(productInfo?.hasErpImage) && !!photo,
     });
@@ -458,7 +491,14 @@ const Index = () => {
 
   const productCount = activeList?.products.length ?? 0;
 
+  const handleClientePedidoSelecionado = (cliente: ClientePdv) => {
+    setClientePedido(cliente);
+    setMostrarClienteModal(false);
+    if (activeList) updateList({ ...activeList, clientePdv: cliente });
+  };
+
   const handleTabChange = (key: "scan" | "list" | "conference" | "compras" | "consultaPreco") => {
+    if (isSefuly && key === "conference") return;
     if (key === "compras") {
       navigate("/compras");
       return;
@@ -470,12 +510,12 @@ const Index = () => {
     setView(key);
   };
 
-  const extraTab = hasPermission(currentLogin, "compras") ? [{ key: "compras" as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
+  const extraTab = !isSefuly && hasPermission(currentLogin, "compras") ? [{ key: "compras" as const, label: "COMPRADOR", Icon: ShoppingCart }] : [];
   const tabs = [
-    ...(hasPermission(currentLogin, "consulta_preco") ? [{ key: "consultaPreco" as const, label: "Consulta", Icon: BadgeDollarSign }] : []),
-    ...(hasPermission(currentLogin, "scanner") ? [{ key: "scan" as const, label: "Escanear", Icon: ScanBarcode }] : []),
-    ...(hasPermission(currentLogin, "lista") ? [{ key: "list" as const, label: "Lista", Icon: ClipboardList }] : []),
-    ...(hasPermission(currentLogin, "conferencia") ? [{ key: "conference" as const, label: "Conferencia", Icon: GitCompare }] : []),
+    ...(!isSefuly && hasPermission(currentLogin, "consulta_preco") ? [{ key: "consultaPreco" as const, label: "Consulta", Icon: BadgeDollarSign }] : []),
+    ...(hasPermission(currentLogin, "scanner") ? [{ key: "scan" as const, label: isSefuly ? "Abrir pedido" : "Escanear", Icon: ScanBarcode }] : []),
+    ...(hasPermission(currentLogin, "lista") ? [{ key: "list" as const, label: isSefuly ? "Pedidos" : "Lista", Icon: ClipboardList }] : []),
+    ...(!isSefuly && hasPermission(currentLogin, "conferencia") ? [{ key: "conference" as const, label: "Conferencia", Icon: GitCompare }] : []),
     ...extraTab,
   ];
 
@@ -485,6 +525,14 @@ const Index = () => {
 
   return (
     <div className={`min-h-screen flex flex-col ${modoDesktop ? "max-w-6xl mx-auto" : "max-w-md mx-auto"}`} style={{ background: "hsl(var(--background))" }}>
+      <PdvClienteModal
+        open={mostrarClienteModal}
+        empresa={currentLogin?.empresa ?? ""}
+        onCancel={() => setMostrarClienteModal(false)}
+        onSelect={handleClientePedidoSelecionado}
+        createButtonLabel="Cadastrar e usar"
+      />
+
       <header
         style={{
           background: "hsl(var(--primary))",
@@ -577,20 +625,56 @@ const Index = () => {
         {view === "scan" ? (
           <div style={{ display: "flex", flexDirection: modoDesktop ? "row" : "column", gap: modoDesktop ? 24 : 16, alignItems: modoDesktop ? "flex-start" : "stretch" }}>
             <div style={{ flex: modoDesktop ? 1 : "auto", display: "flex", flexDirection: "column", gap: modoDesktop ? 20 : 16 }}>
+              {isSefuly && (
+                <div>
+                  <label style={S.label}>Cliente</label>
+                  <button
+                    type="button"
+                    onClick={() => setMostrarClienteModal(true)}
+                    style={{
+                      width: "100%",
+                      minHeight: 52,
+                      borderRadius: 10,
+                      border: clientePedido ? "1.5px solid hsl(var(--primary) / 0.35)" : "1.5px solid hsl(var(--destructive) / 0.35)",
+                      background: clientePedido ? "hsl(var(--primary) / 0.08)" : "hsl(var(--destructive) / 0.06)",
+                      color: "hsl(var(--foreground))",
+                      cursor: "pointer",
+                      display: "flex",
+                      alignItems: "center",
+                      gap: 10,
+                      padding: "9px 14px",
+                      textAlign: "left",
+                    }}
+                  >
+                    <UserPlus style={{ width: 18, height: 18, color: clientePedido ? "hsl(var(--primary))" : "hsl(var(--destructive))", flexShrink: 0 }} />
+                    <span style={{ minWidth: 0, flex: 1 }}>
+                      <span style={{ display: "block", fontSize: 14, fontWeight: 800, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                        {clientePedido?.nome || "Selecionar ou cadastrar cliente"}
+                      </span>
+                      {clientePedido?.codigo && (
+                        <span style={{ display: "block", marginTop: 2, fontFamily: "var(--font-mono)", fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
+                          Cod. {clientePedido.codigo}
+                        </span>
+                      )}
+                    </span>
+                  </button>
+                </div>
+              )}
+
               {!activeList && (
                 <button
                   onClick={handleOpenList}
                   data-tut="abrir-lista"
                   style={{ ...S.btnPrimary, height: modoDesktop ? 56 : 52, fontSize: modoDesktop ? 15 : 14 }}
                 >
-                  <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> Abrir Lista
+                  <ClipboardList style={{ width: modoDesktop ? 20 : 18, height: modoDesktop ? 20 : 18 }} /> {isSefuly ? "Abrir pedido" : "Abrir Lista"}
                 </button>
               )}
 
               {!activeList && (
                 <div style={{ background: "hsl(var(--destructive) / 0.07)", border: "1px solid hsl(var(--destructive) / 0.15)", borderRadius: 10, padding: modoDesktop ? "16px 20px" : "12px 16px", display: "flex", alignItems: "center", gap: 8 }}>
                   <ClipboardList style={{ width: modoDesktop ? 16 : 15, height: modoDesktop ? 16 : 15, color: "hsl(var(--destructive))", flexShrink: 0 }} />
-                  <p style={{ fontSize: modoDesktop ? 14 : 13, color: "hsl(var(--destructive))", fontWeight: 500 }}>Abra uma lista para adicionar produtos</p>
+                  <p style={{ fontSize: modoDesktop ? 14 : 13, color: "hsl(var(--destructive))", fontWeight: 500 }}>{isSefuly ? "Selecione o cliente e abra o pedido para adicionar produtos" : "Abra uma lista para adicionar produtos"}</p>
                 </div>
               )}
 
@@ -829,14 +913,15 @@ const Index = () => {
               </div>
             )}
           </div>
-        ) : view === "list" ? (
+        ) : view === "list" || isSefuly ? (
           <Suspense fallback={LAZY_FALLBACK}>
             <ListHistory
               lists={lists}
               onUpdateList={updateList}
-              onStartConference={() => setView("conference")}
+              onStartConference={isSefuly ? undefined : () => setView("conference")}
               modoDesktop={modoDesktop}
               modoLeve={modoLeve}
+              ocultarConferencia={isSefuly}
             />
           </Suspense>
         ) : (

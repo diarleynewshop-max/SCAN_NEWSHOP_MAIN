@@ -7,13 +7,17 @@ import jsPDF from "jspdf";
 import JSZip from "jszip";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "@/components/ui/dialog";
 import { resolvePhotoToDataUrl } from "@/lib/photoUtils";
+import { lojaEnviaPrevendaParaPdv } from "@/lib/lojaFeatures";
+import { PdvClienteModal } from "@/components/PdvClienteModal";
+import type { ClientePdv } from "@/lib/erpClientes";
 
 interface ListHistoryProps {
   lists: ListData[];
   onUpdateList: (list: ListData) => void;
-  onStartConference: () => void;
+  onStartConference?: () => void;
   modoDesktop?: boolean;
   modoLeve?: boolean;
+  ocultarConferencia?: boolean;
 }
 
 const S_INPUT = {
@@ -35,7 +39,7 @@ const STATUS_LEFT: Record<string, string> = {
   yellow: "hsl(var(--warning))",
 };
 
-const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = false, modoLeve = false }: ListHistoryProps) => {
+const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = false, modoLeve = false, ocultarConferencia = false }: ListHistoryProps) => {
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null);
@@ -47,6 +51,8 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
 
 
   const [sendingId, setSendingId] = useState<string | null>(null);
+  const [clienteModalList, setClienteModalList] = useState<ListData | null>(null);
+  const [clientesSelecionados, setClientesSelecionados] = useState<Record<string, ClientePdv>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -240,7 +246,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     } catch {}
   };
 
-  const enviarParaConferencia = async (list: ListData) => {
+  const enviarParaConferencia = async (list: ListData, clientePdv?: ClientePdv) => {
     // Verifica se a lista tem itens antes de enviar
     if (list.products.length === 0) {
       toast({
@@ -265,12 +271,20 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       toast({ title: "⚠️ Já enviado!", description: "Esta lista já foi enviada para conferência.", variant: "destructive" });
       return;
     }
+
+    const pdvDireto = lojaEnviaPrevendaParaPdv(list.empresa ?? "");
+    const clienteSelecionado = clientePdv ?? clientesSelecionados[list.id] ?? list.clientePdv ?? null;
+    if (pdvDireto && !clienteSelecionado) {
+      setClienteModalList(list);
+      return;
+    }
+
     if (sendingId === list.id) return;
 
     setSendingId(list.id);
 
     try {
-      const listaParaEnviar = list;
+      const listaParaEnviar = clienteSelecionado ? { ...list, clientePdv: clienteSelecionado } : list;
       const hydratedProducts = await hydrateProductsForExport(listaParaEnviar);
       const fotosNaoResolvidas = hydratedProducts.filter(({ photoDataUrl }) => !photoDataUrl);
       if (fotosNaoResolvidas.length > 0) {
@@ -291,6 +305,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           .join(" - ") || listaParaEnviar.title,
         totalItens:  listaParaEnviar.products.length,
         dataCriacao: listaParaEnviar.createdAt.toISOString(),
+        clientePdv:  clienteSelecionado,
         produtos:    hydratedProducts.map(({ product, photoDataUrl }) => ({
           barcode:    product.barcode,
           sku:        product.sku || "",
@@ -300,15 +315,27 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           secao:      product.secao || null,
           photo:      photoDataUrl,
           erpProdutoId: product.erpProdutoId,
+          precoUnitario: product.precoUnitario ?? null,
           appPhotoWithoutErp: product.appPhotoWithoutErp,
         })),
       };
 
-      await enviarListaParaSupabase(payload);
+      const envio = await enviarListaParaSupabase(payload);
       marcarListaEnviada(listaParaEnviar.id);
       onUpdateList({ ...listaParaEnviar, status: "green", sentToConference: true });
       const dest = `${payload.flag.toUpperCase()} · ${payload.empresa}`;
-      toast({ title: `✅ Enviado para conferência! [${dest}]`, description: `Lista "${listaParaEnviar.title}" enviada com sucesso.` });
+      if (envio.pdvDireto && envio.prevenda?.ok) {
+        const total = Number(envio.prevenda.valorTotal ?? 0).toLocaleString("pt-BR", {
+          style: "currency",
+          currency: "BRL",
+        });
+        toast({
+          title: `Pedido enviado ao servidor [${dest}]`,
+          description: `${envio.prevenda.nomeArquivo} - ${envio.prevenda.totalItens} item(ns), total ${total}.`,
+        });
+      } else {
+        toast({ title: `✅ Enviado para conferência! [${dest}]`, description: `Lista "${listaParaEnviar.title}" enviada com sucesso.` });
+      }
     } catch (err) {
       // Mostra a causa real (antes ficava escondida num catch vazio) para dar pra
       // diagnosticar falha de Storage/RPC/rede em vez de so "verifique a conexao".
@@ -320,6 +347,15 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     } finally {
       setSendingId(null);
     }
+  };
+
+  const handleClienteSelecionado = (cliente: ClientePdv) => {
+    const list = clienteModalList;
+    if (!list) return;
+    setClientesSelecionados((current) => ({ ...current, [list.id]: cliente }));
+    setClienteModalList(null);
+    onUpdateList({ ...list, clientePdv: cliente });
+    void enviarParaConferencia(list, cliente);
   };
 
   const openEdit = (list: ListData) => {
@@ -353,14 +389,16 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           <div style={{ width: 60, height: 60, borderRadius: 18, background: "hsl(var(--muted))", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 14px", color: "hsl(var(--muted-foreground))" }}>
             <FileInput style={{ width: 26, height: 26 }} />
           </div>
-          <p style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 700, color: "hsl(var(--foreground))", marginBottom: 4 }}>Nenhuma lista</p>
-          <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>Feche uma lista na aba Escanear</p>
+          <p style={{ fontFamily: "var(--font-serif)", fontSize: 18, fontWeight: 700, color: "hsl(var(--foreground))", marginBottom: 4 }}>{ocultarConferencia ? "Nenhum pedido" : "Nenhuma lista"}</p>
+          <p style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>{ocultarConferencia ? "Feche um pedido em Abrir pedido" : "Feche uma lista na aba Escanear"}</p>
         </div>
+        {!ocultarConferencia && onStartConference && (
         <button onClick={onStartConference}
           style={{ width: "100%", height: 48, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))", borderRadius: 10, fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer" }}
         >
           <FileInput style={{ width: 17, height: 17 }} /> Importar para Conferência
         </button>
+        )}
       </div>
     );
   }
@@ -372,6 +410,13 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
       flexDirection: "column", 
       gap: modoDesktop ? 16 : 12 
     }}>
+      <PdvClienteModal
+        open={!!clienteModalList}
+        empresa={clienteModalList?.empresa ?? ""}
+        onCancel={() => setClienteModalList(null)}
+        onSelect={handleClienteSelecionado}
+      />
+
       {sortedLists.map((list) => {
          return (
           <div key={list.id} style={{ 
@@ -431,6 +476,18 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
                 }}>
                   👤 {list.person} · {list.createdAt.toLocaleDateString("pt-BR")}
                 </p>
+                {list.clientePdv?.nome && (
+                  <p style={{
+                    fontSize: modoDesktop ? 12 : 11,
+                    color: "hsl(var(--foreground))",
+                    marginTop: 4,
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}>
+                    Cliente: {list.clientePdv.nome}
+                  </p>
+                )}
               </div>
               <div style={{ textAlign: "right", flexShrink: 0 }}>
                 <div style={{ 
@@ -549,11 +606,13 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
         );
       })}
 
+      {!ocultarConferencia && onStartConference && (
       <button onClick={onStartConference}
         style={{ width: "100%", height: 48, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))", borderRadius: 10, fontWeight: 600, fontSize: 14, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, cursor: "pointer", marginTop: 4 }}
       >
         <FileInput style={{ width: 17, height: 17 }} /> Importar para Conferência
       </button>
+      )}
 
       {/* ── DELETE ── */}
       <Dialog open={!!deleteConfirm} onOpenChange={() => setDeleteConfirm(null)}>

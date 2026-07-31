@@ -39,6 +39,10 @@ export function loginTemFeature(login: LoginLike | null | undefined, feature: Lo
   return lojaTemFeature(login?.empresa, feature);
 }
 
+export function loginEhSefuly(login: LoginLike | null | undefined): boolean {
+  return normalizarEmpresa(login?.empresa) === "SEFULY";
+}
+
 // Atalho de leitura para o fluxo de conferencia.
 export function lojaEnviaPrevendaParaPdv(empresa: unknown): boolean {
   return lojaTemFeature(empresa, "pdv_prevenda");

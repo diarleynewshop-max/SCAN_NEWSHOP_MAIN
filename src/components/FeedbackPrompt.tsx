@@ -14,6 +14,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { enviarFeedback, temComentarioFeedback, verificarFeedbackPendente } from "@/lib/feedback";
+import { loginEhSefuly } from "@/lib/lojaFeatures";
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const START_DELAY_MS = 2200;
@@ -97,7 +98,7 @@ export function FeedbackPrompt() {
   }, [loginSalvo?.usuarioId]);
 
   useEffect(() => {
-    if (!loginSalvo?.usuarioId || !loginSalvo.login || loginSalvo.feedbackPendente === false) {
+    if (!loginSalvo?.usuarioId || !loginSalvo.login || loginEhSefuly(loginSalvo) || loginSalvo.feedbackPendente === false) {
       setOpen(false);
       return;
     }
@@ -130,7 +131,7 @@ export function FeedbackPrompt() {
       if (timeoutId != null) window.clearTimeout(timeoutId);
       if (intervalId != null) window.clearInterval(intervalId);
     };
-  }, [loginSalvo?.usuarioId, loginSalvo?.login, loginSalvo?.feedbackPendente]);
+  }, [loginSalvo?.usuarioId, loginSalvo?.login, loginSalvo?.empresa, loginSalvo?.feedbackPendente]);
 
   const setCampo = (campo: CampoTexto, value: string) => {
     setForm((prev) => ({ ...prev, [campo]: value }));
@@ -178,7 +179,7 @@ export function FeedbackPrompt() {
     }
   };
 
-  if (!loginSalvo?.usuarioId || !loginSalvo.login || loginSalvo.feedbackPendente === false) return null;
+  if (!loginSalvo?.usuarioId || !loginSalvo.login || loginEhSefuly(loginSalvo) || loginSalvo.feedbackPendente === false) return null;
 
   return (
     <Dialog open={open} onOpenChange={(next) => !enviando && setOpen(next)}>

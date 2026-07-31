@@ -20,12 +20,13 @@ async function fetchErpWithRetry(input: string | URL, init?: RequestInit): Promi
   }
 }
 
-type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
+type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE" | "SEFULY";
 
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
   SOYE: "facil.varejofacil.com",
+  SEFULY: "sefuly.varejofacil.com",
 };
 
 const tokenCache = new Map<string, string>();
@@ -47,12 +48,14 @@ function getSingle(value: string | string[] | undefined): string {
 
 function normalizeEmpresa(value: string | string[] | undefined): EmpresaKey {
   const normalized = getSingle(value).trim().toUpperCase();
+  if (normalized.includes("SEFULY")) return "SEFULY";
   if (normalized.includes("SOYE")) return "SOYE";
   if (normalized.includes("FACIL")) return "FACIL";
   return "NEWSHOP";
 }
 
 function erpBaseEmpresa(empresa: EmpresaKey): EmpresaKey {
+  if (empresa === "SEFULY") return "NEWSHOP";
   return empresa === "SOYE" ? "FACIL" : empresa;
 }
 

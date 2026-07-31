@@ -1,5 +1,6 @@
 import { isSupabaseConfigured, supabase } from './supabaseClient';
 import { produtoKey } from './comprasSupabase';
+import type { PdvPrevendaCliente } from './pdvPrevenda';
 
 const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
 const STORAGE_URL_MARKER = '/storage/v1/object/public/';
@@ -21,6 +22,8 @@ interface PedidoFilaRow {
   created_at: string | null;
   clickup_task_id: string | null;
   pedido_numero: number | null;
+  catalogo_cliente_nome: string | null;
+  catalogo_payload: Record<string, unknown> | null;
 }
 
 interface MeuPedidoRow {
@@ -52,6 +55,7 @@ interface PedidoFilaItemRow {
   quantidade_real: number | null;
   status: 'separado' | 'nao_tem' | 'nao_tem_tudo' | 'pendente';
   foto_url: string | null;
+  preco_unitario: number | null;
   ordem: number | null;
   conferido_em: string | null;
 }
@@ -87,6 +91,8 @@ export interface PedidoParaConferencia {
   emAndamento: boolean;
   clickupTaskId: string | null;
   numeroPedido: number | null;
+  clienteNome: string | null;
+  clientePdv: PdvPrevendaCliente | null;
   undoMergeDisponivel?: boolean;
   description?: string;
   attachments?: any[];
@@ -125,6 +131,7 @@ export interface PedidoFilaItem {
   quantidadeReal: number | null;
   status: 'separado' | 'nao_tem' | 'nao_tem_tudo' | 'pendente';
   photo: string | null;
+  precoUnitario: number | null;
   ordem: number;
   conferidoEm: string | null;
 }
@@ -191,6 +198,7 @@ export interface FecharConferenciaItemPayload {
   quantidadeReal: number | null;
   status: 'separado' | 'nao_tem' | 'nao_tem_tudo' | 'pendente' | 'aguardando';
   photo?: string | null;
+  precoUnitario?: number | null;
 }
 
 export interface FecharConferenciaPayload {
@@ -209,6 +217,7 @@ export interface PedidoFilaProduto {
   photo: string | null;
   description?: string;
   erpProdutoId?: string;
+  precoUnitario?: number | null;
   appPhotoWithoutErp?: boolean;
 }
 
@@ -220,6 +229,7 @@ export interface EnviarListaParaConferenciaPayload {
   totalItens: number;
   dataCriacao: string;
   conferenceId?: string;
+  clientePdv?: PdvPrevendaCliente | null;
   produtos: PedidoFilaProduto[];
 }
 
@@ -370,6 +380,67 @@ function toInt(value: unknown, fallback = 0): number {
   const num = Number(value);
   if (!Number.isFinite(num)) return fallback;
   return Math.max(0, Math.trunc(num));
+}
+
+function toMoneyOrNull(value: unknown): number | null {
+  const num = Number(value);
+  if (!Number.isFinite(num) || num <= 0) return null;
+  return Math.round(num * 100) / 100;
+}
+
+function texto(value: unknown): string {
+  return String(value ?? '').trim();
+}
+
+function pickRecord(obj: Record<string, unknown> | null | undefined, keys: string[]): unknown {
+  if (!obj || typeof obj !== 'object') return undefined;
+  for (const key of keys) {
+    if (!Object.prototype.hasOwnProperty.call(obj, key)) continue;
+    const value = obj[key];
+    if (value != null && texto(value)) return value;
+  }
+  return undefined;
+}
+
+function extrairClientePedido(row: PedidoFilaRow): { clienteNome: string | null; clientePdv: PdvPrevendaCliente | null } {
+  const payload = row.catalogo_payload && typeof row.catalogo_payload === 'object' ? row.catalogo_payload : null;
+  const clienteRaw = pickRecord(payload, ['cliente', 'customer', 'clienteDados']);
+  const fonte = clienteRaw && typeof clienteRaw === 'object'
+    ? clienteRaw as Record<string, unknown>
+    : payload;
+
+  const nome =
+    texto(pickRecord(fonte, ['nomeCliente', 'nome_cliente', 'nome', 'cliente', 'customerName', 'razaoSocial'])) ||
+    texto(row.catalogo_cliente_nome);
+  const cpfCnpj = texto(pickRecord(fonte, ['cpfCnpj', 'cpf_cnpj', 'cpf', 'cnpj', 'documento', 'doc'])).replace(/\D/g, '');
+  const codigo =
+    texto(pickRecord(fonte, ['codigo', 'codigoCliente', 'codigo_cliente', 'clienteCodigo', 'idCliente'])).replace(/\D/g, '') ||
+    cpfCnpj;
+
+  const clientePdv = nome && codigo
+    ? {
+        codigo,
+        nome,
+        cpfCnpj: cpfCnpj || null,
+        tipoPessoa: cpfCnpj.length > 11 ? 'J' as const : 'F' as const,
+        endereco: texto(pickRecord(fonte, ['endereco', 'logradouro', 'rua', 'address'])) || null,
+        numeroEndereco: texto(pickRecord(fonte, ['numero', 'numeroEndereco', 'numero_endereco'])) || null,
+        complemento: texto(pickRecord(fonte, ['complemento'])) || null,
+        bairro: texto(pickRecord(fonte, ['bairro'])) || null,
+        cidade: texto(pickRecord(fonte, ['cidade', 'municipio', 'city'])) || null,
+        uf: texto(pickRecord(fonte, ['uf', 'estado', 'state'])).slice(0, 2) || null,
+        cep: texto(pickRecord(fonte, ['cep', 'zip', 'zipCode'])).replace(/\D/g, '') || null,
+        telefone: texto(pickRecord(fonte, ['telefone', 'fone', 'celular', 'phone', 'whatsapp'])).replace(/\D/g, '') || null,
+        inscricaoEstadual: texto(pickRecord(fonte, ['inscricaoEstadual', 'inscricao_estadual', 'ie'])) || null,
+        codigoIbge: texto(pickRecord(fonte, ['codigoIbge', 'codigo_ibge', 'ibge'])).replace(/\D/g, '') || null,
+        codigoPais: texto(pickRecord(fonte, ['codigoPais', 'codigo_pais', 'paisCodigo'])).replace(/\D/g, '') || null,
+      }
+    : null;
+
+  return {
+    clienteNome: nome || clientePdv?.nome || null,
+    clientePdv,
+  };
 }
 
 function hashString(value: string): string {
@@ -566,10 +637,47 @@ function toStatusConferencia(
   return 'pendente';
 }
 
+function chavePrecoItem(value: { id?: string | null; codigo?: string | null; sku?: string | null }): string[] {
+  const id = String(value.id ?? '').trim();
+  const codigo = String(value.codigo ?? '').trim();
+  const sku = String(value.sku ?? '').trim();
+  return [
+    id ? `id:${id}` : '',
+    codigo && sku ? `codigo-sku:${codigo}|${sku}` : '',
+    codigo ? `codigo:${codigo}` : '',
+  ].filter(Boolean);
+}
+
+function montarMapaPrecosOriginais(itens: PedidoFilaItem[]): Map<string, number> {
+  const map = new Map<string, number>();
+  for (const item of itens) {
+    const preco = toMoneyOrNull(item.precoUnitario);
+    if (!preco) continue;
+    for (const chave of chavePrecoItem(item)) {
+      if (!map.has(chave)) map.set(chave, preco);
+    }
+  }
+  return map;
+}
+
+function resolverPrecoItem(
+  item: FecharConferenciaItemPayload,
+  precosOriginais: Map<string, number>
+): number | null {
+  const precoAtual = toMoneyOrNull(item.precoUnitario);
+  if (precoAtual) return precoAtual;
+  for (const chave of chavePrecoItem(item)) {
+    const preco = precosOriginais.get(chave);
+    if (preco) return preco;
+  }
+  return null;
+}
+
 async function buildPedidoItemRows(
   empresa: EmpresaKey,
   pedidoId: string,
-  itens: FecharConferenciaItemPayload[]
+  itens: FecharConferenciaItemPayload[],
+  precosOriginais = new Map<string, number>()
 ): Promise<Array<{
   pedido_id: string;
   codigo: string;
@@ -580,6 +688,7 @@ async function buildPedidoItemRows(
   quantidade_real: number | null;
   status: 'separado' | 'nao_tem' | 'nao_tem_tudo' | 'pendente';
   foto_url: string | null;
+  preco_unitario: number | null;
   ordem: number;
 }>> {
   const fotosResolvidas = await resolverFotosEmLote(
@@ -600,6 +709,7 @@ async function buildPedidoItemRows(
       quantidade_real: item.quantidadeReal == null ? null : toInt(item.quantidadeReal),
       status: toStatusConferencia(item.status),
       foto_url: fotosResolvidas[index] ?? null,
+      preco_unitario: resolverPrecoItem(item, precosOriginais),
       ordem: index + 1,
     }))
     .filter((item) => item.codigo);
@@ -613,7 +723,7 @@ export async function listarPedidosParaConferencia(
 
   const { data, error } = await supabase
     .from('pedidos')
-    .select('id,titulo,listeiro,pessoa,status,observacao,created_at,clickup_task_id,pedido_numero')
+    .select('id,titulo,listeiro,pessoa,status,observacao,created_at,clickup_task_id,pedido_numero,catalogo_cliente_nome,catalogo_payload')
     .eq('empresa', normalizarEmpresa(empresa))
     .eq('flag', normalizarFlag(flag))
     .in('status', ['analisado', 'em_andamento'])
@@ -621,16 +731,53 @@ export async function listarPedidosParaConferencia(
 
   if (error) throw error;
 
-  return ((data ?? []) as PedidoFilaRow[]).map((pedido) => ({
-    id: pedido.id,
-    name: String(pedido.titulo ?? pedido.id).trim() || pedido.id,
-    listeiro: String(pedido.listeiro ?? pedido.pessoa ?? '').trim(),
-    date_created: pedido.created_at ? String(new Date(pedido.created_at).getTime()) : '',
-    emAndamento: pedido.status === 'em_andamento',
-    clickupTaskId: pedido.clickup_task_id ?? null,
-    numeroPedido: pedido.pedido_numero == null ? null : toInt(pedido.pedido_numero),
-    undoMergeDisponivel: Boolean(extrairMergeUndoMeta(pedido.observacao)),
-  }));
+  return ((data ?? []) as PedidoFilaRow[]).map((pedido) => {
+    const cliente = extrairClientePedido(pedido);
+    return {
+      id: pedido.id,
+      name: String(pedido.titulo ?? pedido.id).trim() || pedido.id,
+      listeiro: String(pedido.listeiro ?? pedido.pessoa ?? '').trim(),
+      date_created: pedido.created_at ? String(new Date(pedido.created_at).getTime()) : '',
+      emAndamento: pedido.status === 'em_andamento',
+      clickupTaskId: pedido.clickup_task_id ?? null,
+      numeroPedido: pedido.pedido_numero == null ? null : toInt(pedido.pedido_numero),
+      clienteNome: cliente.clienteNome,
+      clientePdv: cliente.clientePdv,
+      undoMergeDisponivel: Boolean(extrairMergeUndoMeta(pedido.observacao)),
+    };
+  });
+}
+
+export async function atualizarClientePdvPedido(
+  pedidoId: string,
+  cliente: PdvPrevendaCliente
+): Promise<void> {
+  if (!isSupabaseConfigured || !pedidoId) return;
+
+  const { data, error: fetchError } = await supabase
+    .from('pedidos')
+    .select('catalogo_payload')
+    .eq('id', pedidoId)
+    .maybeSingle();
+  if (fetchError) throw fetchError;
+
+  const payloadAtual =
+    data?.catalogo_payload && typeof data.catalogo_payload === 'object'
+      ? data.catalogo_payload as Record<string, unknown>
+      : {};
+
+  const { error } = await supabase
+    .from('pedidos')
+    .update({
+      catalogo_cliente_nome: texto(cliente.nome) || null,
+      catalogo_payload: {
+        ...payloadAtual,
+        cliente,
+        origemCliente: 'conference_web',
+      },
+    })
+    .eq('id', pedidoId);
+  if (error) throw error;
 }
 
 function mapMeuPedido(row: MeuPedidoRow): MeuPedidoResumo {
@@ -992,7 +1139,7 @@ export async function carregarItensDoPedido(pedidoId: string): Promise<PedidoFil
 
   const { data, error } = await supabase
     .from('pedido_itens')
-    .select('id,pedido_id,codigo,sku,descricao,secao,quantidade_pedida,quantidade_real,status,foto_url,ordem,conferido_em')
+    .select('id,pedido_id,codigo,sku,descricao,secao,quantidade_pedida,quantidade_real,status,foto_url,preco_unitario,ordem,conferido_em')
     .eq('pedido_id', pedidoId)
     .order('ordem', { ascending: true });
 
@@ -1009,6 +1156,7 @@ export async function carregarItensDoPedido(pedidoId: string): Promise<PedidoFil
     quantidadeReal: item.quantidade_real == null ? null : toInt(item.quantidade_real),
     status: item.status,
     photo: item.foto_url ?? null,
+    precoUnitario: toMoneyOrNull(item.preco_unitario),
     ordem: item.ordem ?? index + 1,
     conferidoEm: item.conferido_em ?? null,
   }));
@@ -1347,6 +1495,16 @@ export async function enviarListaParaConferencia(
     .maybeSingle();
   if (existingError) throw existingError;
   if (existing?.id) {
+    if (payload.clientePdv?.nome) {
+      const { error: clienteUpdateError } = await supabase
+        .from('pedidos')
+        .update({
+          catalogo_cliente_nome: String(payload.clientePdv.nome ?? '').trim() || null,
+          catalogo_payload: { cliente: payload.clientePdv, origem: 'scan_web' },
+        })
+        .eq('id', existing.id);
+      if (clienteUpdateError) throw clienteUpdateError;
+    }
     return { pedidoId: existing.id, conferenceId, created: false };
   }
 
@@ -1368,6 +1526,8 @@ export async function enviarListaParaConferencia(
       resumo_pendente: payload.produtos.length,
       observacao,
       conference_id: conferenceId,
+      catalogo_cliente_nome: payload.clientePdv?.nome ? String(payload.clientePdv.nome).trim() : null,
+      catalogo_payload: payload.clientePdv ? { cliente: payload.clientePdv, origem: 'scan_web' } : null,
     })
     .select('id')
     .single();
@@ -1395,6 +1555,7 @@ export async function enviarListaParaConferencia(
         quantidade_real: null,
         status: 'pendente',
         foto_url: fotosResolvidas[index] ?? null,
+        preco_unitario: toMoneyOrNull(produto.precoUnitario),
         ordem: index + 1,
       }))
       .filter((item) => item.codigo);
@@ -1477,12 +1638,16 @@ export async function fecharConferenciaExistente(
   }
 
   const empresa = normalizarEmpresa(payload.empresa);
-  const novosItens = await buildPedidoItemRows(empresa, pedidoId, payload.itens);
+  const itensOriginais = await carregarItensDoPedido(pedidoId);
+  const novosItens = await buildPedidoItemRows(
+    empresa,
+    pedidoId,
+    payload.itens,
+    montarMapaPrecosOriginais(itensOriginais)
+  );
   if (novosItens.length === 0) {
     throw new Error('Nenhum item valido para concluir pedido');
   }
-
-  const itensOriginais = await carregarItensDoPedido(pedidoId);
 
   try {
     const { error: deleteError } = await supabase.from('pedido_itens').delete().eq('pedido_id', pedidoId);
@@ -1524,6 +1689,7 @@ export async function fecharConferenciaExistente(
           quantidadeReal: item.quantidadeReal,
           status: item.status,
           photo: item.photo,
+          precoUnitario: item.precoUnitario,
         }))
       );
 
