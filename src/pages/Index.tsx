@@ -143,6 +143,8 @@ const Index = () => {
   const initialTab = searchParams.get("tab");
   const currentLogin = obterLoginSalvo();
   const isSefuly = loginEhSefuly(currentLogin);
+  const isSefulyPriv = isSefuly && ["compras", "admin", "super"].includes(currentLogin?.role ?? "");
+  const allowSefulyConferenceDirect = isSefulyPriv && initialTab === "conference";
 
   const [barcode, setBarcode] = useState(() => sessionStorage.getItem("scan_barcode") ?? "");
   const [semEAN, setSemEAN] = useState(() => (sessionStorage.getItem("scan_barcode") ?? "").startsWith("SEM_EAN_"));
@@ -150,7 +152,7 @@ const Index = () => {
   const [photo, setPhoto] = useState<string | null>(null);
   const [quantity, setQuantity] = useState(() => sessionStorage.getItem("scan_quantity") ?? "");
   const [view, setView] = useState<"scan" | "list" | "conference">(
-    initialTab === "conference" && !isSefuly && hasPermission(currentLogin, "conferencia")
+    initialTab === "conference" && (!isSefuly || allowSefulyConferenceDirect) && hasPermission(currentLogin, "conferencia")
       ? "conference"
       : initialTab === "list" && hasPermission(currentLogin, "lista")
         ? "list"
@@ -196,8 +198,8 @@ const Index = () => {
   });
 
   useEffect(() => {
-    if (isSefuly && view === "conference") setView("scan");
-  }, [isSefuly, view]);
+    if (isSefuly && view === "conference" && !allowSefulyConferenceDirect) setView("scan");
+  }, [allowSefulyConferenceDirect, isSefuly, view]);
 
   useEffect(() => {
     if (!isSefuly) {
@@ -913,7 +915,7 @@ const Index = () => {
               </div>
             )}
           </div>
-        ) : view === "list" || isSefuly ? (
+        ) : view === "list" || (isSefuly && view !== "conference") ? (
           <Suspense fallback={LAZY_FALLBACK}>
             <ListHistory
               lists={lists}
