@@ -1002,6 +1002,24 @@ grant select, insert, update on public.pedido_sequencias to anon, authenticated,
 grant execute on function public.pedido_pessoa_chave(text, text, text) to anon, authenticated, service_role;
 grant execute on function public.proximo_numero_pedido(text, text, text) to anon, authenticated, service_role;
 
+-- #######################################################################
+-- SECURITY ADVISOR - views do Dashboard como invoker
+-- #######################################################################
+
+alter view if exists public.dashboard_diario set (security_invoker = true);
+alter view if exists public.dashboard_semanal set (security_invoker = true);
+alter view if exists public.dashboard_pedidos_status set (security_invoker = true);
+alter view if exists public.dashboard_por_conferente set (security_invoker = true);
+alter view if exists public.dashboard_por_secao set (security_invoker = true);
+alter view if exists public.dashboard_item_frequencia set (security_invoker = true);
+
+grant select on public.dashboard_diario to anon, authenticated, service_role;
+grant select on public.dashboard_semanal to anon, authenticated, service_role;
+grant select on public.dashboard_pedidos_status to anon, authenticated, service_role;
+grant select on public.dashboard_por_conferente to anon, authenticated, service_role;
+grant select on public.dashboard_por_secao to anon, authenticated, service_role;
+grant select on public.dashboard_item_frequencia to anon, authenticated, service_role;
+
 
 -- #######################################################################
 -- VERIFICACAO - rode isto depois pra confirmar que tudo subiu certo

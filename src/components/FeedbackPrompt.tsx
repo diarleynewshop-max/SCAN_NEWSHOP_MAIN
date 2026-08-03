@@ -18,6 +18,7 @@ import { loginEhSefuly } from "@/lib/lojaFeatures";
 
 const CHECK_INTERVAL_MS = 30 * 60 * 1000;
 const START_DELAY_MS = 2200;
+const DEFER_UNLOCK_SECONDS = 12;
 
 const camposTexto = [
   { key: "bom", label: "O que está bom?", placeholder: "Ex.: ficou mais rápido, ajuda no pedido..." },
@@ -85,12 +86,27 @@ export function FeedbackPrompt() {
   const { toast } = useToast();
   const [open, setOpen] = useState(false);
   const [enviando, setEnviando] = useState(false);
+  const [deferSeconds, setDeferSeconds] = useState(DEFER_UNLOCK_SECONDS);
   const [form, setForm] = useState<FormState>(formInicial);
   const openRef = useRef(false);
   const checandoRef = useRef(false);
 
   useEffect(() => {
     openRef.current = open;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open) {
+      setDeferSeconds(DEFER_UNLOCK_SECONDS);
+      return;
+    }
+
+    setDeferSeconds(DEFER_UNLOCK_SECONDS);
+    const intervalId = window.setInterval(() => {
+      setDeferSeconds((value) => Math.max(0, value - 1));
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
   }, [open]);
 
   useEffect(() => {
@@ -179,11 +195,23 @@ export function FeedbackPrompt() {
     }
   };
 
+  const handleLembrarDepois = () => {
+    if (enviando || deferSeconds > 0) return;
+    setOpen(false);
+  };
+
   if (!loginSalvo?.usuarioId || !loginSalvo.login || loginEhSefuly(loginSalvo) || loginSalvo.feedbackPendente === false) return null;
 
+  const podeAdiar = deferSeconds <= 0;
+
   return (
-    <Dialog open={open} onOpenChange={(next) => !enviando && setOpen(next)}>
-      <DialogContent className="max-h-[92dvh] max-w-2xl overflow-y-auto p-0">
+    <Dialog open={open} onOpenChange={(next) => next && !enviando && setOpen(true)}>
+      <DialogContent
+        className="max-h-[92dvh] max-w-2xl overflow-y-auto p-0 [&>button:last-child]:hidden"
+        onEscapeKeyDown={(event) => event.preventDefault()}
+        onPointerDownOutside={(event) => event.preventDefault()}
+        onInteractOutside={(event) => event.preventDefault()}
+      >
         <div className="border-b border-border bg-muted/30 px-5 py-4">
           <DialogHeader>
             <div className="flex items-center gap-2">
@@ -231,9 +259,9 @@ export function FeedbackPrompt() {
         </div>
 
         <DialogFooter className="gap-2 border-t border-border bg-background px-5 py-4 sm:gap-2">
-          <Button type="button" variant="outline" onClick={() => setOpen(false)} disabled={enviando}>
+          <Button type="button" variant="outline" onClick={handleLembrarDepois} disabled={enviando || !podeAdiar}>
             <Clock3 className="h-4 w-4" />
-            Lembrar depois
+            {podeAdiar ? "Lembrar depois" : `Lembrar depois (${deferSeconds}s)`}
           </Button>
           <Button type="button" onClick={() => void handleEnviar()} disabled={enviando}>
             <Send className="h-4 w-4" />
