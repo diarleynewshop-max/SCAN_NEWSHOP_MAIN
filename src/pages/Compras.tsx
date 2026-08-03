@@ -2,7 +2,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown, MoreVertical, Barcode, Tags, Link2, Building2, Trash2 } from "lucide-react";
+import { ArrowLeft, Search, RefreshCw, Check, ThumbsDown, ThumbsUp, Upload, Loader2, ShoppingCart, X, Filter, TrendingUp, FileDown, MoreVertical, Barcode, Tags, Link2, Building2, Trash2, Bot } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { useState, useRef, useMemo, useEffect } from "react";
 import { useProdutosComprar, type ProdutoComprar } from "@/hooks/useProdutosComprar";
@@ -33,6 +33,7 @@ import {
   ConferenciaGalpaoModal,
   type ConferenciaGalpaoItemView,
 } from "@/components/ConferenciaGalpaoModal";
+import { ComprasIaModal } from "@/components/ComprasIaModal";
 import { produtoKey } from "@/lib/comprasSupabase";
 import {
   criarMarcaFornecedorCompras,
@@ -405,6 +406,7 @@ const Compras = () => {
   const [baixandoPdfPedido, setBaixandoPdfPedido] = useState<string | null>(null);
   const [analiseAberta, setAnaliseAberta] = useState(false);
   const [galpaoAberto, setGalpaoAberto] = useState(false);
+  const [iaAberta, setIaAberta] = useState(false);
   const [filtroSecaoGalpao, setFiltroSecaoGalpao] = useState(temSecoesCompras ? FILTRO_MINHAS_SECOES : "todos");
   // Item aberto no modal de detalhes (mostra codigo de barras + acoes).
   const [produtoDetalhe, setProdutoDetalhe] = useState<ProdutoComprar | null>(null);
@@ -1626,6 +1628,12 @@ const Compras = () => {
               <Barcode className="h-4 w-4 mr-2" />
               Conferencia Galpao
             </Button>
+            {isAdminPlus && (
+              <Button variant="outline" onClick={() => setIaAberta(true)} disabled={loading}>
+                <Bot className="h-4 w-4 mr-2" />
+                IA
+              </Button>
+            )}
             <Button variant="outline" onClick={() => refetch()} disabled={loading}>
               <RefreshCw className={`h-4 w-4 mr-2 ${loading ? "animate-spin" : ""}`} />
               Atualizar
@@ -2296,6 +2304,15 @@ const Compras = () => {
             )}
           </div>
         </div>
+      )}
+
+      {isAdminPlus && (
+        <ComprasIaModal
+          open={iaAberta}
+          onOpenChange={setIaAberta}
+          empresa={empresa}
+          flag={flagAtual}
+        />
       )}
 
       {modalMarcasAberto && (
