@@ -19,6 +19,9 @@ const NATIVE_BARCODE_FORMATS = [
 ] as const;
 
 const ZXING_MAX_PHOTO_EDGE = 2200;
+const ZXING_MAX_VIDEO_EDGE = 1280;
+const ZXING_VIDEO_SCAN_INTERVAL_MS = 280;
+const NATIVE_VIDEO_SCAN_INTERVAL_MS = 90;
 
 const PHOTO_SCAN_VARIANTS = [
   { x: 0, y: 0, width: 1, height: 1, rotate: 0 },
@@ -28,6 +31,12 @@ const PHOTO_SCAN_VARIANTS = [
   { x: 0.04, y: 0.18, width: 0.92, height: 0.64, rotate: 90 },
   { x: 0.08, y: 0.28, width: 0.84, height: 0.44, rotate: 90 },
   { x: 0, y: 0, width: 1, height: 1, rotate: -90 },
+] as const;
+
+const VIDEO_SCAN_VARIANTS = [
+  { x: 0, y: 0, width: 1, height: 1 },
+  { x: 0.04, y: 0.2, width: 0.92, height: 0.6 },
+  { x: 0.08, y: 0.32, width: 0.84, height: 0.36 },
 ] as const;
 
 type NativeBarcode = {
@@ -183,6 +192,52 @@ async function detectWithZxing(image: HTMLImageElement): Promise<string | null> 
   return null;
 }
 
+async function detectVideoFrameWithZxing(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement
+): Promise<string | null> {
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+
+  if (!sourceWidth || !sourceHeight) return null;
+
+  for (const variant of VIDEO_SCAN_VARIANTS) {
+    const cropX = Math.round(clampBetweenZeroAndOne(variant.x) * sourceWidth);
+    const cropY = Math.round(clampBetweenZeroAndOne(variant.y) * sourceHeight);
+    const cropWidth = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.width) * sourceWidth));
+    const cropHeight = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.height) * sourceHeight));
+    const safeCropWidth = Math.min(cropWidth, sourceWidth - cropX);
+    const safeCropHeight = Math.min(cropHeight, sourceHeight - cropY);
+    const scale = Math.min(1, ZXING_MAX_VIDEO_EDGE / Math.max(safeCropWidth, safeCropHeight));
+    const targetWidth = Math.max(1, Math.round(safeCropWidth * scale));
+    const targetHeight = Math.max(1, Math.round(safeCropHeight * scale));
+
+    canvas.width = targetWidth;
+    canvas.height = targetHeight;
+
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    if (!ctx) return null;
+
+    ctx.clearRect(0, 0, targetWidth, targetHeight);
+    ctx.drawImage(
+      video,
+      cropX,
+      cropY,
+      safeCropWidth,
+      safeCropHeight,
+      0,
+      0,
+      targetWidth,
+      targetHeight
+    );
+
+    const code = await decodeCanvasWithZxing(canvas);
+    if (code) return code;
+  }
+
+  return null;
+}
+
 function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {
   return new Promise((resolve, reject) => {
     const objectUrl = URL.createObjectURL(file);
@@ -205,11 +260,15 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
   const cameraInputRef = useRef<HTMLInputElement>(null);
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const detectedRef = useRef(false);
+  const processingRef = useRef(false);
 
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
+  const [fileModeOnly, setFileModeOnly] = useState(false);
+  const [cameraStarting, setCameraStarting] = useState(true);
 
-  const useFileMode = !hasNativeBarcodeDetector;
+  const supportsLiveCamera = typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
+  const useFileMode = fileModeOnly || !supportsLiveCamera;
 
   const cleanup = useCallback(() => {
     if (animFrameRef.current) {
@@ -224,10 +283,15 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
   }, []);
 
   useEffect(() => {
-    if (useFileMode) return;
+    if (useFileMode) {
+      setCameraStarting(false);
+      return;
+    }
 
     let cancelled = false;
     detectedRef.current = false;
+    setCameraStarting(true);
+    setError(null);
 
     const start = async () => {
       try {
@@ -251,10 +315,32 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
           await videoRef.current.play();
         }
 
-        const scan = async () => {
+        setCameraStarting(false);
+
+        let lastScanAt = 0;
+        const scanInterval = hasNativeBarcodeDetector ? NATIVE_VIDEO_SCAN_INTERVAL_MS : ZXING_VIDEO_SCAN_INTERVAL_MS;
+
+        const scan = async (timestamp = 0) => {
           if (cancelled || detectedRef.current || !videoRef.current) return;
 
-          const code = await detectWithNativeBarcodeDetector(videoRef.current);
+          if (processingRef.current || videoRef.current.readyState < HTMLMediaElement.HAVE_CURRENT_DATA) {
+            animFrameRef.current = requestAnimationFrame(scan);
+            return;
+          }
+
+          if (timestamp - lastScanAt < scanInterval) {
+            animFrameRef.current = requestAnimationFrame(scan);
+            return;
+          }
+
+          lastScanAt = timestamp;
+
+          const canvas = canvasRef.current;
+          const nativeCode = hasNativeBarcodeDetector
+            ? await detectWithNativeBarcodeDetector(videoRef.current)
+            : null;
+          const code = nativeCode || (canvas ? await detectVideoFrameWithZxing(videoRef.current, canvas) : null);
+
           if (code && !detectedRef.current) {
             detectedRef.current = true;
             cleanup();
@@ -265,10 +351,12 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
           animFrameRef.current = requestAnimationFrame(scan);
         };
 
-        scan();
+        animFrameRef.current = requestAnimationFrame(scan);
       } catch {
         if (!cancelled) {
-          setError("Nao foi possivel acessar a camera. Verifique as permissoes.");
+          setFileModeOnly(true);
+          setCameraStarting(false);
+          setError("Nao foi possivel abrir a camera ao vivo. Permita a camera no navegador ou use foto.");
         }
       }
     };
@@ -287,6 +375,7 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
     if (!file) return;
 
     setError(null);
+    processingRef.current = true;
     setProcessing(true);
 
     try {
@@ -320,6 +409,7 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
     } catch {
       setError("Nao foi possivel ler a imagem. Tente novamente.");
     } finally {
+      processingRef.current = false;
       setProcessing(false);
     }
   };
@@ -343,7 +433,7 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
         <div className="flex items-center gap-2 text-primary-foreground">
           <ScanBarcode className="w-5 h-5" />
           <span className="font-semibold text-sm">
-            {useFileMode ? "Capturar codigo" : "Escaneando..."}
+            {useFileMode ? "Capturar codigo" : cameraStarting ? "Abrindo camera..." : "Escaneando..."}
           </span>
         </div>
 
@@ -362,7 +452,7 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
               <Loader2 className="w-8 h-8 animate-spin mx-auto mb-3" />
               <p className="font-medium">Lendo codigo da imagem...</p>
             </div>
-          ) : error ? (
+          ) : error && !useFileMode ? (
             <div className="text-center text-destructive-foreground bg-destructive/80 rounded-xl p-4">
               <p className="font-medium">{error}</p>
               <div className="flex gap-2 mt-3 justify-center">
@@ -382,6 +472,12 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
             </div>
           ) : useFileMode ? (
             <div className="text-center space-y-4">
+              {error && (
+                <div className="text-destructive-foreground bg-destructive/80 rounded-xl p-3 text-sm font-semibold">
+                  {error}
+                </div>
+              )}
+
               <div className="w-20 h-20 rounded-full bg-card/20 flex items-center justify-center mx-auto">
                 <Camera className="w-10 h-10 text-primary-foreground" />
               </div>
@@ -430,7 +526,7 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
           ) : (
             <div className="space-y-3">
               <div className="rounded-2xl overflow-hidden">
-                <video ref={videoRef} className="w-full rounded-2xl" playsInline muted />
+                <video ref={videoRef} className="w-full rounded-2xl" playsInline muted autoPlay />
               </div>
 
               <input
