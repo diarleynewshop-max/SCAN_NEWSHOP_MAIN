@@ -502,15 +502,120 @@ function formatarItemResumo(item: ItemResumo, index: number): string {
   return `${index + 1}. ${descricao} | Cod. ${item.codigo}${sku} | ${item.secao} | ${unidades} | ${item.vezes} ocorrencia(s)${real}`;
 }
 
-function perguntaPedeTopItem(pergunta: string): boolean {
-  const texto = pergunta
+function normalizarBusca(value: string): string {
+  return value
     .normalize("NFD")
     .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase();
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function perguntaPedeTopItem(pergunta: string): boolean {
+  const texto = normalizarBusca(pergunta);
 
   const falaDeItem = /\b(item|itens|produto|produtos|sku|codigo)\b/.test(texto);
   const falaDeRanking = /\b(mais pedido|mais pedidos|mais pedida|mais pedidas|top|ranking|campeao|maior pedido)\b/.test(texto);
   return falaDeItem && falaDeRanking;
+}
+
+function perguntaPedeRankingPorSecao(pergunta: string): boolean {
+  const texto = normalizarBusca(pergunta);
+  const falaDeSecao = /\bsecao\b/.test(texto);
+  const falaDeItem = /\b(item|itens|produto|produtos|sku|codigo)\b/.test(texto);
+  const falaDeMaisOuMenos = /\b(mais pedido|mais pedidos|mais pedida|mais pedidas|menos pedido|menos pedidos|menos pedida|menos pedidas|top|ranking)\b/.test(texto);
+  return falaDeSecao && falaDeItem && falaDeMaisOuMenos;
+}
+
+function extrairSecaoPergunta(pergunta: string): string | null {
+  const texto = normalizarBusca(pergunta);
+  const match = texto.match(/\bsecao\s+(?:de\s+|do\s+|da\s+)?([a-z0-9 ]{3,80})/);
+  const raw = match?.[1]?.trim();
+  if (!raw) return null;
+
+  const cortado = raw
+    .split(/\b(?:nos|nas|no|na|entre|desde|ate|ultimos|ultimas|periodo|dias?)\b/)[0]
+    .trim();
+  return cortado || raw;
+}
+
+function extrairLimiteRanking(pergunta: string, fallback = 5): number {
+  const match = normalizarBusca(pergunta).match(/\b([1-9]|1\d|20)\s+(?:item|itens|produto|produtos)\b/);
+  const value = Number(match?.[1] ?? fallback);
+  return Number.isFinite(value) ? Math.min(Math.max(value, 1), 20) : fallback;
+}
+
+function pontuacaoPedido(item: Pick<ItemResumo, "total_pedido" | "vezes">): number {
+  return item.total_pedido > 0 ? item.total_pedido : item.vezes;
+}
+
+function compraToItemResumo(row: CompraRow): ItemResumo {
+  const codigo = toText(row.codigo) || "SEM_CODIGO";
+  const vezes = toNumber(row.vezes_pedido);
+  return {
+    codigo,
+    sku: toText(row.sku),
+    descricao: toText(row.descricao) || codigo,
+    secao: toText(row.secao) || "Sem categoria",
+    vezes,
+    total_pedido: vezes,
+    total_real: 0,
+  };
+}
+
+function montarRespostaRankingSecao(
+  pergunta: string,
+  rows: ItemFrequenciaRow[],
+  compras: CompraRow[],
+  dataInicio: string,
+  dataFim: string
+): string | null {
+  if (!perguntaPedeRankingPorSecao(pergunta)) return null;
+
+  const secao = extrairSecaoPergunta(pergunta);
+  if (!secao) return null;
+
+  const hoje = hojeSaoPaulo();
+  const limite = extrairLimiteRanking(pergunta, 5);
+  const filtroData = filtrarItensPorPergunta(rows, pergunta, hoje);
+  const secaoNormalizada = normalizarBusca(secao);
+  const linhasDaSecao = filtroData.rows.filter((row) => normalizarBusca(toText(row.secao)).includes(secaoNormalizada));
+  let itens = agregarItens(linhasDaSecao, 500);
+  let base = "dashboard de pedidos concluidos";
+
+  if (itens.length === 0) {
+    itens = compras
+      .filter((row) => normalizarBusca(toText(row.secao)).includes(secaoNormalizada))
+      .map(compraToItemResumo)
+      .sort((a, b) => pontuacaoPedido(b) - pontuacaoPedido(a));
+    base = "tabela Compras, campo vezes_pedido";
+  }
+
+  if (itens.length === 0) {
+    return [
+      `Nao encontrei itens na secao "${secao}" para montar o ranking.`,
+      `Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+    ].join("\n");
+  }
+
+  const maisPedidos = [...itens]
+    .sort((a, b) => pontuacaoPedido(b) - pontuacaoPedido(a) || a.descricao.localeCompare(b.descricao))
+    .slice(0, limite);
+  const menosPedidos = [...itens]
+    .filter((item) => pontuacaoPedido(item) > 0)
+    .sort((a, b) => pontuacaoPedido(a) - pontuacaoPedido(b) || a.descricao.localeCompare(b.descricao))
+    .slice(0, limite);
+
+  return [
+    `Ranking da secao ${secao}`,
+    `Base: ${base}. Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)} (${filtroData.label}).`,
+    "",
+    `${limite} itens mais pedidos:`,
+    ...maisPedidos.map(formatarItemResumo),
+    "",
+    `${limite} itens menos pedidos:`,
+    ...menosPedidos.map(formatarItemResumo),
+  ].join("\n");
 }
 
 function montarRespostaTopItens(
@@ -712,6 +817,15 @@ function montarRespostaFallback(params: {
   dataFim: string;
   erroIa: string;
 }): string {
+  const rankingSecao = montarRespostaRankingSecao(
+    params.pergunta,
+    params.itens,
+    params.compras,
+    params.dataInicio,
+    params.dataFim
+  );
+  if (rankingSecao) return rankingSecao;
+
   const respostaDireta = montarRespostaTopItens(
     params.pergunta,
     params.itens,
@@ -845,23 +959,6 @@ async function perguntarIa(pergunta: string, contexto: string, historico: ChatMe
   const messages = buildIaMessages(pergunta, contexto, historico);
   const erros: string[] = [];
 
-  const bonsaiApiKey = process.env.COMPRAS_IA_API_KEY || process.env.BONSAI_API_KEY || "";
-  if (bonsaiApiKey) {
-    try {
-      return await chamarChatCompletion({
-        apiUrl: process.env.COMPRAS_IA_API_URL || process.env.BONSAI_API_URL || "https://ai.187-127-45-197.nip.io/v1/chat/completions",
-        apiKey: bonsaiApiKey,
-        model: process.env.COMPRAS_IA_MODEL || process.env.BONSAI_MODEL || "bonsai-27b",
-        messages,
-        provider: "Ollama/Bonsai",
-      });
-    } catch (error) {
-      erros.push(error instanceof Error ? error.message : "Ollama/Bonsai falhou");
-    }
-  } else {
-    erros.push("COMPRAS_IA_API_KEY nao configurada");
-  }
-
   const openRouterApiKey = process.env.OPENROUTER_API_KEY || process.env.COMPRAS_IA_OPENROUTER_API_KEY || "";
   if (openRouterApiKey) {
     for (const model of getOpenRouterModels()) {
@@ -883,6 +980,23 @@ async function perguntarIa(pergunta: string, contexto: string, historico: ChatMe
     }
   } else {
     erros.push("OPENROUTER_API_KEY nao configurada");
+  }
+
+  const bonsaiApiKey = process.env.COMPRAS_IA_API_KEY || process.env.BONSAI_API_KEY || "";
+  if (bonsaiApiKey) {
+    try {
+      return await chamarChatCompletion({
+        apiUrl: process.env.COMPRAS_IA_API_URL || process.env.BONSAI_API_URL || "https://ai.187-127-45-197.nip.io/v1/chat/completions",
+        apiKey: bonsaiApiKey,
+        model: process.env.COMPRAS_IA_MODEL || process.env.BONSAI_MODEL || "bonsai-27b",
+        messages,
+        provider: "Ollama/Bonsai",
+      });
+    } catch (error) {
+      erros.push(error instanceof Error ? error.message : "Ollama/Bonsai falhou");
+    }
+  } else {
+    erros.push("COMPRAS_IA_API_KEY nao configurada");
   }
 
   throw new HttpError(502, erros.join(" | "));
@@ -915,9 +1029,33 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const dataInicio = addDays(dataFim, -180);
     const avisos: string[] = [];
 
-    const [itens, compras, pedidos, secoes] = await Promise.all([
+    const [itens, compras] = await Promise.all([
       lerItemFrequencia(supabase, empresa, flag, dataInicio, dataFim, avisos),
       lerCompras(supabase, empresa),
+    ]);
+
+    const metaInicial: QueryMeta = {
+      periodo_inicio: dataInicio,
+      periodo_fim: dataFim,
+      empresa,
+      flag,
+      linhas_item_frequencia: itens.length,
+      linhas_compras: compras.length,
+      linhas_pedidos: 0,
+      avisos,
+    };
+
+    const respostaRankingSecao = montarRespostaRankingSecao(pergunta, itens, compras, dataInicio, dataFim);
+    if (respostaRankingSecao) {
+      return res.status(200).json({ ok: true, resposta: respostaRankingSecao, contexto: metaInicial });
+    }
+
+    const respostaDireta = montarRespostaTopItens(pergunta, itens, compras, dataInicio, dataFim);
+    if (respostaDireta) {
+      return res.status(200).json({ ok: true, resposta: respostaDireta, contexto: metaInicial });
+    }
+
+    const [pedidos, secoes] = await Promise.all([
       lerPedidosRecentes(supabase, empresa, flag),
       lerSecoes(supabase, empresa, flag, dataInicio, dataFim),
     ]);
@@ -934,11 +1072,6 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       secoes,
       avisos,
     });
-
-    const respostaDireta = montarRespostaTopItens(pergunta, itens, compras, dataInicio, dataFim);
-    if (respostaDireta) {
-      return res.status(200).json({ ok: true, resposta: respostaDireta, contexto: meta });
-    }
 
     try {
       const resposta = await perguntarIa(pergunta, contexto, limparHistorico(body.historico));
