@@ -457,11 +457,113 @@ function montarTopPorDia(rows: ItemFrequenciaRow[], pergunta: string, hoje: stri
 
   return [...porData.entries()]
     .sort(([a], [b]) => b.localeCompare(a))
-    .slice(0, datasExatas.length || diasMes.length ? 80 : 45)
+    .slice(0, datasExatas.length || diasMes.length ? 20 : 10)
     .map(([data, list]) => ({
       data,
-      itens: agregarItens(list, 8),
+      itens: agregarItens(list, 5),
     }));
+}
+
+function formatarData(isoDate: string): string {
+  const [ano, mes, dia] = isoDate.split("-");
+  return dia && mes && ano ? `${dia}/${mes}/${ano}` : isoDate;
+}
+
+function filtrarItensPorPergunta(rows: ItemFrequenciaRow[], pergunta: string, hoje: string) {
+  const { datasExatas, diasMes } = extrairDatas(pergunta, hoje);
+  if (datasExatas.length > 0) {
+    return {
+      rows: rows.filter((row) => datasExatas.includes(toText(row.data))),
+      label: datasExatas.map(formatarData).join(", "),
+      temFiltroData: true,
+    };
+  }
+
+  if (diasMes.length > 0) {
+    return {
+      rows: rows.filter((row) => diasMes.includes(toText(row.data).slice(8, 10))),
+      label: `dias ${diasMes.join(", ")} dentro do periodo lido`,
+      temFiltroData: true,
+    };
+  }
+
+  return {
+    rows,
+    label: "periodo lido",
+    temFiltroData: false,
+  };
+}
+
+function formatarItemResumo(item: ItemResumo, index: number): string {
+  const descricao = item.descricao || item.codigo;
+  const sku = item.sku ? ` | SKU ${item.sku}` : "";
+  const unidades = item.total_pedido > 0 ? `${item.total_pedido} un. pedidas` : `${item.vezes} ocorrencia(s)`;
+  const real = item.total_real > 0 ? ` | ${item.total_real} un. reais` : "";
+  return `${index + 1}. ${descricao} | Cod. ${item.codigo}${sku} | ${item.secao} | ${unidades} | ${item.vezes} ocorrencia(s)${real}`;
+}
+
+function perguntaPedeTopItem(pergunta: string): boolean {
+  const texto = pergunta
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase();
+
+  const falaDeItem = /\b(item|itens|produto|produtos|sku|codigo)\b/.test(texto);
+  const falaDeRanking = /\b(mais pedido|mais pedidos|mais pedida|mais pedidas|top|ranking|campeao|maior pedido)\b/.test(texto);
+  return falaDeItem && falaDeRanking;
+}
+
+function montarRespostaTopItens(
+  pergunta: string,
+  rows: ItemFrequenciaRow[],
+  compras: CompraRow[],
+  dataInicio: string,
+  dataFim: string
+): string | null {
+  if (!perguntaPedeTopItem(pergunta)) return null;
+
+  const hoje = hojeSaoPaulo();
+  const filtro = filtrarItensPorPergunta(rows, pergunta, hoje);
+  const top = agregarItens(filtro.rows, 10);
+
+  if (top.length > 0) {
+    const linhas = [
+      `Item mais pedido (${filtro.label})`,
+      `Base: dashboard de pedidos concluidos. Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+      "",
+      `Mais pedido: ${top[0].descricao || top[0].codigo} | Cod. ${top[0].codigo} | ${top[0].total_pedido || top[0].vezes} ${top[0].total_pedido > 0 ? "un. pedidas" : "ocorrencia(s)"}.`,
+      "",
+      "Top itens:",
+      ...top.map(formatarItemResumo),
+    ];
+
+    const porDia = filtro.temFiltroData ? montarTopPorDia(rows, pergunta, hoje) : [];
+    if (porDia.length > 0) {
+      linhas.push("", "Por dia:");
+      for (const dia of porDia) {
+        const item = dia.itens[0];
+        if (!item) continue;
+        linhas.push(`- ${formatarData(dia.data)}: ${item.descricao || item.codigo} | Cod. ${item.codigo} | ${item.total_pedido || item.vezes} ${item.total_pedido > 0 ? "un. pedidas" : "ocorrencia(s)"}.`);
+      }
+    }
+
+    return linhas.join("\n");
+  }
+
+  const comprasTop = [...compras]
+    .sort((a, b) => toNumber(b.vezes_pedido) - toNumber(a.vezes_pedido))
+    .slice(0, 10);
+
+  if (comprasTop.length > 0) {
+    return [
+      "Nao encontrei pedidos concluidos no dashboard para esse recorte.",
+      "Usei a tabela Compras como fallback, pelo campo vezes_pedido.",
+      "",
+      ...comprasTop.map((row, index) => `${index + 1}. ${toText(row.descricao) || toText(row.codigo)} | Cod. ${toText(row.codigo)} | ${toText(row.secao) || "Sem categoria"} | ${toNumber(row.vezes_pedido)} vez(es).`),
+    ].join("\n");
+  }
+
+  return "Nao encontrei dados suficientes no Supabase para calcular o item mais pedido.";
 }
 
 function contarPorCampo<T extends Record<string, unknown>>(rows: T[], field: keyof T) {
@@ -509,14 +611,14 @@ function resumirSecoes(rows: SecaoRow[]) {
     mapa.set(secao, atual);
   }
 
-  return [...mapa.values()].sort((a, b) => b.total_pedido - a.total_pedido).slice(0, 30);
+  return [...mapa.values()].sort((a, b) => b.total_pedido - a.total_pedido).slice(0, 15);
 }
 
 function resumirCompras(rows: CompraRow[]) {
   const porStatus = contarPorCampo(rows as unknown as Record<string, unknown>[], "status");
   const topCompras = [...rows]
     .sort((a, b) => toNumber(b.vezes_pedido) - toNumber(a.vezes_pedido))
-    .slice(0, 60)
+    .slice(0, 25)
     .map((row) => ({
       codigo: toText(row.codigo),
       sku: toText(row.sku),
@@ -544,12 +646,12 @@ function montarContexto(params: {
   avisos: string[];
 }): { contexto: string; meta: QueryMeta } {
   const hoje = hojeSaoPaulo();
-  const topItensPeriodo = agregarItens(params.itens, 80);
+  const topItensPeriodo = agregarItens(params.itens, 30);
   const topItensPorDia = montarTopPorDia(params.itens, params.pergunta, hoje);
   const comprasResumo = resumirCompras(params.compras);
   const pedidosPorStatus = contarPorCampo(params.pedidos as unknown as Record<string, unknown>[], "status");
   const secoesResumo = resumirSecoes(params.secoes);
-  const recentesPedidos = params.pedidos.slice(0, 40).map((row) => ({
+  const recentesPedidos = params.pedidos.slice(0, 15).map((row) => ({
     empresa: toText(row.empresa),
     flag: toText(row.flag),
     status: toText(row.status),
@@ -602,6 +704,50 @@ function montarContexto(params: {
   };
 }
 
+function montarRespostaFallback(params: {
+  pergunta: string;
+  itens: ItemFrequenciaRow[];
+  compras: CompraRow[];
+  dataInicio: string;
+  dataFim: string;
+  erroIa: string;
+}): string {
+  const respostaDireta = montarRespostaTopItens(
+    params.pergunta,
+    params.itens,
+    params.compras,
+    params.dataInicio,
+    params.dataFim
+  );
+  if (respostaDireta) return respostaDireta;
+
+  const topItens = agregarItens(params.itens, 8);
+  const statusCompras = resumirCompras(params.compras).porStatus.slice(0, 8);
+  const linhas = [
+    `A IA/Ollama falhou (${params.erroIa}).`,
+    "Segue um resumo direto com os dados lidos do Supabase:",
+    `Periodo consultado: ${formatarData(params.dataInicio)} a ${formatarData(params.dataFim)}.`,
+    "",
+  ];
+
+  if (topItens.length > 0) {
+    linhas.push("Top itens por pedidos concluidos:");
+    linhas.push(...topItens.map(formatarItemResumo));
+    linhas.push("");
+  }
+
+  if (statusCompras.length > 0) {
+    linhas.push("Compras por status:");
+    linhas.push(...statusCompras.map((row) => `- ${row.label}: ${row.total}`));
+  }
+
+  if (topItens.length === 0 && statusCompras.length === 0) {
+    linhas.push("Nao encontrei dados suficientes para montar um resumo automatico.");
+  }
+
+  return linhas.join("\n").trim();
+}
+
 function limparHistorico(value: unknown): ChatMessage[] {
   if (!Array.isArray(value)) return [];
   return value
@@ -609,25 +755,31 @@ function limparHistorico(value: unknown): ChatMessage[] {
       const role = (item as ChatMessage)?.role;
       const content = toText((item as ChatMessage)?.content);
       if ((role !== "user" && role !== "assistant") || !content) return null;
-      return { role, content: content.slice(0, 3000) };
+      return { role, content: content.slice(0, 1000) };
     })
     .filter((item): item is ChatMessage => !!item)
-    .slice(-8);
+    .slice(-4);
 }
 
-async function perguntarIa(pergunta: string, contexto: string, historico: ChatMessage[]): Promise<string> {
-  const apiUrl = (
-    process.env.COMPRAS_IA_API_URL ||
-    process.env.BONSAI_API_URL ||
-    "https://ai.187-127-45-197.nip.io/v1/chat/completions"
+function getOpenRouterModels(): string[] {
+  const configured = toText(
+    process.env.OPENROUTER_MODELS ||
+    process.env.COMPRAS_IA_OPENROUTER_MODELS ||
+    process.env.OPENROUTER_MODEL ||
+    process.env.COMPRAS_IA_OPENROUTER_MODEL
   );
-  const apiKey = process.env.COMPRAS_IA_API_KEY || process.env.BONSAI_API_KEY || "";
-  const model = process.env.COMPRAS_IA_MODEL || process.env.BONSAI_MODEL || "bonsai-27b";
+  const modelos = configured
+    ? configured.split(",").map((model) => model.trim()).filter(Boolean)
+    : [
+        "google/gemma-4-26b-a4b-it:free",
+        "openai/gpt-oss-20b:free",
+      ];
 
-  if (!apiKey) {
-    throw new HttpError(500, "COMPRAS_IA_API_KEY nao configurada na Vercel.");
-  }
+  const freeOnly = modelos.filter((model) => model === "openrouter/free" || model.endsWith(":free"));
+  return freeOnly.length > 0 ? freeOnly : ["openrouter/free"];
+}
 
+function buildIaMessages(pergunta: string, contexto: string, historico: ChatMessage[]) {
   const system = [
     "Voce e a IA interna do setor de Compras do SCAN.",
     "Responda em portugues do Brasil, de forma direta e operacional.",
@@ -644,21 +796,33 @@ async function perguntarIa(pergunta: string, contexto: string, historico: ChatMe
     contexto,
   ].join("\n");
 
-  const response = await fetch(apiUrl, {
+  return [
+    { role: "system", content: system },
+    ...historico,
+    { role: "user", content: perguntaComContexto },
+  ];
+}
+
+async function chamarChatCompletion(params: {
+  apiUrl: string;
+  apiKey: string;
+  model: string;
+  messages: Array<{ role: string; content: string }>;
+  provider: string;
+  extraHeaders?: Record<string, string>;
+}): Promise<string> {
+  const response = await fetch(params.apiUrl, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${apiKey}`,
+      Authorization: `Bearer ${params.apiKey}`,
       "Content-Type": "application/json",
+      ...(params.extraHeaders ?? {}),
     },
     body: JSON.stringify({
-      model,
-      messages: [
-        { role: "system", content: system },
-        ...historico,
-        { role: "user", content: perguntaComContexto },
-      ],
+      model: params.model,
+      messages: params.messages,
       temperature: 0.2,
-      max_tokens: 1400,
+      max_tokens: 900,
     }),
     signal: AbortSignal.timeout(55_000),
   });
@@ -666,15 +830,62 @@ async function perguntarIa(pergunta: string, contexto: string, historico: ChatMe
   const payload = await response.json().catch(() => null) as any;
   if (!response.ok) {
     const detail = payload?.error?.message || payload?.message || response.statusText;
-    throw new HttpError(502, `IA retornou erro: ${detail}`);
+    throw new HttpError(502, `${params.provider} retornou erro: ${detail}`);
   }
 
   const content = payload?.choices?.[0]?.message?.content;
   if (typeof content !== "string" || !content.trim()) {
-    throw new HttpError(502, "IA nao retornou resposta valida.");
+    throw new HttpError(502, `${params.provider} nao retornou resposta valida.`);
   }
 
   return content.trim();
+}
+
+async function perguntarIa(pergunta: string, contexto: string, historico: ChatMessage[]): Promise<string> {
+  const messages = buildIaMessages(pergunta, contexto, historico);
+  const erros: string[] = [];
+
+  const bonsaiApiKey = process.env.COMPRAS_IA_API_KEY || process.env.BONSAI_API_KEY || "";
+  if (bonsaiApiKey) {
+    try {
+      return await chamarChatCompletion({
+        apiUrl: process.env.COMPRAS_IA_API_URL || process.env.BONSAI_API_URL || "https://ai.187-127-45-197.nip.io/v1/chat/completions",
+        apiKey: bonsaiApiKey,
+        model: process.env.COMPRAS_IA_MODEL || process.env.BONSAI_MODEL || "bonsai-27b",
+        messages,
+        provider: "Ollama/Bonsai",
+      });
+    } catch (error) {
+      erros.push(error instanceof Error ? error.message : "Ollama/Bonsai falhou");
+    }
+  } else {
+    erros.push("COMPRAS_IA_API_KEY nao configurada");
+  }
+
+  const openRouterApiKey = process.env.OPENROUTER_API_KEY || process.env.COMPRAS_IA_OPENROUTER_API_KEY || "";
+  if (openRouterApiKey) {
+    for (const model of getOpenRouterModels()) {
+      try {
+        return await chamarChatCompletion({
+          apiUrl: process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1/chat/completions",
+          apiKey: openRouterApiKey,
+          model,
+          messages,
+          provider: `OpenRouter Free (${model})`,
+          extraHeaders: {
+            "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://scan.newgrup.cloud",
+            "X-Title": "SCAN Compras IA",
+          },
+        });
+      } catch (error) {
+        erros.push(error instanceof Error ? error.message : `OpenRouter Free (${model}) falhou`);
+      }
+    }
+  } else {
+    erros.push("OPENROUTER_API_KEY nao configurada");
+  }
+
+  throw new HttpError(502, erros.join(" | "));
 }
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
@@ -724,8 +935,27 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       avisos,
     });
 
-    const resposta = await perguntarIa(pergunta, contexto, limparHistorico(body.historico));
-    return res.status(200).json({ ok: true, resposta, contexto: meta });
+    const respostaDireta = montarRespostaTopItens(pergunta, itens, compras, dataInicio, dataFim);
+    if (respostaDireta) {
+      return res.status(200).json({ ok: true, resposta: respostaDireta, contexto: meta });
+    }
+
+    try {
+      const resposta = await perguntarIa(pergunta, contexto, limparHistorico(body.historico));
+      return res.status(200).json({ ok: true, resposta, contexto: meta });
+    } catch (error) {
+      const erroIa = error instanceof Error ? error.message : "erro desconhecido";
+      meta.avisos.push(erroIa);
+      const resposta = montarRespostaFallback({
+        pergunta,
+        itens,
+        compras,
+        dataInicio,
+        dataFim,
+        erroIa,
+      });
+      return res.status(200).json({ ok: true, resposta, contexto: meta });
+    }
   } catch (error) {
     const statusCode = error instanceof HttpError ? error.statusCode : 500;
     const message = error instanceof Error ? error.message : "Falha na IA de Compras.";
