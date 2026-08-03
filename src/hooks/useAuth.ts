@@ -84,7 +84,7 @@ const normalizarEmpresa = (value: unknown): Empresa | null => {
   return null;
 };
 
-const normalizarFlag = (value: unknown): LoginFlag => (String(value ?? "").toLowerCase() === "cd" ? "cd" : "loja");
+const normalizarFlag = (_value: unknown): LoginFlag => "loja";
 
 const normalizarRole = (value: unknown): UserRole => {
   const role = String(value ?? "").toLowerCase() as UserRole;
@@ -238,9 +238,9 @@ export function useAuth() {
       return { sucesso: false, motivo: "empresa_nao_permitida", contexto };
     }
 
-    const flag = request.flag ?? contexto.flagDefault;
-    const tituloPadrao = flag === "cd" ? "CD" : (request.tituloPadrao ?? "").trim();
-    if (flag === "loja" && !tituloPadrao) {
+    const flag: LoginFlag = "loja";
+    const tituloPadrao = (request.tituloPadrao ?? "").trim();
+    if (!tituloPadrao) {
       return { sucesso: false, motivo: "titulo_obrigatorio", contexto };
     }
 

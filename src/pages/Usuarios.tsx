@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { Check, Eye, EyeOff, Pencil, Plus, RefreshCw, RotateCcw, Save, Shield, Trash2, Users } from "lucide-react";
-import { useAuth, type Empresa, type LoginFlag, type UserRole } from "@/hooks/useAuth";
+import { useAuth, type Empresa, type UserRole } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { buscarSecoesComprasDisponiveis, getSecoesFixasPorEmpresa } from "@/lib/secoesCompras";
 import {
@@ -22,8 +22,6 @@ import { ACCESS_PERMISSION_GROUPS, ACCESS_PERMISSION_LABELS, contarPermissoesAti
 
 const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
 const ROLES: UserRole[] = ["operador", "compras", "admin", "super"];
-const FLAGS: LoginFlag[] = ["loja", "cd"];
-
 const emptyUserForm: UsuarioFormPayload = {
   login: "",
   nome: "",
@@ -176,7 +174,7 @@ export default function Usuarios() {
       senha: "",
       role: usuario.role,
       empresas: usuario.empresas.length > 0 ? usuario.empresas : ["NEWSHOP"],
-      flagDefault: usuario.flagDefault,
+      flagDefault: "loja",
       secoesCompras: usuario.secoesCompras,
       secaoPadrao: usuario.secaoPadrao ?? "",
       grupoAcessoId: usuario.grupoAcessoId ?? "",
@@ -467,11 +465,6 @@ export default function Usuarios() {
                     {ROLES.map((role) => <option key={role} value={role}>{labelRole(role)}</option>)}
                   </select>
                 </Field>
-                <Field label="Flag">
-                  <select value={userForm.flagDefault} onChange={(event) => setUserForm((prev) => ({ ...prev, flagDefault: event.target.value as LoginFlag }))} style={inputStyle}>
-                    {FLAGS.map((flag) => <option key={flag} value={flag}>{flag.toUpperCase()}</option>)}
-                  </select>
-                </Field>
                 <Field label="Grupo de acesso">
                   <select value={userForm.grupoAcessoId} onChange={(event) => setUserForm((prev) => ({ ...prev, grupoAcessoId: event.target.value }))} style={inputStyle}>
                     <option value="">Sem grupo (usa role)</option>
@@ -619,7 +612,7 @@ export default function Usuarios() {
 
                     <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 12 }}>
                       {usuario.empresas.map((empresa) => <Tag key={empresa}>{empresa}</Tag>)}
-                      <Tag>{usuario.flagDefault.toUpperCase()}</Tag>
+                      <Tag>LOJA</Tag>
                       <Tag>{usuario.secaoPadrao ? `Secao: ${usuario.secaoPadrao}` : "Secao aberta"}</Tag>
                       <Tag>{usuario.grupoAcessoNome ? `Grupo: ${usuario.grupoAcessoNome}` : "Sem grupo"}</Tag>
                       {usuario.secoesCompras.map((secao) => <Tag key={secao}>{secao}</Tag>)}

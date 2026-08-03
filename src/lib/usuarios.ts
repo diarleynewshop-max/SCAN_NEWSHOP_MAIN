@@ -97,8 +97,8 @@ function normalizarRole(value: unknown): UserRole {
   return ROLES.includes(role) ? role : "operador";
 }
 
-function normalizarFlag(value: unknown): LoginFlag {
-  return String(value ?? "").toLowerCase() === "cd" ? "cd" : "loja";
+function normalizarFlag(_value: unknown): LoginFlag {
+  return "loja";
 }
 
 function normalizarEmpresas(values: unknown): Empresa[] {
@@ -171,7 +171,7 @@ export async function criarUsuario(actor: ActorCredenciais, payload: UsuarioForm
     p_senha: payload.senha ?? "",
     p_role: payload.role,
     p_empresas: payload.empresas,
-    p_flag_default: payload.flagDefault,
+    p_flag_default: "loja",
     p_secoes: payload.secoesCompras,
     p_secao_padrao: payload.secaoPadrao,
     p_grupo_acesso_id: payload.grupoAcessoId || null,
@@ -188,7 +188,7 @@ export async function atualizarUsuario(actor: ActorCredenciais, id: string, payl
     p_nome: payload.nome,
     p_role: payload.role,
     p_empresas: payload.empresas,
-    p_flag_default: payload.flagDefault,
+    p_flag_default: "loja",
     p_secoes: payload.secoesCompras,
     p_secao_padrao: payload.secaoPadrao,
     p_ativo: payload.ativo,
@@ -272,7 +272,7 @@ export async function criarMinhaConta(payload: CriarContaPayload): Promise<strin
     p_nome: payload.nome,
     p_senha: payload.senha,
     p_empresas: empresas,
-    p_flag_default: payload.flagDefault ?? "loja",
+    p_flag_default: "loja",
   });
   if (error) throw error;
   return String(data ?? "");

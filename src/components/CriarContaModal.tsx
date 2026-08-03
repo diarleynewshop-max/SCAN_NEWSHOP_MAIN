@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { UserPlus, Loader2, Eye, EyeOff, Check } from "lucide-react";
-import type { Empresa, LoginFlag } from "@/hooks/useAuth";
+import type { Empresa } from "@/hooks/useAuth";
 import { criarMinhaConta } from "@/lib/usuarios";
 
 const EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
@@ -29,7 +29,6 @@ export default function CriarContaModal({ modoDesktop, onClose, onSuccess }: Pro
   const [senha, setSenha] = useState("");
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [empresas, setEmpresas] = useState<Empresa[]>([]);
-  const [flag, setFlag] = useState<LoginFlag>("loja");
   const [carregando, setCarregando] = useState(false);
   const [erro, setErro] = useState("");
 
@@ -47,7 +46,7 @@ export default function CriarContaModal({ modoDesktop, onClose, onSuccess }: Pro
 
     setCarregando(true);
     try {
-      await criarMinhaConta({ login: login.trim(), nome: nome.trim(), senha, empresas, flagDefault: flag });
+      await criarMinhaConta({ login: login.trim(), nome: nome.trim(), senha, empresas, flagDefault: "loja" });
       onSuccess(login.trim().toLowerCase());
     } catch (e) {
       const msg = String((e as { message?: string })?.message ?? "");
@@ -132,27 +131,6 @@ export default function CriarContaModal({ modoDesktop, onClose, onSuccess }: Pro
                     }}>
                     {on && <Check style={{ width: 15, height: 15 }} />}
                     {emp}
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div>
-            <label style={labelStyle}>Tipo</label>
-            <div style={{ display: "flex", gap: 8 }}>
-              {(["loja", "cd"] as LoginFlag[]).map((f) => {
-                const on = flag === f;
-                return (
-                  <button key={f} type="button" onClick={() => setFlag(f)}
-                    style={{
-                      flex: 1, height: 44, borderRadius: 12, fontWeight: 700, fontSize: 13,
-                      cursor: "pointer", transition: "all 0.18s", letterSpacing: "0.04em",
-                      background: on ? "hsl(var(--foreground))" : "hsl(var(--secondary))",
-                      color: on ? "hsl(var(--background))" : "hsl(var(--foreground))",
-                      border: on ? "2px solid hsl(var(--foreground))" : "2px solid hsl(var(--border))",
-                    }}>
-                    {f.toUpperCase()}
                   </button>
                 );
               })}
