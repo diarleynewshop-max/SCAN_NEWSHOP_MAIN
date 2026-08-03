@@ -8,7 +8,7 @@ import {
   type TipoContribuinteCliente,
 } from "@/lib/erpClientes";
 import { buscarEnderecoPorCep } from "@/lib/cepBrasil";
-import { consultarFornecedorDanfe } from "@/lib/danfeFornecedor";
+import { consultarFornecedorDanfe, separarEnderecoDanfe } from "@/lib/danfeFornecedor";
 
 interface PdvClienteModalProps {
   open: boolean;
@@ -62,19 +62,6 @@ function formatPhone(value?: string | null): string {
   if (digits.length === 11) return `(${digits.slice(0, 2)}) ${digits.slice(2, 7)}-${digits.slice(7)}`;
   if (digits.length === 10) return `(${digits.slice(0, 2)}) ${digits.slice(2, 6)}-${digits.slice(6)}`;
   return digits;
-}
-
-function separarEnderecoDanfe(value?: string | null): { endereco: string; numeroEndereco: string; bairro: string } {
-  const partes = String(value ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return {
-    endereco: partes[0] ?? "",
-    numeroEndereco: partes[1] ?? "",
-    bairro: partes.slice(2).join(", "),
-  };
 }
 
 const TELEFONE_PADRAO_CLIENTE = "99999999999";

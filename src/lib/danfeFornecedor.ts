@@ -15,6 +15,12 @@ export interface DanfeFornecedorConsulta {
   fonteResumo: string | null;
 }
 
+export interface DanfeEnderecoSeparado {
+  endereco: string;
+  numeroEndereco: string;
+  bairro: string;
+}
+
 function onlyDigits(value: string): string {
   return value.replace(/\D/g, "");
 }
@@ -85,6 +91,30 @@ function inferirTipoContribuinte(status: string, ie: string): DanfeTipoContribui
   if (normalized.includes("CONTRIBUINTE") && !normalized.includes("NAO")) return "CONTRIBUINTE";
   if (normalized.includes("NAO CONTRIBUINTE") || normalized.includes("SEM IE")) return "NAO_CONTRIBUINTE";
   return ie ? "CONTRIBUINTE" : "NAO_CONTRIBUINTE";
+}
+
+export function separarEnderecoDanfe(value?: string | null): DanfeEnderecoSeparado {
+  const partes = String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  if (partes.length === 0) return { endereco: "", numeroEndereco: "", bairro: "" };
+
+  const numeroIndex = partes.findIndex((parte) => /\d/.test(parte) || /^S\/?N$/i.test(parte));
+  if (numeroIndex < 0) {
+    return {
+      endereco: partes.join(", "),
+      numeroEndereco: "",
+      bairro: "",
+    };
+  }
+
+  return {
+    endereco: partes.slice(0, numeroIndex).join(" "),
+    numeroEndereco: partes[numeroIndex],
+    bairro: partes.slice(numeroIndex + 1).join(", "),
+  };
 }
 
 export function normalizarFornecedorDanfeResponse(data: any, fallbackCnpj: string): DanfeFornecedorConsulta {

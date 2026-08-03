@@ -11,7 +11,7 @@ import {
   type TipoContribuinteCliente,
 } from "@/lib/erpClientes";
 import { buscarEnderecoPorCep } from "@/lib/cepBrasil";
-import { consultarFornecedorDanfe } from "@/lib/danfeFornecedor";
+import { consultarFornecedorDanfe, separarEnderecoDanfe } from "@/lib/danfeFornecedor";
 
 const PAGE_SIZE = 50;
 const TELEFONE_PADRAO_CLIENTE = "99999999999";
@@ -49,19 +49,6 @@ function mergeClientes(current: ClientePdv[], incoming: ClientePdv[]): ClientePd
   for (const cliente of current) map.set(`${cliente.codigo}-${cliente.cpfCnpj ?? ""}`, cliente);
   for (const cliente of incoming) map.set(`${cliente.codigo}-${cliente.cpfCnpj ?? ""}`, cliente);
   return [...map.values()];
-}
-
-function separarEnderecoDanfe(value?: string | null): { endereco: string; numeroEndereco: string; bairro: string } {
-  const partes = String(value ?? "")
-    .split(",")
-    .map((item) => item.trim())
-    .filter(Boolean);
-
-  return {
-    endereco: partes[0] ?? "",
-    numeroEndereco: partes[1] ?? "",
-    bairro: partes.slice(2).join(", "),
-  };
 }
 
 const initialForm = {
