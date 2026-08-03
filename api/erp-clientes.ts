@@ -328,7 +328,58 @@ async function buscarClientes(empresa: EmpresaKey, search: string, limit: number
   return [...byId.values()].slice(0, limit);
 }
 
-export function montarPayloadCadastro(empresa: EmpresaKey, body: Record<string, unknown>) {
+function maiorCodigoCliente(items: ErpCliente[] | undefined): number {
+  return (items ?? []).reduce((maior, item) => {
+    const id = Number(item?.id ?? 0);
+    return Number.isFinite(id) && id > maior ? Math.trunc(id) : maior;
+  }, 0);
+}
+
+async function buscarMaiorCodigoClienteOrdenado(empresa: EmpresaKey): Promise<number> {
+  const sorts = ["-id", "id,desc", "id:desc"];
+  for (const sort of sorts) {
+    try {
+      const { data } = await fetchErpJson<ErpListResponse<ErpCliente>>(
+        empresa,
+        `/v1/pessoa/clientes?sort=${encodeURIComponent(sort)}&start=0&count=1`
+      );
+      const maior = maiorCodigoCliente(data?.items);
+      if (maior > 0) return maior;
+    } catch {
+      // Continua para a proxima sintaxe de ordenacao.
+    }
+  }
+  return 0;
+}
+
+async function buscarMaiorCodigoClientePaginado(empresa: EmpresaKey): Promise<number> {
+  const count = 50;
+  const maxPaginas = 100;
+  let maior = 0;
+
+  for (let pagina = 0; pagina < maxPaginas; pagina += 1) {
+    const start = pagina * count;
+    const { data } = await fetchErpJson<ErpListResponse<ErpCliente>>(
+      empresa,
+      `/v1/pessoa/clientes?sort=nome&start=${start}&count=${count}`
+    );
+    const items = data?.items ?? [];
+    maior = Math.max(maior, maiorCodigoCliente(items));
+    if (items.length < count) break;
+  }
+
+  return maior;
+}
+
+async function resolverProximoCodigoCliente(empresa: EmpresaKey): Promise<number> {
+  const maiorOrdenado = await buscarMaiorCodigoClienteOrdenado(empresa);
+  const maiorPaginado = await buscarMaiorCodigoClientePaginado(empresa);
+  const maior = Math.max(maiorOrdenado, maiorPaginado);
+  if (!maior) throw new Error("Nao foi possivel descobrir o ultimo codigo de cliente no ERP.");
+  return maior + 1;
+}
+
+export function montarPayloadCadastro(empresa: EmpresaKey, body: Record<string, unknown>, codigoCliente = 0) {
   const nome = getString(body.nome);
   const fantasia = nome;
   const documento = soDigitos(body.cpfCnpj ?? body.numeroDoDocumento ?? body.documento);
@@ -367,7 +418,7 @@ export function montarPayloadCadastro(empresa: EmpresaKey, body: Record<string, 
   const lojaId = getIntEnv(empresa, "ERP_CLIENTE_LOJA_ID", empresa === "NEWSHOP" ? 2 : 1);
 
   return {
-    id: 0,
+    id: codigoCliente,
     numeroDoDocumento: documento,
     email,
     tipoDeCliente: "TITULAR",
@@ -424,10 +475,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (req.method === "POST") {
       const body = getBody(req);
       const empresa = normalizeEmpresa(getString(body.empresa));
-      const payload = montarPayloadCadastro(empresa, body);
-      const existentes = await buscarClientes(empresa, payload.numeroDoDocumento, 5);
-      const existente = existentes.find((cliente) => cliente.cpfCnpj === payload.numeroDoDocumento);
+      const payloadBase = montarPayloadCadastro(empresa, body);
+      const existentes = await buscarClientes(empresa, payloadBase.numeroDoDocumento, 5);
+      const existente = existentes.find((cliente) => cliente.cpfCnpj === payloadBase.numeroDoDocumento);
       if (existente) return res.status(200).json({ cliente: existente, created: false, empresa });
+      const codigoCliente = await resolverProximoCodigoCliente(empresa);
+      const payload = { ...payloadBase, id: codigoCliente };
 
       const created = await fetchErpJson<ErpCliente>(empresa, "/v1/pessoa/clientes", {
         method: "POST",

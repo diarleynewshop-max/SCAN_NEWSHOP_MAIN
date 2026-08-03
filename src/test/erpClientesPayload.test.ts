@@ -26,6 +26,7 @@ describe("montarPayloadCadastro", () => {
     expect(payload.inscricaoEstadual).toBe("ISENTO");
     expect(payload.telefone1).toBe("99999999999");
     expect(payload.holdingId).toBe(1);
+    expect(payload.id).toBe(0);
     expect(payload.enderecos[0].codigoDoPais).toBe(1058);
     expect(payload.enderecos[0].municipio).toBe("Sao Paulo");
     expect(payload.enderecos[0].codigoIbge).toBe("3550308");
@@ -38,8 +39,9 @@ describe("montarPayloadCadastro", () => {
       tipoContribuinte: "NAO_CONTRIBUINTE",
       telefone: "",
       ...enderecoBase,
-    });
+    }, 423);
 
+    expect(payload.id).toBe(423);
     expect(payload.tipoDePessoa).toBe("JURIDICA");
     expect(payload.tipoContribuinte).toBe("NAO_CONTRIBUINTE");
     expect(payload.inscricaoEstadual).toBe("ISENTO");

@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Check, Loader2, Search, UserPlus } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Check, Loader2, RefreshCw, Search, UserPlus } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   buscarClientesVarejoFacil,
@@ -8,6 +8,7 @@ import {
   type TipoContribuinteCliente,
 } from "@/lib/erpClientes";
 import { buscarEnderecoPorCep } from "@/lib/cepBrasil";
+import { consultarFornecedorDanfe } from "@/lib/danfeFornecedor";
 
 interface PdvClienteModalProps {
   open: boolean;
@@ -63,6 +64,19 @@ function formatPhone(value?: string | null): string {
   return digits;
 }
 
+function separarEnderecoDanfe(value?: string | null): { endereco: string; numeroEndereco: string; bairro: string } {
+  const partes = String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return {
+    endereco: partes[0] ?? "",
+    numeroEndereco: partes[1] ?? "",
+    bairro: partes.slice(2).join(", "),
+  };
+}
+
 const TELEFONE_PADRAO_CLIENTE = "99999999999";
 
 const tipoContribuinteOptions: Array<{ value: TipoContribuinteCliente; label: string }> = [
@@ -77,8 +91,10 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
   const [clientes, setClientes] = useState<ClientePdv[]>([]);
   const [loading, setLoading] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
+  const [danfeLoading, setDanfeLoading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
+  const ultimoCnpjDanfeRef = useRef("");
   const [form, setForm] = useState({
     nome: "",
     cpfCnpj: "",
@@ -103,6 +119,8 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
     setError("");
     setClientes([]);
     setCepLoading(false);
+    setDanfeLoading(false);
+    ultimoCnpjDanfeRef.current = "";
     setForm({
       nome: "",
       cpfCnpj: "",
@@ -173,8 +191,57 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
     }
   };
 
+  const consultarCnpjDanfe = useCallback(async (force = false) => {
+    const cnpj = onlyDigits(form.cpfCnpj);
+    if (cnpj.length !== 14) return;
+    const ufAtual = form.uf.trim().toUpperCase().slice(0, 2);
+    const cacheKey = `${cnpj}:${ufAtual}`;
+    if (!force && ultimoCnpjDanfeRef.current === cacheKey) return;
+
+    ultimoCnpjDanfeRef.current = cacheKey;
+    setDanfeLoading(true);
+    setError("");
+    try {
+      const dados = await consultarFornecedorDanfe(cnpj, ufAtual || undefined);
+      const endereco = separarEnderecoDanfe(dados.endereco);
+      let enderecoCep: Awaited<ReturnType<typeof buscarEnderecoPorCep>> = null;
+      if (dados.cep) {
+        enderecoCep = await buscarEnderecoPorCep(dados.cep).catch(() => null);
+      }
+
+      setForm((current) => ({
+        ...current,
+        nome: current.nome || dados.razaoSocial || "",
+        cpfCnpj: dados.cnpj || current.cpfCnpj,
+        tipoContribuinte: dados.tipoContribuinte,
+        inscricaoEstadual: dados.tipoContribuinte === "CONTRIBUINTE" ? dados.inscricaoEstadual || current.inscricaoEstadual : "",
+        cep: current.cep || dados.cep || enderecoCep?.cep || "",
+        endereco: current.endereco || enderecoCep?.logradouro || endereco.endereco,
+        numeroEndereco: current.numeroEndereco || endereco.numeroEndereco,
+        bairro: current.bairro || enderecoCep?.bairro || endereco.bairro,
+        cidade: current.cidade || enderecoCep?.cidade || dados.cidade || "",
+        uf: current.uf || enderecoCep?.uf || dados.uf || "",
+        codigoIbge: current.codigoIbge || enderecoCep?.codigoIbge || "",
+      }));
+    } catch (err) {
+      ultimoCnpjDanfeRef.current = "";
+      setError(err instanceof Error ? err.message : "Falha ao consultar CNPJ no DanfeCollector.");
+    } finally {
+      setDanfeLoading(false);
+    }
+  }, [form.cpfCnpj, form.uf]);
+
   const documentoAtual = onlyDigits(form.cpfCnpj);
   const isCnpjForm = documentoAtual.length === 14;
+
+  useEffect(() => {
+    const cnpj = onlyDigits(form.cpfCnpj);
+    if (!open || mode !== "cadastrar" || cnpj.length !== 14) return;
+    const handle = window.setTimeout(() => {
+      void consultarCnpjDanfe(false);
+    }, 500);
+    return () => window.clearTimeout(handle);
+  }, [open, mode, form.cpfCnpj, consultarCnpjDanfe]);
 
   const cadastrar = async () => {
     if (saving) return;
@@ -375,6 +442,7 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
                 value={form.cpfCnpj}
                 onChange={(e) => {
                   const nextDoc = onlyDigits(e.target.value);
+                  if (nextDoc.length !== 14) ultimoCnpjDanfeRef.current = "";
                   setForm((current) => ({
                     ...current,
                     cpfCnpj: e.target.value,
@@ -387,6 +455,32 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
                 style={fieldStyle}
               />
             </div>
+            {isCnpjForm && (
+              <button
+                type="button"
+                onClick={() => void consultarCnpjDanfe(true)}
+                disabled={danfeLoading}
+                style={{
+                  height: 38,
+                  borderRadius: 8,
+                  border: "1.5px solid hsl(var(--border))",
+                  background: "hsl(var(--secondary))",
+                  color: "hsl(var(--foreground))",
+                  padding: "0 12px",
+                  fontSize: 12,
+                  fontWeight: 800,
+                  cursor: danfeLoading ? "not-allowed" : "pointer",
+                  opacity: danfeLoading ? 0.65 : 1,
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 7,
+                }}
+              >
+                {danfeLoading ? <Loader2 style={{ width: 15, height: 15, animation: "spin 0.8s linear infinite" }} /> : <RefreshCw style={{ width: 15, height: 15 }} />}
+                {danfeLoading ? "Consultando Danfe..." : "Consultar CNPJ no Danfe"}
+              </button>
+            )}
             {isCnpjForm ? (
               <div style={{ display: "grid", gridTemplateColumns: form.tipoContribuinte === "CONTRIBUINTE" ? "1fr 1fr" : "1fr", gap: 8 }}>
                 <div>

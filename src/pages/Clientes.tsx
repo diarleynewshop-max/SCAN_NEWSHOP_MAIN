@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowLeft, Loader2, RefreshCw, Search, UserPlus, UsersRound, X } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { obterLoginSalvo } from "@/hooks/useAuth";
@@ -11,6 +11,7 @@ import {
   type TipoContribuinteCliente,
 } from "@/lib/erpClientes";
 import { buscarEnderecoPorCep } from "@/lib/cepBrasil";
+import { consultarFornecedorDanfe } from "@/lib/danfeFornecedor";
 
 const PAGE_SIZE = 50;
 const TELEFONE_PADRAO_CLIENTE = "99999999999";
@@ -50,6 +51,19 @@ function mergeClientes(current: ClientePdv[], incoming: ClientePdv[]): ClientePd
   return [...map.values()];
 }
 
+function separarEnderecoDanfe(value?: string | null): { endereco: string; numeroEndereco: string; bairro: string } {
+  const partes = String(value ?? "")
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+
+  return {
+    endereco: partes[0] ?? "",
+    numeroEndereco: partes[1] ?? "",
+    bairro: partes.slice(2).join(", "),
+  };
+}
+
 const initialForm = {
   nome: "",
   fantasia: "",
@@ -86,8 +100,10 @@ const Clientes = () => {
   const [cadastroAberto, setCadastroAberto] = useState(false);
   const [saving, setSaving] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
+  const [danfeLoading, setDanfeLoading] = useState(false);
   const [form, setForm] = useState(initialForm);
   const [formError, setFormError] = useState("");
+  const ultimoCnpjDanfeRef = useRef("");
 
   const termoBusca = useMemo(() => search.trim(), [search]);
   const documentoAtual = onlyDigits(form.cpfCnpj);
@@ -152,6 +168,60 @@ const Clientes = () => {
       setCepLoading(false);
     }
   };
+
+  const consultarCnpjDanfe = useCallback(async (force = false) => {
+    const cnpj = onlyDigits(form.cpfCnpj);
+    if (cnpj.length !== 14) return;
+    const ufAtual = form.uf.trim().toUpperCase().slice(0, 2);
+    const cacheKey = `${cnpj}:${ufAtual}`;
+    if (!force && ultimoCnpjDanfeRef.current === cacheKey) return;
+
+    ultimoCnpjDanfeRef.current = cacheKey;
+    setDanfeLoading(true);
+    setFormError("");
+    try {
+      const dados = await consultarFornecedorDanfe(cnpj, ufAtual || undefined);
+      const endereco = separarEnderecoDanfe(dados.endereco);
+      let enderecoCep: Awaited<ReturnType<typeof buscarEnderecoPorCep>> = null;
+      if (dados.cep) {
+        enderecoCep = await buscarEnderecoPorCep(dados.cep).catch(() => null);
+      }
+
+      setForm((current) => ({
+        ...current,
+        nome: current.nome || dados.razaoSocial || "",
+        cpfCnpj: dados.cnpj || current.cpfCnpj,
+        tipoContribuinte: dados.tipoContribuinte,
+        inscricaoEstadual: dados.tipoContribuinte === "CONTRIBUINTE" ? dados.inscricaoEstadual || current.inscricaoEstadual : "",
+        cep: current.cep || dados.cep || enderecoCep?.cep || "",
+        endereco: current.endereco || enderecoCep?.logradouro || endereco.endereco,
+        numeroEndereco: current.numeroEndereco || endereco.numeroEndereco,
+        bairro: current.bairro || enderecoCep?.bairro || endereco.bairro,
+        cidade: current.cidade || enderecoCep?.cidade || dados.cidade || "",
+        uf: current.uf || enderecoCep?.uf || dados.uf || "",
+        codigoIbge: current.codigoIbge || enderecoCep?.codigoIbge || "",
+      }));
+
+      toast({
+        title: "CNPJ consultado no Danfe",
+        description: dados.aviso || dados.fonteResumo || dados.razaoSocial || "Dados preenchidos no cadastro.",
+      });
+    } catch (err) {
+      ultimoCnpjDanfeRef.current = "";
+      setFormError(err instanceof Error ? err.message : "Falha ao consultar CNPJ no DanfeCollector.");
+    } finally {
+      setDanfeLoading(false);
+    }
+  }, [form.cpfCnpj, form.uf, toast]);
+
+  useEffect(() => {
+    const cnpj = onlyDigits(form.cpfCnpj);
+    if (!cadastroAberto || cnpj.length !== 14) return;
+    const handle = window.setTimeout(() => {
+      void consultarCnpjDanfe(false);
+    }, 500);
+    return () => window.clearTimeout(handle);
+  }, [cadastroAberto, form.cpfCnpj, consultarCnpjDanfe]);
 
   const salvarCliente = async () => {
     if (saving) return;
@@ -280,6 +350,8 @@ const Clientes = () => {
                   setForm(initialForm);
                   setFormError("");
                   setCepLoading(false);
+                  setDanfeLoading(false);
+                  ultimoCnpjDanfeRef.current = "";
                   setCadastroAberto(true);
                 }}
                 className="inline-flex h-11 items-center justify-center gap-2 rounded-lg bg-primary px-4 text-sm font-bold text-primary-foreground"
@@ -377,6 +449,7 @@ const Clientes = () => {
                 value={form.cpfCnpj}
                 onChange={(value) => {
                   const nextDoc = onlyDigits(value);
+                  if (nextDoc.length !== 14) ultimoCnpjDanfeRef.current = "";
                   setForm((current) => ({
                     ...current,
                     cpfCnpj: value,
@@ -387,6 +460,17 @@ const Clientes = () => {
                 inputMode="numeric"
                 placeholder="Somente numeros"
               />
+              {isCnpjForm && (
+                <button
+                  type="button"
+                  onClick={() => void consultarCnpjDanfe(true)}
+                  disabled={danfeLoading}
+                  className="inline-flex h-10 items-center justify-center gap-2 rounded-lg border border-border bg-background px-3 text-xs font-black text-foreground disabled:opacity-60"
+                >
+                  {danfeLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  {danfeLoading ? "Consultando Danfe..." : "Consultar CNPJ no Danfe"}
+                </button>
+              )}
               {isCnpjForm ? (
                 <div className={`grid gap-3 ${form.tipoContribuinte === "CONTRIBUINTE" ? "sm:grid-cols-2" : ""}`}>
                   <label className="block">
