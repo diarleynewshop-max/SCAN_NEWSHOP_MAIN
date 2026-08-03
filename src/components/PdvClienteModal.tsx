@@ -26,7 +26,7 @@ const fieldStyle = {
   border: "1.5px solid hsl(var(--border))",
   background: "hsl(var(--secondary))",
   color: "hsl(var(--foreground))",
-  fontSize: 13,
+  fontSize: 16,
   outline: "none",
   boxSizing: "border-box" as const,
 };
@@ -98,6 +98,16 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
     codigoIbge: "",
     complemento: "",
   });
+  const autoFocusCampo = typeof window !== "undefined" && window.innerWidth >= 768;
+
+  const manterCampoVisivel = useCallback((event: React.FocusEvent<HTMLDivElement>) => {
+    const target = event.target;
+    if (!(target instanceof HTMLInputElement || target instanceof HTMLSelectElement || target instanceof HTMLTextAreaElement)) return;
+
+    window.setTimeout(() => {
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+    }, 120);
+  }, []);
 
   useEffect(() => {
     if (!open) return;
@@ -288,7 +298,20 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
 
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
-      <DialogContent aria-describedby={undefined} className="max-h-[92vh] max-w-lg overflow-y-auto" style={{ borderRadius: 16 }}>
+      <DialogContent
+        aria-describedby={undefined}
+        className="max-w-lg overflow-y-auto p-4 sm:p-6"
+        onFocusCapture={manterCampoVisivel}
+        style={{
+          borderRadius: 16,
+          top: "max(8px, env(safe-area-inset-top))",
+          maxHeight: "calc(100dvh - 16px)",
+          width: "min(32rem, calc(100vw - 16px))",
+          transform: "translateX(-50%)",
+          paddingBottom: "max(16px, env(safe-area-inset-bottom))",
+          overscrollBehavior: "contain",
+        }}
+      >
         <DialogHeader>
           <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 20 }}>
             Cliente do PDV
@@ -348,7 +371,7 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Digite para buscar"
                 style={fieldStyle}
-                autoFocus
+                autoFocus={autoFocusCampo}
               />
             </div>
             <div style={{ minHeight: 210, maxHeight: 300, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>
@@ -401,7 +424,7 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
                 onChange={(e) => setForm((current) => ({ ...current, nome: e.target.value }))}
                 placeholder="Nome do cliente"
                 style={fieldStyle}
-                autoFocus
+                autoFocus={autoFocusCampo}
               />
             </div>
             <div>

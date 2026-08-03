@@ -3,7 +3,7 @@ import { obterLoginSalvo } from "@/hooks/useAuth";
 import { Plus, ClipboardList, ScanBarcode, ArrowLeft, GitCompare, Loader2, AlertCircle, ShoppingCart, BadgeDollarSign, UserPlus } from "lucide-react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import BarcodeInput from "@/components/BarcodeInput";
-import ProductCard from "@/components/ProductCard";
+import ProductCard, { type Product } from "@/components/ProductCard";
 import { useInventory } from "@/hooks/useInventory";
 import { useProductLookup } from "@/hooks/useProductLookup";
 import { useToast } from "@/hooks/use-toast";
@@ -90,6 +90,35 @@ function isConsultaBloqueada(flag?: string | null): boolean {
   return (flag ?? "loja").toLowerCase() !== "loja";
 }
 
+const DESCONTO_LIVRE_PDV = 20;
+const DESCONTO_MAXIMO_PDV = 50;
+
+function formatarMoeda(value: number): string {
+  return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function normalizarDescontoPercentual(value: unknown): number {
+  const numero = Number(value ?? 0);
+  if (!Number.isFinite(numero) || numero <= 0) return 0;
+  return Math.min(DESCONTO_MAXIMO_PDV, Math.round(numero * 100) / 100);
+}
+
+function totalProduto(product: Product) {
+  const quantidade = Number(product.quantity ?? 0);
+  const preco = Number(product.precoUnitario ?? 0);
+  const descontoPercentual = normalizarDescontoPercentual(product.descontoPercentual);
+  const bruto = Math.round(quantidade * preco * 100) / 100;
+  const desconto = Math.round((bruto * descontoPercentual / 100) * 100) / 100;
+  return {
+    quantidade,
+    preco,
+    descontoPercentual,
+    bruto,
+    desconto,
+    liquido: Math.max(0, Math.round((bruto - desconto) * 100) / 100),
+  };
+}
+
 async function compactImageBlobToDataUrl(blob: Blob): Promise<string> {
   if (!blob.type.startsWith("image/")) return blobToDataUrl(blob);
 
@@ -158,6 +187,8 @@ const Index = () => {
   );
   const [clientePedido, setClientePedido] = useState<ClientePdv | null>(null);
   const [mostrarClienteModal, setMostrarClienteModal] = useState(false);
+  const [mostrarDescontoModal, setMostrarDescontoModal] = useState(false);
+  const [descontosPedido, setDescontosPedido] = useState<Record<string, number>>({});
   const [showScanner, setShowScanner] = useState(false);
   const [showProductInfo, setShowProductInfo] = useState(false);
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
@@ -199,10 +230,15 @@ const Index = () => {
     if (!isSefuly) {
       setClientePedido(null);
       setMostrarClienteModal(false);
+      setMostrarDescontoModal(false);
       return;
     }
     if (activeList?.clientePdv) setClientePedido(activeList.clientePdv);
   }, [isSefuly, activeList?.id, activeList?.clientePdv]);
+
+  useEffect(() => {
+    if (!activeList) setMostrarDescontoModal(false);
+  }, [activeList?.id]);
 
   // Consulta o historico do item no Supabase (em paralelo com o ERP) e decide
   // barrar (item em pedido nao concluido) / avisar (conferido <=7 dias) / mostrar
@@ -487,6 +523,58 @@ const Index = () => {
 
   const productCount = activeList?.products.length ?? 0;
 
+  const produtosDescontoPedido = activeList?.products.map((product) => {
+    const descontoPercentual = normalizarDescontoPercentual(descontosPedido[product.id] ?? product.descontoPercentual);
+    return {
+      product,
+      totais: totalProduto({ ...product, descontoPercentual }),
+    };
+  }) ?? [];
+  const totalBrutoPedido = produtosDescontoPedido.reduce((sum, item) => sum + item.totais.bruto, 0);
+  const totalDescontoPedido = produtosDescontoPedido.reduce((sum, item) => sum + item.totais.desconto, 0);
+  const totalFinalPedido = produtosDescontoPedido.reduce((sum, item) => sum + item.totais.liquido, 0);
+  const temDescontoAltoPedido = produtosDescontoPedido.some((item) => item.totais.descontoPercentual > DESCONTO_LIVRE_PDV);
+
+  const abrirDescontoPedido = () => {
+    if (!isSefuly) return;
+    if (!activeList || activeList.products.length === 0) {
+      toast({ title: "Adicione produto primeiro", description: "O desconto entra nos itens do pedido aberto.", variant: "destructive" });
+      return;
+    }
+
+    const descontosAtuais: Record<string, number> = {};
+    activeList.products.forEach((product) => {
+      descontosAtuais[product.id] = normalizarDescontoPercentual(product.descontoPercentual);
+    });
+    setDescontosPedido(descontosAtuais);
+    setMostrarDescontoModal(true);
+  };
+
+  const alterarDescontoPedido = (productId: string, value: unknown) => {
+    setDescontosPedido((current) => ({
+      ...current,
+      [productId]: normalizarDescontoPercentual(value),
+    }));
+  };
+
+  const salvarDescontoPedido = () => {
+    if (!activeList) return;
+
+    const products = activeList.products.map((product) => ({
+      ...product,
+      descontoPercentual: normalizarDescontoPercentual(descontosPedido[product.id] ?? product.descontoPercentual),
+    }));
+
+    updateList({ ...activeList, products });
+    setMostrarDescontoModal(false);
+
+    const qtdAcima = products.filter((product) => normalizarDescontoPercentual(product.descontoPercentual) > DESCONTO_LIVRE_PDV).length;
+    toast({
+      title: "Desconto salvo",
+      description: qtdAcima > 0 ? `${qtdAcima} item(ns) acima de 20%; o envio ao PDV vai pedir confirmacao.` : "Desconto aplicado no pedido aberto.",
+    });
+  };
+
   const handleClientePedidoSelecionado = (cliente: ClientePdv) => {
     setClientePedido(cliente);
     setMostrarClienteModal(false);
@@ -528,6 +616,164 @@ const Index = () => {
         createButtonLabel="Cadastrar e usar"
       />
 
+      {mostrarDescontoModal && activeList && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 120,
+            background: "rgba(0,0,0,0.58)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            padding: modoDesktop ? 24 : 10,
+          }}
+          onClick={() => setMostrarDescontoModal(false)}
+        >
+          <div
+            style={{
+              width: "100%",
+              maxWidth: 620,
+              maxHeight: "calc(100dvh - 20px)",
+              background: "hsl(var(--background))",
+              border: "1px solid hsl(var(--border))",
+              borderRadius: 14,
+              boxShadow: "0 18px 50px rgba(0,0,0,0.30)",
+              display: "flex",
+              flexDirection: "column",
+              overflow: "hidden",
+            }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <div style={{ padding: modoDesktop ? "18px 20px 14px" : "14px 14px 10px", borderBottom: "1px solid hsl(var(--border))", display: "flex", justifyContent: "space-between", gap: 12 }}>
+              <div>
+                <p style={{ fontFamily: "var(--font-mono)", fontSize: 10, letterSpacing: "0.14em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))", marginBottom: 4 }}>
+                  Pedido aberto
+                </p>
+                <h3 style={{ fontSize: modoDesktop ? 20 : 17, fontWeight: 850, color: "hsl(var(--foreground))" }}>
+                  DESCONTO
+                </h3>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMostrarDescontoModal(false)}
+                style={{ width: 36, height: 36, borderRadius: 9, border: "1px solid hsl(var(--border))", background: "hsl(var(--card))", color: "hsl(var(--muted-foreground))", cursor: "pointer", fontSize: 18 }}
+              >
+                x
+              </button>
+            </div>
+
+            <div style={{ padding: modoDesktop ? 16 : 10, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
+              {produtosDescontoPedido.map(({ product, totais }) => (
+                <div
+                  key={product.id}
+                  style={{
+                    border: totais.descontoPercentual > DESCONTO_LIVRE_PDV ? "1.5px solid hsl(var(--warning) / 0.55)" : "1px solid hsl(var(--border))",
+                    background: "hsl(var(--card))",
+                    borderRadius: 10,
+                    padding: modoDesktop ? 12 : 10,
+                    display: "grid",
+                    gridTemplateColumns: modoDesktop ? "64px minmax(0,1fr) 170px" : "52px minmax(0,1fr)",
+                    gap: 10,
+                    alignItems: "center",
+                  }}
+                >
+                  {product.photo ? (
+                    <img src={product.photo} alt={product.sku} style={{ width: modoDesktop ? 60 : 50, height: modoDesktop ? 60 : 50, borderRadius: 8, objectFit: "cover", border: "1px solid hsl(var(--border))" }} />
+                  ) : (
+                    <div style={{ width: modoDesktop ? 60 : 50, height: modoDesktop ? 60 : 50, borderRadius: 8, background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))" }} />
+                  )}
+
+                  <div style={{ minWidth: 0 }}>
+                    <p style={{ fontSize: modoDesktop ? 14 : 13, fontWeight: 800, color: "hsl(var(--foreground))", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                      {product.sku}
+                    </p>
+                    <p style={{ marginTop: 3, fontSize: 12, color: "hsl(var(--muted-foreground))" }}>
+                      {totais.quantidade} x {formatarMoeda(totais.preco)} = {formatarMoeda(totais.bruto)}
+                    </p>
+                    {!modoDesktop && (
+                      <p style={{ marginTop: 3, fontSize: 12, fontWeight: 800, color: "hsl(var(--foreground))" }}>
+                        Final: {formatarMoeda(totais.liquido)}
+                      </p>
+                    )}
+                  </div>
+
+                  <div style={{ gridColumn: modoDesktop ? "auto" : "1 / -1", display: "grid", gridTemplateColumns: "1fr 76px", gap: 8, alignItems: "center" }}>
+                    <input
+                      type="range"
+                      min={0}
+                      max={DESCONTO_MAXIMO_PDV}
+                      step={1}
+                      value={totais.descontoPercentual}
+                      onChange={(event) => alterarDescontoPedido(product.id, event.target.value)}
+                      style={{ width: "100%" }}
+                    />
+                    <input
+                      type="number"
+                      min={0}
+                      max={DESCONTO_MAXIMO_PDV}
+                      step={1}
+                      inputMode="decimal"
+                      value={totais.descontoPercentual}
+                      onChange={(event) => alterarDescontoPedido(product.id, event.target.value)}
+                      style={{
+                        height: 38,
+                        borderRadius: 8,
+                        border: "1.5px solid hsl(var(--border))",
+                        background: "hsl(var(--secondary))",
+                        color: "hsl(var(--foreground))",
+                        textAlign: "center",
+                        fontSize: 16,
+                        fontWeight: 800,
+                        outline: "none",
+                      }}
+                    />
+                    {modoDesktop && (
+                      <p style={{ gridColumn: "1 / -1", margin: 0, fontSize: 12, color: "hsl(var(--muted-foreground))", textAlign: "right" }}>
+                        Desc. {formatarMoeda(totais.desconto)} | Final {formatarMoeda(totais.liquido)}
+                      </p>
+                    )}
+                  </div>
+                </div>
+              ))}
+
+              {temDescontoAltoPedido && (
+                <div style={{ borderRadius: 10, border: "1px solid hsl(var(--warning) / 0.4)", background: "hsl(var(--warning) / 0.10)", padding: 10, display: "flex", gap: 8, alignItems: "center" }}>
+                  <AlertCircle style={{ width: 17, height: 17, color: "hsl(var(--warning))", flexShrink: 0 }} />
+                  <p style={{ fontSize: 12, fontWeight: 700, color: "hsl(var(--foreground))" }}>
+                    Tem desconto acima de 20%. No envio ao PDV, o resumo final vai exigir confirmacao.
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div style={{ borderTop: "1px solid hsl(var(--border))", padding: modoDesktop ? "14px 18px" : "12px 10px", display: "grid", gridTemplateColumns: modoDesktop ? "1fr auto auto" : "1fr", gap: 8, alignItems: "center" }}>
+              <div style={{ display: "flex", gap: 12, flexWrap: "wrap", fontSize: 12, color: "hsl(var(--muted-foreground))", fontWeight: 700 }}>
+                <span>Bruto {formatarMoeda(totalBrutoPedido)}</span>
+                <span>Desconto {formatarMoeda(totalDescontoPedido)}</span>
+                <span style={{ color: "hsl(var(--foreground))" }}>Final {formatarMoeda(totalFinalPedido)}</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setMostrarDescontoModal(false)}
+                style={{ height: 40, borderRadius: 9, border: "1.5px solid hsl(var(--border))", background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", padding: "0 14px", fontSize: 12, fontWeight: 800, cursor: "pointer" }}
+              >
+                Cancelar
+              </button>
+              <button
+                type="button"
+                onClick={salvarDescontoPedido}
+                style={{ height: 40, borderRadius: 9, border: "none", background: "hsl(var(--primary))", color: "hsl(var(--primary-foreground))", padding: "0 16px", fontSize: 12, fontWeight: 850, cursor: "pointer" }}
+              >
+                Salvar desconto
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       <header
         style={{
           background: "hsl(var(--primary))",
@@ -564,17 +810,40 @@ const Index = () => {
             padding: modoDesktop ? "12px 32px" : "10px 20px",
             display: "flex",
             alignItems: "center",
+            flexWrap: "wrap",
             gap: 10,
           }}
         >
           <span style={{ width: 8, height: 8, borderRadius: "50%", background: "hsl(var(--warning))", flexShrink: 0, display: "inline-block" }} />
-          <p style={{ flex: 1, fontSize: 12, fontWeight: 600, color: "hsl(var(--foreground))" }}>
+          <p style={{ flex: "1 1 150px", minWidth: 0, fontSize: 12, fontWeight: 600, color: "hsl(var(--foreground))" }}>
             {activeList.title}
             <span style={{ fontWeight: 400, color: "hsl(var(--muted-foreground))" }}> . {activeList.person}</span>
           </p>
           <span style={{ padding: "2px 8px", borderRadius: 6, fontSize: 10, fontWeight: 700, fontFamily: "var(--font-mono)", background: flagBadge.bg, border: `1px solid ${flagBadge.border}`, color: flagBadge.text }}>
             {activeList.flag?.toUpperCase() ?? "LOJA"} . {activeList.empresa ? activeList.empresa.split(" ")[0] : ""}
           </span>
+          {isSefuly && activeList.products.length > 0 && (
+            <button
+              type="button"
+              onClick={abrirDescontoPedido}
+              data-tut="desconto-pedido"
+              style={{
+                fontFamily: "var(--font-mono)",
+                fontSize: 10,
+                color: "hsl(var(--primary))",
+                background: "hsl(var(--primary) / 0.08)",
+                border: "1px solid hsl(var(--primary) / 0.28)",
+                borderRadius: 6,
+                padding: "4px 10px",
+                cursor: "pointer",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                fontWeight: 850,
+              }}
+            >
+              DESCONTO
+            </button>
+          )}
           <button
             onClick={handleCloseList}
             data-tut="fechar-lista"
