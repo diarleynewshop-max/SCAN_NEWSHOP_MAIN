@@ -12,6 +12,7 @@ export interface Product {
   photoAssetId?: string | null;
   erpProdutoId?: string;
   precoUnitario?: number | null;
+  descontoPercentual?: number | null;
   erpPhotoMissing?: boolean;
   appPhotoWithoutErp?: boolean;
   quantity: number;

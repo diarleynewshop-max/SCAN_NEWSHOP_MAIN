@@ -40,6 +40,7 @@ export interface WebhookPayload {
     photo: string | null;
     erpProdutoId?: string;
     precoUnitario?: number | null;
+    descontoPercentual?: number | null;
     appPhotoWithoutErp?: boolean;
   }>;
 }
@@ -129,6 +130,7 @@ export async function enviarListaParaSupabase(payload: WebhookPayload): Promise<
         quantidadePedida: produto.quantidade,
         quantidadeReal: produto.quantidade,
         status: "separado",
+        descontoPercentual: produto.descontoPercentual ?? 0,
       })),
     });
 

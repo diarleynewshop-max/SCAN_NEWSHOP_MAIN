@@ -30,6 +30,7 @@ interface AddProductParams {
   secao?: string;
   erpProdutoId?: string;
   precoUnitario?: number | null;
+  descontoPercentual?: number | null;
   erpPhotoMissing?: boolean;
   appPhotoWithoutErp?: boolean;
   importedFromSpreadsheet?: boolean;
@@ -406,6 +407,7 @@ export function useInventory() {
             ...preparedPhoto,
             erpProdutoId: params.erpProdutoId,
             precoUnitario: params.precoUnitario,
+            descontoPercentual: params.descontoPercentual ?? 0,
             erpPhotoMissing: params.erpPhotoMissing ?? false,
             appPhotoWithoutErp: params.appPhotoWithoutErp ?? false,
             quantity,

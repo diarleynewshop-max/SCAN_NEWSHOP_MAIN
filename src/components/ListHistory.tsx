@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { enviarListaParaSupabase, WebhookPayload } from "@/lib/webhookRouter";
 import { Product, ListData } from "@/components/ProductCard";
-import { Pencil, Trash2, Download, FileText, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
+import { AlertTriangle, Pencil, Trash2, Download, FileText, Share2, FileInput, ChevronLeft, ChevronRight, Monitor } from "lucide-react";
 import { useToast } from "@/hooks/use-toast";
 import jsPDF from "jspdf";
 import JSZip from "jszip";
@@ -39,6 +39,32 @@ const STATUS_LEFT: Record<string, string> = {
   yellow: "hsl(var(--warning))",
 };
 
+function formatarMoeda(value: number): string {
+  return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function normalizarDescontoPercentual(value: unknown): number {
+  const numero = Number(value ?? 0);
+  if (!Number.isFinite(numero) || numero <= 0) return 0;
+  return Math.min(50, Math.round(numero * 100) / 100);
+}
+
+function totalProduto(product: Product) {
+  const quantidade = Number(product.quantity ?? 0);
+  const preco = Number(product.precoUnitario ?? 0);
+  const descontoPercentual = normalizarDescontoPercentual(product.descontoPercentual);
+  const bruto = Math.round(quantidade * preco * 100) / 100;
+  const desconto = Math.round(bruto * descontoPercentual) / 100;
+  return {
+    quantidade,
+    preco,
+    descontoPercentual,
+    bruto,
+    desconto,
+    liquido: Math.max(0, Math.round((bruto - desconto) * 100) / 100),
+  };
+}
+
 const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = false, modoLeve = false, ocultarConferencia = false }: ListHistoryProps) => {
   const { toast } = useToast();
   const [menuOpen, setMenuOpen] = useState<string | null>(null);
@@ -53,6 +79,8 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
   const [sendingId, setSendingId] = useState<string | null>(null);
   const [clienteModalList, setClienteModalList] = useState<ListData | null>(null);
   const [clientesSelecionados, setClientesSelecionados] = useState<Record<string, ClientePdv>>({});
+  const [resumoPdvList, setResumoPdvList] = useState<ListData | null>(null);
+  const [descontosPdv, setDescontosPdv] = useState<Record<string, number>>({});
 
   useEffect(() => {
     let cancelled = false;
@@ -246,7 +274,22 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     } catch {}
   };
 
-  const enviarParaConferencia = async (list: ListData, clientePdv?: ClientePdv) => {
+  const abrirResumoPdv = (list: ListData, clientePdv?: ClientePdv | null) => {
+    const clienteSelecionado = clientePdv ?? clientesSelecionados[list.id] ?? list.clientePdv ?? null;
+    if (!clienteSelecionado) {
+      setClienteModalList(list);
+      return;
+    }
+
+    const nextDescontos: Record<string, number> = {};
+    list.products.forEach((product) => {
+      nextDescontos[product.id] = normalizarDescontoPercentual(product.descontoPercentual);
+    });
+    setDescontosPdv(nextDescontos);
+    setResumoPdvList({ ...list, clientePdv: clienteSelecionado });
+  };
+
+  const enviarParaConferencia = async (list: ListData, clientePdv?: ClientePdv, pdvConfirmado = false) => {
     // Verifica se a lista tem itens antes de enviar
     if (list.products.length === 0) {
       toast({
@@ -276,6 +319,10 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     const clienteSelecionado = clientePdv ?? clientesSelecionados[list.id] ?? list.clientePdv ?? null;
     if (pdvDireto && !clienteSelecionado) {
       setClienteModalList(list);
+      return;
+    }
+    if (pdvDireto && !pdvConfirmado) {
+      abrirResumoPdv(list, clienteSelecionado);
       return;
     }
 
@@ -316,6 +363,7 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
           photo:      photoDataUrl,
           erpProdutoId: product.erpProdutoId,
           precoUnitario: product.precoUnitario ?? null,
+          descontoPercentual: normalizarDescontoPercentual(product.descontoPercentual),
           appPhotoWithoutErp: product.appPhotoWithoutErp,
         })),
       };
@@ -358,6 +406,27 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     void enviarParaConferencia(list, cliente);
   };
 
+  const alterarDescontoPdv = (productId: string, value: string) => {
+    const desconto = normalizarDescontoPercentual(value);
+    setDescontosPdv((current) => ({ ...current, [productId]: desconto }));
+  };
+
+  const confirmarResumoPdv = () => {
+    const list = resumoPdvList;
+    if (!list) return;
+    const listaComDesconto: ListData = {
+      ...list,
+      products: list.products.map((product) => ({
+        ...product,
+        descontoPercentual: normalizarDescontoPercentual(descontosPdv[product.id]),
+      })),
+    };
+
+    onUpdateList(listaComDesconto);
+    setResumoPdvList(null);
+    void enviarParaConferencia(listaComDesconto, listaComDesconto.clientePdv ?? undefined, true);
+  };
+
   const openEdit = (list: ListData) => {
     setEditList({ ...list, products: list.products.map((p) => ({ ...p })) });
     setEditIndex(0); setEditProduct({ ...list.products[0] }); setMenuOpen(null);
@@ -381,6 +450,22 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
   };
 
   const dialogStyle = { background: "hsl(var(--card))", borderRadius: 20, border: "1px solid hsl(var(--border))" };
+  const resumoPdvProdutos = resumoPdvList?.products.map((product) => {
+    const descontoPercentual = normalizarDescontoPercentual(descontosPdv[product.id] ?? product.descontoPercentual);
+    const valores = totalProduto({ ...product, descontoPercentual });
+    return { product, descontoPercentual, ...valores };
+  }) ?? [];
+  const resumoPdvTotal = resumoPdvProdutos.reduce(
+    (acc, item) => ({
+      itens: acc.itens + 1,
+      unidades: acc.unidades + item.quantidade,
+      bruto: acc.bruto + item.bruto,
+      desconto: acc.desconto + item.desconto,
+      liquido: acc.liquido + item.liquido,
+    }),
+    { itens: 0, unidades: 0, bruto: 0, desconto: 0, liquido: 0 }
+  );
+  const resumoPdvTemDescontoAlto = resumoPdvProdutos.some((item) => item.descontoPercentual > 20);
 
   if (sortedLists.length === 0) {
     return (
@@ -416,6 +501,86 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
         onCancel={() => setClienteModalList(null)}
         onSelect={handleClienteSelecionado}
       />
+
+      <Dialog open={!!resumoPdvList} onOpenChange={() => sendingId ? undefined : setResumoPdvList(null)}>
+        <DialogContent aria-describedby={undefined} className="max-w-3xl" style={{ ...dialogStyle, maxHeight: "92vh", overflowY: "auto" }}>
+          <div style={{ width: 36, height: 4, background: "hsl(var(--border))", borderRadius: 2, margin: "0 auto 16px" }} />
+          <DialogHeader>
+            <DialogTitle style={{ fontFamily: "var(--font-serif)", fontSize: 22, fontWeight: 800 }}>Confirmar pedido PDV</DialogTitle>
+            <DialogDescription style={{ fontSize: 13, color: "hsl(var(--muted-foreground))" }}>
+              Revise o pedido da SEFULY, ajuste desconto por item e confirme o envio.
+            </DialogDescription>
+          </DialogHeader>
+
+          {resumoPdvList && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 12, marginTop: 14 }}>
+              <div style={{ border: "1px solid hsl(var(--border))", borderRadius: 12, padding: 12, background: "hsl(var(--secondary) / 0.55)" }}>
+                <p style={LABEL}>Cliente</p>
+                <p style={{ fontSize: 14, fontWeight: 800, color: "hsl(var(--foreground))" }}>{resumoPdvList.clientePdv?.nome || "Sem cliente"}</p>
+                <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
+                  Cod. {resumoPdvList.clientePdv?.codigo || "-"} | {resumoPdvList.clientePdv?.cpfCnpj || "sem documento"}
+                </p>
+              </div>
+
+              {resumoPdvTemDescontoAlto && (
+                <div style={{ border: "1px solid hsl(var(--warning) / 0.45)", borderRadius: 12, padding: 12, background: "hsl(var(--warning) / 0.12)", display: "flex", gap: 10 }}>
+                  <AlertTriangle style={{ width: 18, height: 18, color: "hsl(var(--warning))", flexShrink: 0, marginTop: 1 }} />
+                  <div>
+                    <p style={{ fontSize: 13, fontWeight: 900, color: "hsl(var(--foreground))" }}>Desconto acima de 20%</p>
+                    <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>Ao confirmar, voce libera desconto entre 21% e 50% neste pedido.</p>
+                  </div>
+                </div>
+              )}
+
+              {resumoPdvProdutos.map(({ product, descontoPercentual, preco, quantidade, bruto, desconto, liquido }) => (
+                <div key={product.id} style={{ border: "1px solid hsl(var(--border))", borderRadius: 12, padding: 12, background: "hsl(var(--card))" }}>
+                  <div style={{ display: "flex", gap: 10 }}>
+                    {product.photo ? (
+                      <img src={product.photo} alt={product.description || product.barcode} style={{ width: 50, height: 50, borderRadius: 10, objectFit: "cover", border: "1px solid hsl(var(--border))", flexShrink: 0 }} />
+                    ) : (
+                      <div style={{ width: 50, height: 50, borderRadius: 10, background: "hsl(var(--muted))", flexShrink: 0 }} />
+                    )}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p style={{ fontSize: 13, fontWeight: 900, color: "hsl(var(--foreground))", lineHeight: 1.3 }}>{product.description || product.sku || product.barcode}</p>
+                      <p style={{ fontSize: 12, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
+                        {product.barcode} | Qtd {quantidade} | Unit. {formatarMoeda(preco)}
+                      </p>
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(0,1fr) 86px", gap: 10, alignItems: "end", marginTop: 12 }}>
+                    <div>
+                      <label style={LABEL}>Desconto</label>
+                      <input type="range" min="0" max="50" step="1" value={descontoPercentual} onChange={(e) => alterarDescontoPdv(product.id, e.target.value)} style={{ width: "100%" }} />
+                    </div>
+                    <div>
+                      <label style={LABEL}>%</label>
+                      <input type="number" min="0" max="50" step="1" value={descontoPercentual} onChange={(e) => alterarDescontoPdv(product.id, e.target.value)} style={{ ...S_INPUT, height: 38, textAlign: "center", fontWeight: 900, padding: "0 8px" }} />
+                    </div>
+                  </div>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 10 }}>
+                    <ResumoBox label="Bruto" value={formatarMoeda(bruto)} />
+                    <ResumoBox label="Desc." value={formatarMoeda(desconto)} />
+                    <ResumoBox label="Final" value={formatarMoeda(liquido)} destaque />
+                  </div>
+                </div>
+              ))}
+
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                <ResumoBox label="Unidades" value={String(resumoPdvTotal.unidades)} />
+                <ResumoBox label="Desconto" value={formatarMoeda(resumoPdvTotal.desconto)} />
+                <ResumoBox label="Total" value={formatarMoeda(resumoPdvTotal.liquido)} destaque />
+              </div>
+
+              <DialogFooter className="flex-row gap-2" style={{ marginTop: 4 }}>
+                <button onClick={() => setResumoPdvList(null)} disabled={!!sendingId} style={{ flex: 1, height: 46, borderRadius: 10, background: "hsl(var(--secondary))", color: "hsl(var(--foreground))", border: "1.5px solid hsl(var(--border))", fontWeight: 700, fontSize: 13, cursor: "pointer" }}>Voltar</button>
+                <button onClick={confirmarResumoPdv} disabled={!!sendingId} style={{ flex: 1.25, height: 46, borderRadius: 10, background: resumoPdvTemDescontoAlto ? "hsl(var(--warning))" : "hsl(var(--primary))", color: resumoPdvTemDescontoAlto ? "hsl(var(--warning-foreground))" : "hsl(var(--primary-foreground))", border: "none", fontWeight: 900, fontSize: 13, cursor: "pointer" }}>
+                  {resumoPdvTemDescontoAlto ? "Confirmar desconto e enviar" : "Confirmar e enviar"}
+                </button>
+              </DialogFooter>
+            </div>
+          )}
+        </DialogContent>
+      </Dialog>
 
       {sortedLists.map((list) => {
          return (
@@ -728,5 +893,14 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
     </div>
   );
 };
+
+function ResumoBox({ label, value, destaque = false }: { label: string; value: string; destaque?: boolean }) {
+  return (
+    <div style={{ borderRadius: 10, padding: "9px 10px", background: destaque ? "hsl(var(--primary) / 0.10)" : "hsl(var(--secondary))", border: "1px solid hsl(var(--border))" }}>
+      <p style={{ fontFamily: "var(--font-mono)", fontSize: 9, fontWeight: 700, letterSpacing: "0.14em", textTransform: "uppercase", color: "hsl(var(--muted-foreground))" }}>{label}</p>
+      <p style={{ fontSize: 14, fontWeight: 900, color: "hsl(var(--foreground))", marginTop: 2 }}>{value}</p>
+    </div>
+  );
+}
 
 export default ListHistory;
