@@ -8,10 +8,8 @@ import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { DesktopShell } from "@/components/DesktopShell";
 
-// 1. IMPORTAMOS O BOTÃO AQUI
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import TourGuide from "@/components/TourGuide";
-import { EmpresaToggleSF } from "@/components/EmpresaToggleSF";
 import { AppUpdateManager } from "@/components/AppUpdateManager";
 import { FeedbackPrompt } from "@/components/FeedbackPrompt";
 import { useAuth } from "@/hooks/useAuth";
@@ -54,9 +52,6 @@ const App = () => (
       
       {/* 2. COLOCAMOS O BOTÃO FLUTUANTE NO CANTO SUPERIOR DIREITO */}
       <GlobalThemeToggle />
-
-      {/* Botão SOYE ↔ FACIL (apenas para Compras/Admin logado em SOYE ou FACIL) */}
-      <EmpresaToggleSF />
 
       <BrowserRouter>
         <AppUpdateManager />

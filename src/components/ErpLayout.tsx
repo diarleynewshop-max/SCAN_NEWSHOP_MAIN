@@ -10,6 +10,7 @@ import type { LucideIcon } from "lucide-react";
 import type { LoginData } from "@/hooks/useAuth";
 import { loginEhSefuly, loginTemFeature } from "@/lib/lojaFeatures";
 import { hasPermission } from "@/lib/accessControl";
+import { EmpresaToggleSF } from "@/components/EmpresaToggleSF";
 
 interface NavItemDef {
   icon: LucideIcon;
@@ -104,7 +105,6 @@ export function ErpLayout({
         ...(hasPermission(loginSalvo, "conferencia") ? [{ icon: GitCompare, label: "Conferência", path: "/scanner?tab=conference" }] : []),
         ...(hasPermission(loginSalvo, "consulta_preco") ? [{ icon: BadgeDollarSign, label: "Consulta Preço", path: "/consulta-preco" }] : []),
         { icon: Users, label: "Cliente", path: "/clientes" },
-        { icon: User, label: "Perfil", path: "/perfil" },
       ] : [
         { icon: HomeIcon, label: "Início", path: "/" },
         { icon: ScanBarcode, label: "Escanear", path: "/scanner" },
@@ -290,7 +290,6 @@ export function ErpLayout({
           ))}
 
           {/* Conta */}
-          {!isSefuly && (
           <div style={{ marginTop: 6 }}>
             {!collapsed && (
               <p style={{ ...LABEL_MONO, padding: "6px 8px 6px" }}>
@@ -300,7 +299,6 @@ export function ErpLayout({
             <NavBtn icon={User} label="Perfil" onClick={() => setMostrarPerfil(true)} />
             <NavBtn icon={Settings} label="Configurações" onClick={() => setMostrarConfiguracoes(true)} />
           </div>
-          )}
         </div>
 
         {/* User footer */}
@@ -380,6 +378,7 @@ export function ErpLayout({
               {resolvedPageTitle}
             </p>
           </div>
+          <EmpresaToggleSF />
           {loginSalvo && (
             <div style={{
               display: "flex",

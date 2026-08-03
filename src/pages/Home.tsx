@@ -309,6 +309,8 @@ const Home = ({ loginOnly = false }: HomeProps) => {
   const [atualizandoApp, setAtualizandoApp] = useState(false);
   const logoEmpresa = getCompanyLogo(loginSalvo?.empresa ?? empresa);
   const nomeEmpresaLogo = getCompanyName(loginSalvo?.empresa ?? empresa);
+  const isSefuly = loginEhSefuly(loginSalvo);
+  const sefulyHomeLabels = new Set(["Escanear", "Consulta Preço", "Conferência", "Perfil", "Configuração"]);
 
 
   const [isDesktop, setIsDesktop] = useState(() => window.innerWidth >= 1024);
@@ -651,6 +653,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
           {/* Cards base — filtrados por flag para operadores */}
           {baseMenuItems
             .filter(({ label, permission }) => {
+              if (isSefuly && !sefulyHomeLabels.has(label)) return false;
               if (!permission) return true;
               if (!hasPermission(loginSalvo, permission)) return false;
               const userFlag = loginSalvo?.flag ?? 'loja';
@@ -674,7 +677,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
           ))}
           
           {/* Cards para compras (se tiver acesso) */}
-          {comprasMenuItems.filter((item) => hasPermission(loginSalvo, item.permission) && (!item.lojaFeature || loginTemFeature(loginSalvo, item.lojaFeature))).map(({ Icon, label, description, path, accent }) => (
+          {!isSefuly && comprasMenuItems.filter((item) => hasPermission(loginSalvo, item.permission) && (!item.lojaFeature || loginTemFeature(loginSalvo, item.lojaFeature))).map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard 
                   Icon={Icon}
@@ -690,7 +693,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
             ))}
           
           {/* Cards para analytics (se tiver acesso) */}
-          {analyticsMenuItems.filter((item) => hasPermission(loginSalvo, item.permission)).map(({ Icon, label, description, path, accent }) => (
+          {!isSefuly && analyticsMenuItems.filter((item) => hasPermission(loginSalvo, item.permission)).map(({ Icon, label, description, path, accent }) => (
               <div key={label}>
                 <MenuCard
                   Icon={Icon}
@@ -706,7 +709,7 @@ const Home = ({ loginOnly = false }: HomeProps) => {
             ))}
 
           {/* Cards exclusivos admin */}
-          {adminMenuItems
+          {!isSefuly && adminMenuItems
             .filter((item) => hasPermission(loginSalvo, item.permission) && (item.permission !== "feedback" || loginSalvo?.role === "super"))
             .map(({ Icon, label, description, path, accent }) => (
               <div key={label}>

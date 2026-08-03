@@ -2,7 +2,6 @@ import { useEffect, useState } from "react";
 import { Repeat } from "lucide-react";
 import { obterLoginSalvo, type Empresa } from "@/hooks/useAuth";
 import { applyCompanyTheme } from "@/lib/companyTheme";
-import { loginEhSefuly } from "@/lib/lojaFeatures";
 
 const STORAGE_KEY = "scan_newshop_login";
 
@@ -16,7 +15,6 @@ export function EmpresaToggleSF() {
   }, []);
 
   if (!login) return null;
-  if (loginEhSefuly(login)) return null;
   const elevado = login.role === "compras" || login.role === "admin" || login.role === "super";
   if (!elevado) return null;
 
@@ -49,10 +47,6 @@ export function EmpresaToggleSF() {
       aria-label={`Trocar para ${proxima}`}
       title={`Trocar para ${proxima}`}
       style={{
-        position: "fixed",
-        top: 16,
-        right: 64,
-        zIndex: 60,
         height: 36,
         padding: "0 12px",
         borderRadius: 10,
@@ -70,7 +64,7 @@ export function EmpresaToggleSF() {
     >
       <Repeat style={{ width: 14, height: 14 }} />
       <span style={{ opacity: 0.6 }}>{login.empresa}</span>
-      <span>→</span>
+      <span>-&gt;</span>
       <span>{proxima}</span>
     </button>
   );
