@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { Bot, FileDown, FileText, Loader2, Send, ShieldCheck } from "lucide-react";
+import { Bot, FileDown, FileText, ImageOff, Loader2, Send, ShieldCheck, ShoppingCart, TrendingDown, Trophy } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -19,6 +19,7 @@ import {
   consultarComprasIa,
   type ComprasIaContexto,
   type ComprasIaMessage,
+  type ComprasIaProduto,
 } from "@/lib/comprasIa";
 
 interface ComprasIaModalProps {
@@ -31,12 +32,13 @@ interface ComprasIaModalProps {
 interface MensagemLocal extends ComprasIaMessage {
   id: string;
   contexto?: ComprasIaContexto;
+  produtos?: ComprasIaProduto[];
   perguntaOrigem?: string;
 }
 
 const SUGESTOES = [
   "Qual produto foi mais pedido nos dias 10 e 12?",
-  "Faca um relatorio dos itens mais pedidos no periodo lido.",
+  "Gere uma lista dos 5 itens mais pedidos e 5 menos pedidos da secao de eletronico.",
   "Quais secoes tiveram mais falta?",
 ];
 
@@ -47,6 +49,90 @@ function nextId(): string {
 function erroMensagem(error: unknown): string {
   if (error instanceof Error) return error.message;
   return String(error || "Falha ao consultar IA.");
+}
+
+function grupoProdutoLabel(grupo: string): { titulo: string; Icon: typeof Trophy } {
+  if (grupo === "mais_pedidos") return { titulo: "🏆 Mais pedidos", Icon: Trophy };
+  if (grupo === "menos_pedidos") return { titulo: "📉 Menos pedidos", Icon: TrendingDown };
+  return { titulo: "📦 Produtos citados", Icon: ShoppingCart };
+}
+
+function formatarQuantidade(value: number | null | undefined): string {
+  return Number(value || 0).toLocaleString("pt-BR");
+}
+
+function ProdutosIaCards({ produtos }: { produtos?: ComprasIaProduto[] }) {
+  if (!produtos?.length) return null;
+
+  const grupos = produtos.reduce<Record<string, ComprasIaProduto[]>>((acc, produto) => {
+    const key = produto.grupo || "citados";
+    acc[key] = acc[key] ? [...acc[key], produto] : [produto];
+    return acc;
+  }, {});
+
+  return (
+    <div className="mt-4 space-y-3">
+      {Object.entries(grupos).map(([grupo, itens]) => {
+        const { titulo, Icon } = grupoProdutoLabel(grupo);
+        return (
+          <section key={grupo} className="space-y-2">
+            <div className="flex items-center gap-2 text-xs font-bold uppercase tracking-wide text-slate-600">
+              <Icon className="h-3.5 w-3.5" />
+              {titulo}
+            </div>
+            <div className="grid gap-2 lg:grid-cols-2">
+              {itens.map((produto) => (
+                <article
+                  key={`${grupo}-${produto.posicao}-${produto.codigo}-${produto.sku}`}
+                  className="overflow-hidden rounded-md border border-slate-200 bg-slate-50"
+                >
+                  <div className="flex gap-3 p-3">
+                    <div className="flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-md border border-slate-200 bg-white">
+                      {produto.fotoUrl ? (
+                        <img src={produto.fotoUrl} alt={produto.titulo || produto.codigo} className="h-full w-full object-contain" loading="lazy" />
+                      ) : (
+                        <ImageOff className="h-6 w-6 text-slate-300" />
+                      )}
+                    </div>
+                    <div className="min-w-0 flex-1 space-y-2">
+                      <div className="flex items-start gap-2">
+                        <Badge className="shrink-0 bg-slate-900 text-white">#{produto.posicao}</Badge>
+                        <p className="min-w-0 text-sm font-bold leading-5 text-slate-900">
+                          {produto.titulo || produto.descricao || produto.codigo}
+                        </p>
+                      </div>
+                      <div className="grid gap-1 text-xs text-slate-600">
+                        <span>Cod. {produto.codigo || "-"}{produto.sku ? ` | SKU ${produto.sku}` : ""}</span>
+                        <span>Secao: {produto.secao || "-"}</span>
+                        <span>Pedido: {formatarQuantidade(produto.totalPedido)} | Real: {formatarQuantidade(produto.totalReal)} | Ocorr.: {formatarQuantidade(produto.vezes)}</span>
+                      </div>
+                      <div className="flex flex-wrap gap-1.5">
+                        {produto.status && (
+                          <Badge variant="outline" className="border-blue-200 bg-blue-50 text-blue-700">
+                            {produto.status}
+                          </Badge>
+                        )}
+                        {produto.pedidoFeito === true && (
+                          <Badge variant="outline" className="border-emerald-200 bg-emerald-50 text-emerald-700">
+                            pedido feito
+                          </Badge>
+                        )}
+                        {produto.fotoUrl && (
+                          <Badge variant="outline" className="border-slate-200 bg-white text-slate-600">
+                            foto
+                          </Badge>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        );
+      })}
+    </div>
+  );
 }
 
 export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaModalProps) {
@@ -120,6 +206,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
           role: "assistant",
           content: result.resposta,
           contexto: result.contexto,
+          produtos: result.produtos ?? [],
           perguntaOrigem: texto,
         },
       ]);
@@ -211,13 +298,14 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
                     }`}
                   >
                     <div className="whitespace-pre-wrap break-words">{mensagem.content}</div>
+                    {!isUser && <ProdutosIaCards produtos={mensagem.produtos} />}
                     {!isUser && !mensagem.content.startsWith("Erro:") && (
                       <div className="mt-3 flex flex-wrap items-center gap-2 border-t border-slate-100 pt-3">
                         <Button
                           size="sm"
                           variant="outline"
                           className="h-8"
-                          onClick={() => baixarComprasIaTxt(mensagem.perguntaOrigem ?? "", mensagem.content, mensagem.contexto)}
+                          onClick={() => baixarComprasIaTxt(mensagem.perguntaOrigem ?? "", mensagem.content, mensagem.contexto, mensagem.produtos)}
                         >
                           <FileText className="mr-2 h-3.5 w-3.5" />
                           TXT
@@ -226,7 +314,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
                           size="sm"
                           variant="outline"
                           className="h-8"
-                          onClick={() => baixarComprasIaPdf(mensagem.perguntaOrigem ?? "", mensagem.content, mensagem.contexto)}
+                          onClick={() => baixarComprasIaPdf(mensagem.perguntaOrigem ?? "", mensagem.content, mensagem.contexto, mensagem.produtos)}
                         >
                           <FileDown className="mr-2 h-3.5 w-3.5" />
                           PDF

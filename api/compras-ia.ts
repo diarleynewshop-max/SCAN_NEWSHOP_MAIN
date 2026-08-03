@@ -50,6 +50,7 @@ type CompraRow = {
   sku: string | null;
   descricao: string | null;
   secao: string | null;
+  foto_url: string | null;
   status: string | null;
   vezes_pedido: number | null;
   pedido_feito?: number | boolean | null;
@@ -92,9 +93,36 @@ type ItemResumo = {
   sku: string;
   descricao: string;
   secao: string;
+  foto_url: string | null;
+  status: string;
+  pedido_feito: boolean | null;
+  updated_at: string;
   vezes: number;
   total_pedido: number;
   total_real: number;
+};
+
+type ProdutoIaCard = {
+  grupo: "mais_pedidos" | "menos_pedidos" | "top" | "citados";
+  posicao: number;
+  titulo: string;
+  codigo: string;
+  sku: string;
+  descricao: string;
+  secao: string;
+  fotoUrl: string | null;
+  status: string;
+  pedidoFeito: boolean | null;
+  atualizadoEm: string;
+  vezes: number;
+  totalPedido: number;
+  totalReal: number;
+  origem: string;
+};
+
+type RespostaAutomatica = {
+  resposta: string;
+  produtos: ProdutoIaCard[];
 };
 
 type QueryMeta = {
@@ -311,7 +339,7 @@ async function lerCompras(
   return await selectAll<CompraRow>((from, to) => (
     supabase
       .from("compras")
-      .select("empresa,codigo,sku,descricao,secao,status,vezes_pedido,pedido_feito,updated_at")
+      .select("empresa,codigo,sku,descricao,secao,foto_url,status,vezes_pedido,pedido_feito,updated_at")
       .eq("empresa", empresaCompras(empresa))
       .order("updated_at", { ascending: false })
       .range(from, to)
@@ -362,6 +390,10 @@ function limparItem(row: ItemFrequenciaRow): ItemResumo {
     sku: toText(row.sku),
     descricao: toText(row.descricao) || codigo,
     secao: toText(row.secao) || "Sem categoria",
+    foto_url: null,
+    status: "",
+    pedido_feito: null,
+    updated_at: "",
     vezes: toNumber(row.vezes),
     total_pedido: toNumber(row.total_pedido),
     total_real: toNumber(row.total_real),
@@ -496,10 +528,17 @@ function filtrarItensPorPergunta(rows: ItemFrequenciaRow[], pergunta: string, ho
 
 function formatarItemResumo(item: ItemResumo, index: number): string {
   const descricao = item.descricao || item.codigo;
-  const sku = item.sku ? ` | SKU ${item.sku}` : "";
-  const unidades = item.total_pedido > 0 ? `${item.total_pedido} un. pedidas` : `${item.vezes} ocorrencia(s)`;
-  const real = item.total_real > 0 ? ` | ${item.total_real} un. reais` : "";
-  return `${index + 1}. ${descricao} | Cod. ${item.codigo}${sku} | ${item.secao} | ${unidades} | ${item.vezes} ocorrencia(s)${real}`;
+  const sku = item.sku ? ` | SKU: ${item.sku}` : "";
+  const pedido = item.total_pedido > 0 ? `${item.total_pedido} un. pedidas` : `${item.vezes} ocorrencia(s)`;
+  const real = item.total_real > 0 ? `${item.total_real} un. reais` : "sem qtd. real";
+  const status = item.status ? `\n   🛒 Compras: ${item.status}${item.pedido_feito === true ? " | pedido feito" : ""}` : "";
+  const foto = item.foto_url ? "\n   🖼️ Foto: card do produto abaixo" : "";
+
+  return [
+    `${index + 1}. ${descricao}`,
+    `   🔖 Cod: ${item.codigo}${sku}`,
+    `   📦 Secao: ${item.secao} | Pedido: ${pedido} | Real: ${real} | Ocorrencias: ${item.vezes}`,
+  ].join("\n") + status + foto;
 }
 
 function normalizarBusca(value: string): string {
@@ -509,6 +548,102 @@ function normalizarBusca(value: string): string {
     .toLowerCase()
     .replace(/\s+/g, " ")
     .trim();
+}
+
+function normalizarChaveProduto(value: string): string {
+  return normalizarBusca(value).replace(/[^a-z0-9]/g, "");
+}
+
+function chavesProduto(codigo: string, sku: string): string[] {
+  return [codigo, sku]
+    .map(normalizarChaveProduto)
+    .filter((value, index, list) => value && list.indexOf(value) === index);
+}
+
+function fotoUrlSegura(value: unknown): string | null {
+  const foto = toText(value);
+  if (!foto) return null;
+  if (/^https?:\/\//i.test(foto)) return foto;
+  if (/^data:image\//i.test(foto) && foto.length <= 250_000) return foto;
+  return null;
+}
+
+function compraPedidoFeito(row: CompraRow): boolean | null {
+  if (row.pedido_feito === null || row.pedido_feito === undefined) return null;
+  return row.pedido_feito === true || row.pedido_feito === 1;
+}
+
+function indexarCompras(compras: CompraRow[]): Map<string, CompraRow> {
+  const mapa = new Map<string, CompraRow>();
+  for (const row of compras) {
+    for (const key of chavesProduto(toText(row.codigo), toText(row.sku))) {
+      if (!mapa.has(key)) mapa.set(key, row);
+    }
+  }
+  return mapa;
+}
+
+function enriquecerItensComCompras(itens: ItemResumo[], compras: CompraRow[]): ItemResumo[] {
+  const index = indexarCompras(compras);
+
+  return itens.map((item) => {
+    const compra = chavesProduto(item.codigo, item.sku)
+      .map((key) => index.get(key))
+      .find(Boolean);
+    if (!compra) return item;
+
+    return {
+      ...item,
+      sku: item.sku || toText(compra.sku),
+      descricao: item.descricao && item.descricao !== item.codigo ? item.descricao : (toText(compra.descricao) || item.descricao),
+      secao: item.secao !== "Sem categoria" ? item.secao : (toText(compra.secao) || item.secao),
+      foto_url: fotoUrlSegura(compra.foto_url),
+      status: toText(compra.status),
+      pedido_feito: compraPedidoFeito(compra),
+      updated_at: toText(compra.updated_at),
+    };
+  });
+}
+
+function produtoCardFromItem(
+  item: ItemResumo,
+  index: number,
+  grupo: ProdutoIaCard["grupo"],
+  origem: string
+): ProdutoIaCard {
+  const titulo = item.descricao || item.sku || item.codigo;
+  return {
+    grupo,
+    posicao: index + 1,
+    titulo,
+    codigo: item.codigo,
+    sku: item.sku,
+    descricao: item.descricao,
+    secao: item.secao,
+    fotoUrl: fotoUrlSegura(item.foto_url),
+    status: item.status,
+    pedidoFeito: item.pedido_feito,
+    atualizadoEm: item.updated_at,
+    vezes: item.vezes,
+    totalPedido: item.total_pedido,
+    totalReal: item.total_real,
+    origem,
+  };
+}
+
+function itemResumoParaContexto(item: ItemResumo) {
+  return {
+    codigo: item.codigo,
+    sku: item.sku,
+    descricao: item.descricao,
+    secao: item.secao,
+    vezes: item.vezes,
+    total_pedido: item.total_pedido,
+    total_real: item.total_real,
+    status_compras: item.status || null,
+    pedido_feito: item.pedido_feito,
+    foto_disponivel: Boolean(item.foto_url),
+  };
 }
 
 function perguntaPedeTopItem(pergunta: string): boolean {
@@ -557,6 +692,10 @@ function compraToItemResumo(row: CompraRow): ItemResumo {
     sku: toText(row.sku),
     descricao: toText(row.descricao) || codigo,
     secao: toText(row.secao) || "Sem categoria",
+    foto_url: fotoUrlSegura(row.foto_url),
+    status: toText(row.status),
+    pedido_feito: compraPedidoFeito(row),
+    updated_at: toText(row.updated_at),
     vezes,
     total_pedido: vezes,
     total_real: 0,
@@ -569,7 +708,7 @@ function montarRespostaRankingSecao(
   compras: CompraRow[],
   dataInicio: string,
   dataFim: string
-): string | null {
+): RespostaAutomatica | null {
   if (!perguntaPedeRankingPorSecao(pergunta)) return null;
 
   const secao = extrairSecaoPergunta(pergunta);
@@ -580,7 +719,7 @@ function montarRespostaRankingSecao(
   const filtroData = filtrarItensPorPergunta(rows, pergunta, hoje);
   const secaoNormalizada = normalizarBusca(secao);
   const linhasDaSecao = filtroData.rows.filter((row) => normalizarBusca(toText(row.secao)).includes(secaoNormalizada));
-  let itens = agregarItens(linhasDaSecao, 500);
+  let itens = enriquecerItensComCompras(agregarItens(linhasDaSecao, 500), compras);
   let base = "dashboard de pedidos concluidos";
 
   if (itens.length === 0) {
@@ -592,10 +731,13 @@ function montarRespostaRankingSecao(
   }
 
   if (itens.length === 0) {
-    return [
-      `Nao encontrei itens na secao "${secao}" para montar o ranking.`,
-      `Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
-    ].join("\n");
+    return {
+      resposta: [
+        `🔎 Nao encontrei itens na secao "${secao}" para montar o ranking.`,
+        `📅 Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+      ].join("\n"),
+      produtos: [],
+    };
   }
 
   const maisPedidos = [...itens]
@@ -606,16 +748,32 @@ function montarRespostaRankingSecao(
     .sort((a, b) => pontuacaoPedido(a) - pontuacaoPedido(b) || a.descricao.localeCompare(b.descricao))
     .slice(0, limite);
 
-  return [
-    `Ranking da secao ${secao}`,
-    `Base: ${base}. Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)} (${filtroData.label}).`,
+  const produtos = [
+    ...maisPedidos.map((item, index) => produtoCardFromItem(item, index, "mais_pedidos", base)),
+    ...menosPedidos.map((item, index) => produtoCardFromItem(item, index, "menos_pedidos", base)),
+  ];
+  const campeao = maisPedidos[0];
+  const menor = menosPedidos[0];
+
+  return {
+    resposta: [
+    `📊 Ranking da secao: ${secao.toUpperCase()}`,
+    `📅 Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)} (${filtroData.label})`,
+    `🧾 Base: ${base}.`,
+    produtos.some((produto) => produto.fotoUrl) ? `🖼️ Fotos: veja os cards dos produtos abaixo.` : `🖼️ Fotos: nao encontrei foto vinculada para esses itens.`,
     "",
-    `${limite} itens mais pedidos:`,
+    `🏆 ${limite} itens mais pedidos`,
     ...maisPedidos.map(formatarItemResumo),
     "",
-    `${limite} itens menos pedidos:`,
+    `📉 ${limite} itens menos pedidos`,
     ...menosPedidos.map(formatarItemResumo),
-  ].join("\n");
+    "",
+    "💡 Leitura rapida",
+    campeao ? `- Campeao: ${campeao.descricao || campeao.codigo} com ${pontuacaoPedido(campeao)} un./ocorrencias.` : "- Sem campeao no recorte.",
+    menor ? `- Menor giro: ${menor.descricao || menor.codigo} com ${pontuacaoPedido(menor)} un./ocorrencias.` : "- Sem itens de menor giro no recorte.",
+  ].join("\n"),
+    produtos,
+  };
 }
 
 function montarRespostaTopItens(
@@ -624,21 +782,24 @@ function montarRespostaTopItens(
   compras: CompraRow[],
   dataInicio: string,
   dataFim: string
-): string | null {
+): RespostaAutomatica | null {
   if (!perguntaPedeTopItem(pergunta)) return null;
 
   const hoje = hojeSaoPaulo();
   const filtro = filtrarItensPorPergunta(rows, pergunta, hoje);
-  const top = agregarItens(filtro.rows, 10);
+  const top = enriquecerItensComCompras(agregarItens(filtro.rows, 10), compras);
 
   if (top.length > 0) {
+    const produtos = top.map((item, index) => produtoCardFromItem(item, index, "top", "dashboard de pedidos concluidos"));
     const linhas = [
-      `Item mais pedido (${filtro.label})`,
-      `Base: dashboard de pedidos concluidos. Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+      `🏆 Item mais pedido (${filtro.label})`,
+      `📅 Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+      `🧾 Base: dashboard de pedidos concluidos.`,
+      produtos.some((produto) => produto.fotoUrl) ? `🖼️ Fotos: veja os cards dos produtos abaixo.` : `🖼️ Fotos: nao encontrei foto vinculada para esses itens.`,
       "",
-      `Mais pedido: ${top[0].descricao || top[0].codigo} | Cod. ${top[0].codigo} | ${top[0].total_pedido || top[0].vezes} ${top[0].total_pedido > 0 ? "un. pedidas" : "ocorrencia(s)"}.`,
+      `🥇 Mais pedido: ${top[0].descricao || top[0].codigo} | Cod. ${top[0].codigo} | ${top[0].total_pedido || top[0].vezes} ${top[0].total_pedido > 0 ? "un. pedidas" : "ocorrencia(s)"}.`,
       "",
-      "Top itens:",
+      "📦 Top itens",
       ...top.map(formatarItemResumo),
     ];
 
@@ -652,7 +813,10 @@ function montarRespostaTopItens(
       }
     }
 
-    return linhas.join("\n");
+    return {
+      resposta: linhas.join("\n"),
+      produtos,
+    };
   }
 
   const comprasTop = [...compras]
@@ -660,15 +824,22 @@ function montarRespostaTopItens(
     .slice(0, 10);
 
   if (comprasTop.length > 0) {
-    return [
-      "Nao encontrei pedidos concluidos no dashboard para esse recorte.",
-      "Usei a tabela Compras como fallback, pelo campo vezes_pedido.",
+    const itensFallback = comprasTop.map(compraToItemResumo);
+    return {
+      resposta: [
+      "🔎 Nao encontrei pedidos concluidos no dashboard para esse recorte.",
+      "🧾 Usei a tabela Compras como fallback, pelo campo vezes_pedido.",
       "",
-      ...comprasTop.map((row, index) => `${index + 1}. ${toText(row.descricao) || toText(row.codigo)} | Cod. ${toText(row.codigo)} | ${toText(row.secao) || "Sem categoria"} | ${toNumber(row.vezes_pedido)} vez(es).`),
-    ].join("\n");
+      ...itensFallback.map(formatarItemResumo),
+    ].join("\n"),
+      produtos: itensFallback.map((item, index) => produtoCardFromItem(item, index, "top", "tabela Compras")),
+    };
   }
 
-  return "Nao encontrei dados suficientes no Supabase para calcular o item mais pedido.";
+  return {
+    resposta: "🔎 Nao encontrei dados suficientes no Supabase para calcular o item mais pedido.",
+    produtos: [],
+  };
 }
 
 function contarPorCampo<T extends Record<string, unknown>>(rows: T[], field: keyof T) {
@@ -732,6 +903,7 @@ function resumirCompras(rows: CompraRow[]) {
       status: toText(row.status),
       vezes_pedido: toNumber(row.vezes_pedido),
       pedido_feito: row.pedido_feito === 1 || row.pedido_feito === true,
+      foto_disponivel: Boolean(fotoUrlSegura(row.foto_url)),
       atualizado_em: toText(row.updated_at),
     }));
 
@@ -751,7 +923,8 @@ function montarContexto(params: {
   avisos: string[];
 }): { contexto: string; meta: QueryMeta } {
   const hoje = hojeSaoPaulo();
-  const topItensPeriodo = agregarItens(params.itens, 30);
+  const topItensPeriodo = enriquecerItensComCompras(agregarItens(params.itens, 30), params.compras)
+    .map(itemResumoParaContexto);
   const topItensPorDia = montarTopPorDia(params.itens, params.pergunta, hoje);
   const comprasResumo = resumirCompras(params.compras);
   const pedidosPorStatus = contarPorCampo(params.pedidos as unknown as Record<string, unknown>[], "status");
@@ -816,7 +989,7 @@ function montarRespostaFallback(params: {
   dataInicio: string;
   dataFim: string;
   erroIa: string;
-}): string {
+}): RespostaAutomatica {
   const rankingSecao = montarRespostaRankingSecao(
     params.pergunta,
     params.itens,
@@ -835,31 +1008,54 @@ function montarRespostaFallback(params: {
   );
   if (respostaDireta) return respostaDireta;
 
-  const topItens = agregarItens(params.itens, 8);
+  const topItens = enriquecerItensComCompras(agregarItens(params.itens, 8), params.compras);
   const statusCompras = resumirCompras(params.compras).porStatus.slice(0, 8);
   const linhas = [
-    `A IA/Ollama falhou (${params.erroIa}).`,
-    "Segue um resumo direto com os dados lidos do Supabase:",
-    `Periodo consultado: ${formatarData(params.dataInicio)} a ${formatarData(params.dataFim)}.`,
+    `⚠️ A IA externa falhou (${params.erroIa}).`,
+    "📌 Segue um resumo direto com os dados lidos do Supabase:",
+    `📅 Periodo: ${formatarData(params.dataInicio)} a ${formatarData(params.dataFim)}.`,
     "",
   ];
 
   if (topItens.length > 0) {
-    linhas.push("Top itens por pedidos concluidos:");
+    linhas.push("📦 Top itens por pedidos concluidos");
     linhas.push(...topItens.map(formatarItemResumo));
     linhas.push("");
   }
 
   if (statusCompras.length > 0) {
-    linhas.push("Compras por status:");
+    linhas.push("🛒 Compras por status");
     linhas.push(...statusCompras.map((row) => `- ${row.label}: ${row.total}`));
   }
 
   if (topItens.length === 0 && statusCompras.length === 0) {
-    linhas.push("Nao encontrei dados suficientes para montar um resumo automatico.");
+    linhas.push("🔎 Nao encontrei dados suficientes para montar um resumo automatico.");
   }
 
-  return linhas.join("\n").trim();
+  return {
+    resposta: linhas.join("\n").trim(),
+    produtos: topItens.map((item, index) => produtoCardFromItem(item, index, "citados", "resumo automatico")),
+  };
+}
+
+function perguntaFalaDeProduto(pergunta: string): boolean {
+  return /\b(item|itens|produto|produtos|sku|codigo|codigos|ranking)\b/.test(normalizarBusca(pergunta));
+}
+
+function montarProdutosRelacionados(pergunta: string, itens: ItemFrequenciaRow[], compras: CompraRow[]): ProdutoIaCard[] {
+  if (!perguntaFalaDeProduto(pergunta)) return [];
+
+  const hoje = hojeSaoPaulo();
+  const filtro = filtrarItensPorPergunta(itens, pergunta, hoje);
+  const topDashboard = enriquecerItensComCompras(agregarItens(filtro.rows, 8), compras);
+  const base = topDashboard.length > 0
+    ? topDashboard
+    : [...compras]
+      .sort((a, b) => toNumber(b.vezes_pedido) - toNumber(a.vezes_pedido))
+      .slice(0, 8)
+      .map(compraToItemResumo);
+
+  return base.map((item, index) => produtoCardFromItem(item, index, "citados", topDashboard.length > 0 ? "dashboard de pedidos concluidos" : "tabela Compras"));
 }
 
 function limparHistorico(value: unknown): ChatMessage[] {
@@ -900,7 +1096,10 @@ function buildIaMessages(pergunta: string, contexto: string, historico: ChatMess
     "Use somente os dados fornecidos no contexto Supabase. Nao invente produto, quantidade, status ou data.",
     "Se os dados nao forem suficientes, diga exatamente qual filtro/data falta.",
     "Voce nao pode alterar banco, status, pedidos, ERP ou fornecedores. Apenas analisar e relatar.",
-    "Quando for relatorio, estruture com titulo, periodo, filtros, resumo e lista objetiva.",
+    "Padrao visual obrigatorio: use emojis moderados, titulo claro, periodo/base, resumo rapido e listas escaneaveis.",
+    "Quando citar produto, traga codigo, SKU quando existir, secao, quantidade pedida, quantidade real, ocorrencias, status de compras e se ha foto disponivel.",
+    "Evite resposta seca em linhas gigantes; quebre cada produto em 2 ou 3 linhas curtas.",
+    "Quando for relatorio, estruture com titulo, periodo, filtros, resumo, destaques e lista objetiva.",
   ].join("\n");
 
   const perguntaComContexto = [
@@ -1047,12 +1246,22 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const respostaRankingSecao = montarRespostaRankingSecao(pergunta, itens, compras, dataInicio, dataFim);
     if (respostaRankingSecao) {
-      return res.status(200).json({ ok: true, resposta: respostaRankingSecao, contexto: metaInicial });
+      return res.status(200).json({
+        ok: true,
+        resposta: respostaRankingSecao.resposta,
+        produtos: respostaRankingSecao.produtos,
+        contexto: metaInicial,
+      });
     }
 
     const respostaDireta = montarRespostaTopItens(pergunta, itens, compras, dataInicio, dataFim);
     if (respostaDireta) {
-      return res.status(200).json({ ok: true, resposta: respostaDireta, contexto: metaInicial });
+      return res.status(200).json({
+        ok: true,
+        resposta: respostaDireta.resposta,
+        produtos: respostaDireta.produtos,
+        contexto: metaInicial,
+      });
     }
 
     const [pedidos, secoes] = await Promise.all([
@@ -1075,11 +1284,16 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     try {
       const resposta = await perguntarIa(pergunta, contexto, limparHistorico(body.historico));
-      return res.status(200).json({ ok: true, resposta, contexto: meta });
+      return res.status(200).json({
+        ok: true,
+        resposta,
+        produtos: montarProdutosRelacionados(pergunta, itens, compras),
+        contexto: meta,
+      });
     } catch (error) {
       const erroIa = error instanceof Error ? error.message : "erro desconhecido";
       meta.avisos.push(erroIa);
-      const resposta = montarRespostaFallback({
+      const respostaFallback = montarRespostaFallback({
         pergunta,
         itens,
         compras,
@@ -1087,7 +1301,12 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         dataFim,
         erroIa,
       });
-      return res.status(200).json({ ok: true, resposta, contexto: meta });
+      return res.status(200).json({
+        ok: true,
+        resposta: respostaFallback.resposta,
+        produtos: respostaFallback.produtos,
+        contexto: meta,
+      });
     }
   } catch (error) {
     const statusCode = error instanceof HttpError ? error.statusCode : 500;

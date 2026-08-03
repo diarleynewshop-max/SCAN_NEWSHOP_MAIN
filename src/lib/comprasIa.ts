@@ -18,9 +18,28 @@ export interface ComprasIaContexto {
   avisos?: string[];
 }
 
+export interface ComprasIaProduto {
+  grupo: "mais_pedidos" | "menos_pedidos" | "top" | "citados" | string;
+  posicao: number;
+  titulo: string;
+  codigo: string;
+  sku: string;
+  descricao: string;
+  secao: string;
+  fotoUrl: string | null;
+  status: string;
+  pedidoFeito: boolean | null;
+  atualizadoEm: string;
+  vezes: number;
+  totalPedido: number;
+  totalReal: number;
+  origem: string;
+}
+
 export interface ComprasIaResponse {
   resposta: string;
   contexto: ComprasIaContexto;
+  produtos?: ComprasIaProduto[];
 }
 
 export interface ConsultarComprasIaParams {
@@ -59,6 +78,7 @@ export async function consultarComprasIa(params: ConsultarComprasIaParams): Prom
     ok?: boolean;
     resposta?: string;
     contexto?: ComprasIaContexto;
+    produtos?: ComprasIaProduto[];
     error?: string;
   } | null;
 
@@ -69,10 +89,28 @@ export async function consultarComprasIa(params: ConsultarComprasIaParams): Prom
   return {
     resposta: String(payload.resposta ?? "").trim(),
     contexto: payload.contexto as ComprasIaContexto,
+    produtos: Array.isArray(payload.produtos) ? payload.produtos : [],
   };
 }
 
-export function baixarComprasIaTxt(pergunta: string, resposta: string, contexto?: ComprasIaContexto): void {
+function linhasProdutos(produtos?: ComprasIaProduto[]): string[] {
+  if (!produtos?.length) return [];
+  return [
+    "",
+    "Produtos citados:",
+    ...produtos.map((produto) => [
+      `${produto.posicao}. ${produto.titulo || produto.descricao || produto.codigo}`,
+      `   Codigo: ${produto.codigo || "-"}`,
+      produto.sku ? `   SKU: ${produto.sku}` : "",
+      `   Secao: ${produto.secao || "-"}`,
+      `   Pedido: ${produto.totalPedido || 0} | Real: ${produto.totalReal || 0} | Ocorrencias: ${produto.vezes || 0}`,
+      produto.status ? `   Status Compras: ${produto.status}` : "",
+      produto.fotoUrl ? `   Foto: ${produto.fotoUrl}` : "",
+    ].filter(Boolean).join("\n")),
+  ];
+}
+
+export function baixarComprasIaTxt(pergunta: string, resposta: string, contexto?: ComprasIaContexto, produtos?: ComprasIaProduto[]): void {
   const linhas = [
     "Relatorio IA Compras",
     `Gerado em: ${new Date().toLocaleString("pt-BR")}`,
@@ -84,6 +122,7 @@ export function baixarComprasIaTxt(pergunta: string, resposta: string, contexto?
     "",
     "Resposta:",
     resposta,
+    ...linhasProdutos(produtos),
   ].filter((linha) => linha !== "");
 
   baixarBlob(
@@ -92,7 +131,7 @@ export function baixarComprasIaTxt(pergunta: string, resposta: string, contexto?
   );
 }
 
-export function baixarComprasIaPdf(pergunta: string, resposta: string, contexto?: ComprasIaContexto): void {
+export function baixarComprasIaPdf(pergunta: string, resposta: string, contexto?: ComprasIaContexto, produtos?: ComprasIaProduto[]): void {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
@@ -127,6 +166,19 @@ export function baixarComprasIaPdf(pergunta: string, resposta: string, contexto?
   y += 3;
   write("Resposta", 11, true);
   write(resposta, 10);
+
+  if (produtos?.length) {
+    y += 3;
+    write("Produtos citados", 11, true);
+    for (const produto of produtos) {
+      write(`${produto.posicao}. ${produto.titulo || produto.descricao || produto.codigo}`, 10, true);
+      write(`Codigo: ${produto.codigo || "-"}${produto.sku ? ` | SKU: ${produto.sku}` : ""}`, 9);
+      write(`Secao: ${produto.secao || "-"} | Pedido: ${produto.totalPedido || 0} | Real: ${produto.totalReal || 0} | Ocorrencias: ${produto.vezes || 0}`, 9);
+      if (produto.status) write(`Status Compras: ${produto.status}`, 9);
+      if (produto.fotoUrl) write(`Foto: ${produto.fotoUrl}`, 8);
+      y += 2;
+    }
+  }
 
   doc.save(nomeArquivo("ia-compras", "pdf"));
 }
