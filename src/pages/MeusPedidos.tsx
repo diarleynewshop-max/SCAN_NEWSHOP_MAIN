@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from "react";
 import {
   CheckCircle2,
   ChevronDown,
@@ -10,6 +10,7 @@ import {
   PackageCheck,
   RefreshCw,
   Search,
+  ScanBarcode,
   User,
   X,
 } from "lucide-react";
@@ -34,6 +35,14 @@ import {
   responderRecomendacaoSubstituicao,
   type RecomendacaoSubstituicao,
 } from "@/lib/recomendacoesSubstituicao";
+
+const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
+
+const SCANNER_FALLBACK = (
+  <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/80 p-4 text-sm font-semibold text-white">
+    Abrindo scanner...
+  </div>
+);
 
 const ITEM_STATUS_META: Record<string, { label: string; classes: string }> = {
   separado: { label: "Separado", classes: "border-emerald-200 bg-emerald-50 text-emerald-700" },
@@ -70,11 +79,11 @@ function formatDateTime(value: string | null): string {
 
 function ResumoChip(props: { label: string; value: number; classes: string }) {
   return (
-    <div className={`rounded-xl border px-3 py-2 ${props.classes}`}>
-      <div className="text-[11px] font-semibold uppercase tracking-[0.14em] opacity-80">
+    <div className={`rounded-lg border px-2 py-2 sm:rounded-xl sm:px-3 ${props.classes}`}>
+      <div className="text-[9px] font-semibold uppercase tracking-[0.08em] opacity-80 sm:text-[11px] sm:tracking-[0.14em]">
         {props.label}
       </div>
-      <div className="mt-1 text-lg font-bold">{props.value}</div>
+      <div className="mt-1 text-base font-bold sm:text-lg">{props.value}</div>
     </div>
   );
 }
@@ -94,6 +103,7 @@ export default function MeusPedidos() {
   const [pessoaBusca, setPessoaBusca] = useState("");
   const [dataInicio, setDataInicio] = useState("");
   const [dataFim, setDataFim] = useState("");
+  const [scannerAberto, setScannerAberto] = useState(false);
 
   // Render incremental: todos os pedidos ficam carregados/filtraveis, mas so
   // renderizamos um lote por vez (concluidos podem passar de 1000).
@@ -328,6 +338,15 @@ export default function MeusPedidos() {
     setDataFim("");
   };
 
+  const aplicarCodigoEscaneado = (codigo: string) => {
+    const code = codigo.trim();
+    setScannerAberto(false);
+    if (!code) return;
+    setProdutoBusca(code);
+    setVisiveis(LOTE);
+    toast({ title: "Codigo escaneado", description: code });
+  };
+
   const responderRecomendacao = async (
     recomendacao: RecomendacaoSubstituicao,
     decisao: "aceita" | "recusada"
@@ -354,18 +373,18 @@ export default function MeusPedidos() {
   };
 
   return (
-    <div className="mx-auto flex w-full max-w-6xl flex-col gap-4 pb-8">
-      <section className="rounded-3xl border border-border bg-card p-5 shadow-sm">
-        <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+    <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-2 pb-8 sm:gap-4 sm:px-0">
+      <section className="rounded-2xl border border-border bg-card p-3 shadow-sm sm:rounded-3xl sm:p-5">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
           <div>
-            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+            <div className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-muted-foreground sm:text-xs sm:tracking-[0.2em]">
               <ClipboardList className="h-4 w-4" />
               Pedidos concluidos
             </div>
-            <h1 className="mt-2 text-2xl font-black text-foreground md:text-3xl">
+            <h1 className="mt-1.5 text-xl font-black text-foreground sm:mt-2 sm:text-2xl md:text-3xl">
               Todos os pedidos finalizados
             </h1>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+            <p className="mt-1.5 max-w-2xl text-xs text-muted-foreground sm:mt-2 sm:text-sm">
               {empresa} | {flag.toUpperCase()} — filtre por produto, pessoa ou periodo.
             </p>
           </div>
@@ -374,7 +393,7 @@ export default function MeusPedidos() {
             type="button"
             onClick={() => void carregar(true)}
             disabled={loading || refreshing}
-            className="inline-flex items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60"
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground transition hover:bg-accent disabled:cursor-not-allowed disabled:opacity-60 sm:w-auto"
           >
             <RefreshCw className={`h-4 w-4 ${refreshing ? "animate-spin" : ""}`} />
             Atualizar
@@ -382,7 +401,7 @@ export default function MeusPedidos() {
         </div>
 
         {recomendacoesPendentes.length > 0 && (
-          <div className="mt-4 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-3">
+          <div className="mt-3 rounded-2xl border border-amber-200 bg-amber-50 px-3 py-3 sm:mt-4 sm:px-4">
             <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
               <div>
                 <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-amber-700">
@@ -395,7 +414,7 @@ export default function MeusPedidos() {
               <button
                 type="button"
                 onClick={() => setPopupRecomendacaoAberto(true)}
-                className="inline-flex items-center justify-center rounded-xl bg-amber-600 px-4 py-2 text-sm font-bold text-white"
+                className="inline-flex h-10 items-center justify-center rounded-xl bg-amber-600 px-4 text-sm font-bold text-white"
               >
                 Ver recomendacoes
               </button>
@@ -404,24 +423,36 @@ export default function MeusPedidos() {
         )}
 
         {/* Filtros */}
-        <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-          <label className="flex flex-col gap-1">
+        <div className="mt-3 grid gap-2 sm:gap-3 md:grid-cols-2 xl:grid-cols-4">
+          <div className="flex flex-col gap-1">
             <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Produto</span>
-            <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
-              <Search className="h-4 w-4 text-muted-foreground" />
-              <input
-                value={produtoBusca}
-                onChange={(e) => setProdutoBusca(e.target.value)}
-                placeholder="Codigo, nome ou SKU"
-                className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
-              />
+            <div className="flex gap-2">
+              <div className="flex min-w-0 flex-1 items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
+                <Search className="h-4 w-4 shrink-0 text-muted-foreground" />
+                <input
+                  value={produtoBusca}
+                  onChange={(e) => setProdutoBusca(e.target.value)}
+                  placeholder="Codigo, nome ou SKU"
+                  className="w-full bg-transparent text-sm text-foreground outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+              <button
+                type="button"
+                onClick={() => setScannerAberto(true)}
+                className="inline-flex h-10 w-11 shrink-0 items-center justify-center rounded-xl bg-primary text-primary-foreground shadow-sm transition active:scale-[0.98] sm:w-auto sm:px-4"
+                aria-label="Escanear codigo de barras"
+                title="Escanear codigo de barras"
+              >
+                <ScanBarcode className="h-5 w-5" />
+                <span className="ml-2 hidden text-sm font-bold sm:inline">Scan</span>
+              </button>
             </div>
-          </label>
+          </div>
 
           <label className="flex flex-col gap-1">
             <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Pessoa</span>
             <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2">
-              <User className="h-4 w-4 text-muted-foreground" />
+              <User className="h-4 w-4 shrink-0 text-muted-foreground" />
               <input
                 value={pessoaBusca}
                 onChange={(e) => setPessoaBusca(e.target.value)}
@@ -463,24 +494,24 @@ export default function MeusPedidos() {
           </button>
         )}
 
-        <div className="mt-4 grid gap-3 md:grid-cols-3">
-          <div className="rounded-2xl border border-border bg-background px-4 py-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        <div className="mt-3 grid grid-cols-3 gap-2 sm:mt-4 sm:gap-3">
+          <div className="rounded-xl border border-border bg-background px-3 py-2 sm:rounded-2xl sm:px-4 sm:py-3">
+            <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:text-[11px] sm:tracking-[0.16em]">
               Pedidos
             </div>
-            <div className="mt-2 text-3xl font-black text-foreground">{stats.total}</div>
+            <div className="mt-1 text-2xl font-black text-foreground sm:mt-2 sm:text-3xl">{stats.total}</div>
           </div>
-          <div className="rounded-2xl border border-border bg-background px-4 py-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="rounded-xl border border-border bg-background px-3 py-2 sm:rounded-2xl sm:px-4 sm:py-3">
+            <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:text-[11px] sm:tracking-[0.16em]">
               Itens
             </div>
-            <div className="mt-2 text-3xl font-black text-sky-700">{stats.itens}</div>
+            <div className="mt-1 text-2xl font-black text-sky-700 sm:mt-2 sm:text-3xl">{stats.itens}</div>
           </div>
-          <div className="rounded-2xl border border-border bg-background px-4 py-3">
-            <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+          <div className="rounded-xl border border-border bg-background px-3 py-2 sm:rounded-2xl sm:px-4 sm:py-3">
+            <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:text-[11px] sm:tracking-[0.16em]">
               Nao tem
             </div>
-            <div className="mt-2 text-3xl font-black text-rose-700">{stats.naoTem}</div>
+            <div className="mt-1 text-2xl font-black text-rose-700 sm:mt-2 sm:text-3xl">{stats.naoTem}</div>
           </div>
         </div>
       </section>
@@ -491,17 +522,17 @@ export default function MeusPedidos() {
         </section>
       )}
 
-      <section className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <section className="grid gap-3 sm:gap-4 md:grid-cols-2 xl:grid-cols-3">
         {loading && pedidos.length === 0 ? (
           Array.from({ length: 3 }).map((_, index) => (
-            <div key={index} className="rounded-3xl border border-border bg-card p-5 shadow-sm">
+            <div key={index} className="rounded-2xl border border-border bg-card p-4 shadow-sm sm:rounded-3xl sm:p-5">
               <div className="h-5 w-40 animate-pulse rounded bg-muted" />
               <div className="mt-4 h-4 w-full animate-pulse rounded bg-muted" />
               <div className="mt-2 h-4 w-2/3 animate-pulse rounded bg-muted" />
             </div>
           ))
         ) : pedidos.length === 0 ? (
-          <div className="rounded-3xl border border-dashed border-border bg-card px-6 py-10 text-center shadow-sm md:col-span-2 xl:col-span-3">
+          <div className="rounded-2xl border border-dashed border-border bg-card px-5 py-8 text-center shadow-sm sm:rounded-3xl sm:px-6 sm:py-10 md:col-span-2 xl:col-span-3">
             <PackageCheck className="mx-auto h-10 w-10 text-muted-foreground" />
             <h2 className="mt-4 text-lg font-bold text-foreground">Nenhum pedido encontrado</h2>
             <p className="mt-2 text-sm text-muted-foreground">
@@ -519,18 +550,18 @@ export default function MeusPedidos() {
             const carregando = carregandoItens.has(pedido.id);
 
             return (
-              <article key={pedido.id} className="rounded-3xl border border-border bg-card p-5 shadow-sm">
-                <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+              <article key={pedido.id} className="rounded-2xl border border-border bg-card p-3 shadow-sm sm:rounded-3xl sm:p-5">
+                <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
-                      <User className="h-5 w-5 shrink-0 text-muted-foreground" />
-                      <h2 className="truncate text-lg font-black text-foreground">{tituloPedido}</h2>
-                      <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-3 py-1 text-xs font-bold text-emerald-800">
+                      <User className="h-4 w-4 shrink-0 text-muted-foreground sm:h-5 sm:w-5" />
+                      <h2 className="max-w-[calc(100vw-9rem)] truncate text-base font-black text-foreground sm:max-w-none sm:text-lg">{tituloPedido}</h2>
+                      <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 sm:px-3 sm:py-1 sm:text-xs">
                         Concluido
                       </span>
                     </div>
 
-                    <div className="mt-3 flex flex-col gap-2 text-sm text-muted-foreground">
+                    <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted-foreground sm:mt-3 sm:gap-2 sm:text-sm">
                       <span className="inline-flex items-center gap-2">
                         <Clock3 className="h-4 w-4" />
                         Criado em {formatDateTime(pedido.createdAt)}
@@ -542,15 +573,15 @@ export default function MeusPedidos() {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-border bg-background px-4 py-3 text-sm">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                  <div className="shrink-0 rounded-xl border border-border bg-background px-3 py-2 text-sm sm:rounded-2xl sm:px-4 sm:py-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:text-[11px] sm:tracking-[0.16em]">
                       Itens
                     </div>
-                    <div className="mt-1 text-2xl font-black text-foreground">{pedido.totalItens}</div>
+                    <div className="mt-1 text-xl font-black text-foreground sm:text-2xl">{pedido.totalItens}</div>
                   </div>
                 </div>
 
-                <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-3">
+                <div className="mt-3 grid grid-cols-4 gap-2 sm:mt-4 sm:grid-cols-3 sm:gap-3">
                   <ResumoChip
                     label="Separado"
                     value={pedido.resumoSeparado}
@@ -571,8 +602,8 @@ export default function MeusPedidos() {
                     value={pedido.resumoPendente}
                     classes="border-slate-200 bg-slate-50 text-slate-800"
                   />
-                  <div className="rounded-xl border border-border bg-background px-3 py-2">
-                    <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+                  <div className="col-span-4 rounded-lg border border-border bg-background px-2 py-2 sm:col-span-1 sm:rounded-xl sm:px-3">
+                    <div className="text-[9px] font-semibold uppercase tracking-[0.08em] text-muted-foreground sm:text-[11px] sm:tracking-[0.14em]">
                       Conferente
                     </div>
                     <div className="mt-1 text-sm font-bold text-foreground">{pedido.conferente || "-"}</div>
@@ -582,7 +613,7 @@ export default function MeusPedidos() {
                 <button
                   type="button"
                   onClick={() => void toggleItens(pedido.id)}
-                  className="mt-4 inline-flex w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 py-2 text-sm font-semibold text-foreground transition hover:bg-accent"
+                  className="mt-3 inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border bg-background px-4 text-sm font-semibold text-foreground transition hover:bg-accent sm:mt-4"
                 >
                   <Package className="h-4 w-4" />
                   {aberto ? "Ocultar itens" : `Ver itens (${pedido.totalItens})`}
@@ -604,17 +635,17 @@ export default function MeusPedidos() {
                         return (
                           <div
                             key={item.id}
-                            className="flex items-center gap-3 rounded-xl border border-border bg-background px-3 py-2"
+                            className="flex items-start gap-2 rounded-xl border border-border bg-background px-2 py-2 sm:items-center sm:gap-3 sm:px-3"
                           >
                             {foto ? (
                               <img
                                 src={foto}
                                 alt={descricao}
-                                className="h-12 w-12 shrink-0 rounded-lg object-cover"
+                                className="h-14 w-14 shrink-0 rounded-lg object-cover sm:h-12 sm:w-12"
                                 loading="lazy"
                               />
                             ) : (
-                              <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg bg-muted text-[10px] text-muted-foreground">
+                              <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-lg bg-muted text-[10px] text-muted-foreground sm:h-12 sm:w-12">
                                 sem foto
                               </div>
                             )}
@@ -626,11 +657,20 @@ export default function MeusPedidos() {
                                 {item.codigo}
                                 {item.sku ? ` · ${item.sku}` : ""}
                               </div>
+                              <div className="mt-1 flex flex-wrap items-center gap-2 sm:hidden">
+                                <span className="text-xs text-muted-foreground">
+                                  Ped: <span className="font-bold text-foreground">{item.quantidadePedida}</span>
+                                  {item.quantidadeReal != null && ` | Real: ${item.quantidadeReal}`}
+                                </span>
+                                <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${st.classes}`}>
+                                  {st.label}
+                                </span>
+                              </div>
                             </div>
-                            <div className="shrink-0 text-right">
+                            <div className="hidden shrink-0 text-right sm:block">
                               <div className="text-xs text-muted-foreground">
                                 Ped: <span className="font-bold text-foreground">{item.quantidadePedida}</span>
-                                {item.quantidadeReal != null && ` · Real: ${item.quantidadeReal}`}
+                                {item.quantidadeReal != null && ` | Real: ${item.quantidadeReal}`}
                               </div>
                               <span className={`mt-1 inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-bold ${st.classes}`}>
                                 {st.label}
@@ -666,11 +706,17 @@ export default function MeusPedidos() {
           <button
             type="button"
             onClick={() => setVisiveis((v) => v + LOTE)}
-            className="inline-flex items-center gap-2 rounded-xl border border-border bg-card px-5 py-2.5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-accent"
+            className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-xl border border-border bg-card px-5 text-sm font-semibold text-foreground shadow-sm transition hover:bg-accent sm:w-auto"
           >
             Carregar mais ({pedidos.length - visiveis} restantes)
           </button>
         </div>
+      )}
+
+      {scannerAberto && (
+        <Suspense fallback={SCANNER_FALLBACK}>
+          <BarcodeScanner onDetected={aplicarCodigoEscaneado} onClose={() => setScannerAberto(false)} />
+        </Suspense>
       )}
 
       <ItemPedidoModal
