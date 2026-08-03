@@ -97,6 +97,16 @@ export interface ConferenceItem {
   digito?: "S" | "M" | null;
 }
 
+interface PdvResumoItem {
+  item: ConferenceItem;
+  quantidade: number;
+  precoUnitario: number;
+  descontoPercentual: number;
+  descontoValor: number;
+  totalBruto: number;
+  totalLiquido: number;
+}
+
 interface ConferenceViewProps {
   onBack: () => void;
   empresa?: string;
@@ -109,6 +119,31 @@ function formatTime(seconds: number): string {
   const m = Math.floor((seconds % 3600) / 60);
   const s = seconds % 60;
   return `${h.toString().padStart(2, "0")}:${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+function formatarMoeda(value: number): string {
+  return Number(value || 0).toLocaleString("pt-BR", { style: "currency", currency: "BRL" });
+}
+
+function toMoney(value: unknown): number {
+  const numero = Number(value ?? 0);
+  if (!Number.isFinite(numero) || numero <= 0) return 0;
+  return Math.round(numero * 100) / 100;
+}
+
+function normalizarDescontoPercentual(value: unknown): number {
+  const numero = Number(value ?? 0);
+  if (!Number.isFinite(numero) || numero <= 0) return 0;
+  return Math.min(50, Math.round(numero * 100) / 100);
+}
+
+function quantidadeVendavelConferencia(item: ConferenceItem): number {
+  if (item.status === "separado") {
+    const real = item.quantidadeReal == null ? 0 : Math.trunc(Number(item.quantidadeReal));
+    return real > 0 ? real : Math.trunc(Number(item.quantidadePedida ?? 0));
+  }
+  if (item.status === "nao_tem_tudo") return Math.trunc(Number(item.quantidadeReal ?? 0));
+  return 0;
 }
 
 type Phase = "import" | "pickTask" | "ready" | "running" | "finished";
@@ -263,6 +298,8 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [clientePdv, setClientePdv] = useState<ClientePdv | null>(null);
   const [clienteNomePedido, setClienteNomePedido] = useState("");
   const [modalClienteAberto, setModalClienteAberto] = useState(false);
+  const [modalResumoPdvAberto, setModalResumoPdvAberto] = useState(false);
+  const [descontoPdvPorItem, setDescontoPdvPorItem] = useState<Record<string, number>>({});
   const pedidoOrigemIdsRef = useRef<string[]>([]);
   const pedidoReservadoIdsRef = useRef<string[]>([]);
   const taskOrigemIdsRef = useRef<string[]>([]);
@@ -290,6 +327,29 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const clienteLabel = (clientePdv?.nome || clienteNomePedido || "").trim();
   const clienteCodigoLabel = String(clientePdv?.codigo ?? "").trim();
   const clienteDocLabel = String(clientePdv?.cpfCnpj ?? "").replace(/\D/g, "");
+  const obterDescontoPdv = (itemId: string) => normalizarDescontoPercentual(descontoPdvPorItem[itemId]);
+  const itensPdvResumo: PdvResumoItem[] = items
+    .map((item) => {
+      const quantidade = quantidadeVendavelConferencia(item);
+      const precoUnitario = toMoney(item.precoUnitario);
+      const descontoPercentual = obterDescontoPdv(item.id);
+      const totalBruto = Math.round(quantidade * precoUnitario * 100) / 100;
+      const descontoValor = Math.round(totalBruto * descontoPercentual) / 100;
+      const totalLiquido = Math.max(0, Math.round((totalBruto - descontoValor) * 100) / 100);
+      return { item, quantidade, precoUnitario, descontoPercentual, descontoValor, totalBruto, totalLiquido };
+    })
+    .filter((entry) => entry.quantidade > 0);
+  const resumoPdv = itensPdvResumo.reduce(
+    (acc, entry) => ({
+      itens: acc.itens + 1,
+      unidades: acc.unidades + entry.quantidade,
+      bruto: acc.bruto + entry.totalBruto,
+      desconto: acc.desconto + entry.descontoValor,
+      liquido: acc.liquido + entry.totalLiquido,
+    }),
+    { itens: 0, unidades: 0, bruto: 0, desconto: 0, liquido: 0 }
+  );
+  const temDescontoAltoPdv = itensPdvResumo.some((entry) => entry.descontoPercentual > 20);
   const [recomendacoesPedido, setRecomendacoesPedido] = useState<RecomendacaoSubstituicao[]>([]);
   const [modalRecomendacaoAberto, setModalRecomendacaoAberto] = useState(false);
   const [itemSelecionadoRecomendacao, setItemSelecionadoRecomendacao] = useState<ConferenceItem | null>(null);
@@ -891,6 +951,46 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
   };
 
+  function alterarDescontoPdv(itemId: string, value: string) {
+    const desconto = normalizarDescontoPercentual(value);
+    setDescontoPdvPorItem((prev) => ({ ...prev, [itemId]: desconto }));
+  }
+
+  function abrirResumoPdvParaFechar() {
+    if (!lojaEnviaPrevendaParaPdv(empresa)) {
+      void fecharConferencia();
+      return;
+    }
+
+    if (!clientePdv) {
+      setModalClienteAberto(true);
+      toast({
+        title: "Cliente obrigatorio",
+        description: "Selecione ou cadastre o cliente antes de enviar ao PDV.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (itensPdvResumo.length === 0) {
+      toast({ title: "Nenhum item vendavel para o PDV", variant: "destructive" });
+      return;
+    }
+
+    const semPreco = itensPdvResumo.filter((entry) => !entry.precoUnitario);
+    if (semPreco.length > 0) {
+      const exemplos = semPreco.slice(0, 5).map((entry) => entry.item.codigo).join(", ");
+      toast({
+        title: "PDV bloqueado: item sem preco",
+        description: exemplos,
+        variant: "destructive",
+      });
+      return;
+    }
+
+    setModalResumoPdvAberto(true);
+  }
+
   const clienteModal = (
     <PdvClienteModal
       open={modalClienteAberto}
@@ -899,6 +999,145 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       onSelect={(cliente) => void selecionarClientePedido(cliente)}
     />
   );
+
+  const resumoPdvModal = modalResumoPdvAberto ? (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center bg-black/70 p-4" onClick={() => sendStatus !== "sending" && setModalResumoPdvAberto(false)}>
+      <div className="w-full max-w-3xl max-h-[90vh] overflow-hidden rounded-2xl bg-card shadow-2xl" onClick={(event) => event.stopPropagation()}>
+        <div className="border-b border-border p-4">
+          <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">PDV</p>
+          <h2 className="text-lg font-black text-foreground">Confirmar pre-venda</h2>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Revise os itens, aplique desconto ate 50% e confirme antes de enviar ao caixa.
+          </p>
+        </div>
+
+        <div className="max-h-[58vh] overflow-y-auto p-4 space-y-3">
+          <div className="rounded-xl border border-border bg-background p-3">
+            <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Cliente</p>
+            <p className="truncate text-sm font-black text-foreground">{clienteLabel || "Sem cliente"}</p>
+            <p className="text-xs text-muted-foreground">
+              {clienteCodigoLabel ? `Cod. ${clienteCodigoLabel}` : "Sem codigo"} | {clienteDocLabel || "sem documento"}
+            </p>
+          </div>
+
+          {temDescontoAltoPdv && (
+            <div className="rounded-xl border border-amber-300 bg-amber-50 p-3 text-sm text-amber-900">
+              <div className="flex items-start gap-2">
+                <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="font-black">Desconto acima de 20%</p>
+                  <p className="mt-0.5 text-xs">Ao clicar em confirmar, voce esta autorizando desconto entre 21% e 50%.</p>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {itensPdvResumo.map((entry) => (
+            <div key={entry.item.id} className="rounded-xl border border-border bg-background p-3">
+              <div className="flex gap-3">
+                {entry.item.photo ? (
+                  <img src={entry.item.photo} alt={entry.item.descricao || entry.item.codigo} className="h-12 w-12 shrink-0 rounded-lg border border-border object-cover" />
+                ) : (
+                  <div className="flex h-12 w-12 shrink-0 items-center justify-center rounded-lg border border-border bg-muted">
+                    <Package className="h-5 w-5 text-muted-foreground" />
+                  </div>
+                )}
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-black text-foreground leading-snug break-words">{entry.item.descricao || entry.item.sku || entry.item.codigo}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    {entry.item.codigo} | Qtd {entry.quantidade} | Unit. {formatarMoeda(entry.precoUnitario)}
+                  </p>
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-[minmax(0,1fr)_96px] gap-3 items-end">
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Desconto</label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="50"
+                    step="1"
+                    value={entry.descontoPercentual}
+                    onChange={(event) => alterarDescontoPdv(entry.item.id, event.target.value)}
+                    className="mt-2 w-full"
+                  />
+                </div>
+                <div>
+                  <label className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">%</label>
+                  <input
+                    type="number"
+                    inputMode="decimal"
+                    min="0"
+                    max="50"
+                    step="1"
+                    value={entry.descontoPercentual}
+                    onChange={(event) => alterarDescontoPdv(entry.item.id, event.target.value)}
+                    className="mt-1 h-10 w-full rounded-lg border border-input bg-card px-2 text-center text-sm font-black text-foreground focus:outline-none focus:ring-2 focus:ring-ring"
+                  />
+                </div>
+              </div>
+              <div className="mt-3 grid grid-cols-3 gap-2 text-xs">
+                <div className="rounded-lg bg-muted/60 p-2">
+                  <p className="text-muted-foreground">Bruto</p>
+                  <p className="font-black text-foreground">{formatarMoeda(entry.totalBruto)}</p>
+                </div>
+                <div className="rounded-lg bg-muted/60 p-2">
+                  <p className="text-muted-foreground">Desconto</p>
+                  <p className="font-black text-foreground">{formatarMoeda(entry.descontoValor)}</p>
+                </div>
+                <div className="rounded-lg bg-primary/10 p-2">
+                  <p className="text-muted-foreground">Final</p>
+                  <p className="font-black text-foreground">{formatarMoeda(entry.totalLiquido)}</p>
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+
+        <div className="border-t border-border bg-background p-4">
+          <div className="grid grid-cols-2 gap-2 text-sm md:grid-cols-4">
+            <div className="rounded-lg bg-card p-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Itens</p>
+              <p className="font-black text-foreground">{resumoPdv.itens}</p>
+            </div>
+            <div className="rounded-lg bg-card p-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Unidades</p>
+              <p className="font-black text-foreground">{resumoPdv.unidades}</p>
+            </div>
+            <div className="rounded-lg bg-card p-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Desconto</p>
+              <p className="font-black text-foreground">{formatarMoeda(resumoPdv.desconto)}</p>
+            </div>
+            <div className="rounded-lg bg-primary/10 p-2">
+              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground">Total</p>
+              <p className="font-black text-foreground">{formatarMoeda(resumoPdv.liquido)}</p>
+            </div>
+          </div>
+          <div className="mt-4 flex gap-2">
+            <button
+              type="button"
+              onClick={() => setModalResumoPdvAberto(false)}
+              disabled={sendStatus === "sending"}
+              className="h-11 flex-1 rounded-xl border border-border bg-card text-sm font-bold text-foreground disabled:opacity-60"
+            >
+              Voltar
+            </button>
+            <button
+              type="button"
+              onClick={() => {
+                setModalResumoPdvAberto(false);
+                void fecharConferencia();
+              }}
+              disabled={sendStatus === "sending"}
+              className={`h-11 flex-[1.4] rounded-xl text-sm font-black text-primary-foreground disabled:opacity-60 ${temDescontoAltoPdv ? "bg-amber-600" : "bg-primary"}`}
+            >
+              {temDescontoAltoPdv ? "Confirmar desconto e fechar" : "Confirmar e fechar"}
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  ) : null;
 
   const renderClienteConferencia = (compact = false) => {
     if (!clientePdvHabilitado) return null;
@@ -1451,6 +1690,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       status: i.status,
       photo: i.photo ?? null,
       precoUnitario: i.precoUnitario ?? null,
+      descontoPercentual: lojaEnviaPrevendaParaPdv(empresa) ? obterDescontoPdv(i.id) : 0,
     }));
 
     try {
@@ -2716,6 +2956,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           </button>
         </div>
         {clienteModal}
+        {resumoPdvModal}
       </div>
     );
   }
@@ -2779,7 +3020,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             </div>
           )}
           <button
-            onClick={fecharConferencia}
+            onClick={abrirResumoPdvParaFechar}
             disabled={apenasVisualizar || sendStatus === "sending" || sendStatus === "sent"}
             title={apenasVisualizar ? "Abra em modo Separação para enviar" : undefined}
             className="h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-all disabled:opacity-70 disabled:cursor-not-allowed"
@@ -2830,6 +3071,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           })}
         </div>
         {clienteModal}
+        {resumoPdvModal}
       </div>
     );
   }
@@ -3045,6 +3287,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       </div>}
 
       {clienteModal}
+      {resumoPdvModal}
       {recomendacaoOverlay}
     </div>
   );

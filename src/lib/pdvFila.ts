@@ -33,6 +33,7 @@ export interface PdvPrevendaConferenciaItem {
   quantidadePedida: number;
   quantidadeReal: number | null;
   status: PdvPrevendaStatusItem;
+  descontoPercentual?: number | null;
 }
 
 export interface EnfileirarPrevendaParams {
@@ -105,6 +106,12 @@ function calcularValorTotal(itens: PdvPrevendaItem[]): number {
     return acc + bruto - desconto;
   }, 0);
   return Math.round(total * 100) / 100;
+}
+
+function normalizarDescontoPercentual(value: unknown): number {
+  const percentual = Number(value ?? 0);
+  if (!Number.isFinite(percentual) || percentual <= 0) return 0;
+  return Math.min(50, Math.round(percentual * 100) / 100);
 }
 
 /**
@@ -335,15 +342,20 @@ export async function enfileirarPrevendaConferencia(
     const numeroPrevenda = Number(numeroData ?? 0);
     if (!numeroPrevenda) return { ok: false, motivo: "numero_prevenda_indisponivel" };
 
-    const itens: PdvPrevendaItem[] = vendaveis.map((entry) => ({
-      codigo: texto(entry.item.codigo),
-      descricao: texto(entry.item.descricao) || texto(entry.item.sku) || texto(entry.item.codigo),
-      quantidade: entry.quantidade,
-      valorUnitario: precos.get(texto(entry.item.codigo)) as number,
-      tributacao: TRIBUTACAO_PADRAO || null,
-      unidade: UNIDADE_PADRAO,
-      codigoAuxiliar: texto(entry.item.sku) || null,
-    }));
+    const itens: PdvPrevendaItem[] = vendaveis.map((entry) => {
+      const valorUnitario = precos.get(texto(entry.item.codigo)) as number;
+      const descontoPercentual = normalizarDescontoPercentual(entry.item.descontoPercentual);
+      return {
+        codigo: texto(entry.item.codigo),
+        descricao: texto(entry.item.descricao) || texto(entry.item.sku) || texto(entry.item.codigo),
+        quantidade: entry.quantidade,
+        valorUnitario,
+        valorDesconto: Math.round(entry.quantidade * valorUnitario * descontoPercentual) / 100,
+        tributacao: TRIBUTACAO_PADRAO || null,
+        unidade: UNIDADE_PADRAO,
+        codigoAuxiliar: texto(entry.item.sku) || null,
+      };
+    });
 
     const numeroCatalogo = texto(pedido?.catalogo_numero_pedido);
     const origemTipo = params.origemTipo === "pedido_direto" ? "pedido_direto" : "conferencia";
