@@ -651,6 +651,24 @@ function normalizarRequestId(value: unknown, perguntaKey: string): string {
   return raw || `server-${perguntaKey}-${Date.now().toString(36)}`;
 }
 
+function numeroEnv(name: string, fallback: number, min: number, max: number): number {
+  const value = Number(process.env[name] ?? fallback);
+  if (!Number.isFinite(value)) return fallback;
+  return Math.min(Math.max(value, min), max);
+}
+
+function getIaProviderTimeoutMs(): number {
+  return numeroEnv("COMPRAS_IA_PROVIDER_TIMEOUT_MS", 9_000, 3_000, 20_000);
+}
+
+function getIaTotalTimeoutMs(): number {
+  return numeroEnv("COMPRAS_IA_TOTAL_TIMEOUT_MS", 22_000, 8_000, 45_000);
+}
+
+function getIaMaxTokens(): number {
+  return numeroEnv("COMPRAS_IA_MAX_TOKENS", 900, 300, 1_400);
+}
+
 function normalizarChaveProduto(value: string): string {
   return normalizarBusca(value).replace(/[^a-z0-9]/g, "");
 }
@@ -1363,23 +1381,30 @@ async function chamarChatCompletion(params: {
   model: string;
   messages: Array<{ role: string; content: string }>;
   provider: string;
+  timeoutMs: number;
   extraHeaders?: Record<string, string>;
 }): Promise<string> {
-  const response = await fetch(params.apiUrl, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${params.apiKey}`,
-      "Content-Type": "application/json",
-      ...(params.extraHeaders ?? {}),
-    },
-    body: JSON.stringify({
-      model: params.model,
-      messages: params.messages,
-      temperature: 0.15,
-      max_tokens: Number(process.env.COMPRAS_IA_MAX_TOKENS || 1400) || 1400,
-    }),
-    signal: AbortSignal.timeout(55_000),
-  });
+  let response: Response;
+  try {
+    response = await fetch(params.apiUrl, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${params.apiKey}`,
+        "Content-Type": "application/json",
+        ...(params.extraHeaders ?? {}),
+      },
+      body: JSON.stringify({
+        model: params.model,
+        messages: params.messages,
+        temperature: 0.15,
+        max_tokens: getIaMaxTokens(),
+      }),
+      signal: AbortSignal.timeout(params.timeoutMs),
+    });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "tempo esgotado";
+    throw new HttpError(502, `${params.provider} nao respondeu em ${Math.round(params.timeoutMs / 1000)}s: ${detail}`);
+  }
 
   const payload = await response.json().catch(() => null) as any;
   if (!response.ok) {
@@ -1404,10 +1429,19 @@ async function perguntarIa(
 ): Promise<string> {
   const messages = buildIaMessages(pergunta, contexto, historico, skill, perguntaKey);
   const erros: string[] = [];
+  const deadline = Date.now() + getIaTotalTimeoutMs();
+  const providerTimeoutMs = getIaProviderTimeoutMs();
+  const timeoutRestante = () => Math.min(providerTimeoutMs, Math.max(0, deadline - Date.now() - 750));
 
   const openRouterApiKey = process.env.OPENROUTER_API_KEY || process.env.COMPRAS_IA_OPENROUTER_API_KEY || "";
   if (openRouterApiKey) {
     for (const model of getOpenRouterModels()) {
+      const timeoutMs = timeoutRestante();
+      if (timeoutMs < 2_000) {
+        erros.push("orcamento de tempo da IA externa esgotado antes do OpenRouter responder");
+        break;
+      }
+
       try {
         return await chamarChatCompletion({
           apiUrl: process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1/chat/completions",
@@ -1415,6 +1449,7 @@ async function perguntarIa(
           model,
           messages,
           provider: `OpenRouter Free (${model})`,
+          timeoutMs,
           extraHeaders: {
             "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://scan.newgrup.cloud",
             "X-Title": "SCAN Compras IA",
@@ -1430,6 +1465,12 @@ async function perguntarIa(
 
   const bonsaiApiKey = process.env.COMPRAS_IA_API_KEY || process.env.BONSAI_API_KEY || "";
   if (bonsaiApiKey) {
+    const timeoutMs = timeoutRestante();
+    if (timeoutMs < 2_000) {
+      erros.push("orcamento de tempo da IA externa esgotado antes do Bonsai/Ollama responder");
+      throw new HttpError(502, erros.join(" | "));
+    }
+
     try {
       return await chamarChatCompletion({
         apiUrl: process.env.COMPRAS_IA_API_URL || process.env.BONSAI_API_URL || "https://ai.187-127-45-197.nip.io/v1/chat/completions",
@@ -1437,6 +1478,7 @@ async function perguntarIa(
         model: process.env.COMPRAS_IA_MODEL || process.env.BONSAI_MODEL || "bonsai-27b",
         messages,
         provider: "Ollama/Bonsai",
+        timeoutMs,
       });
     } catch (error) {
       erros.push(error instanceof Error ? error.message : "Ollama/Bonsai falhou");
