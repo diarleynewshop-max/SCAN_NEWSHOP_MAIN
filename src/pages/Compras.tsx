@@ -1631,7 +1631,7 @@ const Compras = () => {
             {isAdminPlus && (
               <Button variant="outline" onClick={() => setIaAberta(true)} disabled={loading}>
                 <Bot className="h-4 w-4 mr-2" />
-                IA
+                Analista IA
               </Button>
             )}
             <Button variant="outline" onClick={() => refetch()} disabled={loading}>
