@@ -14,7 +14,7 @@ type ChatMessage = {
   content: string;
 };
 
-type ComprasIaSkillId = "comparativo" | "melhor_pior_item" | "faltas_secao" | "resumo_geral";
+type ComprasIaSkillId = "comparativo" | "melhor_pior_item" | "recomendacao_compra" | "faltas_secao" | "resumo_geral";
 
 type BuyManSkill = {
   id: ComprasIaSkillId;
@@ -553,13 +553,13 @@ function formatarItemResumo(item: ItemResumo, index: number): string {
   const sku = item.sku ? ` | SKU: ${item.sku}` : "";
   const pedido = item.total_pedido > 0 ? `${item.total_pedido} un. pedidas` : `${item.vezes} ocorrencia(s)`;
   const real = item.total_real > 0 ? `${item.total_real} un. reais` : "sem qtd. real";
-  const status = item.status ? `\n   🛒 Compras: ${item.status}${item.pedido_feito === true ? " | pedido feito" : ""}` : "";
-  const foto = item.foto_url ? "\n   🖼️ Foto: card do produto abaixo" : "";
+  const status = item.status ? `\n   Compras: ${item.status}${item.pedido_feito === true ? " | pedido feito" : ""}` : "";
+  const foto = item.foto_url ? "\n   Foto: card do produto abaixo" : "";
 
   return [
     `${index + 1}. ${descricao}`,
-    `   🔖 Cod: ${item.codigo}${sku}`,
-    `   📦 Secao: ${item.secao} | Pedido: ${pedido} | Real: ${real} | Ocorrencias: ${item.vezes}`,
+    `   Cod: ${item.codigo}${sku}`,
+    `   Secao: ${item.secao} | Pedido: ${pedido} | Real: ${real} | Ocorrencias: ${item.vezes}`,
   ].join("\n") + status + foto;
 }
 
@@ -595,6 +595,17 @@ const BUY_MAN_SKILLS: Record<ComprasIaSkillId, BuyManSkill> = {
     ],
     prompt: "Skill Melhor/Pior Item: ranqueie produtos com criterio explicito. Nao chame item de melhor ou pior sem mostrar a metrica usada.",
   },
+  recomendacao_compra: {
+    id: "recomendacao_compra",
+    label: "Recomendacao de compra",
+    criterios: [
+      "recomendar somente em modo leitura, sem alterar status, pedido ou ERP",
+      "priorizar alta demanda, diferenca entre pedido e real, ocorrencias e status de compras",
+      "nao priorizar produto_ruim, compra_realizada, pedido_andamento, concluido ou item com pedido ja feito",
+      "quando o usuario disser 'desse/desses', avaliar os produtos citados no historico recente",
+    ],
+    prompt: "Skill Recomendacao de Compra: escolha o item com melhor prioridade operacional para comprar agora. Mostre criterio, motivo e itens que devem ser evitados.",
+  },
   faltas_secao: {
     id: "faltas_secao",
     label: "Faltas e secao",
@@ -623,6 +634,9 @@ function selecionarBuyManSkill(pergunta: string): BuyManSkill {
   const texto = normalizarBusca(pergunta);
   if (/\b(comparativo|comparar|compare|comparacao|versus|vs|diferenca|evolucao|cresceu|caiu|alta|queda)\b/.test(texto)) {
     return BUY_MAN_SKILLS.comparativo;
+  }
+  if (perguntaPedeRecomendacaoCompra(pergunta)) {
+    return BUY_MAN_SKILLS.recomendacao_compra;
   }
   if (/\b(melhor|melhores|pior|piores|mais pedido|mais pedidos|menos pedido|menos pedidos|top|ranking|campeao|menor giro|maior giro)\b/.test(texto)) {
     return BUY_MAN_SKILLS.melhor_pior_item;
@@ -793,6 +807,14 @@ function perguntaPedeTopItem(pergunta: string): boolean {
   return falaDeItem && falaDeRanking;
 }
 
+function perguntaPedeRecomendacaoCompra(pergunta: string): boolean {
+  const texto = normalizarBusca(pergunta);
+  const falaDeProduto = /\b(qual|item|itens|produto|produtos|sku|codigo|cod|desse|desses|deste|destes)\b/.test(texto);
+  const falaDeCompra = /\b(compra|comprar|comppra|compras|pedido|pedir|repor|reposicao)\b/.test(texto);
+  const falaDeRecomendacao = /\b(recomenda|recomendar|recomendacao|indica|indicacao|sugere|sugestao|prioriza|priorizar|devo|vale|compraria)\b/.test(texto);
+  return falaDeProduto && falaDeCompra && falaDeRecomendacao;
+}
+
 function perguntaPedeRankingPorSecao(pergunta: string): boolean {
   const texto = normalizarBusca(pergunta);
   const falaDeSecao = /\bsecao\b/.test(texto);
@@ -842,6 +864,112 @@ function compraToItemResumo(row: CompraRow): ItemResumo {
     total_pedido: vezes,
     total_real: 0,
   };
+}
+
+function extrairCodigosProdutoTexto(text: string): string[] {
+  const codigos: string[] = [];
+  const vistos = new Set<string>();
+  const add = (value: string) => {
+    const codigo = toText(value).replace(/[.,;:)]+$/g, "");
+    const key = normalizarChaveProduto(codigo);
+    if (!key || vistos.has(key)) return;
+    vistos.add(key);
+    codigos.push(codigo);
+  };
+
+  for (const match of text.matchAll(/\bSEM_EAN_\d+\b/gi)) add(match[0]);
+  for (const match of text.matchAll(/\b(?:cod\.?|codigo|sku)\s*:?\s*([A-Z0-9_-]{5,40})/gi)) add(match[1]);
+  for (const match of text.matchAll(/\b\d{6,14}\b/g)) add(match[0]);
+
+  return codigos.slice(0, 20);
+}
+
+function limparHistoricoParaProdutos(value: unknown): ChatMessage[] {
+  if (!Array.isArray(value)) return [];
+  return value
+    .map((item) => {
+      const role = (item as ChatMessage)?.role;
+      const content = toText((item as ChatMessage)?.content);
+      if ((role !== "user" && role !== "assistant") || !content) return null;
+      return { role, content: content.slice(0, 12_000) };
+    })
+    .filter((item): item is ChatMessage => !!item)
+    .slice(-4);
+}
+
+function montarIndexItensResumo(itens: ItemResumo[]): Map<string, ItemResumo> {
+  const index = new Map<string, ItemResumo>();
+  for (const item of itens) {
+    for (const key of chavesProduto(item.codigo, item.sku)) {
+      if (!index.has(key)) index.set(key, item);
+    }
+  }
+  return index;
+}
+
+function selecionarCodigosRecomendacao(pergunta: string, historico: ChatMessage[]): { codigos: string[]; origem: string } {
+  const codigosPergunta = extrairCodigosProdutoTexto(pergunta);
+  if (codigosPergunta.length > 0) {
+    return { codigos: codigosPergunta, origem: "codigos citados na pergunta atual" };
+  }
+
+  for (const item of [...historico].reverse()) {
+    if (item.role !== "assistant") continue;
+    const codigos = extrairCodigosProdutoTexto(item.content);
+    if (codigos.length > 0) {
+      return { codigos, origem: "produtos citados no historico recente" };
+    }
+  }
+
+  return { codigos: [], origem: "top do periodo lido" };
+}
+
+function motivoBloqueioCompra(item: ItemResumo): string | null {
+  const status = normalizarBusca(item.status);
+  if (status === "produto_ruim") return "status produto_ruim";
+  if (item.pedido_feito === true) return "pedido ja feito";
+  if (status === "compra_realizada") return "compra ja realizada";
+  if (status === "pedido_andamento") return "pedido em andamento";
+  if (status === "concluido") return "status concluido";
+  return null;
+}
+
+function bonusStatusCompra(item: ItemResumo): number {
+  const status = normalizarBusca(item.status);
+  if (status === "produto_bom") return 800;
+  if (status === "fazer_pedido") return 650;
+  if (status === "todo") return 350;
+  if (!status) return 150;
+  return 0;
+}
+
+function avaliarItemParaCompra(item: ItemResumo) {
+  const pedido = pontuacaoPedido(item);
+  const falta = Math.max(0, item.total_pedido - item.total_real);
+  const bloqueio = motivoBloqueioCompra(item);
+  const scoreBase = Math.min(pedido, 5_000) + Math.min(falta, 2_000) * 0.9 + item.vezes * 35 + bonusStatusCompra(item);
+  return {
+    item,
+    pedido,
+    falta,
+    bloqueio,
+    score: bloqueio ? scoreBase - 100_000 : scoreBase,
+  };
+}
+
+function formatarAvaliacaoCompra(row: ReturnType<typeof avaliarItemParaCompra>, index: number): string {
+  const item = row.item;
+  const sku = item.sku ? ` | SKU: ${item.sku}` : "";
+  const status = item.status || "sem status";
+  const falta = row.falta > 0 ? ` | Falta: ${formatarNumero(row.falta)}` : "";
+  const bloqueio = row.bloqueio ? ` | Evitar: ${row.bloqueio}` : "";
+
+  return [
+    `${index + 1}. ${item.descricao || item.codigo}`,
+    `   Cod: ${item.codigo}${sku} | Secao: ${item.secao}`,
+    `   Pedido: ${formatarNumero(item.total_pedido)} | Real: ${formatarNumero(item.total_real)} | Ocorr.: ${formatarNumero(item.vezes)}${falta}`,
+    `   Compras: ${status}${item.pedido_feito === true ? " | pedido feito" : ""}${bloqueio}`,
+  ].join("\n");
 }
 
 function perguntaPedeComparativo(pergunta: string): boolean {
@@ -1035,6 +1163,102 @@ function montarRespostaComparativo(
   };
 }
 
+function montarRespostaRecomendacaoCompra(
+  pergunta: string,
+  rows: ItemFrequenciaRow[],
+  compras: CompraRow[],
+  dataInicio: string,
+  dataFim: string,
+  historico: ChatMessage[] = []
+): RespostaAutomatica | null {
+  if (!perguntaPedeRecomendacaoCompra(pergunta)) return null;
+
+  const itensPeriodo = enriquecerItensComCompras(agregarItens(rows, 2_000), compras);
+  const index = montarIndexItensResumo([
+    ...itensPeriodo,
+    ...compras.map(compraToItemResumo),
+  ]);
+  const { codigos, origem } = selecionarCodigosRecomendacao(pergunta, historico);
+  const candidatosMap = new Map<string, ItemResumo>();
+
+  for (const codigo of codigos) {
+    const item = index.get(normalizarChaveProduto(codigo));
+    if (item) candidatosMap.set(normalizarChaveProduto(item.codigo), item);
+  }
+
+  if (candidatosMap.size === 0) {
+    for (const item of itensPeriodo.slice(0, 10)) {
+      candidatosMap.set(normalizarChaveProduto(item.codigo), item);
+    }
+  }
+
+  const candidatos = [...candidatosMap.values()].filter((item) => pontuacaoPedido(item) > 0);
+  if (candidatos.length === 0) {
+    return {
+      resposta: [
+        "Recomendacao de compra",
+        `Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+        "Nao encontrei itens com demanda suficiente para recomendar compra nesse recorte.",
+      ].join("\n"),
+      produtos: [],
+    };
+  }
+
+  const avaliados = candidatos
+    .map(avaliarItemParaCompra)
+    .sort((a, b) => b.score - a.score || b.pedido - a.pedido || a.item.descricao.localeCompare(b.item.descricao));
+  const recomendavel = avaliados.find((row) => !row.bloqueio) ?? avaliados[0];
+  const ranking = [
+    recomendavel,
+    ...avaliados.filter((row) => row.item.codigo !== recomendavel.item.codigo && !row.bloqueio),
+  ].slice(0, 5);
+  const evitados = avaliados.filter((row) => row.bloqueio).slice(0, 4);
+  const item = recomendavel.item;
+
+  const produtos = [
+    ...ranking.map((row, index) => produtoCardFromItem(row.item, index, "citados", "recomendacao de compra")),
+    ...evitados.map((row, index) => produtoCardFromItem(row.item, ranking.length + index, "citados", "recomendacao de compra - evitar")),
+  ];
+
+  const linhas = [
+    "Recomendacao de compra",
+    `Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+    `Base: ${origem}.`,
+    "Criterio: demanda pedida + falta entre pedido e real + ocorrencias + status de Compras.",
+    "Regra: nao priorizo produto_ruim, pedido ja feito, compra realizada, pedido em andamento ou concluido.",
+    "",
+    recomendavel.bloqueio
+      ? `Nao recomendo comprar agora: todos os candidatos tem bloqueio. O menos ruim foi ${item.descricao || item.codigo}, mas esta com ${recomendavel.bloqueio}.`
+      : `Minha recomendacao: comprar ${item.descricao || item.codigo}.`,
+    `Cod: ${item.codigo}${item.sku ? ` | SKU: ${item.sku}` : ""} | Secao: ${item.secao}`,
+    `Pedido: ${formatarNumero(item.total_pedido)} | Real: ${formatarNumero(item.total_real)} | Ocorr.: ${formatarNumero(item.vezes)} | Falta: ${formatarNumero(recomendavel.falta)}`,
+    `Compras: ${item.status || "sem status"}${item.pedido_feito === true ? " | pedido feito" : ""}`,
+    "",
+    "Motivo",
+    recomendavel.bloqueio
+      ? `- Tem demanda, mas o status bloqueia a prioridade: ${recomendavel.bloqueio}.`
+      : "- Tem melhor prioridade operacional entre os itens avaliados.",
+    recomendavel.falta > 0
+      ? `- Existe diferenca entre pedido e real de ${formatarNumero(recomendavel.falta)} un.; sinal de ruptura/parcial ou compra insuficiente.`
+      : "- Pedido e real estao proximos; a prioridade veio mais por volume/ocorrencia/status.",
+    item.foto_url ? "- Tem foto/card disponivel abaixo." : "- Sem foto vinculada no cadastro de Compras.",
+    "",
+    "Ranking rapido",
+    ...ranking.map(formatarAvaliacaoCompra),
+  ];
+
+  if (evitados.length > 0) {
+    linhas.push("", "Evitar por enquanto", ...evitados.map(formatarAvaliacaoCompra));
+  }
+
+  linhas.push("", "Observacao: Buy-man apenas leu os dados. Nao alterei pedido, status, ERP ou Supabase.");
+
+  return {
+    resposta: linhas.join("\n"),
+    produtos,
+  };
+}
+
 function montarRespostaRankingSecao(
   pergunta: string,
   rows: ItemFrequenciaRow[],
@@ -1066,8 +1290,8 @@ function montarRespostaRankingSecao(
   if (itens.length === 0) {
     return {
       resposta: [
-        `🔎 Nao encontrei itens na secao "${secao}" para montar o ranking.`,
-        `📅 Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+        `Nao encontrei itens na secao "${secao}" para montar o ranking.`,
+        `Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
       ].join("\n"),
       produtos: [],
     };
@@ -1090,18 +1314,18 @@ function montarRespostaRankingSecao(
 
   return {
     resposta: [
-    `📊 Ranking da secao: ${secao.toUpperCase()}`,
-    `📅 Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)} (${filtroData.label})`,
-    `🧾 Base: ${base}.`,
-    produtos.some((produto) => produto.fotoUrl) ? `🖼️ Fotos: veja os cards dos produtos abaixo.` : `🖼️ Fotos: nao encontrei foto vinculada para esses itens.`,
+    `Ranking da secao: ${secao.toUpperCase()}`,
+    `Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)} (${filtroData.label})`,
+    `Base: ${base}.`,
+    produtos.some((produto) => produto.fotoUrl) ? `Fotos: veja os cards dos produtos abaixo.` : `Fotos: nao encontrei foto vinculada para esses itens.`,
     "",
-    `🏆 ${limite} itens mais pedidos`,
+    `${limite} itens mais pedidos`,
     ...maisPedidos.map(formatarItemResumo),
     "",
-    `📉 ${limite} itens menos pedidos`,
+    `${limite} itens menos pedidos`,
     ...menosPedidos.map(formatarItemResumo),
     "",
-    "💡 Leitura rapida",
+    "Leitura rapida",
     campeao ? `- Campeao: ${campeao.descricao || campeao.codigo} com ${pontuacaoPedido(campeao)} un./ocorrencias.` : "- Sem campeao no recorte.",
     menor ? `- Menor giro: ${menor.descricao || menor.codigo} com ${pontuacaoPedido(menor)} un./ocorrencias.` : "- Sem itens de menor giro no recorte.",
   ].join("\n"),
@@ -1209,14 +1433,14 @@ function montarRespostaTopItens(
   if (top.length > 0) {
     const produtos = top.map((item, index) => produtoCardFromItem(item, index, "top", "dashboard de pedidos concluidos"));
     const linhas = [
-      `🏆 Item mais pedido (${filtro.label})`,
-      `📅 Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
-      `🧾 Base: dashboard de pedidos concluidos.`,
-      produtos.some((produto) => produto.fotoUrl) ? `🖼️ Fotos: veja os cards dos produtos abaixo.` : `🖼️ Fotos: nao encontrei foto vinculada para esses itens.`,
+      `Item mais pedido (${filtro.label})`,
+      `Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+      `Base: dashboard de pedidos concluidos.`,
+      produtos.some((produto) => produto.fotoUrl) ? `Fotos: veja os cards dos produtos abaixo.` : `Fotos: nao encontrei foto vinculada para esses itens.`,
       "",
-      `🥇 Mais pedido: ${top[0].descricao || top[0].codigo} | Cod. ${top[0].codigo} | ${top[0].total_pedido || top[0].vezes} ${top[0].total_pedido > 0 ? "un. pedidas" : "ocorrencia(s)"}.`,
+      `Mais pedido: ${top[0].descricao || top[0].codigo} | Cod. ${top[0].codigo} | ${top[0].total_pedido || top[0].vezes} ${top[0].total_pedido > 0 ? "un. pedidas" : "ocorrencia(s)"}.`,
       "",
-      "📦 Top itens",
+      "Top itens",
       ...top.map(formatarItemResumo),
     ];
 
@@ -1244,8 +1468,8 @@ function montarRespostaTopItens(
     const itensFallback = comprasTop.map(compraToItemResumo);
     return {
       resposta: [
-      "🔎 Nao encontrei pedidos concluidos no dashboard para esse recorte.",
-      "🧾 Usei a tabela Compras como fallback, pelo campo vezes_pedido.",
+      "Nao encontrei pedidos concluidos no dashboard para esse recorte.",
+      "Usei a tabela Compras como fallback, pelo campo vezes_pedido.",
       "",
       ...itensFallback.map(formatarItemResumo),
     ].join("\n"),
@@ -1254,7 +1478,7 @@ function montarRespostaTopItens(
   }
 
   return {
-    resposta: "🔎 Nao encontrei dados suficientes no Supabase para calcular o item mais pedido.",
+    resposta: "Nao encontrei dados suficientes no Supabase para calcular o item mais pedido.",
     produtos: [],
   };
 }
@@ -1270,7 +1494,7 @@ function contarPorCampo<T extends Record<string, unknown>>(rows: T[], field: key
     .sort((a, b) => b.total - a.total);
 }
 
-function resumirSecoes(rows: SecaoRow[]) {
+function resumirSecoes(rows: SecaoRow[], limit = 30) {
   const mapa = new Map<string, {
     secao: string;
     total: number;
@@ -1304,14 +1528,14 @@ function resumirSecoes(rows: SecaoRow[]) {
     mapa.set(secao, atual);
   }
 
-  return [...mapa.values()].sort((a, b) => b.total_pedido - a.total_pedido).slice(0, 30);
+  return [...mapa.values()].sort((a, b) => b.total_pedido - a.total_pedido).slice(0, limit);
 }
 
-function resumirCompras(rows: CompraRow[]) {
+function resumirCompras(rows: CompraRow[], topLimit = 60) {
   const porStatus = contarPorCampo(rows as unknown as Record<string, unknown>[], "status");
   const topCompras = [...rows]
     .sort((a, b) => toNumber(b.vezes_pedido) - toNumber(a.vezes_pedido))
-    .slice(0, 60)
+    .slice(0, topLimit)
     .map((row) => ({
       codigo: toText(row.codigo),
       sku: toText(row.sku),
@@ -1325,6 +1549,22 @@ function resumirCompras(rows: CompraRow[]) {
     }));
 
   return { porStatus, topCompras };
+}
+
+function limitesContextoPorSkill(skillId: ComprasIaSkillId) {
+  if (skillId === "recomendacao_compra") {
+    return { topItens: 10, diasTop: 0, itensPorDia: 0, topCompras: 10, secoes: 0, pedidos: 0 };
+  }
+
+  if (skillId === "faltas_secao") {
+    return { topItens: 12, diasTop: 2, itensPorDia: 3, topCompras: 12, secoes: 12, pedidos: 12 };
+  }
+
+  if (skillId === "melhor_pior_item") {
+    return { topItens: 16, diasTop: 3, itensPorDia: 3, topCompras: 16, secoes: 4, pedidos: 4 };
+  }
+
+  return { topItens: 18, diasTop: 3, itensPorDia: 3, topCompras: 18, secoes: 8, pedidos: 8 };
 }
 
 function montarContexto(params: {
@@ -1343,13 +1583,21 @@ function montarContexto(params: {
   avisos: string[];
 }): { contexto: string; meta: QueryMeta } {
   const hoje = hojeSaoPaulo();
-  const topItensPeriodo = enriquecerItensComCompras(agregarItens(params.itens, 60), params.compras)
+  const limites = limitesContextoPorSkill(params.skill.id);
+  const topItensPeriodo = enriquecerItensComCompras(agregarItens(params.itens, limites.topItens), params.compras)
     .map(itemResumoParaContexto);
-  const topItensPorDia = montarTopPorDia(params.itens, params.pergunta, hoje);
-  const comprasResumo = resumirCompras(params.compras);
+  const topItensPorDia = limites.diasTop > 0
+    ? montarTopPorDia(params.itens, params.pergunta, hoje)
+      .slice(0, limites.diasTop)
+      .map((dia) => ({
+        data: dia.data,
+        itens: dia.itens.slice(0, limites.itensPorDia).map(itemResumoParaContexto),
+      }))
+    : [];
+  const comprasResumo = resumirCompras(params.compras, limites.topCompras);
   const pedidosPorStatus = contarPorCampo(params.pedidos as unknown as Record<string, unknown>[], "status");
-  const secoesResumo = resumirSecoes(params.secoes);
-  const recentesPedidos = params.pedidos.slice(0, 40).map((row) => ({
+  const secoesResumo = limites.secoes > 0 ? resumirSecoes(params.secoes, limites.secoes) : [];
+  const recentesPedidos = params.pedidos.slice(0, limites.pedidos).map((row) => ({
     empresa: toText(row.empresa),
     flag: toText(row.flag),
     status: toText(row.status),
@@ -1423,6 +1671,7 @@ function montarRespostaFallback(params: {
   dataInicio: string;
   dataFim: string;
   erroIa: string;
+  historico?: ChatMessage[];
 }): RespostaAutomatica {
   const comparativo = montarRespostaComparativo(
     params.pergunta,
@@ -1432,6 +1681,16 @@ function montarRespostaFallback(params: {
     params.dataFim
   );
   if (comparativo) return comparativo;
+
+  const recomendacaoCompra = montarRespostaRecomendacaoCompra(
+    params.pergunta,
+    params.itens,
+    params.compras,
+    params.dataInicio,
+    params.dataFim,
+    params.historico ?? []
+  );
+  if (recomendacaoCompra) return recomendacaoCompra;
 
   const rankingSecao = montarRespostaRankingSecao(
     params.pergunta,
@@ -1463,25 +1722,25 @@ function montarRespostaFallback(params: {
   const topItens = enriquecerItensComCompras(agregarItens(params.itens, 8), params.compras);
   const statusCompras = resumirCompras(params.compras).porStatus.slice(0, 8);
   const linhas = [
-    `⚠️ A IA externa falhou (${params.erroIa}).`,
-    "📌 Segue um resumo direto com os dados lidos do Supabase:",
-    `📅 Periodo: ${formatarData(params.dataInicio)} a ${formatarData(params.dataFim)}.`,
+    `Aviso: a IA externa falhou (${params.erroIa}).`,
+    "Segue um resumo direto com os dados lidos do Supabase:",
+    `Periodo: ${formatarData(params.dataInicio)} a ${formatarData(params.dataFim)}.`,
     "",
   ];
 
   if (topItens.length > 0) {
-    linhas.push("📦 Top itens por pedidos concluidos");
+    linhas.push("Top itens por pedidos concluidos");
     linhas.push(...topItens.map(formatarItemResumo));
     linhas.push("");
   }
 
   if (statusCompras.length > 0) {
-    linhas.push("🛒 Compras por status");
+    linhas.push("Compras por status");
     linhas.push(...statusCompras.map((row) => `- ${row.label}: ${row.total}`));
   }
 
   if (topItens.length === 0 && statusCompras.length === 0) {
-    linhas.push("🔎 Nao encontrei dados suficientes para montar um resumo automatico.");
+    linhas.push("Nao encontrei dados suficientes para montar um resumo automatico.");
   }
 
   return {
@@ -1517,10 +1776,10 @@ function limparHistorico(value: unknown): ChatMessage[] {
       const role = (item as ChatMessage)?.role;
       const content = toText((item as ChatMessage)?.content);
       if ((role !== "user" && role !== "assistant") || !content) return null;
-      return { role, content: content.slice(0, 700) };
+      return { role, content: content.slice(0, 300) };
     })
     .filter((item): item is ChatMessage => !!item)
-    .slice(-6);
+    .slice(-4);
 }
 
 function historicoParaContexto(historico: ChatMessage[]): string {
@@ -1829,6 +2088,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       avisos,
     };
+    const historicoProdutos = limparHistoricoParaProdutos(body.historico);
 
     const respostaComparativo = montarRespostaComparativo(pergunta, itens, compras, dataInicio, dataFim);
     if (respostaComparativo) {
@@ -1836,6 +2096,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         ok: true,
         resposta: respostaComparativo.resposta,
         produtos: respostaComparativo.produtos,
+        contexto: metaInicial,
+        pergunta_key: perguntaKey,
+        request_id: requestId,
+      });
+    }
+
+    const respostaRecomendacaoCompra = montarRespostaRecomendacaoCompra(pergunta, itens, compras, dataInicio, dataFim, historicoProdutos);
+    if (respostaRecomendacaoCompra) {
+      return res.status(200).json({
+        ok: true,
+        resposta: respostaRecomendacaoCompra.resposta,
+        produtos: respostaRecomendacaoCompra.produtos,
         contexto: metaInicial,
         pergunta_key: perguntaKey,
         request_id: requestId,
@@ -1919,6 +2191,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         dataInicio,
         dataFim,
         erroIa,
+        historico: historicoProdutos,
       });
       return res.status(200).json({
         ok: true,

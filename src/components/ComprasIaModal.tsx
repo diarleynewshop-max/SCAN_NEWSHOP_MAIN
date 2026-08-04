@@ -38,6 +38,7 @@ interface MensagemLocal extends ComprasIaMessage {
 
 const SUGESTOES = [
   "Faca um comparativo entre os dias 10 e 12.",
+  "Qual desses itens voce recomenda comprar?",
   "Mostre os 5 melhores e 5 piores itens por quantidade pedida.",
   "Quais secoes tiveram mais falta?",
 ];
@@ -52,9 +53,9 @@ function erroMensagem(error: unknown): string {
 }
 
 function grupoProdutoLabel(grupo: string): { titulo: string; Icon: typeof Trophy } {
-  if (grupo === "mais_pedidos") return { titulo: "🏆 Mais pedidos", Icon: Trophy };
-  if (grupo === "menos_pedidos") return { titulo: "📉 Menos pedidos", Icon: TrendingDown };
-  return { titulo: "📦 Produtos citados", Icon: ShoppingCart };
+  if (grupo === "mais_pedidos") return { titulo: "Mais pedidos", Icon: Trophy };
+  if (grupo === "menos_pedidos") return { titulo: "Menos pedidos", Icon: TrendingDown };
+  return { titulo: "Produtos citados", Icon: ShoppingCart };
 }
 
 function formatarQuantidade(value: number | null | undefined): string {
