@@ -1514,22 +1514,21 @@ function historicoParaContexto(historico: ChatMessage[]): string {
     .join("\n");
 }
 
-function getOpenRouterModels(): string[] {
+function getGroqModels(): string[] {
   const configured = toText(
-    process.env.OPENROUTER_MODELS ||
-    process.env.COMPRAS_IA_OPENROUTER_MODELS ||
-    process.env.OPENROUTER_MODEL ||
-    process.env.COMPRAS_IA_OPENROUTER_MODEL
+    process.env.GROQ_MODELS ||
+    process.env.COMPRAS_IA_GROQ_MODELS ||
+    process.env.GROQ_MODEL ||
+    process.env.COMPRAS_IA_GROQ_MODEL
   );
   const modelos = configured
     ? configured.split(",").map((model) => model.trim()).filter(Boolean)
     : [
-        "google/gemma-4-26b-a4b-it:free",
-        "openai/gpt-oss-20b:free",
+        "llama-3.3-70b-versatile",
+        "llama-3.1-8b-instant",
       ];
 
-  const freeOnly = modelos.filter((model) => model === "openrouter/free" || model.endsWith(":free"));
-  return freeOnly.length > 0 ? freeOnly : ["openrouter/free"];
+  return modelos.length > 0 ? modelos : ["llama-3.3-70b-versatile"];
 }
 
 function buildIaMessages(
@@ -1633,58 +1632,30 @@ async function perguntarIa(
   const providerTimeoutMs = getIaProviderTimeoutMs();
   const timeoutRestante = () => Math.min(providerTimeoutMs, Math.max(0, deadline - Date.now() - 750));
 
-  const openRouterApiKey = process.env.OPENROUTER_API_KEY || process.env.COMPRAS_IA_OPENROUTER_API_KEY || "";
-  if (openRouterApiKey) {
-    for (const model of getOpenRouterModels()) {
+  const groqApiKey = process.env.GROQ_API_KEY || process.env.COMPRAS_IA_GROQ_API_KEY || "";
+  if (groqApiKey) {
+    for (const model of getGroqModels()) {
       const timeoutMs = timeoutRestante();
       if (timeoutMs < 2_000) {
-        erros.push("orcamento de tempo da IA externa esgotado antes do OpenRouter responder");
+        erros.push("orcamento de tempo da IA externa esgotado antes do Groq responder");
         break;
       }
 
       try {
         return await chamarChatCompletion({
-          apiUrl: process.env.OPENROUTER_API_URL || "https://openrouter.ai/api/v1/chat/completions",
-          apiKey: openRouterApiKey,
+          apiUrl: process.env.GROQ_API_URL || process.env.COMPRAS_IA_GROQ_API_URL || "https://api.groq.com/openai/v1/chat/completions",
+          apiKey: groqApiKey,
           model,
           messages,
-          provider: `OpenRouter Free (${model})`,
+          provider: `Groq (${model})`,
           timeoutMs,
-          extraHeaders: {
-            "HTTP-Referer": process.env.OPENROUTER_SITE_URL || "https://scan.newgrup.cloud",
-            "X-Title": "SCAN Compras IA",
-          },
         });
       } catch (error) {
-        erros.push(error instanceof Error ? error.message : `OpenRouter Free (${model}) falhou`);
+        erros.push(error instanceof Error ? error.message : `Groq (${model}) falhou`);
       }
     }
   } else {
-    erros.push("OPENROUTER_API_KEY nao configurada");
-  }
-
-  const bonsaiApiKey = process.env.COMPRAS_IA_API_KEY || process.env.BONSAI_API_KEY || "";
-  if (bonsaiApiKey) {
-    const timeoutMs = timeoutRestante();
-    if (timeoutMs < 2_000) {
-      erros.push("orcamento de tempo da IA externa esgotado antes do Bonsai/Ollama responder");
-      throw new HttpError(502, erros.join(" | "));
-    }
-
-    try {
-      return await chamarChatCompletion({
-        apiUrl: process.env.COMPRAS_IA_API_URL || process.env.BONSAI_API_URL || "https://ai.187-127-45-197.nip.io/v1/chat/completions",
-        apiKey: bonsaiApiKey,
-        model: process.env.COMPRAS_IA_MODEL || process.env.BONSAI_MODEL || "bonsai-27b",
-        messages,
-        provider: "Ollama/Bonsai",
-        timeoutMs,
-      });
-    } catch (error) {
-      erros.push(error instanceof Error ? error.message : "Ollama/Bonsai falhou");
-    }
-  } else {
-    erros.push("COMPRAS_IA_API_KEY nao configurada");
+    erros.push("GROQ_API_KEY nao configurada");
   }
 
   throw new HttpError(502, erros.join(" | "));
