@@ -665,8 +665,28 @@ function getIaTotalTimeoutMs(): number {
   return numeroEnv("COMPRAS_IA_TOTAL_TIMEOUT_MS", 22_000, 8_000, 45_000);
 }
 
-function getIaMaxTokens(): number {
-  return numeroEnv("COMPRAS_IA_MAX_TOKENS", 900, 300, 1_400);
+function getIaMaxCompletionTokens(): number {
+  const legacyMaxTokens = numeroEnv("COMPRAS_IA_MAX_TOKENS", 2_048, 300, 8_192);
+  return numeroEnv("COMPRAS_IA_MAX_COMPLETION_TOKENS", legacyMaxTokens, 300, 8_192);
+}
+
+function getIaTemperature(): number {
+  return numeroEnv("COMPRAS_IA_TEMPERATURE", 1, 0, 2);
+}
+
+function getIaTopP(): number {
+  return numeroEnv("COMPRAS_IA_TOP_P", 1, 0, 1);
+}
+
+function getGroqReasoningEffort(): "low" | "medium" | "high" {
+  const value = toText(process.env.GROQ_REASONING_EFFORT || process.env.COMPRAS_IA_REASONING_EFFORT).toLowerCase();
+  if (value === "low" || value === "medium" || value === "high") return value;
+  return "medium";
+}
+
+function getGroqStreamEnabled(): boolean {
+  const value = toText(process.env.GROQ_STREAM ?? process.env.COMPRAS_IA_STREAM ?? "true").toLowerCase();
+  return !["0", "false", "nao", "no", "off"].includes(value);
 }
 
 function normalizarChaveProduto(value: string): string {
@@ -1573,6 +1593,83 @@ function buildIaMessages(
   ];
 }
 
+function extrairConteudoChatCompletion(payload: any): string {
+  const choice = payload?.choices?.[0];
+  const content = choice?.message?.content ?? choice?.delta?.content;
+
+  if (typeof content === "string") return content;
+  if (Array.isArray(content)) {
+    return content
+      .map((part) => {
+        if (typeof part === "string") return part;
+        if (typeof part?.text === "string") return part.text;
+        if (typeof part?.content === "string") return part.content;
+        return "";
+      })
+      .join("");
+  }
+
+  return "";
+}
+
+function detalheErroChatCompletion(raw: string, fallback: string): string {
+  const text = raw.trim();
+  if (!text) return fallback;
+
+  try {
+    const payload = JSON.parse(text) as any;
+    return payload?.error?.message || payload?.message || fallback;
+  } catch {
+    return text.slice(0, 500);
+  }
+}
+
+async function lerRespostaStream(response: Response, provider: string): Promise<string> {
+  const reader = response.body?.getReader();
+  if (!reader) throw new HttpError(502, `${provider} nao abriu stream valida.`);
+
+  const decoder = new TextDecoder();
+  let buffer = "";
+  let content = "";
+
+  const processarLinhas = (final = false) => {
+    const lines = buffer.split(/\r?\n/);
+    buffer = final ? "" : lines.pop() ?? "";
+
+    for (const rawLine of lines) {
+      const line = rawLine.trim();
+      if (!line.startsWith("data:")) continue;
+
+      const data = line.slice(5).trim();
+      if (!data || data === "[DONE]") continue;
+
+      let payload: any;
+      try {
+        payload = JSON.parse(data);
+      } catch {
+        throw new HttpError(502, `${provider} retornou stream invalido.`);
+      }
+
+      content += extrairConteudoChatCompletion(payload);
+    }
+  };
+
+  while (true) {
+    const { done, value } = await reader.read();
+    if (value) buffer += decoder.decode(value, { stream: !done });
+
+    if (done) {
+      buffer += decoder.decode();
+      processarLinhas(true);
+      break;
+    }
+
+    processarLinhas(false);
+  }
+
+  return content.trim();
+}
+
 async function chamarChatCompletion(params: {
   apiUrl: string;
   apiKey: string;
@@ -1580,9 +1677,25 @@ async function chamarChatCompletion(params: {
   messages: Array<{ role: string; content: string }>;
   provider: string;
   timeoutMs: number;
+  stream?: boolean;
   extraHeaders?: Record<string, string>;
 }): Promise<string> {
   let response: Response;
+  const stream = params.stream ?? false;
+  const requestBody: Record<string, unknown> = {
+    model: params.model,
+    messages: params.messages,
+    temperature: getIaTemperature(),
+    max_completion_tokens: getIaMaxCompletionTokens(),
+    top_p: getIaTopP(),
+    stream,
+    stop: null,
+  };
+
+  if (/^openai\/gpt-oss-/i.test(params.model)) {
+    requestBody.reasoning_effort = getGroqReasoningEffort();
+  }
+
   try {
     response = await fetch(params.apiUrl, {
       method: "POST",
@@ -1591,12 +1704,7 @@ async function chamarChatCompletion(params: {
         "Content-Type": "application/json",
         ...(params.extraHeaders ?? {}),
       },
-      body: JSON.stringify({
-        model: params.model,
-        messages: params.messages,
-        temperature: 0.15,
-        max_tokens: getIaMaxTokens(),
-      }),
+      body: JSON.stringify(requestBody),
       signal: AbortSignal.timeout(params.timeoutMs),
     });
   } catch (error) {
@@ -1604,14 +1712,17 @@ async function chamarChatCompletion(params: {
     throw new HttpError(502, `${params.provider} nao respondeu em ${Math.round(params.timeoutMs / 1000)}s: ${detail}`);
   }
 
-  const payload = await response.json().catch(() => null) as any;
   if (!response.ok) {
-    const detail = payload?.error?.message || payload?.message || response.statusText;
+    const raw = await response.text().catch(() => "");
+    const detail = detalheErroChatCompletion(raw, response.statusText);
     throw new HttpError(502, `${params.provider} retornou erro: ${detail}`);
   }
 
-  const content = payload?.choices?.[0]?.message?.content;
-  if (typeof content !== "string" || !content.trim()) {
+  const content = stream
+    ? await lerRespostaStream(response, params.provider)
+    : extrairConteudoChatCompletion(await response.json().catch(() => null));
+
+  if (!content.trim()) {
     throw new HttpError(502, `${params.provider} nao retornou resposta valida.`);
   }
 
@@ -1648,6 +1759,7 @@ async function perguntarIa(
           messages,
           provider: `Groq (${model})`,
           timeoutMs,
+          stream: getGroqStreamEnabled(),
         });
       } catch (error) {
         erros.push(error instanceof Error ? error.message : `Groq (${model}) falhou`);
