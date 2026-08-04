@@ -684,6 +684,17 @@ function getIaMaxCompletionTokens(): number {
   return numeroEnv("COMPRAS_IA_MAX_COMPLETION_TOKENS", legacyMaxTokens, 300, 8_192);
 }
 
+function getGroqMaxCompletionTokens(): number {
+  // A cota gratuita da Groq conta entrada e saida na mesma janela TPM.
+  // Um relatorio operacional continua util com 900 tokens e evita reservar 2.048 desnecessariamente.
+  return Math.min(getIaMaxCompletionTokens(), numeroEnv("GROQ_MAX_COMPLETION_TOKENS", 900, 300, 2_048));
+}
+
+function getGroqPromptBudgetTokens(): number {
+  // Mantem margem para a diferenca entre esta estimativa conservadora e o tokenizer da Groq.
+  return numeroEnv("GROQ_PROMPT_BUDGET_TOKENS", 4_600, 1_500, 6_000);
+}
+
 function getIaTemperature(): number {
   return numeroEnv("COMPRAS_IA_TEMPERATURE", 1, 0, 2);
 }
@@ -1557,14 +1568,14 @@ function limitesContextoPorSkill(skillId: ComprasIaSkillId) {
   }
 
   if (skillId === "faltas_secao") {
-    return { topItens: 12, diasTop: 2, itensPorDia: 3, topCompras: 12, secoes: 12, pedidos: 12 };
+    return { topItens: 8, diasTop: 1, itensPorDia: 2, topCompras: 6, secoes: 8, pedidos: 4 };
   }
 
   if (skillId === "melhor_pior_item") {
-    return { topItens: 16, diasTop: 3, itensPorDia: 3, topCompras: 16, secoes: 4, pedidos: 4 };
+    return { topItens: 12, diasTop: 2, itensPorDia: 2, topCompras: 8, secoes: 3, pedidos: 3 };
   }
 
-  return { topItens: 18, diasTop: 3, itensPorDia: 3, topCompras: 18, secoes: 8, pedidos: 8 };
+  return { topItens: 12, diasTop: 2, itensPorDia: 2, topCompras: 8, secoes: 5, pedidos: 4 };
 }
 
 function montarContexto(params: {
@@ -1659,7 +1670,8 @@ function montarContexto(params: {
   };
 
   return {
-    contexto: JSON.stringify(dados, null, 2),
+    // Sem indentacao: o modelo recebe o mesmo JSON com menos tokens.
+    contexto: JSON.stringify(dados),
     meta,
   };
 }
@@ -1791,6 +1803,44 @@ function historicoParaContexto(historico: ChatMessage[]): string {
       return `${index + 1}. ${autor}: ${item.content.replace(/\s+/g, " ").trim()}`;
     })
     .join("\n");
+}
+
+function estimarTokensGroq(texto: string): number {
+  // Estimativa propositalmente conservadora para portugues, JSON e codigos/EAN.
+  // Nao depende de pacote extra na Vercel e serve apenas para bloquear excesso antes do fetch.
+  const partes: string[] = texto.match(/[A-Za-zÀ-ÿ]+|\d+|[^\s]/g) ?? [];
+  return partes.reduce<number>((total, parte) => {
+    if (/^\d+$/.test(parte)) return total + Math.ceil(parte.length / 2);
+    if (/^[A-Za-zÀ-ÿ]+$/.test(parte)) return total + Math.ceil(parte.length / 3);
+    return total + 1;
+  }, 0);
+}
+
+function limitarTextoParaGroq(texto: string, maxTokens: number): string {
+  if (estimarTokensGroq(texto) <= maxTokens) return texto;
+
+  const aviso = "\n[Contexto adicional omitido para respeitar o limite da Groq. Use apenas os dados acima.]";
+  let inicio = 0;
+  let fim = texto.length;
+  while (inicio < fim) {
+    const meio = Math.ceil((inicio + fim) / 2);
+    const candidato = texto.slice(0, meio).trimEnd() + aviso;
+    if (estimarTokensGroq(candidato) <= maxTokens) inicio = meio;
+    else fim = meio - 1;
+  }
+
+  return texto.slice(0, inicio).trimEnd() + aviso;
+}
+
+function prepararMensagensGroq(messages: Array<{ role: string; content: string }>): Array<{ role: string; content: string }> {
+  const budget = getGroqPromptBudgetTokens();
+  const system = messages[0];
+  const user = messages[1];
+  if (!system || !user) return messages;
+
+  const tokensSistema = estimarTokensGroq(system.content);
+  const tokensUsuario = Math.max(800, budget - tokensSistema);
+  return [system, { ...user, content: limitarTextoParaGroq(user.content, tokensUsuario) }];
 }
 
 function getGroqModels(): string[] {
@@ -1937,6 +1987,7 @@ async function chamarChatCompletion(params: {
   provider: string;
   timeoutMs: number;
   stream?: boolean;
+  maxCompletionTokens?: number;
   extraHeaders?: Record<string, string>;
 }): Promise<string> {
   let response: Response;
@@ -1945,7 +1996,7 @@ async function chamarChatCompletion(params: {
     model: params.model,
     messages: params.messages,
     temperature: getIaTemperature(),
-    max_completion_tokens: getIaMaxCompletionTokens(),
+    max_completion_tokens: params.maxCompletionTokens ?? getIaMaxCompletionTokens(),
     top_p: getIaTopP(),
     stream,
     stop: null,
@@ -1995,7 +2046,7 @@ async function perguntarIa(
   skill: BuyManSkill,
   perguntaKey: string
 ): Promise<string> {
-  const messages = buildIaMessages(pergunta, contexto, historico, skill, perguntaKey);
+  const messages = prepararMensagensGroq(buildIaMessages(pergunta, contexto, historico, skill, perguntaKey));
   const erros: string[] = [];
   const deadline = Date.now() + getIaTotalTimeoutMs();
   const providerTimeoutMs = getIaProviderTimeoutMs();
@@ -2019,6 +2070,7 @@ async function perguntarIa(
           provider: `Groq (${model})`,
           timeoutMs,
           stream: getGroqStreamEnabled(),
+          maxCompletionTokens: getGroqMaxCompletionTokens(),
         });
       } catch (error) {
         erros.push(error instanceof Error ? error.message : `Groq (${model}) falhou`);
