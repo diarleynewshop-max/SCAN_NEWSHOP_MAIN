@@ -9,7 +9,6 @@ import {
   FileText,
   ImageOff,
   Loader2,
-  LockKeyhole,
   PackageSearch,
   Send,
   ShieldCheck,
@@ -25,7 +24,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useToast } from "@/hooks/use-toast";
 import { obterLoginSalvo } from "@/hooks/useAuth";
@@ -255,14 +253,12 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
   const [tipo, setTipo] = useState<ComprasIaTipo>("resumo");
   const [periodoDias, setPeriodoDias] = useState("30");
   const [pergunta, setPergunta] = useState("");
-  const [senha, setSenha] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [relatorio, setRelatorio] = useState<ComprasIaRelatorio | null>(null);
   const loginSalvo = useMemo(() => (open ? obterLoginSalvo() : null), [open]);
 
   useEffect(() => {
     if (!open) {
-      setSenha("");
       setPergunta("");
       setTipo("resumo");
       setRelatorio(null);
@@ -271,12 +267,9 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
 
   const analisar = async () => {
     const actorLogin = loginSalvo?.login?.trim() ?? "";
-    if (!actorLogin) {
-      toast({ title: "Login não encontrado", description: "Entre novamente no sistema.", variant: "destructive" });
-      return;
-    }
-    if (!senha.trim()) {
-      toast({ title: "Confirme sua senha", description: "A análise exige senha de Admin/Super.", variant: "destructive" });
+    const actorId = loginSalvo?.usuarioId?.trim() ?? "";
+    if (!actorLogin || !actorId) {
+      toast({ title: "Sessão inválida", description: "Entre novamente no sistema.", variant: "destructive" });
       return;
     }
     if (tipo === "pergunta" && pergunta.trim().length < 3) {
@@ -292,8 +285,8 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
         periodoDias: Number(periodoDias),
         empresa,
         flag,
+        actorId,
         actorLogin,
-        actorSenha: senha,
       });
       setRelatorio(resultado);
     } catch (error) {
@@ -351,7 +344,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
                 })}
               </div>
 
-              <div className="mt-4 grid gap-3 lg:grid-cols-[150px_220px_1fr_auto] lg:items-end">
+              <div className="mt-4 grid gap-3 lg:grid-cols-[150px_1fr_auto] lg:items-end">
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Período</label>
                   <select
@@ -366,20 +359,6 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
                     <option value="90">Últimos 90 dias</option>
                     <option value="180">Últimos 180 dias</option>
                   </select>
-                </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Senha Admin/Super</label>
-                  <div className="relative">
-                    <LockKeyhole className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-slate-400" />
-                    <Input
-                      type="password"
-                      value={senha}
-                      onChange={(event) => setSenha(event.target.value)}
-                      placeholder="Confirme sua senha"
-                      className="pl-9"
-                      disabled={carregando}
-                    />
-                  </div>
                 </div>
                 <div>
                   <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Pergunta personalizada</label>
@@ -414,7 +393,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
               <section className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
                 <PackageSearch className="mx-auto h-10 w-10 text-slate-300" />
                 <p className="mt-3 font-bold text-slate-700">Nenhuma análise gerada</p>
-                <p className="mt-1 text-sm text-slate-500">Escolha o período, confirme a senha e clique em Analisar.</p>
+                <p className="mt-1 text-sm text-slate-500">Escolha o período e clique em Analisar.</p>
               </section>
             )}
           </div>

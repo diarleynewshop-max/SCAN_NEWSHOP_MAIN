@@ -15,14 +15,17 @@ type RequestBody = {
   periodoDias?: unknown;
   empresa?: unknown;
   flag?: unknown;
+  actorId?: unknown;
   actorLogin?: unknown;
-  actorSenha?: unknown;
 };
 
 type UsuarioLoginRow = {
+  id?: string;
+  login?: string;
   nome?: string;
   role?: string;
   empresas?: string[];
+  ativo?: boolean;
 };
 
 type ItemFrequenciaRow = {
@@ -206,36 +209,35 @@ function subtrairDias(dataIso: string, dias: number): string {
 
 function clienteSupabase(): SupabaseClient {
   const url = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL || "";
-  const key = (
-    process.env.SUPABASE_SERVICE_ROLE_KEY ||
-    process.env.SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_ANON_KEY ||
-    process.env.VITE_SUPABASE_PUBLISHABLE_KEY ||
-    ""
-  );
-  if (!url || !key) throw new HttpError(500, "Supabase não configurado para o analista de Compras.");
-  return createClient(url, key, { auth: { persistSession: false } });
+  const serviceKey = process.env.SUPABASE_SERVICE_ROLE_KEY || "";
+  if (!url || !serviceKey) {
+    throw new HttpError(500, "Supabase server-side não configurado para o analista de Compras.");
+  }
+  return createClient(url, serviceKey, { auth: { persistSession: false } });
 }
 
 async function validarAcesso(
   supabase: SupabaseClient,
+  actorId: string,
   login: string,
-  senha: string,
   empresa: Empresa
 ): Promise<void> {
-  if (!login || !senha) throw new HttpError(401, "Informe login e senha de Admin/Super.");
+  if (!actorId || !login) throw new HttpError(401, "Sessão inválida. Entre novamente no sistema.");
 
-  const { data, error } = await supabase.rpc("login_usuario", {
-    p_login: login.trim().toLowerCase(),
-    p_senha: senha,
-  });
+  const { data, error } = await supabase
+    .from("usuarios")
+    .select("id,login,nome,role,empresas,ativo")
+    .eq("id", actorId)
+    .eq("login", login.trim().toLowerCase())
+    .eq("ativo", true)
+    .maybeSingle();
   if (error) {
-    console.error("[compras-ia] falha no login_usuario", error);
-    throw new HttpError(401, "Login ou senha inválido.");
+    console.error("[compras-ia] falha ao validar sessão", error);
+    throw new HttpError(401, "Não foi possível validar a sessão atual.");
   }
 
-  const usuario = Array.isArray(data) ? data[0] as UsuarioLoginRow | undefined : undefined;
-  if (!usuario) throw new HttpError(401, "Login ou senha inválido.");
+  const usuario = data as UsuarioLoginRow | null;
+  if (!usuario) throw new HttpError(401, "Sessão inválida. Entre novamente no sistema.");
   const role = normalizarRole(usuario.role);
   if (role !== "admin" && role !== "super") {
     throw new HttpError(403, "Analista de Compras disponível apenas para Admin e Super.");
@@ -704,7 +706,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     if (pergunta.length > 500) throw new HttpError(400, "Pergunta muito longa. Use até 500 caracteres.");
 
     const supabase = clienteSupabase();
-    await validarAcesso(supabase, texto(body.actorLogin), texto(body.actorSenha), empresa);
+    await validarAcesso(supabase, texto(body.actorId), texto(body.actorLogin), empresa);
 
     const fim = hojeSaoPaulo();
     const inicio = subtrairDias(fim, periodoDias - 1);

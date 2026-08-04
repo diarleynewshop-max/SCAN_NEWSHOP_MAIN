@@ -71,8 +71,8 @@ export interface ConsultarComprasIaParams {
   periodoDias: number;
   empresa: string;
   flag: string;
+  actorId: string;
   actorLogin: string;
-  actorSenha: string;
 }
 
 export async function consultarComprasIa(params: ConsultarComprasIaParams): Promise<ComprasIaRelatorio> {
