@@ -1524,11 +1524,10 @@ function getGroqModels(): string[] {
   const modelos = configured
     ? configured.split(",").map((model) => model.trim()).filter(Boolean)
     : [
-        "llama-3.3-70b-versatile",
-        "llama-3.1-8b-instant",
+        "openai/gpt-oss-120b",
       ];
 
-  return modelos.length > 0 ? modelos : ["llama-3.3-70b-versatile"];
+  return modelos.length > 0 ? modelos : ["openai/gpt-oss-120b"];
 }
 
 function buildIaMessages(
