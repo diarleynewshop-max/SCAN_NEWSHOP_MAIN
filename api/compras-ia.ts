@@ -652,6 +652,48 @@ function montarMetricas(produtos: ProdutoAgregado[], diario: ReturnType<typeof r
   ];
 }
 
+function montarMetricasRanking(
+  produtos: ProdutoAgregado[],
+  totalElegiveis: number,
+  criterios: CriteriosPergunta
+): Metrica[] {
+  const lider = produtos[0];
+  const quantidadeRanking = produtos.reduce((total, produto) => total + produto.pedido, 0);
+  const ocorrenciasRanking = produtos.reduce((total, produto) => total + produto.ocorrencias, 0);
+  return [
+    {
+      id: "elegiveis",
+      label: "Itens no filtro",
+      valor: ptNumero(totalElegiveis),
+      detalhe: criterios.minimoOcorrencias !== null
+        ? `Pedidos ${ptNumero(criterios.minimoOcorrencias)} vezes ou mais`
+        : "Dentro do período escolhido",
+      tom: "neutro",
+    },
+    {
+      id: "exibidos",
+      label: "Itens exibidos",
+      valor: ptNumero(produtos.length),
+      detalhe: `Limite solicitado: ${ptNumero(criterios.limite)}`,
+      tom: "neutro",
+    },
+    {
+      id: "maior_frequencia",
+      label: "Maior frequência",
+      valor: ptNumero(lider?.ocorrencias ?? 0),
+      detalhe: lider ? lider.descricao : "Nenhum item encontrado",
+      tom: "positivo",
+    },
+    {
+      id: "quantidade_ranking",
+      label: "Qtd. dos listados",
+      valor: ptNumero(quantidadeRanking),
+      detalhe: `${ptNumero(ocorrenciasRanking)} ocorrências somadas`,
+      tom: "neutro",
+    },
+  ];
+}
+
 function leituraFallback(
   tipo: AnaliseTipo,
   produtos: ProdutoAgregado[],
@@ -803,6 +845,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       produto.pedido > 0
       && (criterios.minimoOcorrencias === null || produto.ocorrencias >= criterios.minimoOcorrencias)
     )).length;
+    const metricasRelatorio = criterios.estruturada
+      ? montarMetricasRanking(produtos, totalElegiveis, criterios)
+      : metricas;
     const produtosContexto = Array.from(new Map([
       ...produtos,
       ...selecionarProdutos("faltas", produtosTodos),
@@ -825,7 +870,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : resumoCurto(metricas, secoes),
         leitura: leitura.texto,
         origemLeitura: leitura.origem,
-        metricas,
+        metricas: metricasRelatorio,
         produtos,
         secoes: criterios.estruturada ? [] : secoes.slice(0, 8),
         contexto: {

@@ -84,7 +84,7 @@ function mensagemErro(error: unknown): string {
   return error instanceof Error ? error.message : "Falha ao gerar análise.";
 }
 
-function CardProduto({ produto, posicao }: { produto: ComprasIaProduto; posicao: number }) {
+function CardProduto({ produto, posicao, modoRanking }: { produto: ComprasIaProduto; posicao: number; modoRanking: boolean }) {
   const prioridade = PRIORIDADE[produto.prioridade];
   const imagem = (
     <div className="flex h-24 w-24 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-slate-200 bg-white">
@@ -112,7 +112,13 @@ function CardProduto({ produto, posicao }: { produto: ComprasIaProduto; posicao:
         <div className="min-w-0 flex-1">
           <div className="mb-1 flex items-start justify-between gap-2">
             <span className="text-xs font-bold text-slate-400">#{posicao}</span>
-            <Badge variant="outline" className={prioridade.className}>{prioridade.label}</Badge>
+            {modoRanking ? (
+              <Badge variant="outline" className="border-indigo-200 bg-indigo-50 text-indigo-700">
+                {formatarNumero(produto.ocorrencias)} vezes
+              </Badge>
+            ) : (
+              <Badge variant="outline" className={prioridade.className}>{prioridade.label}</Badge>
+            )}
           </div>
           <h4 className="line-clamp-2 text-sm font-bold leading-5 text-slate-900">{produto.descricao}</h4>
           <p className="mt-1 truncate text-xs text-slate-500">
@@ -131,16 +137,20 @@ function CardProduto({ produto, posicao }: { produto: ComprasIaProduto; posicao:
           <p className="text-sm font-bold text-slate-900">{formatarNumero(produto.pedido)}</p>
         </div>
         <div className="rounded-lg bg-emerald-50 px-2 py-2">
-          <p className="text-[10px] uppercase tracking-wide text-emerald-600">Atendido</p>
-          <p className="text-sm font-bold text-emerald-800">{formatarNumero(produto.atendido)}</p>
+          <p className="text-[10px] uppercase tracking-wide text-emerald-600">{modoRanking ? "Média/vez" : "Atendido"}</p>
+          <p className="text-sm font-bold text-emerald-800">
+            {modoRanking
+              ? (produto.ocorrencias > 0 ? (produto.pedido / produto.ocorrencias).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) : "0")
+              : formatarNumero(produto.atendido)}
+          </p>
         </div>
         <div className="rounded-lg bg-rose-50 px-2 py-2">
-          <p className="text-[10px] uppercase tracking-wide text-rose-600">Falta</p>
-          <p className="text-sm font-bold text-rose-800">{formatarNumero(produto.falta)}</p>
+          <p className="text-[10px] uppercase tracking-wide text-rose-600">{modoRanking ? "Qtd. atendida" : "Falta"}</p>
+          <p className="text-sm font-bold text-rose-800">{formatarNumero(modoRanking ? produto.atendido : produto.falta)}</p>
         </div>
       </div>
-      <p className="mt-2 text-xs leading-5 text-slate-600">{produto.motivo}</p>
-      {produto.status && (
+      {!modoRanking && <p className="mt-2 text-xs leading-5 text-slate-600">{produto.motivo}</p>}
+      {!modoRanking && produto.status && (
         <Badge variant="outline" className="mt-2 border-blue-200 bg-blue-50 text-blue-700">
           {produto.status.replace(/_/g, " ")}
         </Badge>
@@ -151,6 +161,7 @@ function CardProduto({ produto, posicao }: { produto: ComprasIaProduto; posicao:
 
 function Resultado({ relatorio }: { relatorio: ComprasIaRelatorio }) {
   const maiorFaltaSecao = Math.max(1, ...relatorio.secoes.map((secao) => secao.falta));
+  const modoRanking = relatorio.contexto.criterios?.estruturada === true;
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -232,7 +243,12 @@ function Resultado({ relatorio }: { relatorio: ComprasIaRelatorio }) {
           </h3>
           <div className="grid gap-3 lg:grid-cols-2">
             {relatorio.produtos.map((produto, index) => (
-              <CardProduto key={`${produto.codigo}-${produto.sku}-${index}`} produto={produto} posicao={index + 1} />
+              <CardProduto
+                key={`${produto.codigo}-${produto.sku}-${index}`}
+                produto={produto}
+                posicao={index + 1}
+                modoRanking={modoRanking}
+              />
             ))}
           </div>
         </section>

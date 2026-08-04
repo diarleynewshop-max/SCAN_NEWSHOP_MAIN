@@ -127,6 +127,7 @@ function percentualPt(value: number): string {
 }
 
 function linhasRelatorio(relatorio: ComprasIaRelatorio): string[] {
+  const modoRanking = relatorio.contexto.criterios?.estruturada === true;
   const linhas = [
     relatorio.titulo,
     `Empresa: ${relatorio.contexto.empresa} | Operação: ${relatorio.contexto.flag.toUpperCase()}`,
@@ -160,9 +161,11 @@ function linhasRelatorio(relatorio: ComprasIaRelatorio): string[] {
       linhas.push(
         `${index + 1}. ${produto.descricao}`,
         `   Código: ${produto.codigo}${produto.sku ? ` | SKU: ${produto.sku}` : ""} | Seção: ${produto.secao}`,
-        `   Pedido: ${numeroPt(produto.pedido)} | Atendido: ${numeroPt(produto.atendido)} | Falta: ${numeroPt(produto.falta)} | Taxa: ${percentualPt(produto.taxaAtendimento)}`,
-        `   Prioridade: ${produto.prioridade} | ${produto.motivo}`,
-        produto.status ? `   Status em Compras: ${produto.status}` : "",
+        modoRanking
+          ? `   Vezes: ${numeroPt(produto.ocorrencias)} | Quantidade pedida: ${numeroPt(produto.pedido)} | Média por vez: ${produto.ocorrencias > 0 ? (produto.pedido / produto.ocorrencias).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) : "0"}`
+          : `   Pedido: ${numeroPt(produto.pedido)} | Atendido: ${numeroPt(produto.atendido)} | Falta: ${numeroPt(produto.falta)} | Taxa: ${percentualPt(produto.taxaAtendimento)}`,
+        modoRanking ? "" : `   Prioridade: ${produto.prioridade} | ${produto.motivo}`,
+        !modoRanking && produto.status ? `   Status em Compras: ${produto.status}` : "",
         produto.fotoUrl ? `   Foto: ${produto.fotoUrl}` : "",
       );
     });
@@ -200,6 +203,7 @@ export function baixarComprasIaPdf(relatorio: ComprasIaRelatorio): void {
   const doc = new jsPDF({ unit: "mm", format: "a4" });
   const largura = doc.internal.pageSize.getWidth();
   let y = 0;
+  const modoRanking = relatorio.contexto.criterios?.estruturada === true;
 
   doc.setFillColor(15, 23, 42);
   doc.rect(0, 0, largura, 34, "F");
@@ -257,7 +261,14 @@ export function baixarComprasIaPdf(relatorio: ComprasIaRelatorio): void {
       doc.roundedRect(14, y - 3, 182, 20, 2, 2, "F");
       y = escreverLinha(doc, `${index + 1}. ${produto.descricao}`, y + 2, { tamanho: 9, negrito: true });
       y = escreverLinha(doc, `Cód. ${produto.codigo}${produto.sku ? ` | SKU ${produto.sku}` : ""} | ${produto.secao}`, y, { tamanho: 7.5, cor: [71, 85, 105] });
-      y = escreverLinha(doc, `Pedido ${numeroPt(produto.pedido)} | Atendido ${numeroPt(produto.atendido)} | Falta ${numeroPt(produto.falta)} | Prioridade ${produto.prioridade}`, y, { tamanho: 7.5 });
+      y = escreverLinha(
+        doc,
+        modoRanking
+          ? `Vezes ${numeroPt(produto.ocorrencias)} | Quantidade pedida ${numeroPt(produto.pedido)} | Média por vez ${produto.ocorrencias > 0 ? (produto.pedido / produto.ocorrencias).toLocaleString("pt-BR", { maximumFractionDigits: 1 }) : "0"}`
+          : `Pedido ${numeroPt(produto.pedido)} | Atendido ${numeroPt(produto.atendido)} | Falta ${numeroPt(produto.falta)} | Prioridade ${produto.prioridade}`,
+        y,
+        { tamanho: 7.5 }
+      );
       y += 4;
     });
   }
