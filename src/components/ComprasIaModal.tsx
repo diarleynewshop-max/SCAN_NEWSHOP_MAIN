@@ -121,7 +121,11 @@ function CardProduto({ produto, posicao }: { produto: ComprasIaProduto; posicao:
           <p className="truncate text-xs text-slate-500">{produto.secao}</p>
         </div>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center">
+      <div className="mt-3 grid grid-cols-4 gap-2 text-center">
+        <div className="rounded-lg bg-indigo-50 px-2 py-2">
+          <p className="text-[10px] uppercase tracking-wide text-indigo-600">Vezes</p>
+          <p className="text-sm font-bold text-indigo-800">{formatarNumero(produto.ocorrencias)}</p>
+        </div>
         <div className="rounded-lg bg-slate-50 px-2 py-2">
           <p className="text-[10px] uppercase tracking-wide text-slate-500">Pedido</p>
           <p className="text-sm font-bold text-slate-900">{formatarNumero(produto.pedido)}</p>

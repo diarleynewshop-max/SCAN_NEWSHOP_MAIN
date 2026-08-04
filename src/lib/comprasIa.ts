@@ -58,6 +58,12 @@ export interface ComprasIaRelatorio {
     fim: string;
     periodoDias: number;
     tipo: ComprasIaTipo;
+    criterios?: {
+      limite: number;
+      minimoOcorrencias: number | null;
+      ordenacao: "ocorrencias" | "quantidade";
+      estruturada: boolean;
+    };
     linhasLidas: number;
     geradoEm: string;
     somenteLeitura: boolean;
@@ -245,7 +251,7 @@ export function baixarComprasIaPdf(relatorio: ComprasIaRelatorio): void {
   if (relatorio.produtos.length) {
     y += 4;
     y = escreverLinha(doc, "Produtos", y, { tamanho: 11, negrito: true });
-    relatorio.produtos.slice(0, 10).forEach((produto, index) => {
+    relatorio.produtos.forEach((produto, index) => {
       y = novaPaginaSeNecessario(doc, y, 23);
       doc.setFillColor(248, 250, 252);
       doc.roundedRect(14, y - 3, 182, 20, 2, 2, "F");

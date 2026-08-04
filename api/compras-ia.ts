@@ -107,6 +107,13 @@ type Metrica = {
   tom: TomMetrica;
 };
 
+export type CriteriosPergunta = {
+  limite: number;
+  minimoOcorrencias: number | null;
+  ordenacao: "ocorrencias" | "quantidade";
+  estruturada: boolean;
+};
+
 class HttpError extends Error {
   constructor(public statusCode: number, message: string) {
     super(message);
@@ -416,10 +423,14 @@ function agregarProdutos(itens: ItemFrequenciaRow[], compras: CompraRow[]): Prod
     const sku = texto(linha.sku);
     const chave = codigo !== "SEM-CODIGO" ? codigo : `sku:${sku}`;
     const compra = compraVinculada(indiceCompras, codigo, sku);
+    const descricaoBase = texto(linha.descricao) || texto(compra?.descricao);
+    const descricao = descricaoBase && descricaoBase !== codigo
+      ? descricaoBase
+      : /[a-z]/i.test(sku) ? sku : codigo;
     const atual = mapa.get(chave) ?? {
       codigo,
       sku,
-      descricao: texto(linha.descricao) || texto(compra?.descricao) || codigo,
+      descricao,
       secao: texto(linha.secao) || texto(compra?.secao) || "Sem categoria",
       fotoUrl: fotoSegura(linha.foto_url) || fotoSegura(compra?.foto_url),
       status: texto(compra?.status),
@@ -493,6 +504,25 @@ function normalizarBusca(value: string): string {
     .trim();
 }
 
+export function extrairCriteriosPergunta(pergunta: string): CriteriosPergunta {
+  const busca = normalizarBusca(pergunta);
+  const limiteMatch = busca.match(/\btop\s*(\d{1,2})\b/)
+    || busca.match(/\b(?:lista|liste|mostre|gere)\s+(?:os\s+)?(\d{1,2})\b/);
+  const frequenciaMatch = busca.match(/\b(\d{1,3})x\s+(?:a|ou)\s+mais\b/)
+    || busca.match(/\b(?:pelo menos|minimo de)\s+(\d{1,3})\s*(?:x|vez|vezes)\b/)
+    || busca.match(/\b(\d{1,3})\s*(?:vez|vezes)\s+(?:a|ou)\s+mais\b/);
+  const limite = Math.max(1, Math.min(50, limiteMatch ? Number(limiteMatch[1]) : 12));
+  const minimoOcorrencias = frequenciaMatch
+    ? Math.max(1, Math.min(999, Number(frequenciaMatch[1])))
+    : null;
+  return {
+    limite,
+    minimoOcorrencias,
+    ordenacao: minimoOcorrencias !== null ? "ocorrencias" : "quantidade",
+    estruturada: Boolean(limiteMatch || frequenciaMatch),
+  };
+}
+
 function inferirTipoPergunta(pergunta: string): Exclude<AnaliseTipo, "pergunta"> | "pergunta" {
   const busca = normalizarBusca(pergunta);
   if (/\b(falta|faltou|nao tem|ruptura)\b/.test(busca)) return "faltas";
@@ -507,6 +537,7 @@ function produtosCitadosNaPergunta(pergunta: string, produtos: ProdutoAgregado[]
     "qual", "quais", "item", "itens", "produto", "produtos", "secao", "setor",
     "teve", "tiveram", "mais", "menos", "maior", "menor", "pedido", "pedidos",
     "falta", "faltas", "periodo", "mostrar", "mostre", "analise", "compras",
+    "gere", "lista", "liste", "foram", "vez", "vezes",
   ]);
   const tokens = normalizarBusca(pergunta).split(" ").filter((token) => token.length >= 3 && !ignorar.has(token));
   if (!tokens.length) return [];
@@ -516,29 +547,72 @@ function produtosCitadosNaPergunta(pergunta: string, produtos: ProdutoAgregado[]
   });
 }
 
-function selecionarProdutos(tipo: AnaliseTipo, produtos: ProdutoAgregado[], pergunta = ""): ProdutoAgregado[] {
-  const ativos = produtos.filter((produto) => produto.pedido > 0);
+function selecionarProdutos(
+  tipo: AnaliseTipo,
+  produtos: ProdutoAgregado[],
+  pergunta = "",
+  criterios: CriteriosPergunta = extrairCriteriosPergunta(pergunta)
+): ProdutoAgregado[] {
+  const ativos = produtos.filter((produto) => (
+    produto.pedido > 0
+    && (criterios.minimoOcorrencias === null || produto.ocorrencias >= criterios.minimoOcorrencias)
+  ));
+  const limite = criterios.limite;
   if (tipo === "pergunta") {
     const citados = produtosCitadosNaPergunta(pergunta, ativos);
     if (citados.length) {
-      return citados.sort((a, b) => b.falta - a.falta || b.pedido - a.pedido).slice(0, 12);
+      return citados.sort((a, b) => b.ocorrencias - a.ocorrencias || b.pedido - a.pedido).slice(0, limite);
     }
     const inferido = inferirTipoPergunta(pergunta);
-    if (inferido !== "pergunta") return selecionarProdutos(inferido, ativos, pergunta);
+    if (inferido !== "pergunta") return selecionarProdutos(inferido, ativos, pergunta, criterios);
+  }
+  if (criterios.ordenacao === "ocorrencias") {
+    return [...ativos]
+      .sort((a, b) => b.ocorrencias - a.ocorrencias || b.pedido - a.pedido)
+      .slice(0, limite);
   }
   if (tipo === "mais_pedidos") {
-    return [...ativos].sort((a, b) => b.pedido - a.pedido || b.ocorrencias - a.ocorrencias).slice(0, 12);
+    return [...ativos].sort((a, b) => b.pedido - a.pedido || b.ocorrencias - a.ocorrencias).slice(0, limite);
   }
   if (tipo === "prioridades") {
     return ativos
       .filter((produto) => produto.prioridade !== "bloqueada")
       .sort((a, b) => b.score - a.score || b.falta - a.falta)
-      .slice(0, 12);
+      .slice(0, limite);
   }
   return ativos
     .filter((produto) => produto.falta > 0)
     .sort((a, b) => b.falta - a.falta || b.pedido - a.pedido)
-    .slice(0, 12);
+    .slice(0, limite);
+}
+
+function montarLeituraEstruturada(
+  criterios: CriteriosPergunta,
+  produtos: ProdutoAgregado[],
+  totalElegiveis: number
+): string {
+  if (!produtos.length) {
+    return criterios.minimoOcorrencias !== null
+      ? `• Nenhum item foi pedido ${criterios.minimoOcorrencias} vezes ou mais no período selecionado.`
+      : "• Nenhum item foi encontrado para o ranking solicitado.";
+  }
+  const lider = produtos[0];
+  const filtro = criterios.minimoOcorrencias !== null
+    ? ` com frequência mínima de ${criterios.minimoOcorrencias} vezes`
+    : "";
+  return [
+    `• ${ptNumero(totalElegiveis)} itens atendem ao filtro${filtro}; exibindo os ${ptNumero(produtos.length)} primeiros.`,
+    `• Ranking ordenado por ${criterios.ordenacao === "ocorrencias" ? "número de vezes em que o item foi pedido" : "quantidade total pedida"}.`,
+    `• Líder: ${lider.descricao} — ${ptNumero(lider.ocorrencias)} vezes, ${ptNumero(lider.pedido)} unidades pedidas e ${ptNumero(lider.atendido)} atendidas.`,
+    "• Os números vêm das conferências concluídas dentro do período selecionado.",
+  ].join("\n");
+}
+
+function tituloEstruturado(criterios: CriteriosPergunta): string {
+  if (criterios.minimoOcorrencias !== null) {
+    return `Top ${criterios.limite} itens pedidos ${criterios.minimoOcorrencias} vezes ou mais`;
+  }
+  return `Top ${criterios.limite} itens mais pedidos`;
 }
 
 function montarMetricas(produtos: ProdutoAgregado[], diario: ReturnType<typeof resumoDiario>): Metrica[] {
@@ -723,28 +797,37 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const secoes = agregarSecoes(secoesRows);
     const diario = resumoDiario(diarioRows);
     const metricas = montarMetricas(produtosTodos, diario);
-    const produtos = selecionarProdutos(tipo, produtosTodos, pergunta);
+    const criterios = extrairCriteriosPergunta(pergunta);
+    const produtos = selecionarProdutos(tipo, produtosTodos, pergunta, criterios);
+    const totalElegiveis = produtosTodos.filter((produto) => (
+      produto.pedido > 0
+      && (criterios.minimoOcorrencias === null || produto.ocorrencias >= criterios.minimoOcorrencias)
+    )).length;
     const produtosContexto = Array.from(new Map([
       ...produtos,
       ...selecionarProdutos("faltas", produtosTodos),
       ...selecionarProdutos("mais_pedidos", produtosTodos),
       ...selecionarProdutos("prioridades", produtosTodos),
     ].map((produto) => [`${produto.codigo}|${produto.sku}`, produto])).values()).slice(0, 24);
-    const leitura = await gerarLeituraIa(tipo, pergunta, empresa, flag, inicio, fim, produtosContexto, secoes, metricas);
+    const leitura = criterios.estruturada
+      ? { texto: montarLeituraEstruturada(criterios, produtos, totalElegiveis), origem: "calculada" as const }
+      : await gerarLeituraIa(tipo, pergunta, empresa, flag, inicio, fim, produtosContexto, secoes, metricas);
     if (leitura.aviso) avisos.push(leitura.aviso);
 
     return res.status(200).json({
       ok: true,
       relatorio: {
         id: `compras-${Date.now().toString(36)}`,
-        titulo: TITULOS[tipo],
+        titulo: criterios.estruturada ? tituloEstruturado(criterios) : TITULOS[tipo],
         pergunta,
-        resumo: resumoCurto(metricas, secoes),
+        resumo: criterios.estruturada
+          ? `${ptNumero(totalElegiveis)} itens encontrados no filtro solicitado. Resultado ordenado por ${criterios.ordenacao === "ocorrencias" ? "frequência" : "quantidade pedida"}.`
+          : resumoCurto(metricas, secoes),
         leitura: leitura.texto,
         origemLeitura: leitura.origem,
         metricas,
         produtos,
-        secoes: secoes.slice(0, 8),
+        secoes: criterios.estruturada ? [] : secoes.slice(0, 8),
         contexto: {
           empresa,
           flag,
@@ -752,6 +835,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           fim,
           periodoDias,
           tipo,
+          criterios,
           linhasLidas: itensRows.length,
           geradoEm: new Date().toISOString(),
           somenteLeitura: true,
