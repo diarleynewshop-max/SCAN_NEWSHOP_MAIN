@@ -71,7 +71,6 @@ export interface ConsultarComprasIaParams {
   periodoDias: number;
   empresa: string;
   flag: string;
-  actorId: string;
   actorLogin: string;
 }
 

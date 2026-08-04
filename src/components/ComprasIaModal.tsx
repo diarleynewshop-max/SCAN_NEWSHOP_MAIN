@@ -267,8 +267,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
 
   const analisar = async () => {
     const actorLogin = loginSalvo?.login?.trim() ?? "";
-    const actorId = loginSalvo?.usuarioId?.trim() ?? "";
-    if (!actorLogin || !actorId) {
+    if (!actorLogin) {
       toast({ title: "Sessão inválida", description: "Entre novamente no sistema.", variant: "destructive" });
       return;
     }
@@ -285,7 +284,6 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
         periodoDias: Number(periodoDias),
         empresa,
         flag,
-        actorId,
         actorLogin,
       });
       setRelatorio(resultado);
