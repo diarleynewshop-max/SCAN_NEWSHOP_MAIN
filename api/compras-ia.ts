@@ -824,6 +824,197 @@ function compraToItemResumo(row: CompraRow): ItemResumo {
   };
 }
 
+function perguntaPedeComparativo(pergunta: string): boolean {
+  const texto = normalizarBusca(pergunta);
+  return /\b(comparativo|comparar|compare|comparacao|versus|vs|diferenca|evolucao|alta|queda)\b/.test(texto);
+}
+
+function formatarNumero(value: number): string {
+  return Number(value || 0).toLocaleString("pt-BR", { maximumFractionDigits: 2 });
+}
+
+function formatarDelta(value: number): string {
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatarNumero(value)}`;
+}
+
+function formatarPercentual(delta: number, base: number): string {
+  if (!base) return delta ? "sem base anterior" : "0%";
+  return `${formatarDelta((delta / base) * 100)}%`;
+}
+
+function montarGruposComparativo(
+  rows: ItemFrequenciaRow[],
+  pergunta: string,
+  compras: CompraRow[]
+) {
+  const hoje = hojeSaoPaulo();
+  const { datasExatas, diasMes } = extrairDatas(pergunta, hoje);
+  const gruposBase = datasExatas.length >= 2
+    ? datasExatas.slice(0, 4).map((iso) => ({
+        key: iso,
+        label: formatarData(iso),
+        rows: rows.filter((row) => toText(row.data) === iso),
+        criterio: "data exata",
+      }))
+    : diasMes.slice(0, 4).map((dia) => ({
+        key: dia,
+        label: `dia ${dia}`,
+        rows: rows.filter((row) => toText(row.data).slice(8, 10) === dia),
+        criterio: "dia do mes dentro do periodo lido",
+      }));
+
+  return gruposBase
+    .map((grupo) => {
+      const datas = Array.from(new Set(grupo.rows.map((row) => toText(row.data)).filter(Boolean))).sort();
+      const itensTodos = enriquecerItensComCompras(agregarItens(grupo.rows, 2000), compras);
+      return {
+        ...grupo,
+        datas,
+        itensTodos,
+        itensTop: itensTodos.slice(0, 5),
+        totalPedido: grupo.rows.reduce((sum, row) => sum + toNumber(row.total_pedido), 0),
+        totalReal: grupo.rows.reduce((sum, row) => sum + toNumber(row.total_real), 0),
+        ocorrencias: grupo.rows.reduce((sum, row) => sum + toNumber(row.vezes), 0),
+        itensUnicos: new Set(grupo.rows.map((row) => toText(row.codigo)).filter(Boolean)).size,
+      };
+    });
+}
+
+function montarMudancasComparativo(
+  grupoA: ReturnType<typeof montarGruposComparativo>[number],
+  grupoB: ReturnType<typeof montarGruposComparativo>[number],
+  limite = 8
+) {
+  const mapa = new Map<string, { a?: ItemResumo; b?: ItemResumo }>();
+
+  for (const item of grupoA.itensTodos) {
+    mapa.set(item.codigo, { ...(mapa.get(item.codigo) ?? {}), a: item });
+  }
+  for (const item of grupoB.itensTodos) {
+    mapa.set(item.codigo, { ...(mapa.get(item.codigo) ?? {}), b: item });
+  }
+
+  return [...mapa.entries()]
+    .map(([codigo, value]) => {
+      const aPedido = value.a?.total_pedido ?? 0;
+      const bPedido = value.b?.total_pedido ?? 0;
+      const aReal = value.a?.total_real ?? 0;
+      const bReal = value.b?.total_real ?? 0;
+      const item = value.b ?? value.a;
+      return {
+        codigo,
+        item,
+        aPedido,
+        bPedido,
+        aReal,
+        bReal,
+        deltaPedido: bPedido - aPedido,
+        deltaReal: bReal - aReal,
+      };
+    })
+    .filter((row) => row.item && (row.aPedido > 0 || row.bPedido > 0 || row.aReal > 0 || row.bReal > 0))
+    .sort((a, b) => Math.abs(b.deltaPedido) - Math.abs(a.deltaPedido) || Math.abs(b.deltaReal) - Math.abs(a.deltaReal))
+    .slice(0, limite);
+}
+
+function formatarMudancaComparativo(
+  row: ReturnType<typeof montarMudancasComparativo>[number],
+  index: number,
+  labelA: string,
+  labelB: string
+): string {
+  const item = row.item;
+  if (!item) return "";
+
+  const sku = item.sku ? ` | SKU: ${item.sku}` : "";
+  const status = item.status ? `\n   Compras: ${item.status}${item.pedido_feito === true ? " | pedido feito" : ""}` : "";
+  const foto = item.foto_url ? "\n   Foto: card do produto abaixo" : "";
+
+  return [
+    `${index + 1}. ${item.descricao || item.codigo}`,
+    `   Cod: ${item.codigo}${sku} | Secao: ${item.secao}`,
+    `   Pedido: ${labelA} ${formatarNumero(row.aPedido)} -> ${labelB} ${formatarNumero(row.bPedido)} (${formatarDelta(row.deltaPedido)})`,
+    `   Real: ${labelA} ${formatarNumero(row.aReal)} -> ${labelB} ${formatarNumero(row.bReal)} (${formatarDelta(row.deltaReal)})`,
+  ].join("\n") + status + foto;
+}
+
+function montarRespostaComparativo(
+  pergunta: string,
+  rows: ItemFrequenciaRow[],
+  compras: CompraRow[],
+  dataInicio: string,
+  dataFim: string
+): RespostaAutomatica | null {
+  if (!perguntaPedeComparativo(pergunta)) return null;
+
+  const grupos = montarGruposComparativo(rows, pergunta, compras);
+  if (grupos.length < 2) return null;
+
+  const [grupoA, grupoB] = grupos;
+  if (!grupoA.rows.length || !grupoB.rows.length) {
+    return {
+      resposta: [
+        "Relatorio comparativo",
+        `Periodo lido: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+        `Filtro: ${grupoA.label} x ${grupoB.label}.`,
+        "",
+        !grupoA.rows.length ? `- Sem dados para ${grupoA.label}.` : `- ${grupoA.label}: ${formatarNumero(grupoA.totalPedido)} un. pedidas.`,
+        !grupoB.rows.length ? `- Sem dados para ${grupoB.label}.` : `- ${grupoB.label}: ${formatarNumero(grupoB.totalPedido)} un. pedidas.`,
+        "",
+        "Informe datas exatas, exemplo 10/07 e 12/07, se quiser comparar dias especificos.",
+      ].join("\n"),
+      produtos: [],
+    };
+  }
+
+  const deltaPedido = grupoB.totalPedido - grupoA.totalPedido;
+  const deltaReal = grupoB.totalReal - grupoA.totalReal;
+  const deltaOcorrencias = grupoB.ocorrencias - grupoA.ocorrencias;
+  const mudancas = montarMudancasComparativo(grupoA, grupoB, 8);
+  const produtos = mudancas
+    .map((row) => row.item)
+    .filter((item): item is ItemResumo => Boolean(item))
+    .map((item, index) => produtoCardFromItem(item, index, "citados", "comparativo de dias"));
+
+  const criterio = grupoA.criterio === "data exata"
+    ? "datas exatas informadas"
+    : "dia do mes dentro do periodo lido";
+  const datasA = grupoA.datas.length ? grupoA.datas.map(formatarData).join(", ") : "-";
+  const datasB = grupoB.datas.length ? grupoB.datas.map(formatarData).join(", ") : "-";
+
+  return {
+    resposta: [
+      `Relatorio comparativo: ${grupoA.label} x ${grupoB.label}`,
+      `Periodo lido: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+      `Criterio: ${criterio}.`,
+      grupoA.criterio !== "data exata" ? `Datas consideradas ${grupoA.label}: ${datasA}.` : "",
+      grupoB.criterio !== "data exata" ? `Datas consideradas ${grupoB.label}: ${datasB}.` : "",
+      "",
+      "Resumo",
+      `- ${grupoA.label}: ${formatarNumero(grupoA.totalPedido)} pedidas | ${formatarNumero(grupoA.totalReal)} reais | ${formatarNumero(grupoA.ocorrencias)} ocorrencias | ${formatarNumero(grupoA.itensUnicos)} itens.`,
+      `- ${grupoB.label}: ${formatarNumero(grupoB.totalPedido)} pedidas | ${formatarNumero(grupoB.totalReal)} reais | ${formatarNumero(grupoB.ocorrencias)} ocorrencias | ${formatarNumero(grupoB.itensUnicos)} itens.`,
+      `- Diferenca pedida: ${formatarDelta(deltaPedido)} (${formatarPercentual(deltaPedido, grupoA.totalPedido)}).`,
+      `- Diferenca real: ${formatarDelta(deltaReal)} (${formatarPercentual(deltaReal, grupoA.totalReal)}).`,
+      `- Diferenca de ocorrencias: ${formatarDelta(deltaOcorrencias)}.`,
+      "",
+      "Leitura rapida",
+      deltaPedido > 0
+        ? `- ${grupoB.label} teve maior volume pedido.`
+        : deltaPedido < 0
+          ? `- ${grupoA.label} teve maior volume pedido.`
+          : "- Os dois grupos ficaram empatados em volume pedido.",
+      deltaReal < deltaPedido ? "- A quantidade real nao acompanhou todo o aumento pedido; revisar ruptura/parcial." : "- A quantidade real acompanhou proporcionalmente o pedido.",
+      "",
+      "Itens que mais mudaram",
+      ...(mudancas.length
+        ? mudancas.map((row, index) => formatarMudancaComparativo(row, index, grupoA.label, grupoB.label)).filter(Boolean)
+        : ["- Sem variacao por item no recorte."]),
+    ].filter((line) => line !== "").join("\n"),
+    produtos,
+  };
+}
+
 function montarRespostaRankingSecao(
   pergunta: string,
   rows: ItemFrequenciaRow[],
@@ -1213,6 +1404,15 @@ function montarRespostaFallback(params: {
   dataFim: string;
   erroIa: string;
 }): RespostaAutomatica {
+  const comparativo = montarRespostaComparativo(
+    params.pergunta,
+    params.itens,
+    params.compras,
+    params.dataInicio,
+    params.dataFim
+  );
+  if (comparativo) return comparativo;
+
   const rankingSecao = montarRespostaRankingSecao(
     params.pergunta,
     params.itens,
@@ -1547,6 +1747,18 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       avisos,
     };
+
+    const respostaComparativo = montarRespostaComparativo(pergunta, itens, compras, dataInicio, dataFim);
+    if (respostaComparativo) {
+      return res.status(200).json({
+        ok: true,
+        resposta: respostaComparativo.resposta,
+        produtos: respostaComparativo.produtos,
+        contexto: metaInicial,
+        pergunta_key: perguntaKey,
+        request_id: requestId,
+      });
+    }
 
     const respostaRankingSecao = montarRespostaRankingSecao(pergunta, itens, compras, dataInicio, dataFim);
     if (respostaRankingSecao) {
