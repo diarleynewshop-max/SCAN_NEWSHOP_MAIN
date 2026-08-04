@@ -37,8 +37,8 @@ interface MensagemLocal extends ComprasIaMessage {
 }
 
 const SUGESTOES = [
-  "Qual produto foi mais pedido nos dias 10 e 12?",
-  "Gere uma lista dos 5 itens mais pedidos e 5 menos pedidos da secao de eletronico.",
+  "Faca um comparativo entre os dias 10 e 12.",
+  "Mostre os 5 melhores e 5 piores itens por quantidade pedida.",
   "Quais secoes tiveram mais falta?",
 ];
 
@@ -236,9 +236,9 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
               <Bot className="h-5 w-5" />
             </div>
             <div className="min-w-0">
-              <DialogTitle className="text-white">IA Compras</DialogTitle>
+              <DialogTitle className="text-white">Buy-man</DialogTitle>
               <DialogDescription className="text-slate-300">
-                {empresa} | {String(flag).toUpperCase()} | Admin/Super
+                IA Compras | {empresa} | {String(flag).toUpperCase()} | Admin/Super
               </DialogDescription>
             </div>
           </div>
@@ -322,6 +322,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
                         {mensagem.contexto && (
                           <span className="text-xs text-slate-500">
                             {mensagem.contexto.periodo_inicio} a {mensagem.contexto.periodo_fim}
+                            {mensagem.contexto.skill?.label ? ` | ${mensagem.contexto.skill.label}` : ""}
                           </span>
                         )}
                       </div>

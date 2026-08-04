@@ -15,6 +15,13 @@ export interface ComprasIaContexto {
   linhas_item_frequencia: number;
   linhas_compras: number;
   linhas_pedidos: number;
+  pergunta_key?: string;
+  request_id?: string;
+  skill?: {
+    id: string;
+    label: string;
+    criterios: string[];
+  };
   avisos?: string[];
 }
 
@@ -40,6 +47,8 @@ export interface ComprasIaResponse {
   resposta: string;
   contexto: ComprasIaContexto;
   produtos?: ComprasIaProduto[];
+  perguntaKey?: string;
+  requestId?: string;
 }
 
 export interface ConsultarComprasIaParams {
@@ -67,11 +76,50 @@ function baixarBlob(filename: string, blob: Blob): void {
   URL.revokeObjectURL(url);
 }
 
+function normalizarPerguntaCache(value: string): string {
+  return value
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function hashPergunta(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function montarQuestionKey(params: ConsultarComprasIaParams): string {
+  return hashPergunta(`${params.empresa}|${params.flag}|${normalizarPerguntaCache(params.pergunta)}`);
+}
+
+function montarRequestId(questionKey: string): string {
+  return `web-${questionKey}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+}
+
 export async function consultarComprasIa(params: ConsultarComprasIaParams): Promise<ComprasIaResponse> {
+  const questionKey = montarQuestionKey(params);
+  const requestId = montarRequestId(questionKey);
   const response = await fetch("/api/compras-ia", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(params),
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json",
+      "Cache-Control": "no-cache",
+      "Pragma": "no-cache",
+      "X-Compras-Ia-Question-Key": questionKey,
+      "X-Compras-Ia-Request-Id": requestId,
+    },
+    body: JSON.stringify({
+      ...params,
+      questionKey,
+      requestId,
+    }),
   });
 
   const payload = await response.json().catch(() => null) as {
@@ -79,6 +127,8 @@ export async function consultarComprasIa(params: ConsultarComprasIaParams): Prom
     resposta?: string;
     contexto?: ComprasIaContexto;
     produtos?: ComprasIaProduto[];
+    pergunta_key?: string;
+    request_id?: string;
     error?: string;
   } | null;
 
@@ -90,6 +140,8 @@ export async function consultarComprasIa(params: ConsultarComprasIaParams): Prom
     resposta: String(payload.resposta ?? "").trim(),
     contexto: payload.contexto as ComprasIaContexto,
     produtos: Array.isArray(payload.produtos) ? payload.produtos : [],
+    perguntaKey: payload.pergunta_key || payload.contexto?.pergunta_key || questionKey,
+    requestId: payload.request_id || payload.contexto?.request_id || requestId,
   };
 }
 

@@ -14,6 +14,15 @@ type ChatMessage = {
   content: string;
 };
 
+type ComprasIaSkillId = "comparativo" | "melhor_pior_item" | "faltas_secao" | "resumo_geral";
+
+type BuyManSkill = {
+  id: ComprasIaSkillId;
+  label: string;
+  criterios: string[];
+  prompt: string;
+};
+
 type RequestBody = {
   pergunta?: unknown;
   historico?: unknown;
@@ -21,6 +30,8 @@ type RequestBody = {
   flag?: unknown;
   actorLogin?: unknown;
   actorSenha?: unknown;
+  requestId?: unknown;
+  questionKey?: unknown;
 };
 
 type UsuarioLoginRow = {
@@ -133,6 +144,13 @@ type QueryMeta = {
   linhas_item_frequencia: number;
   linhas_compras: number;
   linhas_pedidos: number;
+  pergunta_key: string;
+  request_id: string;
+  skill: {
+    id: ComprasIaSkillId;
+    label: string;
+    criterios: string[];
+  };
   avisos: string[];
 };
 
@@ -147,8 +165,12 @@ class HttpError extends Error {
 
 function setCors(res: VercelResponse) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Headers", "content-type");
+  res.setHeader("Access-Control-Allow-Headers", "content-type, cache-control, pragma, x-compras-ia-question-key, x-compras-ia-request-id");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Cache-Control", "no-store, no-cache, max-age=0, must-revalidate");
+  res.setHeader("Pragma", "no-cache");
+  res.setHeader("Expires", "0");
+  res.setHeader("Vary", "X-Compras-Ia-Question-Key, X-Compras-Ia-Request-Id");
 }
 
 function parseBody(req: VercelRequest): RequestBody {
@@ -357,7 +379,7 @@ async function lerPedidosRecentes(
     .in("empresa", empresasDashboard(empresa))
     .eq("flag", flag)
     .order("updated_at", { ascending: false })
-    .limit(250);
+    .limit(500);
 
   if (error) throw error;
   return (data ?? []) as PedidoRow[];
@@ -550,6 +572,85 @@ function normalizarBusca(value: string): string {
     .trim();
 }
 
+const BUY_MAN_SKILLS: Record<ComprasIaSkillId, BuyManSkill> = {
+  comparativo: {
+    id: "comparativo",
+    label: "Comparativo",
+    criterios: [
+      "separar claramente os grupos comparados",
+      "comparar quantidade pedida, quantidade real, ocorrencias e faltas quando existir",
+      "destacar maior alta, maior queda, diferenca absoluta e risco operacional",
+      "informar periodo, empresa, flag e filtros usados",
+    ],
+    prompt: "Skill Comparativo: compare recortes, secoes, dias, status ou produtos sem misturar bases. Mostre diferencas objetivas e conclua com leitura operacional.",
+  },
+  melhor_pior_item: {
+    id: "melhor_pior_item",
+    label: "Melhor e pior item",
+    criterios: [
+      "melhor item = maior total_pedido; se total_pedido faltar, usar ocorrencias",
+      "pior item = menor total_pedido acima de zero; se total_pedido faltar, usar ocorrencias",
+      "sempre citar codigo, SKU quando existir, secao, status de compras e foto disponivel",
+      "explicar o criterio antes do ranking",
+    ],
+    prompt: "Skill Melhor/Pior Item: ranqueie produtos com criterio explicito. Nao chame item de melhor ou pior sem mostrar a metrica usada.",
+  },
+  faltas_secao: {
+    id: "faltas_secao",
+    label: "Faltas e secao",
+    criterios: [
+      "priorizar nao_tem, parcial e pendente",
+      "separar secao, status e pedidos recentes quando houver dados",
+      "destacar onde a perda operacional esta concentrada",
+      "informar se faltou dado para concluir",
+    ],
+    prompt: "Skill Faltas/Secao: foque em ruptura, pendencias e secoes criticas. Mostre onde agir primeiro.",
+  },
+  resumo_geral: {
+    id: "resumo_geral",
+    label: "Resumo geral",
+    criterios: [
+      "responder somente a pergunta atual",
+      "usar periodo, empresa e flag do contexto",
+      "trazer resumo rapido, destaques e proximas acoes de leitura",
+      "nao repetir resposta anterior do historico",
+    ],
+    prompt: "Skill Resumo Geral: responda direto, usando os dados disponiveis e apontando lacunas quando existirem.",
+  },
+};
+
+function selecionarBuyManSkill(pergunta: string): BuyManSkill {
+  const texto = normalizarBusca(pergunta);
+  if (/\b(comparativo|comparar|compare|comparacao|versus|vs|diferenca|evolucao|cresceu|caiu|alta|queda)\b/.test(texto)) {
+    return BUY_MAN_SKILLS.comparativo;
+  }
+  if (/\b(melhor|melhores|pior|piores|mais pedido|mais pedidos|menos pedido|menos pedidos|top|ranking|campeao|menor giro|maior giro)\b/.test(texto)) {
+    return BUY_MAN_SKILLS.melhor_pior_item;
+  }
+  if (/\b(falta|faltas|nao tem|ruptura|parcial|pendente|pendentes|secao|secoes)\b/.test(texto)) {
+    return BUY_MAN_SKILLS.faltas_secao;
+  }
+  return BUY_MAN_SKILLS.resumo_geral;
+}
+
+function hashPergunta(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+function montarPerguntaKey(pergunta: string, empresa: Empresa, flag: LoginFlag): string {
+  return hashPergunta(`${empresa}|${flag}|${normalizarBusca(pergunta)}`);
+}
+
+function normalizarRequestId(value: unknown, perguntaKey: string): string {
+  const raw = toText(value).replace(/[^a-zA-Z0-9._:-]/g, "").slice(0, 80);
+  return raw || `server-${perguntaKey}-${Date.now().toString(36)}`;
+}
+
 function normalizarChaveProduto(value: string): string {
   return normalizarBusca(value).replace(/[^a-z0-9]/g, "");
 }
@@ -675,7 +776,10 @@ function extrairSecaoPergunta(pergunta: string): string | null {
 }
 
 function extrairLimiteRanking(pergunta: string, fallback = 5): number {
-  const match = normalizarBusca(pergunta).match(/\b([1-9]|1\d|20)\s+(?:item|itens|produto|produtos)\b/);
+  const texto = normalizarBusca(pergunta);
+  const match =
+    texto.match(/\b([1-9]|1\d|20)\s+(?:item|itens|produto|produtos)\b/) ||
+    texto.match(/\btop\s+([1-9]|1\d|20)\b/);
   const value = Number(match?.[1] ?? fallback);
   return Number.isFinite(value) ? Math.min(Math.max(value, 1), 20) : fallback;
 }
@@ -772,6 +876,90 @@ function montarRespostaRankingSecao(
     campeao ? `- Campeao: ${campeao.descricao || campeao.codigo} com ${pontuacaoPedido(campeao)} un./ocorrencias.` : "- Sem campeao no recorte.",
     menor ? `- Menor giro: ${menor.descricao || menor.codigo} com ${pontuacaoPedido(menor)} un./ocorrencias.` : "- Sem itens de menor giro no recorte.",
   ].join("\n"),
+    produtos,
+  };
+}
+
+function perguntaPedeMelhorPiorItem(pergunta: string): boolean {
+  const texto = normalizarBusca(pergunta);
+  const falaDeItem = /\b(item|itens|produto|produtos|sku|codigo|codigos)\b/.test(texto);
+  const falaDeMelhorPior = /\b(melhor|melhores|pior|piores|menos pedido|menos pedidos|menor giro)\b/.test(texto);
+  return falaDeItem && falaDeMelhorPior;
+}
+
+function montarRespostaMelhorPiorItens(
+  pergunta: string,
+  rows: ItemFrequenciaRow[],
+  compras: CompraRow[],
+  dataInicio: string,
+  dataFim: string
+): RespostaAutomatica | null {
+  if (!perguntaPedeMelhorPiorItem(pergunta)) return null;
+
+  const hoje = hojeSaoPaulo();
+  const filtro = filtrarItensPorPergunta(rows, pergunta, hoje);
+  const limite = extrairLimiteRanking(pergunta, 5);
+  const texto = normalizarBusca(pergunta);
+  const pedeMelhor = /\b(melhor|melhores|mais pedido|mais pedidos|top|ranking|campeao|maior giro)\b/.test(texto);
+  const pedePior = /\b(pior|piores|menos pedido|menos pedidos|menor giro)\b/.test(texto);
+
+  let itens = enriquecerItensComCompras(agregarItens(filtro.rows, 1000), compras)
+    .filter((item) => pontuacaoPedido(item) > 0);
+  let base = "dashboard de pedidos concluidos";
+
+  if (itens.length === 0) {
+    itens = compras
+      .map(compraToItemResumo)
+      .filter((item) => pontuacaoPedido(item) > 0)
+      .sort((a, b) => pontuacaoPedido(b) - pontuacaoPedido(a));
+    base = "tabela Compras, campo vezes_pedido";
+  }
+
+  if (itens.length === 0) {
+    return {
+      resposta: [
+        "Nao encontrei dados suficientes para calcular melhor ou pior item.",
+        `Periodo consultado: ${formatarData(dataInicio)} a ${formatarData(dataFim)}.`,
+      ].join("\n"),
+      produtos: [],
+    };
+  }
+
+  const melhores = [...itens]
+    .sort((a, b) => pontuacaoPedido(b) - pontuacaoPedido(a) || a.descricao.localeCompare(b.descricao))
+    .slice(0, limite);
+  const piores = [...itens]
+    .sort((a, b) => pontuacaoPedido(a) - pontuacaoPedido(b) || a.descricao.localeCompare(b.descricao))
+    .slice(0, limite);
+
+  const mostrarMelhores = pedeMelhor || !pedePior;
+  const mostrarPiores = pedePior || !pedeMelhor;
+  const produtos = [
+    ...(mostrarMelhores ? melhores.map((item, index) => produtoCardFromItem(item, index, "mais_pedidos", base)) : []),
+    ...(mostrarPiores ? piores.map((item, index) => produtoCardFromItem(item, index, "menos_pedidos", base)) : []),
+  ];
+
+  const linhas = [
+    "Relatorio melhor/pior item",
+    `Periodo: ${formatarData(dataInicio)} a ${formatarData(dataFim)} (${filtro.label}).`,
+    `Base: ${base}.`,
+    "Criterio: melhor = maior quantidade pedida; pior = menor quantidade pedida acima de zero. Se quantidade faltar, uso ocorrencias.",
+    "",
+  ];
+
+  if (mostrarMelhores) {
+    linhas.push(`${limite} melhores itens`);
+    linhas.push(...melhores.map(formatarItemResumo));
+    linhas.push("");
+  }
+
+  if (mostrarPiores) {
+    linhas.push(`${limite} piores itens`);
+    linhas.push(...piores.map(formatarItemResumo));
+  }
+
+  return {
+    resposta: linhas.join("\n").trim(),
     produtos,
   };
 }
@@ -887,14 +1075,14 @@ function resumirSecoes(rows: SecaoRow[]) {
     mapa.set(secao, atual);
   }
 
-  return [...mapa.values()].sort((a, b) => b.total_pedido - a.total_pedido).slice(0, 15);
+  return [...mapa.values()].sort((a, b) => b.total_pedido - a.total_pedido).slice(0, 30);
 }
 
 function resumirCompras(rows: CompraRow[]) {
   const porStatus = contarPorCampo(rows as unknown as Record<string, unknown>[], "status");
   const topCompras = [...rows]
     .sort((a, b) => toNumber(b.vezes_pedido) - toNumber(a.vezes_pedido))
-    .slice(0, 25)
+    .slice(0, 60)
     .map((row) => ({
       codigo: toText(row.codigo),
       sku: toText(row.sku),
@@ -916,6 +1104,9 @@ function montarContexto(params: {
   flag: LoginFlag;
   dataInicio: string;
   dataFim: string;
+  perguntaKey: string;
+  requestId: string;
+  skill: BuyManSkill;
   itens: ItemFrequenciaRow[];
   compras: CompraRow[];
   pedidos: PedidoRow[];
@@ -923,13 +1114,13 @@ function montarContexto(params: {
   avisos: string[];
 }): { contexto: string; meta: QueryMeta } {
   const hoje = hojeSaoPaulo();
-  const topItensPeriodo = enriquecerItensComCompras(agregarItens(params.itens, 30), params.compras)
+  const topItensPeriodo = enriquecerItensComCompras(agregarItens(params.itens, 60), params.compras)
     .map(itemResumoParaContexto);
   const topItensPorDia = montarTopPorDia(params.itens, params.pergunta, hoje);
   const comprasResumo = resumirCompras(params.compras);
   const pedidosPorStatus = contarPorCampo(params.pedidos as unknown as Record<string, unknown>[], "status");
   const secoesResumo = resumirSecoes(params.secoes);
-  const recentesPedidos = params.pedidos.slice(0, 15).map((row) => ({
+  const recentesPedidos = params.pedidos.slice(0, 40).map((row) => ({
     empresa: toText(row.empresa),
     flag: toText(row.flag),
     status: toText(row.status),
@@ -948,11 +1139,18 @@ function montarContexto(params: {
 
   const dados = {
     fonte: "Supabase somente leitura",
+    agente: {
+      nome: "Buy-man",
+      skill: params.skill.label,
+      criterios: params.skill.criterios,
+    },
     escopo: {
       empresa: params.empresa,
       flag: params.flag,
       periodo_inicio: params.dataInicio,
       periodo_fim: params.dataFim,
+      pergunta_key: params.perguntaKey,
+      request_id: params.requestId,
     },
     observacao_data: "Quando o usuario disser apenas dia 10, dia 12 etc., os dados por dia incluem todas as datas do periodo com esse dia do mes.",
     top_itens_periodo: topItensPeriodo,
@@ -973,6 +1171,13 @@ function montarContexto(params: {
     linhas_item_frequencia: params.itens.length,
     linhas_compras: params.compras.length,
     linhas_pedidos: params.pedidos.length,
+    pergunta_key: params.perguntaKey,
+    request_id: params.requestId,
+    skill: {
+      id: params.skill.id,
+      label: params.skill.label,
+      criterios: params.skill.criterios,
+    },
     avisos: params.avisos,
   };
 
@@ -998,6 +1203,15 @@ function montarRespostaFallback(params: {
     params.dataFim
   );
   if (rankingSecao) return rankingSecao;
+
+  const respostaMelhorPior = montarRespostaMelhorPiorItens(
+    params.pergunta,
+    params.itens,
+    params.compras,
+    params.dataInicio,
+    params.dataFim
+  );
+  if (respostaMelhorPior) return respostaMelhorPior;
 
   const respostaDireta = montarRespostaTopItens(
     params.pergunta,
@@ -1065,10 +1279,21 @@ function limparHistorico(value: unknown): ChatMessage[] {
       const role = (item as ChatMessage)?.role;
       const content = toText((item as ChatMessage)?.content);
       if ((role !== "user" && role !== "assistant") || !content) return null;
-      return { role, content: content.slice(0, 1000) };
+      return { role, content: content.slice(0, 700) };
     })
     .filter((item): item is ChatMessage => !!item)
-    .slice(-4);
+    .slice(-6);
+}
+
+function historicoParaContexto(historico: ChatMessage[]): string {
+  if (historico.length === 0) return "Sem historico anterior nesta conversa.";
+
+  return historico
+    .map((item, index) => {
+      const autor = item.role === "user" ? "Usuario" : "Buy-man";
+      return `${index + 1}. ${autor}: ${item.content.replace(/\s+/g, " ").trim()}`;
+    })
+    .join("\n");
 }
 
 function getOpenRouterModels(): string[] {
@@ -1089,21 +1314,38 @@ function getOpenRouterModels(): string[] {
   return freeOnly.length > 0 ? freeOnly : ["openrouter/free"];
 }
 
-function buildIaMessages(pergunta: string, contexto: string, historico: ChatMessage[]) {
+function buildIaMessages(
+  pergunta: string,
+  contexto: string,
+  historico: ChatMessage[],
+  skill: BuyManSkill,
+  perguntaKey: string
+) {
   const system = [
-    "Voce e a IA interna do setor de Compras do SCAN.",
+    "Voce e o Buy-man, agente interno de IA do setor de Compras do SCAN.",
     "Responda em portugues do Brasil, de forma direta e operacional.",
     "Use somente os dados fornecidos no contexto Supabase. Nao invente produto, quantidade, status ou data.",
+    "A pergunta atual tem prioridade maxima. O historico serve apenas para contexto e nunca deve ser repetido como resposta.",
+    "Se a pergunta atual mudar de assunto, ignore a resposta anterior e responda o novo assunto.",
     "Se os dados nao forem suficientes, diga exatamente qual filtro/data falta.",
     "Voce nao pode alterar banco, status, pedidos, ERP ou fornecedores. Apenas analisar e relatar.",
     "Padrao visual obrigatorio: use emojis moderados, titulo claro, periodo/base, resumo rapido e listas escaneaveis.",
     "Quando citar produto, traga codigo, SKU quando existir, secao, quantidade pedida, quantidade real, ocorrencias, status de compras e se ha foto disponivel.",
     "Evite resposta seca em linhas gigantes; quebre cada produto em 2 ou 3 linhas curtas.",
     "Quando for relatorio, estruture com titulo, periodo, filtros, resumo, destaques e lista objetiva.",
+    skill.prompt,
   ].join("\n");
 
+  const historicoResumo = historicoParaContexto(historico);
   const perguntaComContexto = [
-    `Pergunta atual: ${pergunta}`,
+    `Pergunta atual (responda somente isto): ${pergunta}`,
+    `Chave/cache da pergunta: ${perguntaKey}`,
+    `Skill ativa do Buy-man: ${skill.label}`,
+    "Criterios obrigatorios desta skill:",
+    ...skill.criterios.map((criterio) => `- ${criterio}`),
+    "",
+    "Historico recente (referencia, nao repetir resposta antiga):",
+    historicoResumo,
     "",
     "Contexto Supabase lido pelo backend:",
     contexto,
@@ -1111,7 +1353,6 @@ function buildIaMessages(pergunta: string, contexto: string, historico: ChatMess
 
   return [
     { role: "system", content: system },
-    ...historico,
     { role: "user", content: perguntaComContexto },
   ];
 }
@@ -1134,8 +1375,8 @@ async function chamarChatCompletion(params: {
     body: JSON.stringify({
       model: params.model,
       messages: params.messages,
-      temperature: 0.2,
-      max_tokens: 900,
+      temperature: 0.15,
+      max_tokens: Number(process.env.COMPRAS_IA_MAX_TOKENS || 1400) || 1400,
     }),
     signal: AbortSignal.timeout(55_000),
   });
@@ -1154,8 +1395,14 @@ async function chamarChatCompletion(params: {
   return content.trim();
 }
 
-async function perguntarIa(pergunta: string, contexto: string, historico: ChatMessage[]): Promise<string> {
-  const messages = buildIaMessages(pergunta, contexto, historico);
+async function perguntarIa(
+  pergunta: string,
+  contexto: string,
+  historico: ChatMessage[],
+  skill: BuyManSkill,
+  perguntaKey: string
+): Promise<string> {
+  const messages = buildIaMessages(pergunta, contexto, historico, skill, perguntaKey);
   const erros: string[] = [];
 
   const openRouterApiKey = process.env.OPENROUTER_API_KEY || process.env.COMPRAS_IA_OPENROUTER_API_KEY || "";
@@ -1215,6 +1462,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
 
     const empresa = normalizarEmpresa(body.empresa);
     const flag = normalizarFlag(body.flag);
+    const skill = selecionarBuyManSkill(pergunta);
+    const perguntaKey = montarPerguntaKey(pergunta, empresa, flag);
+    const requestId = normalizarRequestId(
+      body.requestId ?? req.headers["x-compras-ia-request-id"],
+      perguntaKey
+    );
+    res.setHeader("X-Compras-Ia-Question-Key", perguntaKey);
+    res.setHeader("X-Compras-Ia-Request-Id", requestId);
     const supabase = getSupabaseClient();
 
     await validarUsuarioAdmin(
@@ -1241,6 +1496,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       linhas_item_frequencia: itens.length,
       linhas_compras: compras.length,
       linhas_pedidos: 0,
+      pergunta_key: perguntaKey,
+      request_id: requestId,
+      skill: {
+        id: skill.id,
+        label: skill.label,
+        criterios: skill.criterios,
+      },
       avisos,
     };
 
@@ -1251,6 +1513,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         resposta: respostaRankingSecao.resposta,
         produtos: respostaRankingSecao.produtos,
         contexto: metaInicial,
+        pergunta_key: perguntaKey,
+        request_id: requestId,
+      });
+    }
+
+    const respostaMelhorPior = montarRespostaMelhorPiorItens(pergunta, itens, compras, dataInicio, dataFim);
+    if (respostaMelhorPior) {
+      return res.status(200).json({
+        ok: true,
+        resposta: respostaMelhorPior.resposta,
+        produtos: respostaMelhorPior.produtos,
+        contexto: metaInicial,
+        pergunta_key: perguntaKey,
+        request_id: requestId,
       });
     }
 
@@ -1261,6 +1537,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         resposta: respostaDireta.resposta,
         produtos: respostaDireta.produtos,
         contexto: metaInicial,
+        pergunta_key: perguntaKey,
+        request_id: requestId,
       });
     }
 
@@ -1275,6 +1553,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       flag,
       dataInicio,
       dataFim,
+      perguntaKey,
+      requestId,
+      skill,
       itens,
       compras,
       pedidos,
@@ -1283,12 +1564,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     });
 
     try {
-      const resposta = await perguntarIa(pergunta, contexto, limparHistorico(body.historico));
+      const resposta = await perguntarIa(pergunta, contexto, limparHistorico(body.historico), skill, perguntaKey);
       return res.status(200).json({
         ok: true,
         resposta,
         produtos: montarProdutosRelacionados(pergunta, itens, compras),
         contexto: meta,
+        pergunta_key: perguntaKey,
+        request_id: requestId,
       });
     } catch (error) {
       const erroIa = error instanceof Error ? error.message : "erro desconhecido";
@@ -1306,6 +1589,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         resposta: respostaFallback.resposta,
         produtos: respostaFallback.produtos,
         contexto: meta,
+        pergunta_key: perguntaKey,
+        request_id: requestId,
       });
     }
   } catch (error) {
