@@ -687,7 +687,7 @@ function getIaMaxCompletionTokens(): number {
 function getGroqMaxCompletionTokens(): number {
   // A cota gratuita da Groq conta entrada e saida na mesma janela TPM.
   // Um relatorio operacional continua util com 900 tokens e evita reservar 2.048 desnecessariamente.
-  return Math.min(getIaMaxCompletionTokens(), numeroEnv("GROQ_MAX_COMPLETION_TOKENS", 900, 300, 2_048));
+  return Math.min(getIaMaxCompletionTokens(), numeroEnv("GROQ_MAX_COMPLETION_TOKENS", 900, 300, 900));
 }
 
 function getGroqPromptBudgetTokens(): number {
