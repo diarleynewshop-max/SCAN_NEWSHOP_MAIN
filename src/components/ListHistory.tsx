@@ -10,6 +10,7 @@ import { resolvePhotoToDataUrl } from "@/lib/photoUtils";
 import { lojaEnviaPrevendaParaPdv } from "@/lib/lojaFeatures";
 import { PdvClienteModal } from "@/components/PdvClienteModal";
 import type { ClientePdv } from "@/lib/erpClientes";
+import { obterLoginSalvo } from "@/hooks/useAuth";
 
 interface ListHistoryProps {
   lists: ListData[];
@@ -296,6 +297,21 @@ const ListHistory = ({ lists, onUpdateList, onStartConference, modoDesktop = fal
         title: "❌ Lista vazia",
         description: "Não é possível enviar listas com 0 itens para conferência.",
         variant: "destructive"
+      });
+      return;
+    }
+
+    // Trava de seguranca contra listas de outra conta/empresa que tenham
+    // sobrado no aparelho (ex.: dado legado migrado por engano) — evita
+    // enviar pedido pro PDV errado (SEFULY x demais empresas tem regras
+    // diferentes de pre-venda).
+    const loginAtual = obterLoginSalvo();
+    const empresasPermitidas = loginAtual?.empresasPermitidas ?? [];
+    if (list.empresa && empresasPermitidas.length > 0 && !empresasPermitidas.some((e) => e === list.empresa)) {
+      toast({
+        title: "Lista de outra empresa",
+        description: "Esta lista pertence a uma empresa que sua conta nao acessa. Saia e entre com a conta correta antes de enviar.",
+        variant: "destructive",
       });
       return;
     }
