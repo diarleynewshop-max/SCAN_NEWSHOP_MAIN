@@ -37,7 +37,40 @@ interface AddProductParams {
   qtdPlanilha?: number;
 }
 
-const STORAGE_KEY = "scan_newshop_lists";
+const STORAGE_KEY_BASE = "scan_newshop_lists";
+const ACTIVE_LIST_KEY_BASE = "scan_newshop_active_list";
+
+function getStorageKey(userKey: string): string {
+  return `${STORAGE_KEY_BASE}:${userKey}`;
+}
+
+function getActiveListKey(userKey: string): string {
+  return `${ACTIVE_LIST_KEY_BASE}:${userKey}`;
+}
+
+// Listas antigas (antes da conta ser dona da lista) ficavam soltas no
+// dispositivo. Na primeira vez que uma conta abre o app apos essa mudanca,
+// herda essas listas locais uma unica vez e depois isola tudo por conta.
+function migrarListasLegadasSeNecessario(userKey: string): void {
+  try {
+    if (localStorage.getItem(getStorageKey(userKey))) return;
+
+    const listasLegadas = localStorage.getItem(STORAGE_KEY_BASE);
+    if (!listasLegadas) return;
+
+    localStorage.setItem(getStorageKey(userKey), listasLegadas);
+
+    const ativaLegada = localStorage.getItem(ACTIVE_LIST_KEY_BASE);
+    if (ativaLegada) {
+      localStorage.setItem(getActiveListKey(userKey), ativaLegada);
+    }
+
+    localStorage.removeItem(STORAGE_KEY_BASE);
+    localStorage.removeItem(ACTIVE_LIST_KEY_BASE);
+  } catch (err) {
+    console.error("Erro ao migrar listas legadas:", err);
+  }
+}
 
 type SaveListsResult = "ok" | "without-photos" | "failed";
 
@@ -103,11 +136,11 @@ function hasNonPersistablePhotos(lists: ListData[]): boolean {
   );
 }
 
-function saveLists(lists: ListData[]): SaveListsResult {
+function saveLists(lists: ListData[], storageKey: string): SaveListsResult {
   const serializableLists = stripPhotosFromLists(lists);
 
   try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(serializableLists));
+    localStorage.setItem(storageKey, JSON.stringify(serializableLists));
     return hasNonPersistablePhotos(lists) ? "without-photos" : "ok";
   } catch (err) {
     console.error("Erro ao salvar listas:", err);
@@ -115,7 +148,7 @@ function saveLists(lists: ListData[]): SaveListsResult {
 
   try {
     localStorage.setItem(
-      STORAGE_KEY,
+      storageKey,
       JSON.stringify(
         serializableLists.map((list) => ({
           ...list,
@@ -133,9 +166,9 @@ function saveLists(lists: ListData[]): SaveListsResult {
   }
 }
 
-function loadLists(): ListData[] {
+function loadLists(storageKey: string): ListData[] {
   try {
-    const raw = localStorage.getItem(STORAGE_KEY);
+    const raw = localStorage.getItem(storageKey);
     if (!raw) return [];
 
     const parsed = JSON.parse(raw) as ListData[];
@@ -159,15 +192,20 @@ function loadLists(): ListData[] {
   }
 }
 
-export function useInventory() {
+export function useInventory(userKey: string | null | undefined) {
   const { toast } = useToast();
-  const [lists, setLists] = useState<ListData[]>(() => loadLists());
+  const effectiveUserKey = userKey?.trim() || "sem-usuario";
+
+  const [lists, setLists] = useState<ListData[]>(() => {
+    migrarListasLegadasSeNecessario(effectiveUserKey);
+    return loadLists(getStorageKey(effectiveUserKey));
+  });
   const lastSaveResultRef = useRef<SaveListsResult>("ok");
   const [activeListId, setActiveListId] = useState<string | null>(() => {
     try {
-      const savedId = localStorage.getItem("scan_newshop_active_list");
+      const savedId = localStorage.getItem(getActiveListKey(effectiveUserKey));
       if (!savedId) return null;
-      const loadedLists = loadLists();
+      const loadedLists = loadLists(getStorageKey(effectiveUserKey));
       const exists = loadedLists.find((list) => list.id === savedId && list.status === "open");
       return exists ? savedId : null;
     } catch {
@@ -175,10 +213,38 @@ export function useInventory() {
     }
   });
 
+  // Guarda de qual conta as `lists` em memoria realmente pertencem. So o
+  // efeito de troca de conta pode mexer nela; assim o efeito de salvar nunca
+  // grava listas da conta anterior na chave da conta nova.
+  const listasDaContaRef = useRef(effectiveUserKey);
+
   const activeList = lists.find((list) => list.id === activeListId && list.status === "open") ?? null;
 
   useEffect(() => {
-    const saveResult = saveLists(lists);
+    if (listasDaContaRef.current === effectiveUserKey) return;
+
+    migrarListasLegadasSeNecessario(effectiveUserKey);
+    const novasListas = loadLists(getStorageKey(effectiveUserKey));
+    const savedId = (() => {
+      try {
+        const id = localStorage.getItem(getActiveListKey(effectiveUserKey));
+        if (!id) return null;
+        return novasListas.find((list) => list.id === id && list.status === "open") ? id : null;
+      } catch {
+        return null;
+      }
+    })();
+
+    listasDaContaRef.current = effectiveUserKey;
+    setLists(novasListas);
+    setActiveListId(savedId);
+  }, [effectiveUserKey]);
+
+  useEffect(() => {
+    if (listasDaContaRef.current !== effectiveUserKey) return;
+
+    const storageKey = getStorageKey(effectiveUserKey);
+    const saveResult = saveLists(lists, storageKey);
 
     if (saveResult !== lastSaveResultRef.current) {
       if (saveResult === "failed") {
@@ -193,11 +259,11 @@ export function useInventory() {
     lastSaveResultRef.current = saveResult;
 
     if (activeListId) {
-      localStorage.setItem("scan_newshop_active_list", activeListId);
+      localStorage.setItem(getActiveListKey(effectiveUserKey), activeListId);
     } else {
-      localStorage.removeItem("scan_newshop_active_list");
+      localStorage.removeItem(getActiveListKey(effectiveUserKey));
     }
-  }, [lists, activeListId, toast]);
+  }, [lists, activeListId, effectiveUserKey, toast]);
 
   useEffect(() => {
     let cancelled = false;

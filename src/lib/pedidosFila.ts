@@ -1661,7 +1661,7 @@ export async function fecharConferenciaExistente(
     const { error: rpcError } = await supabase.rpc('recalcular_resumo_pedido', { p_pedido_id: pedidoId });
     if (rpcError) throw rpcError;
 
-    const { error: updateError } = await supabase
+    const { data: pedidoAtualizado, error: updateError } = await supabase
       .from('pedidos')
       .update({
         conferente: String(payload.conferente ?? '').trim() || null,
@@ -1670,9 +1670,14 @@ export async function fecharConferenciaExistente(
         em_conferencia_por: null,
         em_conferencia_em: null,
       })
-      .eq('id', pedidoId);
+      .eq('id', pedidoId)
+      .select('id,status')
+      .maybeSingle();
 
     if (updateError) throw updateError;
+    if (!pedidoAtualizado || pedidoAtualizado.status !== 'concluido') {
+      throw new Error('O pedido nao foi marcado como concluido no Supabase.');
+    }
   } catch (error) {
     try {
       const { error: restoreDeleteError } = await supabase.from('pedido_itens').delete().eq('pedido_id', pedidoId);

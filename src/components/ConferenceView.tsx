@@ -373,7 +373,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [erroEstoquesItemAtual, setErroEstoquesItemAtual] = useState<string | null>(null);
 
   // ── Rascunho automático ────────────────────────────────────────────────────
-  const DRAFT_KEY = "conferencia_draft_v1";
+  // Escopado por conta: rascunho de um conferente nao pode aparecer para outro
+  // que use o mesmo aparelho.
+  const usuarioRascunhoKey = obterLoginSalvo()?.usuarioId ?? obterLoginSalvo()?.login ?? "sem-usuario";
+  const DRAFT_KEY = `conferencia_draft_v1:${usuarioRascunhoKey}`;
   const DRAFT_TTL = 8 * 60 * 60 * 1000; // 8 horas
 
   function salvarRascunho() {
@@ -1800,6 +1803,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       taskOrigemIdsRef.current = [];
       limparClientePedido();
       toast({ title: "✅ Conferência concluída!", description: `Pedido de ${conferente} enviado com sucesso.` });
+      // O pedido já saiu da fila no Supabase. Volta para a tela anterior para
+      // não deixar o conferente preso na tela "Enviado!" e forçar uma nova
+      // leitura da fila quando ele iniciar a próxima conferência.
+      onBack();
     } catch (err) {
       setSendStatus("error");
       toast({

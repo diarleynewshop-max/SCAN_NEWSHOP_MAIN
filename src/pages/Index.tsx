@@ -214,7 +214,9 @@ const Index = () => {
   const [bloqueioConferencia, setBloqueioConferencia] = useState<{ titulo: string; pessoa: string } | null>(null);
   const popupMostradoParaRef = useRef<string | null>(null);
 
-  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory();
+  const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory(
+    currentLogin?.usuarioId ?? currentLogin?.login ?? null
+  );
   const lookupEmpresa = activeList?.empresa ?? currentLogin?.empresa;
   const lookupFlag = activeList?.flag ?? currentLogin?.flag ?? "loja";
   const logoEmpresa = getCompanyLogo(lookupEmpresa);

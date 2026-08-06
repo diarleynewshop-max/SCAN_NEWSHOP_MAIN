@@ -44,12 +44,16 @@ const GlobalThemeToggle = () => {
   );
 };
 
-const App = () => (
+const App = () => {
+  const { loginSalvo } = useAuth();
+  const usuarioKey = loginSalvo?.usuarioId ?? loginSalvo?.login ?? "anon";
+
+  return (
   <QueryClientProvider client={queryClient}>
     <TooltipProvider>
       <Toaster />
       <Sonner />
-      
+
       {/* 2. COLOCAMOS O BOTÃO FLUTUANTE NO CANTO SUPERIOR DIREITO */}
       <GlobalThemeToggle />
 
@@ -70,7 +74,7 @@ const App = () => (
 
             <Route path="/scanner" element={
               <ProtectedRoute requiredPermission="scanner">
-                <DesktopShell pageTitle="Scanner"><Index /></DesktopShell>
+                <DesktopShell pageTitle="Scanner"><Index key={usuarioKey} /></DesktopShell>
               </ProtectedRoute>
             } />
             <Route path="/consulta-preco" element={
@@ -154,6 +158,7 @@ const App = () => (
       <VercelAnalytics />
     </TooltipProvider>
   </QueryClientProvider>
-);
+  );
+};
 
 export default App;
