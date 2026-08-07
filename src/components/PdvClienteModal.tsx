@@ -67,9 +67,12 @@ function formatPhone(value?: string | null): string {
 const TELEFONE_PADRAO_CLIENTE = "99999999999";
 
 // Codigo do "Consumidor Final" no ERP. Mesma env usada como fallback no envio
-// ao PDV (src/lib/pdvFila.ts) — mantem os dois pontos consistentes.
+// ao PDV (src/lib/pdvFila.ts) — mantem os dois pontos consistentes. Precisa ser
+// numerico: os campos do layout do SYSpdv (pdvPrevenda.ts `num()`) e a validacao
+// de cliente obrigatorio (webhookRouter.ts `clientePdvValido`) descartam letras,
+// entao um fallback com letras virava codigo vazio e travava o envio.
 const CONSUMIDOR_FINAL_CODIGO =
-  String(import.meta.env.VITE_PDV_CLIENTE_CODIGO_PADRAO ?? "").trim() || "CONSUMIDORFINAL";
+  String(import.meta.env.VITE_PDV_CLIENTE_CODIGO_PADRAO ?? "").replace(/\D/g, "") || "0";
 
 const CONSUMIDOR_FINAL: ClientePdv = {
   codigo: CONSUMIDOR_FINAL_CODIGO,
