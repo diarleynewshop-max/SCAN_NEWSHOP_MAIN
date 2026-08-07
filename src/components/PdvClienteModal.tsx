@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Check, Loader2, RefreshCw, Search, UserPlus } from "lucide-react";
+import { Check, Loader2, RefreshCw, Search, UserPlus, UserRound } from "lucide-react";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import {
   buscarClientesVarejoFacil,
@@ -65,6 +65,18 @@ function formatPhone(value?: string | null): string {
 }
 
 const TELEFONE_PADRAO_CLIENTE = "99999999999";
+
+// Codigo do "Consumidor Final" no ERP. Mesma env usada como fallback no envio
+// ao PDV (src/lib/pdvFila.ts) — mantem os dois pontos consistentes.
+const CONSUMIDOR_FINAL_CODIGO =
+  String(import.meta.env.VITE_PDV_CLIENTE_CODIGO_PADRAO ?? "").trim() || "CONSUMIDORFINAL";
+
+const CONSUMIDOR_FINAL: ClientePdv = {
+  codigo: CONSUMIDOR_FINAL_CODIGO,
+  nome: "CONSUMIDOR FINAL",
+  cpfCnpj: null,
+  tipoPessoa: "F",
+};
 
 const tipoContribuinteOptions: Array<{ value: TipoContribuinteCliente; label: string }> = [
   { value: "ISENTO", label: "ISENTO" },
@@ -364,6 +376,33 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
 
         {mode === "buscar" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+            <button
+              type="button"
+              onClick={() => onSelect(CONSUMIDOR_FINAL)}
+              style={{
+                width: "100%",
+                borderRadius: 10,
+                border: "1.5px solid hsl(var(--primary))",
+                background: "hsl(var(--primary) / 0.08)",
+                padding: "11px 12px",
+                textAlign: "left",
+                cursor: "pointer",
+                display: "flex",
+                alignItems: "center",
+                gap: 10,
+              }}
+            >
+              <UserRound style={{ width: 18, height: 18, color: "hsl(var(--primary))", flexShrink: 0 }} />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ fontSize: 13, fontWeight: 800, color: "hsl(var(--foreground))" }}>
+                  CONSUMIDOR FINAL
+                </div>
+                <div style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
+                  Padrao, sem necessidade de preencher dados
+                </div>
+              </div>
+              <Check style={{ width: 16, height: 16, color: "hsl(var(--primary))", flexShrink: 0 }} />
+            </button>
             <div>
               <label style={labelStyle}>Nome, CPF/CNPJ ou telefone</label>
               <input
