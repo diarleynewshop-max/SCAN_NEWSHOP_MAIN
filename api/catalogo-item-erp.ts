@@ -93,6 +93,7 @@ function normalizeEmpresa(body: Record<string, unknown>): EmpresaKey {
 }
 
 function erpBaseEmpresa(empresa: EmpresaKey): EmpresaKey {
+  if (empresa === "SEFULY") return "NEWSHOP";
   return empresa === "SOYE" ? "FACIL" : empresa;
 }
 

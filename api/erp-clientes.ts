@@ -103,6 +103,7 @@ function normalizeEmpresa(value: string | string[] | undefined): EmpresaKey {
 }
 
 function erpBaseEmpresa(empresa: EmpresaKey): EmpresaKey {
+  if (empresa === "SEFULY") return "NEWSHOP";
   return empresa === "SOYE" ? "FACIL" : empresa;
 }
 

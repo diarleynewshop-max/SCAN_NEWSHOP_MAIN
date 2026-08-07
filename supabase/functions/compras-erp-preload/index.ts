@@ -112,8 +112,7 @@ function hasCronAccess(req: Request): boolean {
 }
 
 function erpEmpresa(empresa: EmpresaCompras): ErpEmpresa {
-  // #GEMINI Adicionado SEFULY
-  if (empresa === "SEFULY") return "SEFULY";
+  if (empresa === "SEFULY") return "NEWSHOP";
   return empresa === "NEWSHOP" ? "NEWSHOP" : "FACIL";
 }
 

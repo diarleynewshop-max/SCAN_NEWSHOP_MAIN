@@ -91,8 +91,7 @@ function errorMessage(err: unknown): string {
 }
 
 function erpEmpresa(empresa: EmpresaCompras): ErpEmpresa {
-  // #GEMINI Adicionado SEFULY
-  if (empresa === "SEFULY") return "SEFULY";
+  if (empresa === "SEFULY") return "NEWSHOP";
   return empresa === "NEWSHOP" ? "NEWSHOP" : "FACIL";
 }
 
