@@ -8,12 +8,13 @@
 // hoje, que tambem nao exige nenhuma autenticacao Supabase. O segredo real e a
 // credencial do ERP, guardada como secret desta function (nunca chega ao browser).
 
-type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
+type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE" | "SEFULY";
 
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
   SOYE: "facil.varejofacil.com",
+  SEFULY: "sefuly.varejofacil.com",
 };
 
 const tokenCache = new Map<string, string>();
@@ -38,6 +39,7 @@ function jsonResponse(status: number, data: unknown): Response {
 
 function normalizeEmpresa(value: string | null): EmpresaKey {
   const normalized = (value ?? "").trim().toUpperCase();
+  if (normalized.includes("SEFULY")) return "SEFULY";
   if (normalized.includes("SOYE")) return "SOYE";
   if (normalized.includes("FACIL")) return "FACIL";
   return "NEWSHOP";
@@ -51,10 +53,11 @@ function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOK
   // Credencial especifica da empresa (ex.: SOYE) sempre vence a da baseEmpresa
   // (FACIL) — SOYE e FACIL compartilham host, mas podem ter tokens diferentes.
   const baseEmpresa = erpBaseEmpresa(empresa);
+  const allowGenericFallback = empresa !== "SEFULY";
   return (
     Deno.env.get(`ERP_API_${key}_${empresa}`) ||
     Deno.env.get(`ERP_API_${key}_${baseEmpresa}`) ||
-    Deno.env.get(`ERP_API_${key}`) ||
+    (allowGenericFallback ? Deno.env.get(`ERP_API_${key}`) : "") ||
     ""
   );
 }

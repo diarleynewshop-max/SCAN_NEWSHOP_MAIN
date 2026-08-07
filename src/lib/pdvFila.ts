@@ -90,6 +90,11 @@ function texto(value: unknown): string {
   return String(value ?? "").trim();
 }
 
+function codigoClienteValido(value: unknown): string {
+  const digits = texto(value).replace(/\D/g, "");
+  return Number(digits) > 0 ? digits : "";
+}
+
 function numeroPrevendaFormatado(value: number): string {
   return String(Math.trunc(value)).replace(/\D/g, "").padStart(10, "0").slice(-10);
 }
@@ -153,9 +158,9 @@ function normalizarClienteDireto(cliente: PdvPrevendaCliente | null | undefined)
   const nome = texto(cliente.nome);
   const cpfCnpj = texto(cliente.cpfCnpj).replace(/\D/g, "");
   const codigo =
-    texto(cliente.codigo).replace(/\D/g, "") ||
+    codigoClienteValido(cliente.codigo) ||
     cpfCnpj ||
-    CLIENTE_CODIGO_PADRAO.replace(/\D/g, "");
+    codigoClienteValido(CLIENTE_CODIGO_PADRAO);
 
   if (!nome || !codigo) return null;
 
@@ -205,9 +210,9 @@ function montarCliente(pedido: PedidoPdvRow | null, fallbackNome: string): PdvPr
 
   const cpfCnpj = texto(pick(fonte, ["cpfCnpj", "cpf_cnpj", "cpf", "cnpj", "documento", "doc"])).replace(/\D/g, "");
   const codigo =
-    texto(pick(fonte, ["codigoCliente", "codigo_cliente", "clienteCodigo", "idCliente"])).replace(/\D/g, "")
+    codigoClienteValido(pick(fonte, ["codigoCliente", "codigo_cliente", "clienteCodigo", "idCliente"]))
     || cpfCnpj
-    || CLIENTE_CODIGO_PADRAO.replace(/\D/g, "");
+    || codigoClienteValido(CLIENTE_CODIGO_PADRAO);
 
   if (!nome || !codigo) return null;
 

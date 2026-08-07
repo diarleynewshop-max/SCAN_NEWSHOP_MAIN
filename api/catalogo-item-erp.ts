@@ -93,12 +93,12 @@ function normalizeEmpresa(body: Record<string, unknown>): EmpresaKey {
 }
 
 function erpBaseEmpresa(empresa: EmpresaKey): EmpresaKey {
-  if (empresa === "SEFULY") return "NEWSHOP";
   return empresa === "SOYE" ? "FACIL" : empresa;
 }
 
 function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN" | "KEY"): string {
   const baseEmpresa = erpBaseEmpresa(empresa);
+  const allowGenericFallback = empresa !== "SEFULY";
   return (
     process.env[`ERP_API_${key}_${empresa}`] ||
     process.env[`ERP_${key}_${empresa}`] ||
@@ -108,10 +108,10 @@ function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOK
     process.env[`ERP_${key}_${baseEmpresa}`] ||
     process.env[`VITE_ERP_API_${key}_${baseEmpresa}`] ||
     process.env[`VITE_ERP_${key}_${baseEmpresa}`] ||
-    process.env[`ERP_API_${key}`] ||
-    process.env[`ERP_${key}`] ||
-    process.env[`VITE_ERP_API_${key}`] ||
-    process.env[`VITE_ERP_${key}`] ||
+    (allowGenericFallback ? process.env[`ERP_API_${key}`] : "") ||
+    (allowGenericFallback ? process.env[`ERP_${key}`] : "") ||
+    (allowGenericFallback ? process.env[`VITE_ERP_API_${key}`] : "") ||
+    (allowGenericFallback ? process.env[`VITE_ERP_${key}`] : "") ||
     ""
   );
 }
@@ -130,6 +130,7 @@ function resolveWebBaseUrl(empresa: EmpresaKey): string {
 
 function getConfiguredWebSessionCookie(empresa: EmpresaKey): string {
   const baseEmpresa = erpBaseEmpresa(empresa);
+  const allowGenericFallback = empresa !== "SEFULY";
   return (
     process.env[`ERP_WEB_COOKIE_${empresa}`] ||
     process.env[`ERP_SESSION_COOKIE_${empresa}`] ||
@@ -137,9 +138,9 @@ function getConfiguredWebSessionCookie(empresa: EmpresaKey): string {
     process.env[`ERP_WEB_COOKIE_${baseEmpresa}`] ||
     process.env[`ERP_SESSION_COOKIE_${baseEmpresa}`] ||
     process.env[`VAREJOFACIL_SESSION_COOKIE_${baseEmpresa}`] ||
-    process.env.ERP_WEB_COOKIE ||
-    process.env.ERP_SESSION_COOKIE ||
-    process.env.VAREJOFACIL_SESSION_COOKIE ||
+    (allowGenericFallback ? process.env.ERP_WEB_COOKIE : "") ||
+    (allowGenericFallback ? process.env.ERP_SESSION_COOKIE : "") ||
+    (allowGenericFallback ? process.env.VAREJOFACIL_SESSION_COOKIE : "") ||
     ""
   ).trim();
 }

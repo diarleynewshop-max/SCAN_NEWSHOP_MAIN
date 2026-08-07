@@ -118,15 +118,16 @@ function erpEmpresa(empresa: EmpresaCompras): ErpEmpresa {
 }
 
 function getEnv(empresa: ErpEmpresa, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN"): string {
+  const allowGenericFallback = empresa !== "SEFULY";
   return (
     Deno.env.get(`ERP_API_${key}_${empresa}`) ||
     Deno.env.get(`ERP_${key}_${empresa}`) ||
     Deno.env.get(`VITE_ERP_API_${key}_${empresa}`) ||
     Deno.env.get(`VITE_ERP_${key}_${empresa}`) ||
-    Deno.env.get(`ERP_API_${key}`) ||
-    Deno.env.get(`ERP_${key}`) ||
-    Deno.env.get(`VITE_ERP_API_${key}`) ||
-    Deno.env.get(`VITE_ERP_${key}`) ||
+    (allowGenericFallback ? Deno.env.get(`ERP_API_${key}`) : "") ||
+    (allowGenericFallback ? Deno.env.get(`ERP_${key}`) : "") ||
+    (allowGenericFallback ? Deno.env.get(`VITE_ERP_API_${key}`) : "") ||
+    (allowGenericFallback ? Deno.env.get(`VITE_ERP_${key}`) : "") ||
     ""
   );
 }

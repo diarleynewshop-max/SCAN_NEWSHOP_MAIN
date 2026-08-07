@@ -60,7 +60,7 @@ function toMoneyOrNull(value: unknown): number | null {
 function clientePdvValido(cliente: PdvPrevendaCliente | null | undefined): boolean {
   const codigo = String(cliente?.codigo ?? "").replace(/\D/g, "");
   const documento = String(cliente?.cpfCnpj ?? "").replace(/\D/g, "");
-  return Boolean(String(cliente?.nome ?? "").trim() && (codigo || documento));
+  return Boolean(String(cliente?.nome ?? "").trim() && (Number(codigo) > 0 || documento));
 }
 
 async function prepararPedidoDiretoPdv(payload: WebhookPayload): Promise<WebhookPayload> {

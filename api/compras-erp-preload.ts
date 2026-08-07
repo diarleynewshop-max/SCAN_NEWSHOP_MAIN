@@ -97,15 +97,16 @@ function erpEmpresa(empresa: EmpresaCompras): ErpEmpresa {
 }
 
 function getEnv(empresa: ErpEmpresa, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN"): string {
+  const allowGenericFallback = empresa !== "SEFULY";
   return (
     process.env[`ERP_API_${key}_${empresa}`] ||
     process.env[`ERP_${key}_${empresa}`] ||
     process.env[`VITE_ERP_API_${key}_${empresa}`] ||
     process.env[`VITE_ERP_${key}_${empresa}`] ||
-    process.env[`ERP_API_${key}`] ||
-    process.env[`ERP_${key}`] ||
-    process.env[`VITE_ERP_API_${key}`] ||
-    process.env[`VITE_ERP_${key}`] ||
+    (allowGenericFallback ? process.env[`ERP_API_${key}`] : "") ||
+    (allowGenericFallback ? process.env[`ERP_${key}`] : "") ||
+    (allowGenericFallback ? process.env[`VITE_ERP_API_${key}`] : "") ||
+    (allowGenericFallback ? process.env[`VITE_ERP_${key}`] : "") ||
     ""
   );
 }

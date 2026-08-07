@@ -15,18 +15,19 @@ const HOSTS: Record<EmpresaKey, string> = {
 
 function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN"): string {
   // Credencial especifica da empresa (ex.: SOYE) sempre vence a da baseEmpresa
-  // (FACIL) — SOYE e FACIL compartilham host, mas podem ter tokens diferentes.
-  const baseEmpresa = empresa === "SOYE" ? "FACIL" : empresa === "SEFULY" ? "NEWSHOP" : empresa;
+  // (FACIL) - SOYE e FACIL compartilham host, mas podem ter tokens diferentes.
+  const baseEmpresa = empresa === "SOYE" ? "FACIL" : empresa;
+  const allowGenericFallback = empresa !== "SEFULY";
   return (
     process.env[`ERP_API_${key}_${empresa}`] ||
     process.env[`ERP_API_${key}_${baseEmpresa}`] ||
-    process.env[`ERP_API_${key}`] ||
+    (allowGenericFallback ? process.env[`ERP_API_${key}`] : "") ||
     ""
   );
 }
 
 function resolveOrigin(empresa: EmpresaKey): string {
-  const baseEmpresa = empresa === "SOYE" ? "FACIL" : empresa === "SEFULY" ? "NEWSHOP" : empresa;
+  const baseEmpresa = empresa === "SOYE" ? "FACIL" : empresa;
   const url = (getEnv(empresa, "URL") || `https://${HOSTS[baseEmpresa]}`).replace(/\/$/, "");
   return url.replace(/\/api$/, "");
 }

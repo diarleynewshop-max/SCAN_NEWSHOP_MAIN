@@ -72,7 +72,8 @@ const TELEFONE_PADRAO_CLIENTE = "99999999999";
 // de cliente obrigatorio (webhookRouter.ts `clientePdvValido`) descartam letras,
 // entao um fallback com letras virava codigo vazio e travava o envio.
 const CONSUMIDOR_FINAL_CODIGO =
-  String(import.meta.env.VITE_PDV_CLIENTE_CODIGO_PADRAO ?? "").replace(/\D/g, "") || "0";
+  String(import.meta.env.VITE_PDV_CLIENTE_CODIGO_PADRAO ?? "").replace(/\D/g, "");
+const CONSUMIDOR_FINAL_CONFIGURADO = Number(CONSUMIDOR_FINAL_CODIGO) > 0;
 
 const CONSUMIDOR_FINAL: ClientePdv = {
   codigo: CONSUMIDOR_FINAL_CODIGO,
@@ -381,15 +382,22 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
             <button
               type="button"
-              onClick={() => onSelect(CONSUMIDOR_FINAL)}
+              onClick={() => {
+                if (!CONSUMIDOR_FINAL_CONFIGURADO) {
+                  setError("Configure VITE_PDV_CLIENTE_CODIGO_PADRAO com o codigo real do Consumidor Final.");
+                  return;
+                }
+                onSelect(CONSUMIDOR_FINAL);
+              }}
               style={{
                 width: "100%",
                 borderRadius: 10,
-                border: "1.5px solid hsl(var(--primary))",
-                background: "hsl(var(--primary) / 0.08)",
+                border: CONSUMIDOR_FINAL_CONFIGURADO ? "1.5px solid hsl(var(--primary))" : "1.5px solid hsl(var(--border))",
+                background: CONSUMIDOR_FINAL_CONFIGURADO ? "hsl(var(--primary) / 0.08)" : "hsl(var(--muted) / 0.4)",
                 padding: "11px 12px",
                 textAlign: "left",
                 cursor: "pointer",
+                opacity: CONSUMIDOR_FINAL_CONFIGURADO ? 1 : 0.78,
                 display: "flex",
                 alignItems: "center",
                 gap: 10,
@@ -401,7 +409,7 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
                   CONSUMIDOR FINAL
                 </div>
                 <div style={{ fontSize: 11, color: "hsl(var(--muted-foreground))", marginTop: 2 }}>
-                  Padrao, sem necessidade de preencher dados
+                  {CONSUMIDOR_FINAL_CONFIGURADO ? `Cod. ${CONSUMIDOR_FINAL_CODIGO}` : "Codigo padrao nao configurado"}
                 </div>
               </div>
               <Check style={{ width: 16, height: 16, color: "hsl(var(--primary))", flexShrink: 0 }} />

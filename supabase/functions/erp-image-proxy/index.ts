@@ -6,12 +6,13 @@
 // Publico (verify_jwt = false) — usado direto em <img src="...">, que nao consegue
 // mandar header de autenticacao. Igual a rota da Vercel de hoje.
 
-type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE";
+type EmpresaKey = "NEWSHOP" | "FACIL" | "SOYE" | "SEFULY";
 
 const HOSTS: Record<EmpresaKey, string> = {
   NEWSHOP: "newshop.varejofacil.com",
   FACIL: "facil.varejofacil.com",
   SOYE: "facil.varejofacil.com",
+  SEFULY: "sefuly.varejofacil.com",
 };
 
 const tokenCache = new Map<string, string>();
@@ -29,6 +30,7 @@ const CORS_HEADERS: Record<string, string> = {
 
 function normalizeEmpresa(value: string | null): EmpresaKey {
   const normalized = (value ?? "").trim().toUpperCase();
+  if (normalized.includes("SEFULY")) return "SEFULY";
   if (normalized.includes("SOYE")) return "SOYE";
   if (normalized.includes("FACIL")) return "FACIL";
   return "NEWSHOP";
@@ -40,10 +42,11 @@ function erpBaseEmpresa(empresa: EmpresaKey): EmpresaKey {
 
 function getEnv(empresa: EmpresaKey, key: "URL" | "USERNAME" | "PASSWORD" | "TOKEN" | "KEY"): string {
   const baseEmpresa = erpBaseEmpresa(empresa);
+  const allowGenericFallback = empresa !== "SEFULY";
   return (
     Deno.env.get(`ERP_API_${key}_${empresa}`) ||
     Deno.env.get(`ERP_API_${key}_${baseEmpresa}`) ||
-    Deno.env.get(`ERP_API_${key}`) ||
+    (allowGenericFallback ? Deno.env.get(`ERP_API_${key}`) : "") ||
     ""
   );
 }
