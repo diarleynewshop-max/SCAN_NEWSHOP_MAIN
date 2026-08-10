@@ -91,6 +91,7 @@ const tipoContribuinteOptions: Array<{ value: TipoContribuinteCliente; label: st
 export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButtonLabel = "Cadastrar e enviar" }: PdvClienteModalProps) {
   const [mode, setMode] = useState<"buscar" | "cadastrar">("buscar");
   const [search, setSearch] = useState("");
+  const [clienteAvulsoNome, setClienteAvulsoNome] = useState("");
   const [clientes, setClientes] = useState<ClientePdv[]>([]);
   const [loading, setLoading] = useState(false);
   const [cepLoading, setCepLoading] = useState(false);
@@ -129,6 +130,7 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
     if (!open) return;
     setMode("buscar");
     setSearch("");
+    setClienteAvulsoNome("");
     setError("");
     setClientes([]);
     setCepLoading(false);
@@ -312,6 +314,25 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
     }
   };
 
+  const usarClienteAvulso = () => {
+    const nome = clienteAvulsoNome.trim();
+    if (!nome) {
+      setError("Informe o nome do cliente.");
+      return;
+    }
+    if (!CONSUMIDOR_FINAL_CONFIGURADO) {
+      setError("Configure VITE_PDV_CLIENTE_CODIGO_PADRAO com o codigo real do Consumidor Final.");
+      return;
+    }
+
+    onSelect({
+      codigo: CONSUMIDOR_FINAL_CODIGO,
+      nome,
+      cpfCnpj: null,
+      tipoPessoa: "F",
+    });
+  };
+
   return (
     <Dialog open={open} onOpenChange={(next) => { if (!next) onCancel(); }}>
       <DialogContent
@@ -333,7 +354,7 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
             Cliente do PDV
           </DialogTitle>
           <DialogDescription style={{ fontSize: 13 }}>
-            Selecione um cliente do Varejo Facil ou cadastre com os dados obrigatorios do ERP.
+            Informe so o nome para sair na pre-venda, selecione um cliente do ERP ou cadastre se precisar.
           </DialogDescription>
         </DialogHeader>
 
@@ -380,6 +401,50 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
 
         {mode === "buscar" ? (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, marginTop: 4 }}>
+            <div
+              style={{
+                borderRadius: 12,
+                border: "1.5px solid hsl(var(--primary) / 0.35)",
+                background: "hsl(var(--primary) / 0.06)",
+                padding: 12,
+                display: "flex",
+                flexDirection: "column",
+                gap: 8,
+              }}
+            >
+              <div>
+                <label style={labelStyle}>Nome no PDV</label>
+                <input
+                  value={clienteAvulsoNome}
+                  onChange={(e) => setClienteAvulsoNome(e.target.value)}
+                  placeholder="Ex: Maria - Pedido 123"
+                  style={fieldStyle}
+                  autoFocus={autoFocusCampo}
+                />
+              </div>
+              <button
+                type="button"
+                onClick={usarClienteAvulso}
+                style={{
+                  width: "100%",
+                  height: 40,
+                  borderRadius: 8,
+                  border: "none",
+                  background: "hsl(var(--primary))",
+                  color: "hsl(var(--primary-foreground))",
+                  fontWeight: 800,
+                  fontSize: 13,
+                  cursor: "pointer",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 7,
+                }}
+              >
+                <Check style={{ width: 15, height: 15 }} /> Usar sem cadastrar
+              </button>
+            </div>
+
             <button
               type="button"
               onClick={() => {
@@ -421,7 +486,6 @@ export function PdvClienteModal({ open, empresa, onCancel, onSelect, createButto
                 onChange={(e) => setSearch(e.target.value)}
                 placeholder="Digite para buscar"
                 style={fieldStyle}
-                autoFocus={autoFocusCampo}
               />
             </div>
             <div style={{ minHeight: 210, maxHeight: 300, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8 }}>

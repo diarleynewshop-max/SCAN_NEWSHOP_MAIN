@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from "react";
-import { Camera, X, ScanBarcode, Upload, Loader2 } from "lucide-react";
+import { Camera, X, ScanBarcode, Upload, Loader2, Zap, ZoomIn } from "lucide-react";
 
 interface BarcodeScannerProps {
   onDetected: (code: string) => void;
@@ -19,24 +19,40 @@ const NATIVE_BARCODE_FORMATS = [
 ] as const;
 
 const ZXING_MAX_PHOTO_EDGE = 2200;
-const ZXING_MAX_VIDEO_EDGE = 1280;
+const ZXING_MAX_VIDEO_EDGE = 1920;
+const ZXING_MIN_PHOTO_EDGE = 900;
+const ZXING_MIN_VIDEO_EDGE = 760;
 const ZXING_VIDEO_SCAN_INTERVAL_MS = 280;
 const NATIVE_VIDEO_SCAN_INTERVAL_MS = 90;
+const SMALL_LABEL_ZOOM = 2.2;
 
 const PHOTO_SCAN_VARIANTS = [
   { x: 0, y: 0, width: 1, height: 1, rotate: 0 },
   { x: 0.04, y: 0.18, width: 0.92, height: 0.64, rotate: 0 },
   { x: 0.08, y: 0.28, width: 0.84, height: 0.44, rotate: 0 },
+  { x: 0.08, y: 0.42, width: 0.84, height: 0.34, rotate: 0 },
+  { x: 0.16, y: 0.48, width: 0.68, height: 0.24, rotate: 0 },
+  { x: 0.22, y: 0.54, width: 0.56, height: 0.2, rotate: 0 },
   { x: 0, y: 0, width: 1, height: 1, rotate: 90 },
   { x: 0.04, y: 0.18, width: 0.92, height: 0.64, rotate: 90 },
   { x: 0.08, y: 0.28, width: 0.84, height: 0.44, rotate: 90 },
+  { x: 0.16, y: 0.48, width: 0.68, height: 0.24, rotate: 90 },
   { x: 0, y: 0, width: 1, height: 1, rotate: -90 },
+  { x: 0.16, y: 0.48, width: 0.68, height: 0.24, rotate: -90 },
 ] as const;
 
 const VIDEO_SCAN_VARIANTS = [
   { x: 0, y: 0, width: 1, height: 1 },
   { x: 0.04, y: 0.2, width: 0.92, height: 0.6 },
   { x: 0.08, y: 0.32, width: 0.84, height: 0.36 },
+] as const;
+
+const VIDEO_SMALL_LABEL_SCAN_VARIANTS = [
+  ...VIDEO_SCAN_VARIANTS,
+  { x: 0.08, y: 0.38, width: 0.84, height: 0.28 },
+  { x: 0.14, y: 0.42, width: 0.72, height: 0.22 },
+  { x: 0.2, y: 0.46, width: 0.6, height: 0.18 },
+  { x: 0.08, y: 0.52, width: 0.84, height: 0.24 },
 ] as const;
 
 type NativeBarcode = {
@@ -80,6 +96,21 @@ function clampBetweenZeroAndOne(value: number): number {
   return Math.min(1, Math.max(0, value));
 }
 
+function resolveTargetScale(width: number, height: number, maxEdge: number, minEdge: number): number {
+  const edge = Math.max(width, height);
+  if (!edge) return 1;
+  if (edge > maxEdge) return maxEdge / edge;
+  if (edge < minEdge) return Math.min(maxEdge / edge, minEdge / edge);
+  return 1;
+}
+
+function tuneCanvasDraw(ctx: CanvasRenderingContext2D, scale: number): void {
+  ctx.imageSmoothingEnabled = scale < 1;
+  if (scale < 1) {
+    ctx.imageSmoothingQuality = "high";
+  }
+}
+
 function createCanvasVariant(
   image: HTMLImageElement,
   variant: (typeof PHOTO_SCAN_VARIANTS)[number]
@@ -94,7 +125,7 @@ function createCanvasVariant(
 
   const safeCropWidth = Math.min(cropWidth, sourceWidth - cropX);
   const safeCropHeight = Math.min(cropHeight, sourceHeight - cropY);
-  const scale = Math.min(1, ZXING_MAX_PHOTO_EDGE / Math.max(safeCropWidth, safeCropHeight));
+  const scale = resolveTargetScale(safeCropWidth, safeCropHeight, ZXING_MAX_PHOTO_EDGE, ZXING_MIN_PHOTO_EDGE);
   const targetWidth = Math.max(1, Math.round(safeCropWidth * scale));
   const targetHeight = Math.max(1, Math.round(safeCropHeight * scale));
 
@@ -109,6 +140,7 @@ function createCanvasVariant(
     throw new Error("Falha ao preparar leitura da imagem");
   }
 
+  tuneCanvasDraw(ctx, scale);
   ctx.translate(canvas.width / 2, canvas.height / 2);
   ctx.rotate((variant.rotate * Math.PI) / 180);
   ctx.drawImage(
@@ -194,21 +226,24 @@ async function detectWithZxing(image: HTMLImageElement): Promise<string | null> 
 
 async function detectVideoFrameWithZxing(
   video: HTMLVideoElement,
-  canvas: HTMLCanvasElement
+  canvas: HTMLCanvasElement,
+  smallLabelMode: boolean
 ): Promise<string | null> {
   const sourceWidth = video.videoWidth;
   const sourceHeight = video.videoHeight;
 
   if (!sourceWidth || !sourceHeight) return null;
 
-  for (const variant of VIDEO_SCAN_VARIANTS) {
+  const variants = smallLabelMode ? VIDEO_SMALL_LABEL_SCAN_VARIANTS : VIDEO_SCAN_VARIANTS;
+
+  for (const variant of variants) {
     const cropX = Math.round(clampBetweenZeroAndOne(variant.x) * sourceWidth);
     const cropY = Math.round(clampBetweenZeroAndOne(variant.y) * sourceHeight);
     const cropWidth = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.width) * sourceWidth));
     const cropHeight = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.height) * sourceHeight));
     const safeCropWidth = Math.min(cropWidth, sourceWidth - cropX);
     const safeCropHeight = Math.min(cropHeight, sourceHeight - cropY);
-    const scale = Math.min(1, ZXING_MAX_VIDEO_EDGE / Math.max(safeCropWidth, safeCropHeight));
+    const scale = resolveTargetScale(safeCropWidth, safeCropHeight, ZXING_MAX_VIDEO_EDGE, ZXING_MIN_VIDEO_EDGE);
     const targetWidth = Math.max(1, Math.round(safeCropWidth * scale));
     const targetHeight = Math.max(1, Math.round(safeCropHeight * scale));
 
@@ -218,6 +253,7 @@ async function detectVideoFrameWithZxing(
     const ctx = canvas.getContext("2d", { willReadFrequently: true });
     if (!ctx) return null;
 
+    tuneCanvasDraw(ctx, scale);
     ctx.clearRect(0, 0, targetWidth, targetHeight);
     ctx.drawImage(
       video,
@@ -236,6 +272,78 @@ async function detectVideoFrameWithZxing(
   }
 
   return null;
+}
+
+type TrackNumberCapability = {
+  min?: number;
+  max?: number;
+  step?: number;
+};
+
+type BarcodeCameraCapabilities = MediaTrackCapabilities & {
+  exposureMode?: string[];
+  focusMode?: string[];
+  torch?: boolean;
+  whiteBalanceMode?: string[];
+  zoom?: TrackNumberCapability;
+};
+
+type BarcodeCameraOptions = {
+  smallLabelMode: boolean;
+  torchOn: boolean;
+};
+
+function roundTrackValue(value: number, step?: number): number {
+  if (!step || step <= 0) return value;
+  return Math.round(value / step) * step;
+}
+
+async function tryApplyVideoConstraint(track: MediaStreamTrack, constraint: Record<string, unknown>): Promise<void> {
+  try {
+    await track.applyConstraints({ advanced: [constraint] } as MediaTrackConstraints);
+  } catch {
+    // Browser support varies a lot here; unsupported camera tweaks should not break scanning.
+  }
+}
+
+async function applyCameraEnhancements(
+  track: MediaStreamTrack,
+  options: BarcodeCameraOptions
+): Promise<{ supportsTorch: boolean; supportsZoom: boolean }> {
+  const capabilities = (track.getCapabilities?.() ?? {}) as BarcodeCameraCapabilities;
+  const focusModes = capabilities.focusMode ?? [];
+  const exposureModes = capabilities.exposureMode ?? [];
+  const whiteBalanceModes = capabilities.whiteBalanceMode ?? [];
+
+  if (focusModes.includes("continuous")) {
+    await tryApplyVideoConstraint(track, { focusMode: "continuous" });
+  }
+
+  if (exposureModes.includes("continuous")) {
+    await tryApplyVideoConstraint(track, { exposureMode: "continuous" });
+  }
+
+  if (whiteBalanceModes.includes("continuous")) {
+    await tryApplyVideoConstraint(track, { whiteBalanceMode: "continuous" });
+  }
+
+  if (capabilities.zoom && typeof capabilities.zoom.max === "number") {
+    const min = typeof capabilities.zoom.min === "number" ? capabilities.zoom.min : 1;
+    const max = capabilities.zoom.max;
+    const step = capabilities.zoom.step;
+    const desired = options.smallLabelMode ? SMALL_LABEL_ZOOM : min;
+    const zoom = Math.min(max, Math.max(min, roundTrackValue(desired, step)));
+    await tryApplyVideoConstraint(track, { zoom });
+  }
+
+  if (capabilities.torch) {
+    await tryApplyVideoConstraint(track, { torch: options.torchOn });
+  }
+
+  return {
+    supportsTorch: Boolean(capabilities.torch),
+    supportsZoom: Boolean(capabilities.zoom),
+  };
 }
 
 function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {
@@ -261,11 +369,17 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const detectedRef = useRef(false);
   const processingRef = useRef(false);
+  const smallLabelModeRef = useRef(true);
+  const torchOnRef = useRef(false);
 
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [fileModeOnly, setFileModeOnly] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(true);
+  const [smallLabelMode, setSmallLabelMode] = useState(true);
+  const [supportsTorch, setSupportsTorch] = useState(false);
+  const [supportsZoom, setSupportsZoom] = useState(false);
+  const [torchOn, setTorchOn] = useState(false);
 
   const supportsLiveCamera = typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
   const useFileMode = fileModeOnly || !supportsLiveCamera;
@@ -283,6 +397,20 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
   }, []);
 
   useEffect(() => {
+    smallLabelModeRef.current = smallLabelMode;
+    torchOnRef.current = torchOn;
+
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+
+    void applyCameraEnhancements(track, { smallLabelMode, torchOn }).then((support) => {
+      setSupportsTorch(support.supportsTorch);
+      setSupportsZoom(support.supportsZoom);
+      if (!support.supportsTorch && torchOn) setTorchOn(false);
+    });
+  }, [smallLabelMode, torchOn]);
+
+  useEffect(() => {
     if (useFileMode) {
       setCameraStarting(false);
       return;
@@ -298,8 +426,9 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
         const stream = await navigator.mediaDevices.getUserMedia({
           video: {
             facingMode: "environment",
-            width: { ideal: 1280 },
-            height: { ideal: 720 },
+            width: { ideal: 1920 },
+            height: { ideal: 1080 },
+            frameRate: { ideal: 30 },
           },
         });
 
@@ -309,6 +438,18 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
         }
 
         streamRef.current = stream;
+
+        const track = stream.getVideoTracks()[0];
+        if (track) {
+          const support = await applyCameraEnhancements(track, {
+            smallLabelMode: smallLabelModeRef.current,
+            torchOn: torchOnRef.current,
+          });
+          if (!cancelled) {
+            setSupportsTorch(support.supportsTorch);
+            setSupportsZoom(support.supportsZoom);
+          }
+        }
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
@@ -339,7 +480,7 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
           const nativeCode = hasNativeBarcodeDetector
             ? await detectWithNativeBarcodeDetector(videoRef.current)
             : null;
-          const code = nativeCode || (canvas ? await detectVideoFrameWithZxing(videoRef.current, canvas) : null);
+          const code = nativeCode || (canvas ? await detectVideoFrameWithZxing(videoRef.current, canvas, smallLabelModeRef.current) : null);
 
           if (code && !detectedRef.current) {
             detectedRef.current = true;
@@ -529,6 +670,33 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
                 <video ref={videoRef} className="w-full rounded-2xl" playsInline muted autoPlay />
               </div>
 
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setSmallLabelMode((value) => !value)}
+                  className={`h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform border ${
+                    smallLabelMode
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card/20 text-primary-foreground border-white/20"
+                  }`}
+                >
+                  <ZoomIn className="w-4 h-4" /> Etiqueta pequena
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setTorchOn((value) => !value)}
+                  disabled={!supportsTorch}
+                  className={`h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform border ${
+                    torchOn && supportsTorch
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-card/20 text-primary-foreground border-white/20"
+                  } ${supportsTorch ? "" : "opacity-45"}`}
+                >
+                  <Zap className="w-4 h-4" /> Luz
+                </button>
+              </div>
+
               <input
                 ref={galleryInputRef}
                 type="file"
@@ -552,7 +720,9 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
         <p className="text-primary-foreground/70 text-sm">
           {useFileMode
             ? "Aproxime bem o codigo e evite sombras na foto"
-            : "Aponte a camera para o codigo de barras"}
+            : supportsZoom || smallLabelMode
+              ? "Aproxime a etiqueta ate ocupar a mira da camera"
+              : "Aponte a camera para o codigo de barras"}
         </p>
       </div>
 

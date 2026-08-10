@@ -135,6 +135,22 @@ describe("gerarArquivoPrevenda", () => {
     expect(campo(linha, 43, 57)).toBe("000000000018.50");
   });
 
+  it("permite cliente avulso usando codigo padrao e nome digitado", () => {
+    const linha = gerarArquivoPrevenda({
+      ...base,
+      cliente: {
+        codigo: "1",
+        nome: "MARIA PEDIDO 123",
+        cpfCnpj: null,
+        tipoPessoa: "F",
+      },
+    }).conteudo.split("\r\n")[0];
+
+    expect(campo(linha, 12, 26)).toBe("000000000000001");
+    expect(campo(linha, 133, 172)).toHaveLength(40);
+    expect(campo(linha, 133, 172).trimEnd()).toBe("MARIA PEDIDO 123");
+  });
+
   it("nomeia o arquivo como RPX<7 digitos>.ECF", () => {
     expect(gerarArquivoPrevenda(base).nomeArquivo).toBe("RPX1300197.ECF");
     expect(gerarArquivoPrevenda({ ...base, arquivoBase: "42" }).nomeArquivo).toBe("RPX0000042.ECF");
