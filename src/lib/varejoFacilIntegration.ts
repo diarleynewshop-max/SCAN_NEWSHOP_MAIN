@@ -213,8 +213,8 @@ const normalizarEmpresaVarejoFacil = (empresa?: string | null): VarejoFacilEmpre
   // SOYE e FACIL usam a mesma base ERP.
   if (normalizada.includes("SOYE")) return "FACIL";
   if (normalizada.includes("FACIL")) return "FACIL";
-  // #GEMINI Adicionado tratamento da SEFULY
-  if (normalizada.includes("SEFULY")) return "SEFULY";
+  // SEFULY usa a base ERP da NEWSHOP neste fluxo.
+  if (normalizada.includes("SEFULY")) return "NEWSHOP";
   return "NEWSHOP";
 };
 
@@ -222,8 +222,7 @@ const getCatalogoItemContexto = (contexto: VarejoFacilLookupContext = {}) => {
   const normalizada = (contexto.empresa ?? "").toUpperCase();
   if (normalizada.includes("SOYE")) return { loja: "soye", lojaId: 1, erpBaseOverride: "soye" };
   if (normalizada.includes("FACIL")) return { loja: "facil_atacado", lojaId: 1, erpBaseOverride: "facil_atacado" };
-  // #GEMINI Adicionado contexto SEFULY
-  if (normalizada.includes("SEFULY")) return { loja: "sefuly", lojaId: 1, erpBaseOverride: "sefuly" };
+  if (normalizada.includes("SEFULY")) return { loja: "newshop", lojaId: 2, erpBaseOverride: "newshop" };
   return { loja: "newshop", lojaId: 2, erpBaseOverride: "newshop" };
 };
 
@@ -554,7 +553,9 @@ const extrairImagemProduto = (produto: ErpProduto): string | undefined => {
 
 const resolverImagemProduto = (imagem: string | undefined, produtoId: number, contexto: VarejoFacilLookupContext = {}) => {
   const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-  const imagemOuProduto = imagem || String(produtoId);
+  const imagemOuProduto = imagem?.trim();
+
+  if (!imagemOuProduto) return undefined;
 
   if (/^data:image\//i.test(imagemOuProduto)) return imagemOuProduto;
 
@@ -800,7 +801,7 @@ export const buscarOpcoesProdutoVarejoFacil = async (
       descricao: item.descricao?.trim() || item.sku?.trim() || `Produto ${id}`,
       precoVarejo: typeof item.varejo === "number" ? item.varejo : undefined,
       precoAtacado: typeof item.atacado === "number" ? item.atacado : undefined,
-      imagem: resolverImagemProduto(foto || id, produtoId, contexto),
+      imagem: foto ? resolverImagemProduto(foto, produtoId, contexto) : undefined,
     });
   }
 

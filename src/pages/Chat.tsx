@@ -374,7 +374,7 @@ export default function Chat() {
     if (fotoFallback) return fotoFallback;
     const produtoId = String(prod?.id ?? "").trim();
     if (!produtoId || !/^\d+$/.test(produtoId)) return null;
-    const empresaImagem = empresaConversa === "SOYE" ? "facil" : empresaConversa.toLowerCase();
+    const empresaImagem = empresaConversa === "SOYE" ? "facil" : empresaConversa === "SEFULY" ? "newshop" : empresaConversa.toLowerCase();
     return `/api/erp-image-proxy?empresa=${empresaImagem}&produtoId=${encodeURIComponent(produtoId)}&src=${encodeURIComponent(produtoId)}`;
   };
 
