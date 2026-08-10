@@ -25,6 +25,7 @@ const ZXING_MIN_VIDEO_EDGE = 760;
 const ZXING_VIDEO_SCAN_INTERVAL_MS = 280;
 const NATIVE_VIDEO_SCAN_INTERVAL_MS = 90;
 const SMALL_LABEL_ZOOM = 2.2;
+const SMALL_LABEL_PREVIEW_ZOOM = 2.35;
 
 const PHOTO_SCAN_VARIANTS = [
   { x: 0, y: 0, width: 1, height: 1, rotate: 0 },
@@ -306,6 +307,21 @@ async function tryApplyVideoConstraint(track: MediaStreamTrack, constraint: Reco
   }
 }
 
+function getCameraSupport(track: MediaStreamTrack): { supportsTorch: boolean; supportsZoom: boolean } {
+  const capabilities = (track.getCapabilities?.() ?? {}) as BarcodeCameraCapabilities;
+  return {
+    supportsTorch: Boolean(capabilities.torch),
+    supportsZoom: Boolean(capabilities.zoom),
+  };
+}
+
+async function applyTorch(track: MediaStreamTrack, torchOn: boolean): Promise<boolean> {
+  const capabilities = (track.getCapabilities?.() ?? {}) as BarcodeCameraCapabilities;
+  if (!capabilities.torch) return false;
+  await tryApplyVideoConstraint(track, { torch: torchOn });
+  return true;
+}
+
 async function applyCameraEnhancements(
   track: MediaStreamTrack,
   options: BarcodeCameraOptions
@@ -337,7 +353,7 @@ async function applyCameraEnhancements(
   }
 
   if (capabilities.torch) {
-    await tryApplyVideoConstraint(track, { torch: options.torchOn });
+    void applyTorch(track, options.torchOn);
   }
 
   return {
@@ -369,17 +385,18 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
   const galleryInputRef = useRef<HTMLInputElement>(null);
   const detectedRef = useRef(false);
   const processingRef = useRef(false);
-  const smallLabelModeRef = useRef(true);
+  const smallLabelModeRef = useRef(false);
   const torchOnRef = useRef(false);
 
   const [error, setError] = useState<string | null>(null);
   const [processing, setProcessing] = useState(false);
   const [fileModeOnly, setFileModeOnly] = useState(false);
   const [cameraStarting, setCameraStarting] = useState(true);
-  const [smallLabelMode, setSmallLabelMode] = useState(true);
+  const [smallLabelMode, setSmallLabelMode] = useState(false);
   const [supportsTorch, setSupportsTorch] = useState(false);
   const [supportsZoom, setSupportsZoom] = useState(false);
   const [torchOn, setTorchOn] = useState(false);
+  const [torchBusy, setTorchBusy] = useState(false);
 
   const supportsLiveCamera = typeof navigator !== "undefined" && Boolean(navigator.mediaDevices?.getUserMedia);
   const useFileMode = fileModeOnly || !supportsLiveCamera;
@@ -398,17 +415,15 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
 
   useEffect(() => {
     smallLabelModeRef.current = smallLabelMode;
-    torchOnRef.current = torchOn;
 
     const track = streamRef.current?.getVideoTracks()[0];
     if (!track) return;
 
-    void applyCameraEnhancements(track, { smallLabelMode, torchOn }).then((support) => {
+    void applyCameraEnhancements(track, { smallLabelMode, torchOn: torchOnRef.current }).then((support) => {
       setSupportsTorch(support.supportsTorch);
       setSupportsZoom(support.supportsZoom);
-      if (!support.supportsTorch && torchOn) setTorchOn(false);
     });
-  }, [smallLabelMode, torchOn]);
+  }, [smallLabelMode]);
 
   useEffect(() => {
     if (useFileMode) {
@@ -441,19 +456,26 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
 
         const track = stream.getVideoTracks()[0];
         if (track) {
-          const support = await applyCameraEnhancements(track, {
-            smallLabelMode: smallLabelModeRef.current,
-            torchOn: torchOnRef.current,
-          });
-          if (!cancelled) {
-            setSupportsTorch(support.supportsTorch);
-            setSupportsZoom(support.supportsZoom);
-          }
+          const support = getCameraSupport(track);
+          setSupportsTorch(support.supportsTorch);
+          setSupportsZoom(support.supportsZoom);
         }
 
         if (videoRef.current) {
           videoRef.current.srcObject = stream;
           await videoRef.current.play();
+        }
+
+        if (track) {
+          void applyCameraEnhancements(track, {
+            smallLabelMode: smallLabelModeRef.current,
+            torchOn: torchOnRef.current,
+          }).then((support) => {
+            if (!cancelled) {
+              setSupportsTorch(support.supportsTorch);
+              setSupportsZoom(support.supportsZoom);
+            }
+          });
         }
 
         setCameraStarting(false);
@@ -568,6 +590,28 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
     }
   };
 
+  const handleTorchToggle = async () => {
+    if (torchBusy) return;
+    const track = streamRef.current?.getVideoTracks()[0];
+    if (!track) return;
+
+    const next = !torchOnRef.current;
+    torchOnRef.current = next;
+    setTorchOn(next);
+    setTorchBusy(true);
+
+    try {
+      const supported = await applyTorch(track, next);
+      if (!supported) {
+        setSupportsTorch(false);
+        torchOnRef.current = false;
+        setTorchOn(false);
+      }
+    } finally {
+      setTorchBusy(false);
+    }
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-foreground/90 flex flex-col">
       <div className="flex items-center justify-between px-4 py-3">
@@ -666,8 +710,20 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
             </div>
           ) : (
             <div className="space-y-3">
-              <div className="rounded-2xl overflow-hidden">
-                <video ref={videoRef} className="w-full rounded-2xl" playsInline muted autoPlay />
+              <div className="relative rounded-2xl overflow-hidden bg-black aspect-[3/4]">
+                <video
+                  ref={videoRef}
+                  className="h-full w-full rounded-2xl object-cover transition-transform duration-200"
+                  style={{ transform: smallLabelMode ? `scale(${SMALL_LABEL_PREVIEW_ZOOM})` : "scale(1)" }}
+                  playsInline
+                  muted
+                  autoPlay
+                />
+                <div
+                  className={`pointer-events-none absolute left-1/2 top-1/2 h-[18%] w-[76%] -translate-x-1/2 -translate-y-1/2 rounded-lg border-2 ${
+                    smallLabelMode ? "border-primary shadow-[0_0_0_999px_rgba(0,0,0,0.30)]" : "border-white/65"
+                  }`}
+                />
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -680,22 +736,31 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
                       : "bg-card/20 text-primary-foreground border-white/20"
                   }`}
                 >
-                  <ZoomIn className="w-4 h-4" /> Etiqueta pequena
+                  <ZoomIn className="w-4 h-4" /> Zoom etiqueta
                 </button>
 
                 <button
                   type="button"
-                  onClick={() => setTorchOn((value) => !value)}
-                  disabled={!supportsTorch}
+                  onClick={() => void handleTorchToggle()}
+                  disabled={!supportsTorch || torchBusy}
                   className={`h-11 rounded-xl font-semibold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform border ${
                     torchOn && supportsTorch
                       ? "bg-primary text-primary-foreground border-primary"
                       : "bg-card/20 text-primary-foreground border-white/20"
-                  } ${supportsTorch ? "" : "opacity-45"}`}
+                  } ${supportsTorch && !torchBusy ? "" : "opacity-45"}`}
                 >
-                  <Zap className="w-4 h-4" /> Luz
+                  {torchBusy ? <Loader2 className="w-4 h-4 animate-spin" /> : <Zap className="w-4 h-4" />} Luz
                 </button>
               </div>
+
+              <input
+                ref={cameraInputRef}
+                type="file"
+                accept="image/*"
+                capture="environment"
+                onChange={handleFileCapture}
+                className="hidden"
+              />
 
               <input
                 ref={galleryInputRef}
@@ -704,6 +769,13 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
                 onChange={handleFileCapture}
                 className="hidden"
               />
+
+              <button
+                onClick={() => cameraInputRef.current?.click()}
+                className="w-full h-11 bg-primary text-primary-foreground rounded-xl font-bold text-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
+              >
+                <Camera className="w-4 h-4" /> Foto nitida
+              </button>
 
               <button
                 onClick={() => galleryInputRef.current?.click()}

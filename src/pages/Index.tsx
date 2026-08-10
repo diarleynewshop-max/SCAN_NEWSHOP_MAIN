@@ -23,6 +23,7 @@ interface HistoricoItemOcorrencia {
 }
 import { blobToDataUrl, isDataPhotoUrl } from "@/lib/photoUtils";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
+import type { VarejoFacilProductOption } from "@/lib/varejoFacilIntegration";
 
 const BarcodeScanner = lazy(() => import("@/components/BarcodeScanner"));
 const PhotoCapture = lazy(() => import("@/components/PhotoCapture"));
@@ -193,6 +194,8 @@ const Index = () => {
   const [showProductInfo, setShowProductInfo] = useState(false);
   const [showPhotoCapture, setShowPhotoCapture] = useState(false);
   const [photoProductId, setPhotoProductId] = useState<string | null>(null);
+  const [selectedProductOption, setSelectedProductOption] = useState<VarejoFacilProductOption | null>(null);
+  const [imageFailedOptions, setImageFailedOptions] = useState<Record<string, boolean>>({});
 
   const [modoDesktop, setModoDesktop] = useState(() => {
     // Sem preferencia salva, segue o tamanho real do aparelho (PC >= 1024px).
@@ -213,6 +216,7 @@ const Index = () => {
   // concluido barra a inclusao no novo pedido.
   const [bloqueioConferencia, setBloqueioConferencia] = useState<{ titulo: string; pessoa: string } | null>(null);
   const popupMostradoParaRef = useRef<string | null>(null);
+  const confirmandoOpcaoRef = useRef(false);
 
   const { lists, activeList, openList, closeList, addProduct, updateList, deleteProduct, updateProduct, updateProductPhoto, moveProductToTop } = useInventory(
     currentLogin?.usuarioId ?? currentLogin?.login ?? null
@@ -398,6 +402,11 @@ const Index = () => {
     };
   }, [productInfo?.imagem, modoLeve]);
 
+  useEffect(() => {
+    setSelectedProductOption(null);
+    setImageFailedOptions({});
+  }, [productOptions]);
+
   const handleBarcodeDetected = useCallback(
     (code: string) => {
       setShowScanner(false);
@@ -410,6 +419,22 @@ const Index = () => {
       startProductLookup(code);
     },
     [startProductLookup, consultaBloqueadaPorFlag, toast]
+  );
+
+  const confirmarProductOption = useCallback(
+    async (option: VarejoFacilProductOption | null) => {
+      if (!option || loading || confirmandoOpcaoRef.current) return;
+      confirmandoOpcaoRef.current = true;
+      try {
+        setBarcode(option.codigo_barras);
+        setSku(option.descricao);
+        setShowProductInfo(true);
+        await selectProductOption(option);
+      } finally {
+        confirmandoOpcaoRef.current = false;
+      }
+    },
+    [loading, selectProductOption]
   );
 
   const handleCloseList = () => {
@@ -1255,6 +1280,9 @@ const Index = () => {
                 <h3 style={{ fontSize: 18, fontWeight: 800, color: "hsl(var(--foreground))" }}>
                   SKU encontrou {productOptions.length} produtos
                 </h3>
+                <p style={{ marginTop: 4, fontSize: 12, color: "hsl(var(--muted-foreground))" }}>
+                  Toque uma vez para marcar. Toque de novo ou confirme abaixo.
+                </p>
               </div>
               <button
                 onClick={clearProductOptions}
@@ -1264,38 +1292,111 @@ const Index = () => {
               </button>
             </div>
 
-            <div style={{ padding: 12, overflowY: "auto", display: "flex", flexDirection: "column", gap: 10 }}>
-              {productOptions.map((option) => (
-                <button
-                  key={option.id}
-                  type="button"
-                  onClick={() => {
-                    setBarcode(option.codigo_barras);
-                    setSku(option.descricao);
-                    setShowProductInfo(true);
-                    void selectProductOption(option);
-                  }}
-                  style={{
-                    width: "100%", textAlign: "left", border: "1px solid hsl(var(--border))",
-                    borderRadius: 12, background: "hsl(var(--card))", padding: 12,
-                    display: "flex", gap: 12, cursor: "pointer",
-                  }}
-                >
-                  {option.imagem ? (
-                    <img src={option.imagem} alt={option.descricao} style={{ width: 56, height: 56, borderRadius: 10, objectFit: "cover", border: "1px solid hsl(var(--border))", flexShrink: 0 }} />
-                  ) : (
-                    <div style={{ width: 56, height: 56, borderRadius: 10, background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", flexShrink: 0 }} />
-                  )}
-                  <div style={{ minWidth: 0, flex: 1 }}>
-                    <p style={{ fontSize: 14, fontWeight: 800, color: "hsl(var(--foreground))", lineHeight: 1.25 }}>
-                      {option.descricao}
-                    </p>
-                    <p style={{ marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
-                      ERP {option.id} {option.sku ? `| SKU ${option.sku}` : ""} | Cod {option.codigo_barras}
-                    </p>
-                  </div>
-                </button>
-              ))}
+            <div style={{ padding: 12, overflowY: "auto", display: "flex", flexDirection: "column", gap: 8, flex: 1 }}>
+              {productOptions.map((option) => {
+                const selected = selectedProductOption?.id === option.id;
+                const imageFailed = imageFailedOptions[option.id];
+
+                return (
+                  <button
+                    key={option.id}
+                    type="button"
+                    onClick={() => {
+                      if (selected) {
+                        void confirmarProductOption(option);
+                        return;
+                      }
+                      setSelectedProductOption(option);
+                    }}
+                    onDoubleClick={() => void confirmarProductOption(option)}
+                    disabled={loading}
+                    style={{
+                      width: "100%",
+                      textAlign: "left",
+                      border: selected ? "2px solid hsl(var(--primary))" : "1px solid hsl(var(--border))",
+                      borderRadius: 12,
+                      background: selected ? "hsl(var(--primary) / 0.08)" : "hsl(var(--card))",
+                      padding: selected ? 11 : 12,
+                      display: "flex",
+                      gap: 12,
+                      cursor: loading ? "wait" : "pointer",
+                      boxShadow: selected ? "0 0 0 3px hsl(var(--primary) / 0.12)" : "none",
+                      transition: "border-color 0.12s ease, background 0.12s ease, box-shadow 0.12s ease",
+                    }}
+                  >
+                    {option.imagem && !imageFailed ? (
+                      <img
+                        src={option.imagem}
+                        alt={option.descricao}
+                        loading="lazy"
+                        decoding="async"
+                        onError={() => setImageFailedOptions((current) => ({ ...current, [option.id]: true }))}
+                        style={{ width: 64, height: 64, borderRadius: 10, objectFit: "cover", border: "1px solid hsl(var(--border))", flexShrink: 0, background: "hsl(var(--secondary))" }}
+                      />
+                    ) : (
+                      <div style={{ width: 64, height: 64, borderRadius: 10, background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", flexShrink: 0, display: "flex", alignItems: "center", justifyContent: "center", color: "hsl(var(--muted-foreground))", fontSize: 10, fontWeight: 800, textAlign: "center", padding: 4 }}>
+                        Sem foto
+                      </div>
+                    )}
+                    <div style={{ minWidth: 0, flex: 1 }}>
+                      <p style={{ fontSize: 14, fontWeight: 800, color: "hsl(var(--foreground))", lineHeight: 1.25 }}>
+                        {option.descricao}
+                      </p>
+                      <p style={{ marginTop: 5, fontFamily: "var(--font-mono)", fontSize: 11, color: "hsl(var(--muted-foreground))" }}>
+                        ERP {option.id} {option.sku ? `| SKU ${option.sku}` : ""} | Cod {option.codigo_barras}
+                      </p>
+                      {selected && (
+                        <p style={{ marginTop: 6, fontSize: 12, fontWeight: 800, color: "hsl(var(--primary))" }}>
+                          Item marcado
+                        </p>
+                      )}
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+
+            <div style={{ padding: 12, borderTop: "1px solid hsl(var(--border))", background: "hsl(var(--background))", display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
+              <button
+                type="button"
+                onClick={() => void confirmarProductOption(selectedProductOption)}
+                disabled={!selectedProductOption || loading}
+                style={{
+                  height: 44,
+                  borderRadius: 10,
+                  border: "none",
+                  background: selectedProductOption ? "hsl(var(--primary))" : "hsl(var(--muted))",
+                  color: selectedProductOption ? "hsl(var(--primary-foreground))" : "hsl(var(--muted-foreground))",
+                  fontWeight: 800,
+                  fontSize: 13,
+                  cursor: selectedProductOption && !loading ? "pointer" : "not-allowed",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: 7,
+                }}
+              >
+                {loading ? <Loader2 style={{ width: 15, height: 15, animation: "spin 0.8s linear infinite" }} /> : null}
+                Selecionar esse item
+              </button>
+              <button
+                type="button"
+                onClick={() => setSelectedProductOption(null)}
+                disabled={!selectedProductOption || loading}
+                style={{
+                  height: 44,
+                  borderRadius: 10,
+                  border: "1.5px solid hsl(var(--border))",
+                  background: "hsl(var(--card))",
+                  color: "hsl(var(--foreground))",
+                  fontWeight: 800,
+                  fontSize: 13,
+                  cursor: selectedProductOption && !loading ? "pointer" : "not-allowed",
+                  opacity: selectedProductOption ? 1 : 0.55,
+                }}
+              >
+                Escolher outro item
+              </button>
             </div>
           </div>
         </div>

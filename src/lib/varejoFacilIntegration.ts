@@ -800,7 +800,7 @@ export const buscarOpcoesProdutoVarejoFacil = async (
       descricao: item.descricao?.trim() || item.sku?.trim() || `Produto ${id}`,
       precoVarejo: typeof item.varejo === "number" ? item.varejo : undefined,
       precoAtacado: typeof item.atacado === "number" ? item.atacado : undefined,
-      imagem: foto ? resolverImagemProduto(foto, produtoId, contexto) : undefined,
+      imagem: resolverImagemProduto(foto || id, produtoId, contexto),
     });
   }
 

@@ -80,7 +80,12 @@ export const useProductLookup = ({ enabled = true, empresa, flag }: UseProductLo
         return;
       }
 
-      setProductInfo(toProductInfo(produto));
+      const productInfo = toProductInfo(produto);
+      if (!productInfo.imagem && option.imagem) {
+        productInfo.imagem = option.imagem;
+        productInfo.hasErpImage = true;
+      }
+      setProductInfo(productInfo);
       setProductOptions([]);
     } catch (err: any) {
       console.error("Erro ao carregar produto escolhido:", err);
