@@ -9,9 +9,12 @@ interface PhotoCaptureProps {
   compressionPreset?: CompressionPreset;
 }
 
-const PRESET_CONFIG: Record<CompressionPreset, { maxEdge: number; quality: number }> = {
-  default: { maxEdge: 1600, quality: 0.72 },
-  light: { maxEdge: 768, quality: 0.42 },
+const ERP_MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const DIMENSION_FACTORS = [1, 0.9, 0.8, 0.7, 0.6, 0.5, 0.4, 0.32, 0.25];
+
+const PRESET_CONFIG: Record<CompressionPreset, { maxEdge: number; quality: number; minQuality: number; maxBytes: number }> = {
+  default: { maxEdge: 3200, quality: 0.94, minQuality: 0.72, maxBytes: ERP_MAX_PHOTO_BYTES },
+  light: { maxEdge: 768, quality: 0.42, minQuality: 0.36, maxBytes: 700 * 1024 },
 };
 
 function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objectUrl: string }> {
@@ -37,31 +40,69 @@ function readFileAsDataUrl(file: File): Promise<string> {
   });
 }
 
+function canvasToJpegBlob(canvas: HTMLCanvasElement, quality: number): Promise<Blob> {
+  return new Promise((resolve, reject) => {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        reject(new Error("Falha ao gerar JPEG"));
+        return;
+      }
+
+      resolve(blob);
+    }, "image/jpeg", quality);
+  });
+}
+
+function blobToDataUrl(blob: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onloadend = () => resolve(String(reader.result ?? ""));
+    reader.onerror = () => reject(new Error("Falha ao ler JPEG"));
+    reader.readAsDataURL(blob);
+  });
+}
+
 async function compressPhoto(file: File, preset: CompressionPreset): Promise<string> {
   const { image, objectUrl } = await loadImageFromFile(file);
-  const { maxEdge, quality } = PRESET_CONFIG[preset];
+  const { maxEdge, quality, minQuality, maxBytes } = PRESET_CONFIG[preset];
   const canvas = document.createElement("canvas");
 
   try {
     const currentMaxEdge = Math.max(image.width, image.height);
     const scale = currentMaxEdge > maxEdge ? maxEdge / currentMaxEdge : 1;
 
-    const targetWidth = Math.max(1, Math.round(image.width * scale));
-    const targetHeight = Math.max(1, Math.round(image.height * scale));
-
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-
     const ctx = canvas.getContext("2d", { alpha: false });
     if (!ctx) {
       throw new Error("Falha ao preparar canvas");
     }
 
-    ctx.imageSmoothingEnabled = true;
-    ctx.imageSmoothingQuality = "high";
-    ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+    let fallback: Blob | null = null;
 
-    return canvas.toDataURL("image/jpeg", quality);
+    for (const factor of DIMENSION_FACTORS) {
+      const targetWidth = Math.max(1, Math.round(image.width * scale * factor));
+      const targetHeight = Math.max(1, Math.round(image.height * scale * factor));
+
+      canvas.width = targetWidth;
+      canvas.height = targetHeight;
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = "high";
+      ctx.drawImage(image, 0, 0, targetWidth, targetHeight);
+
+      let currentQuality = quality;
+      while (currentQuality >= minQuality) {
+        const blob = await canvasToJpegBlob(canvas, currentQuality);
+        fallback = blob;
+        if (blob.size <= maxBytes) {
+          return await blobToDataUrl(blob);
+        }
+
+        if (currentQuality === minQuality) break;
+        currentQuality = Math.max(minQuality, Number((currentQuality - 0.04).toFixed(2)));
+      }
+    }
+
+    if (!fallback) throw new Error("Falha ao comprimir foto");
+    return await blobToDataUrl(fallback);
   } finally {
     canvas.width = 0;
     canvas.height = 0;

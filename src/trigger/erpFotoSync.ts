@@ -403,13 +403,33 @@ async function validarImagemSalva(
   return imagemSalva === imageIdEsperado;
 }
 
+const ERP_MAX_PHOTO_BYTES = 5 * 1024 * 1024;
+const ERP_IMAGE_EDGES = [3200, 2800, 2400, 2000, 1600, 1280, 1024, 800];
+const ERP_IMAGE_QUALITIES = [96, 94, 92, 90, 88, 85, 82, 80, 76, 72];
+
 async function comprimirFotoParaErp(base64: string): Promise<Buffer> {
   const raw = base64.includes(";base64,") ? base64.split(";base64,")[1] : base64;
   const buffer = Buffer.from(raw, "base64");
-  return sharp(buffer)
-    .resize({ width: 800, height: 800, fit: "inside", withoutEnlargement: true })
-    .jpeg({ quality: 75 })
-    .toBuffer();
+  let fallback: Buffer | null = null;
+
+  for (const edge of ERP_IMAGE_EDGES) {
+    for (const quality of ERP_IMAGE_QUALITIES) {
+      const output = await sharp(buffer)
+        .rotate()
+        .flatten({ background: "#ffffff" })
+        .resize({ width: edge, height: edge, fit: "inside", withoutEnlargement: true })
+        .jpeg({ quality, mozjpeg: true })
+        .toBuffer();
+
+      fallback = output;
+      if (output.length <= ERP_MAX_PHOTO_BYTES) {
+        console.info(`[erp-foto-sync] Foto ERP: edge=${edge}, quality=${quality}, bytes=${output.length}`);
+        return output;
+      }
+    }
+  }
+
+  throw new Error(`Foto continua acima do limite do ERP (${fallback?.length ?? buffer.length} bytes > ${ERP_MAX_PHOTO_BYTES} bytes).`);
 }
 
 // --- Task definition ---
