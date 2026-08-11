@@ -1784,15 +1784,20 @@ export async function gerarPedidoPendentes(params: {
 export async function dispararExpedicaoConferencia(params: {
   conferente: string;
   empresa: string;
+  flag?: string;
+  pedidoId?: string | null;
+  conferenceId?: string | null;
   dataConferencia?: string;
   itens: FecharConferenciaItemPayload[];
 }): Promise<void> {
   const itens = (params.itens ?? [])
     .filter((item) => item.status === 'separado' || item.status === 'nao_tem_tudo')
     .map((item) => ({
-      descricao: String(item.sku ?? item.codigo ?? '').trim() || String(item.codigo ?? '').trim(),
+      descricao: String(item.descricao ?? item.sku ?? item.codigo ?? '').trim() || String(item.codigo ?? '').trim(),
       ean: String(item.codigo ?? '').trim(),
       quantidadeReal: toInt(item.quantidadeReal),
+      externalItemRef: String(item.id ?? item.codigo ?? '').trim() || undefined,
+      itemDescricao: String(item.sku ?? item.descricao ?? '').trim() || undefined,
     }))
     .filter((item) => item.ean && item.quantidadeReal > 0);
 
@@ -1812,6 +1817,9 @@ export async function dispararExpedicaoConferencia(params: {
       payload: {
         conferente: String(params.conferente ?? '').trim() || 'App Conferencia',
         empresa: normalizarEmpresa(params.empresa),
+        flag: normalizarFlag(params.flag),
+        pedidoId: params.pedidoId ?? null,
+        conferenceId: params.conferenceId ?? null,
         dataConferencia: params.dataConferencia ?? new Date().toISOString(),
         itens,
       },

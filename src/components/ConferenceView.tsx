@@ -1721,6 +1721,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         await dispararExpedicaoConferencia({
           conferente,
           empresa,
+          flag,
+          pedidoId: pedidoId ?? null,
+          conferenceId,
           dataConferencia: new Date().toISOString(),
           itens: itensFechamento,
         });
