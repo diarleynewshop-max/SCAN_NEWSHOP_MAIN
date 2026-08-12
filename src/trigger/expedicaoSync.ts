@@ -1,4 +1,5 @@
 import { task } from "@trigger.dev/sdk/v3";
+import { escolherDescricaoProdutoExterno, normalizarCodigoExterno14 } from "../lib/codigoExterno";
 
 const SEPARACAO_API_URL = "https://api-recebimento.newgrup.cloud/functions/v1/separacao-integration";
 
@@ -58,16 +59,24 @@ export const expedicaoSync = task({
       return { enviado: false, motivo: "sem_itens" };
     }
 
-    const itensApi = payload.itens.map((item) => ({
-      descricao: item.descricao,
-      ean: item.ean,
-      quantidade: item.quantidadeReal,
-      volume: 0,
-      statusItem: "reposicao",
-      encontrado: true,
-      itemDescricao: item.itemDescricao || item.descricao,
-      externalItemRef: item.externalItemRef || item.ean,
-    }));
+    const itensApi = payload.itens.map((item) => {
+      const ean = normalizarCodigoExterno14(item.ean);
+      const descricao = escolherDescricaoProdutoExterno({
+        descricao: item.descricao,
+        itemDescricao: item.itemDescricao,
+        codigo: ean,
+      });
+      return {
+        descricao,
+        ean,
+        quantidade: item.quantidadeReal,
+        volume: 0,
+        statusItem: "reposicao",
+        encontrado: true,
+        itemDescricao: descricao,
+        externalItemRef: item.externalItemRef || ean,
+      };
+    });
 
     const dataFormatada = payload.dataConferencia
       ? new Date(payload.dataConferencia).toLocaleString("pt-BR", { timeZone: "America/Sao_Paulo" })

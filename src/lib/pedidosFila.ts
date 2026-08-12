@@ -1,6 +1,7 @@
 import { isSupabaseConfigured, supabase } from './supabaseClient';
 import { produtoKey } from './comprasSupabase';
 import type { PdvPrevendaCliente } from './pdvPrevenda';
+import { escolherDescricaoProdutoExterno, normalizarCodigoExterno14 } from './codigoExterno';
 
 const TRIGGER_API_KEY = import.meta.env.VITE_TRIGGER_API_KEY as string;
 const STORAGE_URL_MARKER = '/storage/v1/object/public/';
@@ -1792,13 +1793,21 @@ export async function dispararExpedicaoConferencia(params: {
 }): Promise<void> {
   const itens = (params.itens ?? [])
     .filter((item) => item.status === 'separado' || item.status === 'nao_tem_tudo')
-    .map((item) => ({
-      descricao: String(item.descricao ?? item.sku ?? item.codigo ?? '').trim() || String(item.codigo ?? '').trim(),
-      ean: String(item.codigo ?? '').trim(),
-      quantidadeReal: toInt(item.quantidadeReal),
-      externalItemRef: String(item.id ?? item.codigo ?? '').trim() || undefined,
-      itemDescricao: String(item.sku ?? item.descricao ?? '').trim() || undefined,
-    }))
+    .map((item) => {
+      const ean = normalizarCodigoExterno14(item.codigo);
+      const descricao = escolherDescricaoProdutoExterno({
+        descricao: item.descricao,
+        sku: item.sku,
+        codigo: ean,
+      });
+      return {
+        descricao,
+        ean,
+        quantidadeReal: toInt(item.quantidadeReal),
+        externalItemRef: String(item.id ?? ean).trim() || undefined,
+        itemDescricao: descricao,
+      };
+    })
     .filter((item) => item.ean && item.quantidadeReal > 0);
 
   if (itens.length === 0) return;
