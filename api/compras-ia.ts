@@ -8,6 +8,7 @@ type LoginFlag = "loja" | "cd";
 type UserRole = "operador" | "compras" | "admin" | "super";
 type AnaliseTipo = "resumo" | "faltas" | "mais_pedidos" | "prioridades" | "pergunta";
 type TomMetrica = "neutro" | "positivo" | "atencao" | "critico";
+type OrigemLeitura = "trigger" | "calculada";
 
 type RequestBody = {
   pergunta?: unknown;
@@ -735,7 +736,111 @@ function contextoCompacto(produtos: ProdutoAgregado[], secoes: SecaoAgregada[], 
   };
 }
 
-async function gerarLeituraIa(
+function triggerApiKey(): string {
+  return texto(
+    process.env.COMPRAS_IA_TRIGGER_API_KEY ||
+    process.env.TRIGGER_SECRET_KEY ||
+    process.env.TRIGGER_API_KEY ||
+    process.env.VITE_TRIGGER_API_KEY
+  );
+}
+
+function triggerWaitMs(): number {
+  const parsed = numero(process.env.COMPRAS_IA_TRIGGER_WAIT_MS);
+  if (!parsed) return 22_000;
+  return Math.max(5_000, Math.min(27_000, Math.trunc(parsed)));
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function fetchJsonComTimeout(
+  url: string,
+  options: RequestInit,
+  timeoutMs: number
+): Promise<{ status: number; ok: boolean; payload: any }> {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { ...options, signal: controller.signal });
+    const payload = await response.json().catch(() => null);
+    return { status: response.status, ok: response.ok, payload };
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
+async function gerarLeituraTrigger(params: {
+  tipo: AnaliseTipo;
+  pergunta: string;
+  empresa: Empresa;
+  flag: LoginFlag;
+  inicio: string;
+  fim: string;
+  produtos: ProdutoAgregado[];
+  secoes: SecaoAgregada[];
+  metricas: Metrica[];
+}): Promise<string> {
+  const apiKey = triggerApiKey();
+  if (!apiKey) throw new Error("Chave do Trigger nao configurada para Compras IA.");
+
+  const disparo = await fetchJsonComTimeout("https://api.trigger.dev/api/v1/tasks/compras-ia-gerar-leitura/trigger", {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${apiKey}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify({
+      payload: {
+        tipo: params.tipo,
+        pergunta: params.pergunta,
+        empresa: params.empresa,
+        flag: params.flag,
+        periodo: { inicio: params.inicio, fim: params.fim },
+        dados: contextoCompacto(params.produtos, params.secoes, params.metricas),
+      },
+    }),
+  }, 8_000);
+  if (!disparo.ok) {
+    throw new Error(texto(disparo.payload?.error || disparo.payload?.message) || `Trigger respondeu ${disparo.status}`);
+  }
+
+  const runId = texto(disparo.payload?.id);
+  if (!runId) throw new Error("Trigger nao retornou runId da Compras IA.");
+
+  const limite = Date.now() + triggerWaitMs();
+  let ultimoStatus = "UNKNOWN";
+  while (Date.now() < limite) {
+    await sleep(1_500);
+    const consulta = await fetchJsonComTimeout(`https://api.trigger.dev/api/v3/runs/${encodeURIComponent(runId)}`, {
+      method: "GET",
+      headers: {
+        Authorization: `Bearer ${apiKey}`,
+      },
+    }, 8_000);
+    if (!consulta.ok) {
+      throw new Error(texto(consulta.payload?.error || consulta.payload?.message) || `Run do Trigger respondeu ${consulta.status}`);
+    }
+
+    ultimoStatus = texto(consulta.payload?.status) || ultimoStatus;
+    if (ultimoStatus === "COMPLETED") {
+      const textoGerado = texto(consulta.payload?.output?.texto);
+      if (!textoGerado) throw new Error("Trigger concluiu sem texto da IA.");
+      return textoGerado;
+    }
+    if (["FAILED", "CRASHED", "CANCELED", "INTERRUPTED", "SYSTEM_FAILURE"].includes(ultimoStatus)) {
+      const tentativa = Array.isArray(consulta.payload?.attempts)
+        ? consulta.payload.attempts[consulta.payload.attempts.length - 1]
+        : null;
+      throw new Error(texto(tentativa?.error?.message) || `Run do Trigger terminou com status ${ultimoStatus}`);
+    }
+  }
+
+  throw new Error(`Run do Trigger ainda em andamento (${ultimoStatus}).`);
+}
+
+async function gerarLeituraIaGroqLegacy(
   tipo: AnaliseTipo,
   pergunta: string,
   empresa: Empresa,
@@ -745,13 +850,14 @@ async function gerarLeituraIa(
   produtos: ProdutoAgregado[],
   secoes: SecaoAgregada[],
   metricas: Metrica[]
-): Promise<{ texto: string; origem: "groq" | "calculada"; aviso?: string }> {
+): Promise<{ texto: string; origem: "groq" | OrigemLeitura; aviso?: string }> {
   const fallback = leituraFallback(tipo, produtos, secoes, metricas);
   const apiKey = process.env.GROQ_API_KEY || "";
-  if (!apiKey) return { texto: fallback, origem: "calculada", aviso: "GROQ_API_KEY não configurada; leitura calculada localmente." };
-
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), Math.max(3000, Math.min(12000, numero(process.env.COMPRAS_IA_TIMEOUT_MS) || 8000)));
+  if (!apiKey) clearTimeout(timeout);
+  if (!apiKey) return { texto: fallback, origem: "calculada", aviso: "GROQ_API_KEY não configurada; leitura calculada localmente." };
+
   try {
     const response = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
@@ -797,6 +903,28 @@ async function gerarLeituraIa(
     return { texto: fallback, origem: "calculada", aviso: `IA externa indisponível; leitura calculada usada (${detalhe}).` };
   } finally {
     clearTimeout(timeout);
+  }
+}
+
+async function gerarLeituraIa(
+  tipo: AnaliseTipo,
+  pergunta: string,
+  empresa: Empresa,
+  flag: LoginFlag,
+  inicio: string,
+  fim: string,
+  produtos: ProdutoAgregado[],
+  secoes: SecaoAgregada[],
+  metricas: Metrica[]
+): Promise<{ texto: string; origem: OrigemLeitura; aviso?: string }> {
+  const fallback = leituraFallback(tipo, produtos, secoes, metricas);
+  try {
+    const content = await gerarLeituraTrigger({ tipo, pergunta, empresa, flag, inicio, fim, produtos, secoes, metricas });
+    return { texto: content, origem: "trigger" };
+  } catch (error) {
+    const detalhe = error instanceof Error ? error.message : "falha desconhecida";
+    console.warn("[compras-ia] leitura Trigger indisponivel", detalhe);
+    return { texto: fallback, origem: "calculada", aviso: `IA externa indisponivel; leitura calculada usada (${detalhe}).` };
   }
 }
 

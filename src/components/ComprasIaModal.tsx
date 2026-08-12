@@ -205,7 +205,7 @@ function Resultado({ relatorio }: { relatorio: ComprasIaRelatorio }) {
             <Sparkles className="h-4 w-4 text-indigo-600" /> Leitura do analista
           </div>
           <Badge variant="outline" className="border-indigo-200 bg-white text-indigo-700">
-            {relatorio.origemLeitura === "groq" ? "IA" : "Cálculo local"}
+            {relatorio.origemLeitura === "calculada" ? "Cálculo local" : "IA Trigger"}
           </Badge>
         </div>
         <div className="space-y-2 text-sm leading-6 text-slate-700">

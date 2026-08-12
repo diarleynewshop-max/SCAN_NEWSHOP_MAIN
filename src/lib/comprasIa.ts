@@ -47,7 +47,7 @@ export interface ComprasIaRelatorio {
   pergunta: string;
   resumo: string;
   leitura: string;
-  origemLeitura: "groq" | "calculada";
+  origemLeitura: "trigger" | "groq" | "calculada";
   metricas: ComprasIaMetrica[];
   produtos: ComprasIaProduto[];
   secoes: ComprasIaSecao[];
@@ -144,7 +144,7 @@ function linhasRelatorio(relatorio: ComprasIaRelatorio): string[] {
     "INDICADORES",
     ...relatorio.metricas.map((metrica) => `${metrica.label}: ${metrica.valor} — ${metrica.detalhe}`),
     "",
-    `LEITURA (${relatorio.origemLeitura === "groq" ? "IA" : "calculada"})`,
+    `LEITURA (${relatorio.origemLeitura === "calculada" ? "calculada" : "IA Trigger"})`,
     relatorio.leitura,
   ];
 
