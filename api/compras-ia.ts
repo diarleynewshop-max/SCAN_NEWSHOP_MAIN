@@ -10,6 +10,8 @@ type AnaliseTipo = "resumo" | "faltas" | "mais_pedidos" | "prioridades" | "pergu
 type TomMetrica = "neutro" | "positivo" | "atencao" | "critico";
 type OrigemLeitura = "trigger" | "calculada";
 
+const EMPRESAS_VALIDAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
+
 type RequestBody = {
   pergunta?: unknown;
   tipo?: unknown;
@@ -235,21 +237,36 @@ async function validarAcesso(
 ): Promise<void> {
   if (!login) throw new HttpError(401, "Sessão inválida. Entre novamente no sistema.");
 
-  const { data, error } = await supabase.rpc("chat_listar_usuarios", {
-    p_empresa: empresa,
-  });
-  if (error) {
-    console.error("[compras-ia] falha ao validar sessão", error);
-    throw new HttpError(401, "Não foi possível validar a sessão atual.");
-  }
+  const loginNormalizado = login.trim().toLowerCase();
+  const buscarNaEmpresa = async (empresaBusca: Empresa): Promise<UsuarioLoginRow | undefined> => {
+    const { data, error } = await supabase.rpc("chat_listar_usuarios", {
+      p_empresa: empresaBusca,
+    });
+    if (error) {
+      console.error("[compras-ia] falha ao validar sessao", error);
+      throw new HttpError(401, "Nao foi possivel validar a sessao atual.");
+    }
+    return Array.isArray(data)
+      ? data.find((row) => texto((row as UsuarioLoginRow).login).toLowerCase() === loginNormalizado) as UsuarioLoginRow | undefined
+      : undefined;
+  };
 
-  const usuario = Array.isArray(data)
-    ? data.find((row) => texto((row as UsuarioLoginRow).login).toLowerCase() === login.trim().toLowerCase()) as UsuarioLoginRow | undefined
-    : undefined;
+  let usuario = await buscarNaEmpresa(empresa);
+  const encontradoNaEmpresaSelecionada = Boolean(usuario);
+  if (!usuario) {
+    for (const empresaBusca of EMPRESAS_VALIDAS.filter((item) => item !== empresa)) {
+      usuario = await buscarNaEmpresa(empresaBusca);
+      if (usuario) break;
+    }
+  }
   if (!usuario) throw new HttpError(401, "Sessão inválida. Entre novamente no sistema.");
   const role = normalizarRole(usuario.role);
   if (role !== "admin" && role !== "super") {
     throw new HttpError(403, "Analista de Compras disponível apenas para Admin e Super.");
+  }
+  if (role === "super") return;
+  if (!encontradoNaEmpresaSelecionada) {
+    throw new HttpError(403, "Usuário sem acesso à empresa selecionada.");
   }
 
   const permitidas = normalizarEmpresas(usuario.empresas);

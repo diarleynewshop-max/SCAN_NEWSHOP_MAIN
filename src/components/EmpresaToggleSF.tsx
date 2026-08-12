@@ -4,6 +4,7 @@ import { obterLoginSalvo, type Empresa } from "@/hooks/useAuth";
 import { applyCompanyTheme } from "@/lib/companyTheme";
 
 const STORAGE_KEY = "scan_newshop_login";
+const TODAS_EMPRESAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
 
 export function EmpresaToggleSF() {
   const [login, setLogin] = useState(() => obterLoginSalvo());
@@ -18,8 +19,9 @@ export function EmpresaToggleSF() {
   const elevado = login.role === "compras" || login.role === "admin" || login.role === "super";
   if (!elevado) return null;
 
-  const CICLO: Empresa[] =
-    login.empresasPermitidas && login.empresasPermitidas.length > 0
+  const CICLO: Empresa[] = login.role === "super"
+    ? TODAS_EMPRESAS
+    : login.empresasPermitidas && login.empresasPermitidas.length > 0
       ? login.empresasPermitidas
       : [login.empresa];
   if (CICLO.length < 2) return null;
