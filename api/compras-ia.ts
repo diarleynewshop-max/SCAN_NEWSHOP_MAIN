@@ -738,10 +738,8 @@ function contextoCompacto(produtos: ProdutoAgregado[], secoes: SecaoAgregada[], 
 
 function triggerApiKey(): string {
   return texto(
-    process.env.COMPRAS_IA_TRIGGER_API_KEY ||
     process.env.TRIGGER_SECRET_KEY ||
-    process.env.TRIGGER_API_KEY ||
-    process.env.VITE_TRIGGER_API_KEY
+    process.env.TRIGGER_API_KEY
   );
 }
 
