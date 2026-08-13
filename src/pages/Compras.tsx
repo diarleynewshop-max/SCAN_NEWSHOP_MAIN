@@ -383,6 +383,10 @@ const Compras = () => {
     const role = obterLoginSalvo()?.role;
     return !!role && hasAnyRoleAccess(role, ["admin", "super"]);
   }, []);
+  const podeUsarIaCompras = useMemo(() => {
+    const role = obterLoginSalvo()?.role;
+    return !!role && hasAnyRoleAccess(role, ["compras"]);
+  }, []);
   const [searchTerm, setSearchTerm] = useState("");
   const [filtroFornecedor, setFiltroFornecedor] = useState("");
   const [filtroMarca, setFiltroMarca] = useState("todos");
@@ -1628,7 +1632,7 @@ const Compras = () => {
               <Barcode className="h-4 w-4 mr-2" />
               Conferencia Galpao
             </Button>
-            {isAdminPlus && (
+            {podeUsarIaCompras && (
               <Button variant="outline" onClick={() => setIaAberta(true)} disabled={loading}>
                 <Bot className="h-4 w-4 mr-2" />
                 Analista IA
@@ -2306,7 +2310,7 @@ const Compras = () => {
         </div>
       )}
 
-      {isAdminPlus && (
+      {podeUsarIaCompras && (
         <ComprasIaModal
           open={iaAberta}
           onOpenChange={setIaAberta}

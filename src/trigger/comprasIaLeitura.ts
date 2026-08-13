@@ -1,8 +1,17 @@
 import { task } from "@trigger.dev/sdk/v3";
 
 const OPENROUTER_URL = "https://openrouter.ai/api/v1/chat/completions";
-const DEFAULT_MODEL = "openai/gpt-oss-120b:free";
-const OPENAI_FREE_FALLBACK_MODEL = "openai/gpt-oss-20b:free";
+const MODELOS_COMPRAS_IA = [
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "gemma-4-31b-it:free",
+  "llama-3.3-70b-instruct:free",
+  "qwen3-next-80b-a3b-instruct:free",
+  "ling-3.0-tiny-free",
+  "lfm-2.5-2.6b:free",
+  "nex-n2-pro:free",
+  "glm-4.5-air:free",
+] as const;
+const DEFAULT_MODEL = MODELOS_COMPRAS_IA[0];
 
 type TomMetrica = "neutro" | "positivo" | "atencao" | "critico";
 type AnaliseTipo = "resumo" | "faltas" | "mais_pedidos" | "prioridades" | "pergunta";
@@ -44,6 +53,7 @@ type SecaoContexto = {
 type ComprasIaLeituraPayload = {
   tipo: AnaliseTipo;
   pergunta: string;
+  modelo?: string;
   empresa: Empresa;
   flag: LoginFlag;
   periodo: {
@@ -69,12 +79,14 @@ function uniq(values: string[]): string[] {
   return Array.from(new Set(values.map(texto).filter(Boolean)));
 }
 
-function getModels(): string[] {
+function getModels(modeloSolicitadoRaw?: unknown): string[] {
+  const modeloSolicitado = texto(modeloSolicitadoRaw);
   const modelosFixos = [
+    modeloSolicitado,
     process.env.COMPRAS_IA_TRIGGER_MODEL,
     process.env.OPENROUTER_MODEL,
     DEFAULT_MODEL,
-    OPENAI_FREE_FALLBACK_MODEL,
+    ...MODELOS_COMPRAS_IA,
   ];
   const modelosLista = texto(
     process.env.COMPRAS_IA_TRIGGER_MODELS ||
@@ -104,7 +116,7 @@ export const comprasIaLeitura = task({
       throw new Error("OPENROUTER_API_KEY nao configurada no Trigger.dev.");
     }
 
-    const models = getModels();
+    const models = getModels(payload.modelo);
     let ultimoErro = "";
 
     for (const model of models) {

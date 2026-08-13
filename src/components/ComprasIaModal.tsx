@@ -31,6 +31,9 @@ import {
   baixarComprasIaPdf,
   baixarComprasIaTxt,
   consultarComprasIa,
+  MODELOS_COMPRAS_IA,
+  MODELO_COMPRAS_IA_PADRAO,
+  type ComprasIaModelo,
   type ComprasIaProduto,
   type ComprasIaRelatorio,
   type ComprasIaTipo,
@@ -82,6 +85,12 @@ function formatarPercentual(value: number): string {
 
 function mensagemErro(error: unknown): string {
   return error instanceof Error ? error.message : "Falha ao gerar análise.";
+}
+
+function nomeModelo(modelo: string | null | undefined): string {
+  if (!modelo) return "Modelo automático";
+  const encontrado = MODELOS_COMPRAS_IA.find((item) => item.id === modelo);
+  return encontrado ? `${encontrado.nome} (${encontrado.provedor})` : modelo;
 }
 
 function CardProduto({ produto, posicao, modoRanking }: { produto: ComprasIaProduto; posicao: number; modoRanking: boolean }) {
@@ -273,6 +282,8 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
   const [tipo, setTipo] = useState<ComprasIaTipo>("resumo");
   const [periodoDias, setPeriodoDias] = useState("30");
   const [pergunta, setPergunta] = useState("");
+  const [modelo, setModelo] = useState<ComprasIaModelo>(MODELO_COMPRAS_IA_PADRAO);
+  const [ultimaPergunta, setUltimaPergunta] = useState("");
   const [carregando, setCarregando] = useState(false);
   const [relatorio, setRelatorio] = useState<ComprasIaRelatorio | null>(null);
   const loginSalvo = useMemo(() => (open ? obterLoginSalvo() : null), [open]);
@@ -282,6 +293,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
       setPergunta("");
       setTipo("resumo");
       setRelatorio(null);
+      setUltimaPergunta("");
     }
   }, [open]);
 
@@ -297,6 +309,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
     }
 
     setCarregando(true);
+    setUltimaPergunta(pergunta.trim() || ATALHOS.find((atalho) => atalho.tipo === tipo)?.titulo || "Resumo");
     try {
       const resultado = await consultarComprasIa({
         pergunta: pergunta.trim(),
@@ -305,6 +318,7 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
         empresa,
         flag,
         actorLogin,
+        modelo,
       });
       setRelatorio(resultado);
     } catch (error) {
@@ -316,104 +330,154 @@ export function ComprasIaModal({ open, onOpenChange, empresa, flag }: ComprasIaM
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex h-[92dvh] w-[calc(100vw-1rem)] max-w-6xl flex-col gap-0 overflow-hidden rounded-2xl p-0">
-        <DialogHeader className="border-b border-slate-800 bg-slate-950 px-4 py-4 text-left text-white sm:px-6">
-          <div className="flex items-center gap-3">
-            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-xl bg-indigo-500 text-white shadow-lg shadow-indigo-950/30">
-              <Bot className="h-6 w-6" />
+      <DialogContent className="flex h-[92dvh] w-[calc(100vw-1rem)] max-w-6xl flex-col gap-0 overflow-hidden rounded-xl p-0">
+        <DialogHeader className="border-b border-slate-200 bg-white px-4 py-3 text-left sm:px-5">
+          <div className="flex min-w-0 items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-950 text-white">
+                <Bot className="h-5 w-5" />
+              </div>
+              <div className="min-w-0">
+                <DialogTitle className="truncate text-base font-black text-slate-950">IA de Compras</DialogTitle>
+                <DialogDescription className="truncate text-xs text-slate-500">
+                  {empresa} | {String(flag).toUpperCase()} | somente leitura
+                </DialogDescription>
+              </div>
             </div>
-            <div className="min-w-0">
-              <DialogTitle className="text-lg text-white">Analista de Compras</DialogTitle>
-              <DialogDescription className="text-slate-300">
-                {empresa} · {String(flag).toUpperCase()} · dados reais, sem alterar o banco
-              </DialogDescription>
-            </div>
+            <Badge variant="outline" className="hidden shrink-0 border-emerald-200 bg-emerald-50 text-emerald-700 sm:inline-flex">
+              <ShieldCheck className="mr-1 h-3 w-3" /> Super
+            </Badge>
           </div>
         </DialogHeader>
 
-        <div className="min-h-0 flex-1 overflow-y-auto bg-slate-50">
-          <div className="mx-auto max-w-6xl space-y-4 p-4 sm:p-6">
-            <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
-              <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h2 className="font-black text-slate-950">O que você quer analisar?</h2>
-                  <p className="text-sm text-slate-500">Escolha um atalho ou escreva sua própria pergunta.</p>
-                </div>
-                <Badge variant="outline" className="w-fit border-emerald-200 bg-emerald-50 text-emerald-700">
-                  <ShieldCheck className="mr-1 h-3 w-3" /> Admin/Super
-                </Badge>
-              </div>
+        <div className="flex min-h-0 flex-1 flex-col bg-[#f7f7f8]">
+          <div className="border-b border-slate-200 bg-white px-4 py-3 sm:px-5">
+            <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_150px]">
+              <label className="block min-w-0">
+                <span className="mb-1 block text-xs font-bold uppercase text-slate-500">Modelo</span>
+                <select
+                  value={modelo}
+                  onChange={(event) => setModelo(event.target.value as ComprasIaModelo)}
+                  disabled={carregando}
+                  className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-900 outline-none focus:border-slate-500 disabled:opacity-60"
+                >
+                  {MODELOS_COMPRAS_IA.map((item) => (
+                    <option key={item.id} value={item.id}>{item.nome} - {item.provedor}</option>
+                  ))}
+                </select>
+              </label>
+              <label className="block">
+                <span className="mb-1 block text-xs font-bold uppercase text-slate-500">Período</span>
+                <select
+                  value={periodoDias}
+                  onChange={(event) => setPeriodoDias(event.target.value)}
+                  disabled={carregando}
+                  className="h-10 w-full rounded-md border border-slate-300 bg-white px-3 text-sm font-semibold text-slate-900 outline-none focus:border-slate-500 disabled:opacity-60"
+                >
+                  <option value="7">7 dias</option>
+                  <option value="30">30 dias</option>
+                  <option value="60">60 dias</option>
+                  <option value="90">90 dias</option>
+                  <option value="180">180 dias</option>
+                </select>
+              </label>
+            </div>
+          </div>
 
-              <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
-                {ATALHOS.map(({ tipo: atalhoTipo, titulo, descricao, Icon }) => {
-                  const ativo = tipo === atalhoTipo;
-                  return (
-                    <button
-                      key={atalhoTipo}
-                      type="button"
-                      onClick={() => setTipo(atalhoTipo)}
-                      className={`rounded-xl border p-3 text-left transition-colors ${ativo ? "border-indigo-500 bg-indigo-50 ring-1 ring-indigo-500" : "border-slate-200 bg-white hover:bg-slate-50"}`}
-                    >
-                      <Icon className={`mb-2 h-5 w-5 ${ativo ? "text-indigo-600" : "text-slate-500"}`} />
-                      <p className="text-sm font-bold text-slate-900">{titulo}</p>
-                      <p className="mt-0.5 text-xs text-slate-500">{descricao}</p>
-                    </button>
-                  );
-                })}
-              </div>
+          <div className="min-h-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5">
+            <div className="mx-auto flex max-w-4xl flex-col gap-4">
+              {!relatorio && !carregando && (
+                <div className="rounded-xl border border-dashed border-slate-300 bg-white p-5">
+                  <div className="mb-4 flex items-center gap-3">
+                    <div className="flex h-9 w-9 items-center justify-center rounded-full bg-slate-950 text-white">
+                      <Bot className="h-4 w-4" />
+                    </div>
+                    <div>
+                      <p className="text-sm font-black text-slate-950">Como posso ajudar em Compras?</p>
+                      <p className="text-xs text-slate-500">Escolha um atalho ou digite uma pergunta.</p>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+                    {ATALHOS.map(({ tipo: atalhoTipo, titulo, descricao, Icon }) => (
+                      <button
+                        key={atalhoTipo}
+                        type="button"
+                        onClick={() => setTipo(atalhoTipo)}
+                        className={`rounded-lg border p-3 text-left transition-colors ${tipo === atalhoTipo ? "border-slate-950 bg-slate-100" : "border-slate-200 bg-white hover:bg-slate-50"}`}
+                      >
+                        <Icon className="mb-2 h-4 w-4 text-slate-700" />
+                        <p className="text-sm font-bold text-slate-900">{titulo}</p>
+                        <p className="mt-0.5 line-clamp-2 text-xs text-slate-500">{descricao}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
 
-              <div className="mt-4 grid gap-3 lg:grid-cols-[150px_1fr_auto] lg:items-end">
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Período</label>
-                  <select
-                    value={periodoDias}
-                    onChange={(event) => setPeriodoDias(event.target.value)}
-                    disabled={carregando}
-                    className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50"
-                  >
-                    <option value="7">Últimos 7 dias</option>
-                    <option value="30">Últimos 30 dias</option>
-                    <option value="60">Últimos 60 dias</option>
-                    <option value="90">Últimos 90 dias</option>
-                    <option value="180">Últimos 180 dias</option>
-                  </select>
+              {(ultimaPergunta || carregando || relatorio) && (
+                <div className="flex justify-end">
+                  <div className="max-w-[86%] rounded-2xl bg-slate-950 px-4 py-3 text-sm leading-6 text-white shadow-sm">
+                    {ultimaPergunta || pergunta.trim() || ATALHOS.find((atalho) => atalho.tipo === tipo)?.titulo || "Resumo"}
+                    <div className="mt-1 text-[11px] text-slate-300">{nomeModelo(modelo)}</div>
+                  </div>
                 </div>
-                <div>
-                  <label className="mb-1.5 block text-xs font-bold uppercase tracking-wide text-slate-500">Pergunta personalizada</label>
-                  <Textarea
-                    value={pergunta}
-                    onChange={(event) => {
-                      setPergunta(event.target.value);
-                      if (event.target.value.trim()) setTipo("pergunta");
-                    }}
-                    placeholder="Ex.: quais itens da seção Utilidade tiveram mais falta?"
-                    className="min-h-10 resize-none"
-                    maxLength={500}
-                    disabled={carregando}
-                  />
+              )}
+
+              {carregando && (
+                <div className="flex justify-start">
+                  <div className="max-w-[86%] rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700 shadow-sm">
+                    <div className="flex items-center gap-2 font-semibold text-slate-900">
+                      <Loader2 className="h-4 w-4 animate-spin" /> Analisando Compras...
+                    </div>
+                    <p className="mt-1 text-xs text-slate-500">Lendo dados reais e chamando {nomeModelo(modelo)}.</p>
+                  </div>
                 </div>
-                <Button onClick={() => void analisar()} disabled={carregando} className="h-10 bg-indigo-600 hover:bg-indigo-700">
-                  {carregando ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Send className="mr-2 h-4 w-4" />}
-                  Analisar
+              )}
+
+              {relatorio && !carregando && (
+                <div className="flex justify-start">
+                  <div className="w-full max-w-[96%] rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+                      <div className="flex items-center gap-2 text-sm font-black text-slate-950">
+                        <Sparkles className="h-4 w-4" /> Resposta da IA
+                      </div>
+                      <Badge variant="outline" className="border-slate-200 bg-slate-50 text-slate-700">
+                        {nomeModelo(relatorio.modeloLeitura || modelo)}
+                      </Badge>
+                    </div>
+                    <Resultado relatorio={relatorio} />
+                  </div>
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="border-t border-slate-200 bg-white p-3 sm:p-4">
+            <div className="mx-auto max-w-4xl">
+              <div className="flex items-end gap-2 rounded-2xl border border-slate-300 bg-white p-2 shadow-sm focus-within:border-slate-500">
+                <Textarea
+                  value={pergunta}
+                  onChange={(event) => {
+                    setPergunta(event.target.value);
+                    if (event.target.value.trim()) setTipo("pergunta");
+                  }}
+                  placeholder="Pergunte sobre faltas, mais pedidos, prioridades ou uma seção específica..."
+                  className="max-h-32 min-h-11 flex-1 resize-none border-0 bg-transparent px-2 py-2 shadow-none focus-visible:ring-0 focus-visible:ring-offset-0"
+                  maxLength={500}
+                  disabled={carregando}
+                  onKeyDown={(event) => {
+                    if (event.key === "Enter" && !event.shiftKey) {
+                      event.preventDefault();
+                      void analisar();
+                    }
+                  }}
+                />
+                <Button size="icon" onClick={() => void analisar()} disabled={carregando} className="h-10 w-10 shrink-0 rounded-full bg-slate-950 hover:bg-slate-800">
+                  {carregando ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>
-            </section>
-
-            {carregando ? (
-              <section className="rounded-2xl border border-slate-200 bg-white p-12 text-center shadow-sm">
-                <Loader2 className="mx-auto h-9 w-9 animate-spin text-indigo-600" />
-                <p className="mt-3 font-bold text-slate-800">Calculando indicadores...</p>
-                <p className="mt-1 text-sm text-slate-500">Lendo o período e preparando a análise.</p>
-              </section>
-            ) : relatorio ? (
-              <Resultado relatorio={relatorio} />
-            ) : (
-              <section className="rounded-2xl border border-dashed border-slate-300 bg-white p-10 text-center">
-                <PackageSearch className="mx-auto h-10 w-10 text-slate-300" />
-                <p className="mt-3 font-bold text-slate-700">Nenhuma análise gerada</p>
-                <p className="mt-1 text-sm text-slate-500">Escolha o período e clique em Analisar.</p>
-              </section>
-            )}
+              <p className="mt-2 text-center text-[11px] text-slate-400">IA de Compras pode errar. Confira estoque, venda e pedido aberto antes de comprar.</p>
+            </div>
           </div>
         </div>
       </DialogContent>

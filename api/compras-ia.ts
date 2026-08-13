@@ -11,6 +11,17 @@ type TomMetrica = "neutro" | "positivo" | "atencao" | "critico";
 type OrigemLeitura = "trigger" | "calculada";
 
 const EMPRESAS_VALIDAS: Empresa[] = ["NEWSHOP", "SOYE", "FACIL", "SEFULY"];
+const MODELOS_COMPRAS_IA = [
+  "nvidia/nemotron-3-ultra-550b-a55b:free",
+  "gemma-4-31b-it:free",
+  "llama-3.3-70b-instruct:free",
+  "qwen3-next-80b-a3b-instruct:free",
+  "ling-3.0-tiny-free",
+  "lfm-2.5-2.6b:free",
+  "nex-n2-pro:free",
+  "glm-4.5-air:free",
+] as const;
+const MODELO_COMPRAS_IA_PADRAO = MODELOS_COMPRAS_IA[0];
 
 type RequestBody = {
   pergunta?: unknown;
@@ -19,6 +30,7 @@ type RequestBody = {
   empresa?: unknown;
   flag?: unknown;
   actorLogin?: unknown;
+  modelo?: unknown;
 };
 
 type UsuarioLoginRow = {
@@ -185,6 +197,13 @@ function normalizarTipo(value: unknown): AnaliseTipo {
   return "resumo";
 }
 
+function normalizarModeloComprasIa(value: unknown): string {
+  const modelo = texto(value);
+  return MODELOS_COMPRAS_IA.includes(modelo as typeof MODELOS_COMPRAS_IA[number])
+    ? modelo
+    : MODELO_COMPRAS_IA_PADRAO;
+}
+
 function normalizarPeriodo(value: unknown): number {
   const dias = Math.round(numero(value));
   if (!dias) return 30;
@@ -261,8 +280,8 @@ async function validarAcesso(
   }
   if (!usuario) throw new HttpError(401, "Sessão inválida. Entre novamente no sistema.");
   const role = normalizarRole(usuario.role);
-  if (role !== "admin" && role !== "super") {
-    throw new HttpError(403, "Analista de Compras disponível apenas para Admin e Super.");
+  if (role !== "compras" && role !== "admin" && role !== "super") {
+    throw new HttpError(403, "Analista de Compras disponivel apenas para Compras, Admin e Super.");
   }
   if (role === "super") return;
   if (!encontradoNaEmpresaSelecionada) {
@@ -789,6 +808,7 @@ async function fetchJsonComTimeout(
 async function gerarLeituraTrigger(params: {
   tipo: AnaliseTipo;
   pergunta: string;
+  modelo: string;
   empresa: Empresa;
   flag: LoginFlag;
   inicio: string;
@@ -796,7 +816,7 @@ async function gerarLeituraTrigger(params: {
   produtos: ProdutoAgregado[];
   secoes: SecaoAgregada[];
   metricas: Metrica[];
-}): Promise<string> {
+}): Promise<{ texto: string; modelo: string | null }> {
   const apiKey = triggerApiKey();
   if (!apiKey) throw new Error("Chave do Trigger nao configurada para Compras IA.");
 
@@ -810,6 +830,7 @@ async function gerarLeituraTrigger(params: {
       payload: {
         tipo: params.tipo,
         pergunta: params.pergunta,
+        modelo: params.modelo,
         empresa: params.empresa,
         flag: params.flag,
         periodo: { inicio: params.inicio, fim: params.fim },
@@ -842,7 +863,10 @@ async function gerarLeituraTrigger(params: {
     if (ultimoStatus === "COMPLETED") {
       const textoGerado = texto(consulta.payload?.output?.texto);
       if (!textoGerado) throw new Error("Trigger concluiu sem texto da IA.");
-      return textoGerado;
+      return {
+        texto: textoGerado,
+        modelo: texto(consulta.payload?.output?.model) || null,
+      };
     }
     if (["FAILED", "CRASHED", "CANCELED", "INTERRUPTED", "SYSTEM_FAILURE"].includes(ultimoStatus)) {
       const tentativa = Array.isArray(consulta.payload?.attempts)
@@ -924,6 +948,7 @@ async function gerarLeituraIaGroqLegacy(
 async function gerarLeituraIa(
   tipo: AnaliseTipo,
   pergunta: string,
+  modelo: string,
   empresa: Empresa,
   flag: LoginFlag,
   inicio: string,
@@ -931,15 +956,15 @@ async function gerarLeituraIa(
   produtos: ProdutoAgregado[],
   secoes: SecaoAgregada[],
   metricas: Metrica[]
-): Promise<{ texto: string; origem: OrigemLeitura; aviso?: string }> {
+): Promise<{ texto: string; origem: OrigemLeitura; modelo?: string | null; aviso?: string }> {
   const fallback = leituraFallback(tipo, produtos, secoes, metricas);
   try {
-    const content = await gerarLeituraTrigger({ tipo, pergunta, empresa, flag, inicio, fim, produtos, secoes, metricas });
-    return { texto: content, origem: "trigger" };
+    const content = await gerarLeituraTrigger({ tipo, pergunta, modelo, empresa, flag, inicio, fim, produtos, secoes, metricas });
+    return { texto: content.texto, origem: "trigger", modelo: content.modelo };
   } catch (error) {
     const detalhe = error instanceof Error ? error.message : "falha desconhecida";
     console.warn("[compras-ia] leitura Trigger indisponivel", detalhe);
-    return { texto: fallback, origem: "calculada", aviso: `IA externa indisponivel; leitura calculada usada (${detalhe}).` };
+    return { texto: fallback, origem: "calculada", modelo, aviso: `IA externa indisponivel; leitura calculada usada (${detalhe}).` };
   }
 }
 
@@ -959,6 +984,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const empresa = normalizarEmpresa(body.empresa);
     const flag = normalizarFlag(body.flag);
     const tipo = normalizarTipo(body.tipo);
+    const modelo = normalizarModeloComprasIa(body.modelo);
     const periodoDias = normalizarPeriodo(body.periodoDias);
     const perguntaInformada = texto(body.pergunta);
     const pergunta = tipo === "pergunta" ? perguntaInformada : perguntaInformada || PERGUNTAS_PADRAO[tipo];
@@ -998,8 +1024,8 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       ...selecionarProdutos("prioridades", produtosTodos),
     ].map((produto) => [`${produto.codigo}|${produto.sku}`, produto])).values()).slice(0, 24);
     const leitura = criterios.estruturada
-      ? { texto: montarLeituraEstruturada(criterios, produtos, totalElegiveis), origem: "calculada" as const }
-      : await gerarLeituraIa(tipo, pergunta, empresa, flag, inicio, fim, produtosContexto, secoes, metricas);
+      ? { texto: montarLeituraEstruturada(criterios, produtos, totalElegiveis), origem: "calculada" as const, modelo: null as string | null }
+      : await gerarLeituraIa(tipo, pergunta, modelo, empresa, flag, inicio, fim, produtosContexto, secoes, metricas);
     if (leitura.aviso) avisos.push(leitura.aviso);
 
     return res.status(200).json({
@@ -1013,6 +1039,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           : resumoCurto(metricas, secoes),
         leitura: leitura.texto,
         origemLeitura: leitura.origem,
+        modeloLeitura: leitura.modelo ?? (leitura.origem === "trigger" ? modelo : null),
         metricas: metricasRelatorio,
         produtos,
         secoes: criterios.estruturada ? [] : secoes.slice(0, 8),

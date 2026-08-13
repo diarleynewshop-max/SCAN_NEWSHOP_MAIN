@@ -3,6 +3,20 @@ import jsPDF from "jspdf";
 export type ComprasIaTipo = "resumo" | "faltas" | "mais_pedidos" | "prioridades" | "pergunta";
 export type ComprasIaTom = "neutro" | "positivo" | "atencao" | "critico";
 
+export const MODELOS_COMPRAS_IA = [
+  { id: "nvidia/nemotron-3-ultra-550b-a55b:free", nome: "Nemotron 3 Ultra 550B", provedor: "NVIDIA" },
+  { id: "gemma-4-31b-it:free", nome: "Gemma 4 31B", provedor: "Google" },
+  { id: "llama-3.3-70b-instruct:free", nome: "Llama 3.3 70B", provedor: "Meta" },
+  { id: "qwen3-next-80b-a3b-instruct:free", nome: "Qwen3 Next 80B", provedor: "Qwen" },
+  { id: "ling-3.0-tiny-free", nome: "Ling 3.0 Tiny", provedor: "Ling" },
+  { id: "lfm-2.5-2.6b:free", nome: "LFM 2.5 2.6B", provedor: "Liquid" },
+  { id: "nex-n2-pro:free", nome: "Nex N2 Pro", provedor: "Nex" },
+  { id: "glm-4.5-air:free", nome: "GLM 4.5 Air", provedor: "Z.ai" },
+] as const;
+
+export type ComprasIaModelo = typeof MODELOS_COMPRAS_IA[number]["id"];
+export const MODELO_COMPRAS_IA_PADRAO: ComprasIaModelo = "nvidia/nemotron-3-ultra-550b-a55b:free";
+
 export interface ComprasIaMetrica {
   id: string;
   label: string;
@@ -48,6 +62,7 @@ export interface ComprasIaRelatorio {
   resumo: string;
   leitura: string;
   origemLeitura: "trigger" | "groq" | "calculada";
+  modeloLeitura?: string | null;
   metricas: ComprasIaMetrica[];
   produtos: ComprasIaProduto[];
   secoes: ComprasIaSecao[];
@@ -78,6 +93,7 @@ export interface ConsultarComprasIaParams {
   empresa: string;
   flag: string;
   actorLogin: string;
+  modelo: ComprasIaModelo;
 }
 
 export async function consultarComprasIa(params: ConsultarComprasIaParams): Promise<ComprasIaRelatorio> {
@@ -145,6 +161,7 @@ function linhasRelatorio(relatorio: ComprasIaRelatorio): string[] {
     ...relatorio.metricas.map((metrica) => `${metrica.label}: ${metrica.valor} — ${metrica.detalhe}`),
     "",
     `LEITURA (${relatorio.origemLeitura === "calculada" ? "calculada" : "IA Trigger"})`,
+    relatorio.modeloLeitura ? `Modelo: ${relatorio.modeloLeitura}` : "",
     relatorio.leitura,
   ];
 
