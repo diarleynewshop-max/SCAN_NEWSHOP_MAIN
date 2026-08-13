@@ -78,16 +78,14 @@ function getEmpresaAtual(): EmpresaComprasApp {
 // para que uma re-importacao da planilha nao ressuscite como "pendente" um produto
 // que ja foi analisado/comprado. So reaparece se nunca tiver sido analisado.
 const STATUS_DUPLICADO_PRIORITY: Record<CompraStatusApp, number> = {
+  concluido: 700,
+  compra_realizada: 600,
+  pedido_andamento: 500,
   fazer_pedido: 400,
   produto_bom: 300,
   produto_ruim: 200,
-  pedido_andamento: 150,
-  compra_realizada: 140,
-  concluido: 130,
   todo: 100,
 };
-
-const STATUS_FINAIS = new Set<CompraStatusApp>(['compra_realizada', 'concluido']);
 
 function normalizarProdutoKey(value: string | null | undefined): string {
   return String(value ?? '')
@@ -120,7 +118,7 @@ function deveSubstituirProduto(mantido: ProdutoComprar, candidato: ProdutoCompra
   return Number(candidato.date_created || 0) > Number(mantido.date_created || 0);
 }
 
-function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
+export function deduplicarProdutos(produtos: ProdutoComprar[]): ProdutoComprar[] {
   const porProduto = new Map<string, ProdutoComprar>();
   // Soma vezesPedido em vez de contar ocorrências brutas: o servidor já manda os
   // produtos deduplicados com a contagem real, então essa passagem precisa ser

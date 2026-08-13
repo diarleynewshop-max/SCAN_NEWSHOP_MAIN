@@ -430,11 +430,37 @@ function chaveProduto(codigo: string, sku: string): string[] {
   return Array.from(new Set(valores));
 }
 
+const STATUS_COMPRA_PRIORITY: Record<string, number> = {
+  concluido: 700,
+  compra_realizada: 600,
+  pedido_andamento: 500,
+  fazer_pedido: 400,
+  produto_bom: 300,
+  produto_ruim: 200,
+  todo: 100,
+};
+
+function compraDeMaiorPrioridade(atual: CompraRow | undefined, candidata: CompraRow): CompraRow {
+  if (!atual) return candidata;
+
+  const prioridadeAtual = STATUS_COMPRA_PRIORITY[texto(atual.status).toLowerCase()] ?? 0;
+  const prioridadeCandidata = STATUS_COMPRA_PRIORITY[texto(candidata.status).toLowerCase()] ?? 0;
+  if (prioridadeCandidata !== prioridadeAtual) {
+    return prioridadeCandidata > prioridadeAtual ? candidata : atual;
+  }
+
+  const dataAtual = Date.parse(texto(atual.updated_at));
+  const dataCandidata = Date.parse(texto(candidata.updated_at));
+  return (Number.isFinite(dataCandidata) ? dataCandidata : 0) > (Number.isFinite(dataAtual) ? dataAtual : 0)
+    ? candidata
+    : atual;
+}
+
 function indexarCompras(compras: CompraRow[]): Map<string, CompraRow> {
   const indice = new Map<string, CompraRow>();
   for (const compra of compras) {
     for (const chave of chaveProduto(texto(compra.codigo), texto(compra.sku))) {
-      if (!indice.has(chave)) indice.set(chave, compra);
+      indice.set(chave, compraDeMaiorPrioridade(indice.get(chave), compra));
     }
   }
   return indice;
