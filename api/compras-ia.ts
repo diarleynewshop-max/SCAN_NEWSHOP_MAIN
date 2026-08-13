@@ -43,6 +43,7 @@ type UsuarioLoginRow = {
 };
 
 type ItemFrequenciaRow = {
+  empresa?: string | null;
   data: string | null;
   codigo: string | null;
   sku: string | null;
@@ -66,6 +67,7 @@ type CompraRow = {
 };
 
 type SecaoRow = {
+  empresa?: string | null;
   secao: string | null;
   total: number | null;
   nao_tem: number | null;
@@ -76,6 +78,7 @@ type SecaoRow = {
 };
 
 type DiarioRow = {
+  empresa?: string | null;
   total_conferencias: number | null;
   total_itens: number | null;
   separado: number | null;
@@ -85,6 +88,13 @@ type DiarioRow = {
 };
 
 type ProdutoAgregado = {
+  empresas: Empresa[];
+  porEmpresa: Partial<Record<Empresa, {
+    ocorrencias: number;
+    pedido: number;
+    atendido: number;
+    falta: number;
+  }>>;
   codigo: string;
   sku: string;
   descricao: string;
@@ -120,6 +130,11 @@ type Metrica = {
   valor: string;
   detalhe: string;
   tom: TomMetrica;
+};
+
+type VisualizacaoPergunta = {
+  mostrarGrafico: boolean;
+  mostrarProdutos: boolean;
 };
 
 export type CriteriosPergunta = {
@@ -220,6 +235,26 @@ function empresaCompras(empresa: Empresa): "NEWSHOP" | "SF" | "SEFULY" {
   return empresa === "NEWSHOP" ? "NEWSHOP" : "SF";
 }
 
+function empresasCompras(empresas: Empresa[]): ("NEWSHOP" | "SF" | "SEFULY")[] {
+  return Array.from(new Set(empresas.map(empresaCompras)));
+}
+
+function extrairLojasSfPergunta(pergunta: string): Empresa[] {
+  const busca = normalizarBusca(pergunta);
+  const mencionaSoye = /\b(soye|so\s*soye)\b/.test(busca);
+  const mencionaFacil = /\b(facil|so\s*facil|atacado)\b/.test(busca);
+  const empresas: Empresa[] = [];
+  if (mencionaSoye) empresas.push("SOYE");
+  if (mencionaFacil) empresas.push("FACIL");
+  return empresas;
+}
+
+export function extrairEscopoEmpresasPergunta(empresaAtual: Empresa, pergunta: string): Empresa[] {
+  if (empresaAtual !== "SOYE" && empresaAtual !== "FACIL") return [empresaAtual];
+  const lojasCitadas = extrairLojasSfPergunta(pergunta);
+  return lojasCitadas.length ? lojasCitadas : [empresaAtual];
+}
+
 function hojeSaoPaulo(): string {
   return new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/Sao_Paulo",
@@ -313,7 +348,7 @@ async function selecionarTudo<T>(
 
 async function lerItens(
   supabase: SupabaseClient,
-  empresa: Empresa,
+  empresas: Empresa[],
   flag: LoginFlag,
   inicio: string,
   fim: string,
@@ -322,7 +357,7 @@ async function lerItens(
   const base = (select: string) => (de: number, ate: number) => supabase
     .from("dashboard_item_frequencia")
     .select(select)
-    .eq("empresa", empresa)
+    .in("empresa", empresas)
     .eq("flag", flag)
     .gte("data", inicio)
     .lte("data", fim)
@@ -331,39 +366,39 @@ async function lerItens(
 
   try {
     return await selecionarTudo<ItemFrequenciaRow>(
-      base("data,codigo,sku,secao,descricao,foto_url,vezes,total_pedido,total_real"),
+      base("empresa,data,codigo,sku,secao,descricao,foto_url,vezes,total_pedido,total_real"),
       5000
     );
   } catch (error) {
     avisos.push("A view de itens não expõe descrição/foto; dados foram enriquecidos pela fila de Compras.");
     console.warn("[compras-ia] fallback de colunas da dashboard_item_frequencia", error);
     return selecionarTudo<ItemFrequenciaRow>(
-      base("data,codigo,sku,secao,vezes,total_pedido,total_real"),
+      base("empresa,data,codigo,sku,secao,vezes,total_pedido,total_real"),
       5000
     );
   }
 }
 
-async function lerCompras(supabase: SupabaseClient, empresa: Empresa): Promise<CompraRow[]> {
+async function lerCompras(supabase: SupabaseClient, empresas: Empresa[]): Promise<CompraRow[]> {
   return selecionarTudo<CompraRow>((de, ate) => supabase
     .from("compras")
     .select("codigo,sku,descricao,secao,foto_url,status,pedido_feito,updated_at")
-    .eq("empresa", empresaCompras(empresa))
+    .in("empresa", empresasCompras(empresas))
     .order("updated_at", { ascending: false })
     .range(de, ate), 3000);
 }
 
 async function lerSecoes(
   supabase: SupabaseClient,
-  empresa: Empresa,
+  empresas: Empresa[],
   flag: LoginFlag,
   inicio: string,
   fim: string
 ): Promise<SecaoRow[]> {
   return selecionarTudo<SecaoRow>((de, ate) => supabase
     .from("dashboard_por_secao")
-    .select("secao,total,nao_tem,parcial,pendente,total_pedido,total_real")
-    .eq("empresa", empresa)
+    .select("empresa,secao,total,nao_tem,parcial,pendente,total_pedido,total_real")
+    .in("empresa", empresas)
     .eq("flag", flag)
     .gte("data", inicio)
     .lte("data", fim)
@@ -372,15 +407,15 @@ async function lerSecoes(
 
 async function lerDiario(
   supabase: SupabaseClient,
-  empresa: Empresa,
+  empresas: Empresa[],
   flag: LoginFlag,
   inicio: string,
   fim: string
 ): Promise<DiarioRow[]> {
   const { data, error } = await supabase
     .from("dashboard_diario")
-    .select("total_conferencias,total_itens,separado,nao_tem,parcial,pendente")
-    .eq("empresa", empresa)
+    .select("empresa,total_conferencias,total_itens,separado,nao_tem,parcial,pendente")
+    .in("empresa", empresas)
     .eq("flag", flag)
     .gte("data", inicio)
     .lte("data", fim);
@@ -460,11 +495,14 @@ function agregarProdutos(itens: ItemFrequenciaRow[], compras: CompraRow[]): Prod
     const sku = texto(linha.sku);
     const chave = codigo !== "SEM-CODIGO" ? codigo : `sku:${sku}`;
     const compra = compraVinculada(indiceCompras, codigo, sku);
+    const empresaLinha = normalizarEmpresa(linha.empresa);
     const descricaoBase = texto(linha.descricao) || texto(compra?.descricao);
     const descricao = descricaoBase && descricaoBase !== codigo
       ? descricaoBase
       : /[a-z]/i.test(sku) ? sku : codigo;
     const atual = mapa.get(chave) ?? {
+      empresas: [],
+      porEmpresa: {},
       codigo,
       sku,
       descricao,
@@ -483,6 +521,13 @@ function agregarProdutos(itens: ItemFrequenciaRow[], compras: CompraRow[]): Prod
     atual.ocorrencias += numero(linha.vezes);
     atual.pedido += numero(linha.total_pedido);
     atual.atendido += numero(linha.total_real);
+    if (!atual.empresas.includes(empresaLinha)) atual.empresas.push(empresaLinha);
+    const loja = atual.porEmpresa[empresaLinha] ?? { ocorrencias: 0, pedido: 0, atendido: 0, falta: 0 };
+    loja.ocorrencias += numero(linha.vezes);
+    loja.pedido += numero(linha.total_pedido);
+    loja.atendido += numero(linha.total_real);
+    loja.falta = Math.max(0, loja.pedido - loja.atendido);
+    atual.porEmpresa[empresaLinha] = loja;
     if (!atual.fotoUrl) atual.fotoUrl = fotoSegura(linha.foto_url) || fotoSegura(compra?.foto_url);
     mapa.set(chave, atual);
   }
@@ -560,9 +605,36 @@ export function extrairCriteriosPergunta(pergunta: string): CriteriosPergunta {
   };
 }
 
+export function extrairVisualizacaoPergunta(
+  pergunta: string,
+  tipo: AnaliseTipo,
+  criterios: CriteriosPergunta = extrairCriteriosPergunta(pergunta)
+): VisualizacaoPergunta {
+  const busca = normalizarBusca(pergunta);
+  const pedeGrafico = /\b(grafico|graficos|chart|barra|barras)\b/.test(busca)
+    || /\b(por secao|por secoes|secoes com|secao com)\b/.test(busca);
+  const mencionaSecao = /\b(secao|secoes|setor|setores)\b/.test(busca);
+  const pedeProduto = criterios.estruturada
+    || /\b(item|itens|produto|produtos|codigo|sku|ean)\b/.test(busca)
+    || /\b(mais pedido|mais pedidos|menos pedido|menos pedidos|ranking)\b/.test(busca);
+
+  if (tipo !== "pergunta") {
+    return {
+      mostrarGrafico: false,
+      mostrarProdutos: tipo !== "resumo",
+    };
+  }
+
+  return {
+    mostrarGrafico: pedeGrafico,
+    mostrarProdutos: pedeProduto && !(mencionaSecao && !pedeProduto),
+  };
+}
+
 function inferirTipoPergunta(pergunta: string): Exclude<AnaliseTipo, "pergunta"> | "pergunta" {
   const busca = normalizarBusca(pergunta);
   if (/\b(falta|faltou|nao tem|ruptura)\b/.test(busca)) return "faltas";
+  if (/\b(menos pedido|menos pedidos|menor pedido|menores pedidos)\b/.test(busca)) return "mais_pedidos";
   if (/\b(mais pedido|mais pedidos|maior pedido|ranking)\b/.test(busca)) return "mais_pedidos";
   if (/\b(comprar|compra|prioridade|priorizar|recomenda)\b/.test(busca)) return "prioridades";
   if (/\b(resumo|visao geral|executivo)\b/.test(busca)) return "resumo";
@@ -590,6 +662,8 @@ function selecionarProdutos(
   pergunta = "",
   criterios: CriteriosPergunta = extrairCriteriosPergunta(pergunta)
 ): ProdutoAgregado[] {
+  const busca = normalizarBusca(pergunta);
+  const menorPedido = /\b(menos pedido|menos pedidos|menor pedido|menores pedidos)\b/.test(busca);
   const ativos = produtos.filter((produto) => (
     produto.pedido > 0
     && (criterios.minimoOcorrencias === null || produto.ocorrencias >= criterios.minimoOcorrencias)
@@ -609,7 +683,11 @@ function selecionarProdutos(
       .slice(0, limite);
   }
   if (tipo === "mais_pedidos") {
-    return [...ativos].sort((a, b) => b.pedido - a.pedido || b.ocorrencias - a.ocorrencias).slice(0, limite);
+    return [...ativos].sort((a, b) => (
+      menorPedido
+        ? a.pedido - b.pedido || a.ocorrencias - b.ocorrencias
+        : b.pedido - a.pedido || b.ocorrencias - a.ocorrencias
+    )).slice(0, limite);
   }
   if (tipo === "prioridades") {
     return ativos
@@ -757,6 +835,8 @@ function contextoCompacto(produtos: ProdutoAgregado[], secoes: SecaoAgregada[], 
   return {
     metricas,
     produtos: produtos.slice(0, 20).map((item) => ({
+      lojas: item.empresas,
+      por_loja: item.porEmpresa,
       codigo: item.codigo,
       descricao: item.descricao,
       secao: item.secao,
@@ -997,11 +1077,19 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const fim = hojeSaoPaulo();
     const inicio = subtrairDias(fim, periodoDias - 1);
     const avisos: string[] = [];
+    const escopoEmpresas = extrairEscopoEmpresasPergunta(empresa, pergunta);
+    const lojasSfCitadas = extrairLojasSfPergunta(pergunta);
+    if ((empresa === "NEWSHOP" || empresa === "SEFULY") && lojasSfCitadas.length) {
+      avisos.push(`Escopo travado em ${empresa}; menções a SOYE/FACIL foram ignoradas.`);
+    }
+    if ((empresa === "SOYE" || empresa === "FACIL") && escopoEmpresas.length > 1) {
+      avisos.push("SOYE e FACIL foram lidas como lojas separadas no dashboard; enriquecimento de Compras usa a base SF.");
+    }
     const [itensRows, comprasRows, secoesRows, diarioRows] = await Promise.all([
-      lerItens(supabase, empresa, flag, inicio, fim, avisos),
-      lerCompras(supabase, empresa),
-      lerSecoes(supabase, empresa, flag, inicio, fim),
-      lerDiario(supabase, empresa, flag, inicio, fim),
+      lerItens(supabase, escopoEmpresas, flag, inicio, fim, avisos),
+      lerCompras(supabase, escopoEmpresas),
+      lerSecoes(supabase, escopoEmpresas, flag, inicio, fim),
+      lerDiario(supabase, escopoEmpresas, flag, inicio, fim),
     ]);
 
     const produtosTodos = agregarProdutos(itensRows, comprasRows);
@@ -1009,6 +1097,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     const diario = resumoDiario(diarioRows);
     const metricas = montarMetricas(produtosTodos, diario);
     const criterios = extrairCriteriosPergunta(pergunta);
+    const visualizacao = extrairVisualizacaoPergunta(pergunta, tipo, criterios);
     const produtos = selecionarProdutos(tipo, produtosTodos, pergunta, criterios);
     const totalElegiveis = produtosTodos.filter((produto) => (
       produto.pedido > 0
@@ -1041,16 +1130,20 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         origemLeitura: leitura.origem,
         modeloLeitura: leitura.modelo ?? (leitura.origem === "trigger" ? modelo : null),
         metricas: metricasRelatorio,
-        produtos,
-        secoes: criterios.estruturada ? [] : secoes.slice(0, 8),
+        produtos: visualizacao.mostrarProdutos ? produtos : [],
+        secoes: visualizacao.mostrarGrafico ? secoes.slice(0, 8) : [],
         contexto: {
           empresa,
+          escopoEmpresas,
           flag,
           inicio,
           fim,
           periodoDias,
           tipo,
           criterios,
+          visualizacao,
+          mostrarGrafico: visualizacao.mostrarGrafico,
+          mostrarProdutos: visualizacao.mostrarProdutos,
           linhasLidas: itensRows.length,
           geradoEm: new Date().toISOString(),
           somenteLeitura: true,

@@ -26,6 +26,8 @@ export interface ComprasIaMetrica {
 }
 
 export interface ComprasIaProduto {
+  empresas?: string[];
+  porEmpresa?: Record<string, { ocorrencias: number; pedido: number; atendido: number; falta: number }>;
   codigo: string;
   sku: string;
   descricao: string;
@@ -68,6 +70,7 @@ export interface ComprasIaRelatorio {
   secoes: ComprasIaSecao[];
   contexto: {
     empresa: string;
+    escopoEmpresas?: string[];
     flag: string;
     inicio: string;
     fim: string;
@@ -79,6 +82,12 @@ export interface ComprasIaRelatorio {
       ordenacao: "ocorrencias" | "quantidade";
       estruturada: boolean;
     };
+    visualizacao?: {
+      mostrarGrafico: boolean;
+      mostrarProdutos: boolean;
+    };
+    mostrarGrafico?: boolean;
+    mostrarProdutos?: boolean;
     linhasLidas: number;
     geradoEm: string;
     somenteLeitura: boolean;

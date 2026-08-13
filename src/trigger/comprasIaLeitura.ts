@@ -100,15 +100,15 @@ function getModels(modeloSolicitadoRaw?: unknown): string[] {
 }
 
 function timeoutMs(): number {
-  const parsed = Number(process.env.COMPRAS_IA_TRIGGER_PROVIDER_TIMEOUT_MS ?? 45_000);
-  if (!Number.isFinite(parsed) || parsed <= 0) return 45_000;
-  return Math.max(5_000, Math.min(90_000, Math.trunc(parsed)));
+  const parsed = Number(process.env.COMPRAS_IA_TRIGGER_PROVIDER_TIMEOUT_MS ?? 120_000);
+  if (!Number.isFinite(parsed) || parsed <= 0) return 120_000;
+  return Math.max(5_000, Math.min(180_000, Math.trunc(parsed)));
 }
 
 export const comprasIaLeitura = task({
   id: "compras-ia-gerar-leitura",
   machine: "small-1x",
-  maxDuration: 120,
+  maxDuration: 240,
   retry: { maxAttempts: 2, factor: 2, minTimeoutInMs: 3_000, maxTimeoutInMs: 15_000 },
   run: async (payload: ComprasIaLeituraPayload) => {
     const apiKey = getApiKey();

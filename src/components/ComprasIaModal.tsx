@@ -133,7 +133,9 @@ function CardProduto({ produto, posicao, modoRanking }: { produto: ComprasIaProd
           <p className="mt-1 truncate text-xs text-slate-500">
             Cód. {produto.codigo}{produto.sku ? ` · SKU ${produto.sku}` : ""}
           </p>
-          <p className="truncate text-xs text-slate-500">{produto.secao}</p>
+          <p className="truncate text-xs text-slate-500">
+            {produto.secao}{produto.empresas?.length ? ` | ${produto.empresas.join(", ")}` : ""}
+          </p>
         </div>
       </div>
       <div className="mt-3 grid grid-cols-4 gap-2 text-center">
@@ -171,6 +173,7 @@ function CardProduto({ produto, posicao, modoRanking }: { produto: ComprasIaProd
 function Resultado({ relatorio }: { relatorio: ComprasIaRelatorio }) {
   const maiorFaltaSecao = Math.max(1, ...relatorio.secoes.map((secao) => secao.falta));
   const modoRanking = relatorio.contexto.criterios?.estruturada === true;
+  const mostrarProdutos = relatorio.contexto.mostrarProdutos ?? relatorio.contexto.visualizacao?.mostrarProdutos ?? true;
   return (
     <div className="space-y-5">
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm sm:p-5">
@@ -183,6 +186,11 @@ function Resultado({ relatorio }: { relatorio: ComprasIaRelatorio }) {
               </Badge>
             </div>
             <p className="mt-1 text-sm text-slate-600">{relatorio.resumo}</p>
+            {relatorio.contexto.escopoEmpresas?.length ? (
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                Escopo lido: {relatorio.contexto.escopoEmpresas.join(", ")}
+              </p>
+            ) : null}
             <p className="mt-1 text-xs text-slate-400">
               {relatorio.contexto.inicio} a {relatorio.contexto.fim} · {relatorio.contexto.linhasLidas.toLocaleString("pt-BR")} linhas analisadas
             </p>
@@ -245,7 +253,7 @@ function Resultado({ relatorio }: { relatorio: ComprasIaRelatorio }) {
         </section>
       )}
 
-      {relatorio.produtos.length > 0 ? (
+      {mostrarProdutos && relatorio.produtos.length > 0 ? (
         <section>
           <h3 className="mb-3 flex items-center gap-2 text-sm font-black text-slate-900">
             <PackageSearch className="h-4 w-4" /> Produtos do recorte
@@ -261,12 +269,12 @@ function Resultado({ relatorio }: { relatorio: ComprasIaRelatorio }) {
             ))}
           </div>
         </section>
-      ) : (
+      ) : mostrarProdutos ? (
         <section className="rounded-2xl border border-dashed border-slate-300 bg-white p-8 text-center">
           <CheckCircle2 className="mx-auto h-8 w-8 text-emerald-500" />
           <p className="mt-2 text-sm font-semibold text-slate-700">Nenhum produto encontrado neste recorte.</p>
         </section>
-      )}
+      ) : null}
 
       {relatorio.contexto.avisos.length > 0 && (
         <section className="rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-xs text-amber-800">

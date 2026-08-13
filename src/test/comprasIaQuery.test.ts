@@ -1,5 +1,9 @@
 import { describe, expect, it } from "vitest";
-import { extrairCriteriosPergunta } from "../../api/compras-ia";
+import {
+  extrairCriteriosPergunta,
+  extrairEscopoEmpresasPergunta,
+  extrairVisualizacaoPergunta,
+} from "../../api/compras-ia";
 
 describe("critérios da pergunta do Analista de Compras", () => {
   it("entende top 20 com frequência de 5x ou mais", () => {
@@ -26,6 +30,30 @@ describe("critérios da pergunta do Analista de Compras", () => {
       minimoOcorrencias: null,
       ordenacao: "quantidade",
       estruturada: false,
+    });
+  });
+
+  it("trava NEWSHOP na propria loja mesmo citando FACIL", () => {
+    expect(extrairEscopoEmpresasPergunta("NEWSHOP", "Qual item mais pedido da facil atacado?")).toEqual(["NEWSHOP"]);
+  });
+
+  it("separa SOYE e FACIL dentro do dominio SF", () => {
+    expect(extrairEscopoEmpresasPergunta("SOYE", "Qual item mais pedido na Soye e menos pedido na Facil atacado?")).toEqual(["SOYE", "FACIL"]);
+    expect(extrairEscopoEmpresasPergunta("SOYE", "Qual item mais pedido da facil atacado?")).toEqual(["FACIL"]);
+  });
+
+  it("so mostra grafico e produto quando a pergunta pede", () => {
+    expect(extrairVisualizacaoPergunta("Faca um resumo geral", "pergunta")).toEqual({
+      mostrarGrafico: false,
+      mostrarProdutos: false,
+    });
+    expect(extrairVisualizacaoPergunta("Mostre um grafico por secao", "pergunta")).toEqual({
+      mostrarGrafico: true,
+      mostrarProdutos: false,
+    });
+    expect(extrairVisualizacaoPergunta("Qual item mais pedido?", "pergunta")).toEqual({
+      mostrarGrafico: false,
+      mostrarProdutos: true,
     });
   });
 });
