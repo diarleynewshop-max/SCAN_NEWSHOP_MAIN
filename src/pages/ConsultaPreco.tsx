@@ -5,6 +5,7 @@ import BarcodeInput from "@/components/BarcodeInput";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 import { getCompanyLogo, getCompanyName } from "@/lib/companyTheme";
+import { loginEhSefuly } from "@/lib/lojaFeatures";
 import {
   consultarPrecoProdutoVarejoFacil,
   type ConsultaPrecoVarejoFacilProduto,
@@ -25,6 +26,7 @@ const ConsultaPreco = () => {
   const navigate = useNavigate();
   const { toast } = useToast();
   const login = obterLoginSalvo();
+  const isSefuly = loginEhSefuly(login);
   const logoEmpresa = getCompanyLogo(login?.empresa);
   const nomeEmpresaLogo = getCompanyName(login?.empresa);
   const [modo, setModo] = useState<ModoConsulta>("simples");
@@ -197,7 +199,11 @@ const ConsultaPreco = () => {
 
       {showScanner && (
         <Suspense fallback={<div className="fixed inset-0 z-50 bg-background p-6">Carregando scanner...</div>}>
-          <BarcodeScanner onDetected={handleDetected} onClose={() => setShowScanner(false)} />
+          <BarcodeScanner
+            onDetected={handleDetected}
+            onClose={() => setShowScanner(false)}
+            enableNumberTextScan={isSefuly}
+          />
         </Suspense>
       )}
     </div>

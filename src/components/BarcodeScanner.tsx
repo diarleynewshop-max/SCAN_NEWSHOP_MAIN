@@ -4,6 +4,7 @@ import { Camera, X, ScanBarcode, Upload, Loader2, Zap, ZoomIn } from "lucide-rea
 interface BarcodeScannerProps {
   onDetected: (code: string) => void;
   onClose: () => void;
+  enableNumberTextScan?: boolean;
 }
 
 const NATIVE_BARCODE_FORMATS = [
@@ -24,8 +25,19 @@ const ZXING_MIN_PHOTO_EDGE = 900;
 const ZXING_MIN_VIDEO_EDGE = 760;
 const ZXING_VIDEO_SCAN_INTERVAL_MS = 280;
 const NATIVE_VIDEO_SCAN_INTERVAL_MS = 90;
+const TEXT_VIDEO_SCAN_INTERVAL_MS = 720;
 const SMALL_LABEL_ZOOM = 2.2;
 const SMALL_LABEL_PREVIEW_ZOOM = 2.35;
+
+type ImageScanVariant = {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  rotate: number;
+};
+
+type CropScanVariant = Omit<ImageScanVariant, "rotate">;
 
 const PHOTO_SCAN_VARIANTS = [
   { x: 0, y: 0, width: 1, height: 1, rotate: 0 },
@@ -56,6 +68,25 @@ const VIDEO_SMALL_LABEL_SCAN_VARIANTS = [
   { x: 0.08, y: 0.52, width: 0.84, height: 0.24 },
 ] as const;
 
+const PHOTO_NUMBER_TEXT_SCAN_VARIANTS: readonly ImageScanVariant[] = [
+  { x: 0.04, y: 0.34, width: 0.92, height: 0.36, rotate: 0 },
+  { x: 0.08, y: 0.42, width: 0.84, height: 0.28, rotate: 0 },
+  { x: 0.12, y: 0.48, width: 0.76, height: 0.18, rotate: 0 },
+  { x: 0, y: 0, width: 1, height: 1, rotate: 0 },
+] as const;
+
+const VIDEO_NUMBER_TEXT_SCAN_VARIANTS: readonly CropScanVariant[] = [
+  { x: 0.08, y: 0.48, width: 0.84, height: 0.2 },
+  { x: 0.12, y: 0.55, width: 0.76, height: 0.14 },
+  { x: 0.06, y: 0.4, width: 0.88, height: 0.3 },
+] as const;
+
+const VIDEO_NUMBER_TEXT_SMALL_LABEL_SCAN_VARIANTS: readonly CropScanVariant[] = [
+  { x: 0.1, y: 0.48, width: 0.8, height: 0.22 },
+  { x: 0.14, y: 0.54, width: 0.72, height: 0.16 },
+  { x: 0.08, y: 0.42, width: 0.84, height: 0.3 },
+] as const;
+
 type NativeBarcode = {
   rawValue?: string;
 };
@@ -68,6 +99,17 @@ type NativeBarcodeDetectorConstructor = new (options?: {
   formats?: readonly string[];
 }) => NativeBarcodeDetector;
 
+type NativeDetectedText = {
+  rawValue?: string;
+  text?: string;
+};
+
+type NativeTextDetector = {
+  detect: (source: CanvasImageSource) => Promise<NativeDetectedText[]>;
+};
+
+type NativeTextDetectorConstructor = new () => NativeTextDetector;
+
 function getNativeBarcodeDetector(): NativeBarcodeDetectorConstructor | null {
   if (typeof window === "undefined" || !("BarcodeDetector" in window)) {
     return null;
@@ -78,6 +120,7 @@ function getNativeBarcodeDetector(): NativeBarcodeDetectorConstructor | null {
 
 const hasNativeBarcodeDetector = Boolean(getNativeBarcodeDetector());
 let nativeBarcodeDetector: NativeBarcodeDetector | null = null;
+let nativeTextDetector: NativeTextDetector | null = null;
 
 async function detectWithNativeBarcodeDetector(source: CanvasImageSource): Promise<string | null> {
   const BarcodeDetectorClass = getNativeBarcodeDetector();
@@ -112,9 +155,68 @@ function tuneCanvasDraw(ctx: CanvasRenderingContext2D, scale: number): void {
   }
 }
 
+function getNativeTextDetector(): NativeTextDetectorConstructor | null {
+  if (typeof window === "undefined" || !("TextDetector" in window)) {
+    return null;
+  }
+
+  return (window as Window & { TextDetector: NativeTextDetectorConstructor }).TextDetector;
+}
+
+function cleanOcrDigitText(value: string): string {
+  return value
+    .replace(/[Oo]/g, "0")
+    .replace(/[Il|]/g, "1")
+    .replace(/[S]/g, "5")
+    .replace(/[B]/g, "8");
+}
+
+function escolherMelhorNumeroLido(texts: string[]): string | null {
+  const candidates: string[] = [];
+
+  for (const text of texts) {
+    const cleaned = cleanOcrDigitText(text);
+    const matches = cleaned.match(/\d[\d\s.\-_/]{4,}\d/g) ?? [];
+
+    for (const match of matches) {
+      const digits = match.replace(/\D+/g, "");
+      if (digits.length >= 8 && digits.length <= 14) {
+        candidates.push(digits);
+      }
+    }
+  }
+
+  const unique = [...new Set(candidates)];
+  if (!unique.length) return null;
+
+  return unique.sort((a, b) => {
+    const aBarcodeLike = a.length >= 12 ? 1 : 0;
+    const bBarcodeLike = b.length >= 12 ? 1 : 0;
+    if (aBarcodeLike !== bBarcodeLike) return bBarcodeLike - aBarcodeLike;
+    return b.length - a.length;
+  })[0] ?? null;
+}
+
+async function detectNumberTextWithNativeDetector(source: CanvasImageSource): Promise<string | null> {
+  const TextDetectorClass = getNativeTextDetector();
+  if (!TextDetectorClass) return null;
+
+  try {
+    nativeTextDetector ??= new TextDetectorClass();
+    const texts = await nativeTextDetector.detect(source);
+    const values = texts
+      .map((item) => item.rawValue ?? item.text ?? "")
+      .map((value) => value.trim())
+      .filter(Boolean);
+    return escolherMelhorNumeroLido(values);
+  } catch {
+    return null;
+  }
+}
+
 function createCanvasVariant(
   image: HTMLImageElement,
-  variant: (typeof PHOTO_SCAN_VARIANTS)[number]
+  variant: ImageScanVariant
 ): HTMLCanvasElement {
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
@@ -157,6 +259,51 @@ function createCanvasVariant(
   );
 
   return canvas;
+}
+
+function drawVideoCropToCanvas(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  variant: CropScanVariant,
+  maxEdge: number,
+  minEdge: number
+): boolean {
+  const sourceWidth = video.videoWidth;
+  const sourceHeight = video.videoHeight;
+
+  if (!sourceWidth || !sourceHeight) return false;
+
+  const cropX = Math.round(clampBetweenZeroAndOne(variant.x) * sourceWidth);
+  const cropY = Math.round(clampBetweenZeroAndOne(variant.y) * sourceHeight);
+  const cropWidth = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.width) * sourceWidth));
+  const cropHeight = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.height) * sourceHeight));
+  const safeCropWidth = Math.min(cropWidth, sourceWidth - cropX);
+  const safeCropHeight = Math.min(cropHeight, sourceHeight - cropY);
+  const scale = resolveTargetScale(safeCropWidth, safeCropHeight, maxEdge, minEdge);
+  const targetWidth = Math.max(1, Math.round(safeCropWidth * scale));
+  const targetHeight = Math.max(1, Math.round(safeCropHeight * scale));
+
+  canvas.width = targetWidth;
+  canvas.height = targetHeight;
+
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  if (!ctx) return false;
+
+  tuneCanvasDraw(ctx, scale);
+  ctx.clearRect(0, 0, targetWidth, targetHeight);
+  ctx.drawImage(
+    video,
+    cropX,
+    cropY,
+    safeCropWidth,
+    safeCropHeight,
+    0,
+    0,
+    targetWidth,
+    targetHeight
+  );
+
+  return true;
 }
 
 async function decodeCanvasWithZxing(canvas: HTMLCanvasElement): Promise<string | null> {
@@ -225,48 +372,52 @@ async function detectWithZxing(image: HTMLImageElement): Promise<string | null> 
   return null;
 }
 
+async function detectNumberTextFromImage(image: HTMLImageElement): Promise<string | null> {
+  for (const variant of PHOTO_NUMBER_TEXT_SCAN_VARIANTS) {
+    const canvas = createCanvasVariant(image, variant);
+
+    try {
+      const code = await detectNumberTextWithNativeDetector(canvas);
+      if (code) {
+        return code;
+      }
+    } finally {
+      canvas.width = 0;
+      canvas.height = 0;
+    }
+  }
+
+  return null;
+}
+
+async function detectVideoNumberText(
+  video: HTMLVideoElement,
+  canvas: HTMLCanvasElement,
+  smallLabelMode: boolean
+): Promise<string | null> {
+  const variants = smallLabelMode ? VIDEO_NUMBER_TEXT_SMALL_LABEL_SCAN_VARIANTS : VIDEO_NUMBER_TEXT_SCAN_VARIANTS;
+
+  for (const variant of variants) {
+    const drawn = drawVideoCropToCanvas(video, canvas, variant, 1600, 760);
+    if (!drawn) return null;
+
+    const code = await detectNumberTextWithNativeDetector(canvas);
+    if (code) return code;
+  }
+
+  return null;
+}
+
 async function detectVideoFrameWithZxing(
   video: HTMLVideoElement,
   canvas: HTMLCanvasElement,
   smallLabelMode: boolean
 ): Promise<string | null> {
-  const sourceWidth = video.videoWidth;
-  const sourceHeight = video.videoHeight;
-
-  if (!sourceWidth || !sourceHeight) return null;
-
   const variants = smallLabelMode ? VIDEO_SMALL_LABEL_SCAN_VARIANTS : VIDEO_SCAN_VARIANTS;
 
   for (const variant of variants) {
-    const cropX = Math.round(clampBetweenZeroAndOne(variant.x) * sourceWidth);
-    const cropY = Math.round(clampBetweenZeroAndOne(variant.y) * sourceHeight);
-    const cropWidth = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.width) * sourceWidth));
-    const cropHeight = Math.max(1, Math.round(clampBetweenZeroAndOne(variant.height) * sourceHeight));
-    const safeCropWidth = Math.min(cropWidth, sourceWidth - cropX);
-    const safeCropHeight = Math.min(cropHeight, sourceHeight - cropY);
-    const scale = resolveTargetScale(safeCropWidth, safeCropHeight, ZXING_MAX_VIDEO_EDGE, ZXING_MIN_VIDEO_EDGE);
-    const targetWidth = Math.max(1, Math.round(safeCropWidth * scale));
-    const targetHeight = Math.max(1, Math.round(safeCropHeight * scale));
-
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-
-    const ctx = canvas.getContext("2d", { willReadFrequently: true });
-    if (!ctx) return null;
-
-    tuneCanvasDraw(ctx, scale);
-    ctx.clearRect(0, 0, targetWidth, targetHeight);
-    ctx.drawImage(
-      video,
-      cropX,
-      cropY,
-      safeCropWidth,
-      safeCropHeight,
-      0,
-      0,
-      targetWidth,
-      targetHeight
-    );
+    const drawn = drawVideoCropToCanvas(video, canvas, variant, ZXING_MAX_VIDEO_EDGE, ZXING_MIN_VIDEO_EDGE);
+    if (!drawn) return null;
 
     const code = await decodeCanvasWithZxing(canvas);
     if (code) return code;
@@ -376,7 +527,7 @@ function loadImageFromFile(file: File): Promise<{ image: HTMLImageElement; objec
   });
 }
 
-const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
+const BarcodeScanner = ({ onDetected, onClose, enableNumberTextScan = false }: BarcodeScannerProps) => {
   const videoRef = useRef<HTMLVideoElement>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -481,6 +632,7 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
         setCameraStarting(false);
 
         let lastScanAt = 0;
+        let lastTextScanAt = 0;
         const scanInterval = hasNativeBarcodeDetector ? NATIVE_VIDEO_SCAN_INTERVAL_MS : ZXING_VIDEO_SCAN_INTERVAL_MS;
 
         const scan = async (timestamp = 0) => {
@@ -502,7 +654,12 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
           const nativeCode = hasNativeBarcodeDetector
             ? await detectWithNativeBarcodeDetector(videoRef.current)
             : null;
-          const code = nativeCode || (canvas ? await detectVideoFrameWithZxing(videoRef.current, canvas, smallLabelModeRef.current) : null);
+          let code = nativeCode || (canvas ? await detectVideoFrameWithZxing(videoRef.current, canvas, smallLabelModeRef.current) : null);
+
+          if (!code && enableNumberTextScan && canvas && timestamp - lastTextScanAt >= TEXT_VIDEO_SCAN_INTERVAL_MS) {
+            lastTextScanAt = timestamp;
+            code = await detectVideoNumberText(videoRef.current, canvas, smallLabelModeRef.current);
+          }
 
           if (code && !detectedRef.current) {
             detectedRef.current = true;
@@ -530,7 +687,7 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
       cancelled = true;
       cleanup();
     };
-  }, [cleanup, onDetected, useFileMode]);
+  }, [cleanup, enableNumberTextScan, onDetected, useFileMode]);
 
   const handleFileCapture = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -558,14 +715,20 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
         }
 
         const nativeCode = canvas ? await detectWithNativeBarcodeDetector(canvas) : null;
-        const fallbackCode = nativeCode || await detectWithZxing(image);
+        const fallbackCode = nativeCode
+          || await detectWithZxing(image)
+          || (enableNumberTextScan ? await detectNumberTextFromImage(image) : null);
 
         if (fallbackCode) {
           onDetected(fallbackCode);
           return;
         }
 
-        setError("Nenhum codigo de barras foi identificado. Tente novamente com uma foto mais nitida e o codigo ocupando mais espaco.");
+        setError(
+          enableNumberTextScan
+            ? "Nenhum codigo foi identificado. Tente enquadrar a barra na mira e os numeros na faixa menor."
+            : "Nenhum codigo de barras foi identificado. Tente novamente com uma foto mais nitida e o codigo ocupando mais espaco."
+        );
       } finally {
         URL.revokeObjectURL(objectUrl);
       }
@@ -724,6 +887,13 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
                     smallLabelMode ? "border-primary shadow-[0_0_0_999px_rgba(0,0,0,0.30)]" : "border-white/65"
                   }`}
                 />
+                {enableNumberTextScan && (
+                  <div className="pointer-events-none absolute left-1/2 top-[62%] h-[9%] w-[70%] -translate-x-1/2 rounded-md border-2 border-amber-300/90 bg-black/10">
+                    <span className="absolute -top-6 left-1/2 -translate-x-1/2 whitespace-nowrap rounded bg-black/55 px-2 py-0.5 text-[11px] font-bold text-amber-100">
+                      Numeros do codigo
+                    </span>
+                  </div>
+                )}
               </div>
 
               <div className="grid grid-cols-2 gap-2">
@@ -791,10 +961,14 @@ const BarcodeScanner = ({ onDetected, onClose }: BarcodeScannerProps) => {
       <div className="pb-8 pt-4 text-center">
         <p className="text-primary-foreground/70 text-sm">
           {useFileMode
-            ? "Aproxime bem o codigo e evite sombras na foto"
-            : supportsZoom || smallLabelMode
-              ? "Aproxime a etiqueta ate ocupar a mira da camera"
-              : "Aponte a camera para o codigo de barras"}
+            ? enableNumberTextScan
+              ? "Na foto, deixe a barra e os numeros impressos bem nitidos"
+              : "Aproxime bem o codigo e evite sombras na foto"
+            : enableNumberTextScan
+              ? "Barra na mira maior, numeros impressos na faixa menor"
+              : supportsZoom || smallLabelMode
+                ? "Aproxime a etiqueta ate ocupar a mira da camera"
+                : "Aponte a camera para o codigo de barras"}
         </p>
       </div>
 

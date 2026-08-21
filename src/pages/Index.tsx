@@ -1223,7 +1223,11 @@ const Index = () => {
 
       {showScanner && (
         <Suspense fallback={LAZY_FALLBACK}>
-          <BarcodeScanner onDetected={handleBarcodeDetected} onClose={() => setShowScanner(false)} />
+          <BarcodeScanner
+            onDetected={handleBarcodeDetected}
+            onClose={() => setShowScanner(false)}
+            enableNumberTextScan={isSefuly}
+          />
         </Suspense>
       )}
 
