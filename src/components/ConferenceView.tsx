@@ -1,8 +1,7 @@
 import { lazy, Suspense, useState, useRef, useEffect } from "react";
 import {
-  buscarEstoquesConferenciaVarejoFacil,
+  buscarEnderecoPickingVarejoFacil,
   buscarProdutoVarejoFacil,
-  type VarejoFacilEstoqueConferencia,
   type VarejoFacilProduct,
 } from "@/lib/varejoFacilIntegration";
 import {
@@ -368,9 +367,9 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const [salvandoNomePedido, setSalvandoNomePedido] = useState(false);
   const [removendoItemId, setRemovendoItemId] = useState<string | null>(null);
   const [liberandoPedidoId, setLiberandoPedidoId] = useState<string | null>(null);
-  const [estoquesItemAtual, setEstoquesItemAtual] = useState<VarejoFacilEstoqueConferencia[]>([]);
-  const [loadingEstoquesItemAtual, setLoadingEstoquesItemAtual] = useState(false);
-  const [erroEstoquesItemAtual, setErroEstoquesItemAtual] = useState<string | null>(null);
+  const [enderecoPickingItemAtual, setEnderecoPickingItemAtual] = useState<string | null>(null);
+  const [loadingEnderecoPickingItemAtual, setLoadingEnderecoPickingItemAtual] = useState(false);
+  const [erroEnderecoPickingItemAtual, setErroEnderecoPickingItemAtual] = useState<string | null>(null);
 
   // ── Rascunho automático ────────────────────────────────────────────────────
   // Escopado por conta: rascunho de um conferente nao pode aparecer para outro
@@ -1835,29 +1834,29 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   const isLastItem = currentIndex === items.length - 1;
   useEffect(() => {
     if (!currentItem?.codigo) {
-      setEstoquesItemAtual([]);
-      setErroEstoquesItemAtual(null);
-      setLoadingEstoquesItemAtual(false);
+      setEnderecoPickingItemAtual(null);
+      setErroEnderecoPickingItemAtual(null);
+      setLoadingEnderecoPickingItemAtual(false);
       return;
     }
 
     let ativo = true;
-    setLoadingEstoquesItemAtual(true);
-    setErroEstoquesItemAtual(null);
+    setLoadingEnderecoPickingItemAtual(true);
+    setErroEnderecoPickingItemAtual(null);
 
-    buscarEstoquesConferenciaVarejoFacil(currentItem.codigo, { empresa, flag })
-      .then((estoques) => {
+    buscarEnderecoPickingVarejoFacil(currentItem.codigo, { empresa, flag })
+      .then((endereco) => {
         if (!ativo) return;
-        setEstoquesItemAtual(estoques);
+        setEnderecoPickingItemAtual(endereco);
       })
       .catch((err) => {
         if (!ativo) return;
-        setEstoquesItemAtual([]);
-        setErroEstoquesItemAtual(err instanceof Error ? err.message : "Nao foi possivel consultar o estoque no ERP.");
+        setEnderecoPickingItemAtual(null);
+        setErroEnderecoPickingItemAtual(err instanceof Error ? err.message : "Nao foi possivel consultar o endereco no ERP.");
       })
       .finally(() => {
         if (!ativo) return;
-        setLoadingEstoquesItemAtual(false);
+        setLoadingEnderecoPickingItemAtual(false);
       });
 
     return () => {
@@ -3179,33 +3178,17 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             </p>
           </div>
           <div className="rounded-xl border border-border bg-card/70 p-3">
-            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Estoque ERP</p>
-            {loadingEstoquesItemAtual ? (
-              <p className="mt-2 text-sm text-muted-foreground">Consultando estoque...</p>
-            ) : erroEstoquesItemAtual ? (
-              <p className="mt-2 text-sm text-destructive">{erroEstoquesItemAtual}</p>
+            <p className="text-[11px] font-bold uppercase tracking-wide text-muted-foreground">Endereco para separar</p>
+            {loadingEnderecoPickingItemAtual ? (
+              <p className="mt-2 text-sm text-muted-foreground">Consultando endereco...</p>
+            ) : erroEnderecoPickingItemAtual ? (
+              <p className="mt-2 text-sm text-destructive">{erroEnderecoPickingItemAtual}</p>
+            ) : enderecoPickingItemAtual ? (
+              <p className="mt-2 rounded-lg border border-amber-400/40 bg-amber-100 px-3 py-2 text-center font-mono text-xl font-black tracking-wider text-amber-950">
+                {enderecoPickingItemAtual}
+              </p>
             ) : (
-              <div className="mt-2 space-y-1.5 text-sm">
-                {estoquesItemAtual.map((estoque) => (
-                  <div key={estoque.lojaId} className="rounded-lg bg-muted/40 px-3 py-2">
-                    <div className="flex items-center justify-between">
-                      <span className="font-semibold text-foreground">{estoque.loja}</span>
-                      <span className="font-mono font-black text-foreground">{estoque.quantidade}</span>
-                    </div>
-                    {estoque.locais.length > 0 && (
-                      <div className="mt-2 border-t border-amber-400/30 pt-2">
-                        <p className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Local para separar</p>
-                        {estoque.locais.map((local) => (
-                          <div key={local.localId} className="mt-1 flex items-center justify-between rounded-md bg-amber-100 px-2 py-1 text-xs text-amber-950">
-                            <span className="font-bold">{local.descricao}</span>
-                            <span className="font-mono font-black">{local.quantidade}</span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
+              <p className="mt-2 text-sm text-muted-foreground">Sem endereco de picking cadastrado.</p>
             )}
           </div>
           {currentItem.status !== "aguardando" && label && StatusIcon && (

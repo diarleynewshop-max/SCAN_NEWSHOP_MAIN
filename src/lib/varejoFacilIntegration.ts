@@ -34,11 +34,6 @@ export interface VarejoFacilEstoqueConferencia {
   loja: "Loja" | "CD" | "Deposito";
   lojaId: number;
   quantidade: number;
-  locais: Array<{
-    localId: number;
-    descricao: string;
-    quantidade: number;
-  }>;
 }
 
 export interface ConsultaPrecoVarejoFacilProduto {
@@ -85,13 +80,7 @@ type ErpCodigoAuxiliar = {
 
 type ErpResumoEstoque = {
   lojaId?: number;
-  localId?: number;
   saldo?: number;
-};
-
-type ErpLocalEstoque = {
-  id?: number;
-  descricao?: string;
 };
 
 type ErpSecao = {
@@ -145,9 +134,6 @@ const ERP_LOJAS_CONFERENCIA: ReadonlyArray<{ loja: VarejoFacilEstoqueConferencia
   { loja: "CD", lojaId: 3 },
   { loja: "Deposito", lojaId: 2 },
 ];
-
-const locaisEstoqueCache = new Map<VarejoFacilEmpresa, Map<number, string>>();
-const locaisEstoqueEmAndamento = new Map<VarejoFacilEmpresa, Promise<Map<number, string>>>();
 
 // Cache em memória + localStorage (TTL 24h) para evitar re-consultar seção/grupo a cada reload
 const MERCADOLOGICO_LS_KEY = "vf_mercadologico_v1";
@@ -336,34 +322,6 @@ const fetchJson = async <T>(path: string, contexto: VarejoFacilLookupContext = {
   }
 
   return (await response.json()) as T;
-};
-
-const buscarLocaisEstoque = async (contexto: VarejoFacilLookupContext = {}): Promise<Map<number, string>> => {
-  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
-  const cached = locaisEstoqueCache.get(empresa);
-  if (cached) return cached;
-
-  const pendente = locaisEstoqueEmAndamento.get(empresa);
-  if (pendente) return pendente;
-
-  const consulta = fetchJson<ErpListResponse<ErpLocalEstoque>>("/v1/estoque/locais?count=100", contexto)
-    .then((data) => {
-      const locais = new Map(
-        (data?.items || [])
-          .filter((local): local is Required<Pick<ErpLocalEstoque, "id" | "descricao">> =>
-            typeof local.id === "number" && typeof local.descricao === "string" && local.descricao.trim().length > 0
-          )
-          .map((local) => [local.id, local.descricao.trim()] as const)
-      );
-      locaisEstoqueCache.set(empresa, locais);
-      return locais;
-    })
-    .finally(() => {
-      locaisEstoqueEmAndamento.delete(empresa);
-    });
-
-  locaisEstoqueEmAndamento.set(empresa, consulta);
-  return consulta;
 };
 
 const buscarProdutoPorCatalogoItemErp = async (
@@ -760,23 +718,16 @@ export const buscarEstoquesConferenciaVarejoFacil = async (
   contexto: VarejoFacilLookupContext = {}
 ): Promise<VarejoFacilEstoqueConferencia[]> => {
   const codigo = codigoBarras.trim();
-  if (!codigo) return ERP_LOJAS_CONFERENCIA.map(({ loja, lojaId }) => ({ loja, lojaId, quantidade: 0, locais: [] }));
+  if (!codigo) return ERP_LOJAS_CONFERENCIA.map(({ loja, lojaId }) => ({ loja, lojaId, quantidade: 0 }));
 
   const resolvido = await resolverProdutoErp(codigo, contexto);
   if (!resolvido?.produto.id) {
-    return ERP_LOJAS_CONFERENCIA.map(({ loja, lojaId }) => ({ loja, lojaId, quantidade: 0, locais: [] }));
+    return ERP_LOJAS_CONFERENCIA.map(({ loja, lojaId }) => ({ loja, lojaId, quantidade: 0 }));
   }
 
   const fiql = encodeURIComponent(`produtoId==${resolvido.produto.id}`);
-  const [saldosResult, locaisResult] = await Promise.allSettled([
-    fetchJson<ErpListResponse<ErpResumoEstoque>>(`/v1/estoque/saldos?q=${fiql}&count=100`, contexto),
-    buscarLocaisEstoque(contexto),
-  ]);
-
-  if (saldosResult.status === "rejected") throw saldosResult.reason;
-
-  const itens = saldosResult.value?.items || [];
-  const nomesLocais = locaisResult.status === "fulfilled" ? locaisResult.value : new Map<number, string>();
+  const data = await fetchJson<ErpListResponse<ErpResumoEstoque>>(`/v1/estoque/saldos?q=${fiql}&count=100`, contexto);
+  const itens = data?.items || [];
 
   return ERP_LOJAS_CONFERENCIA.map(({ loja, lojaId }) => ({
     loja,
@@ -784,20 +735,30 @@ export const buscarEstoquesConferenciaVarejoFacil = async (
     quantidade: itens
       .filter((item) => item.lojaId === lojaId)
       .reduce((total, item) => total + Number(item?.saldo || 0), 0),
-    locais: [...itens
-      .filter((item) => item.lojaId === lojaId && Number(item?.saldo || 0) > 0 && typeof item.localId === "number")
-      .reduce((agrupado, item) => {
-        const localId = item.localId!;
-        agrupado.set(localId, (agrupado.get(localId) || 0) + Number(item.saldo || 0));
-        return agrupado;
-      }, new Map<number, number>())]
-      .map(([localId, quantidade]) => ({
-        localId,
-        descricao: nomesLocais.get(localId) || `Local ${localId}`,
-        quantidade,
-      }))
-      .sort((a, b) => b.quantidade - a.quantidade || a.descricao.localeCompare(b.descricao, "pt-BR")),
   }));
+};
+
+export const buscarEnderecoPickingVarejoFacil = async (
+  codigoBarras: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<string | null> => {
+  const codigo = codigoBarras.trim();
+  if (!codigo) return null;
+
+  const resolvido = await resolverProdutoErp(codigo, contexto);
+  if (!resolvido?.produto.id) return null;
+
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  const configuredBase = getConfiguredErpProxyBase();
+  const endpoint = configuredBase ? `${configuredBase}/erp-picking-address` : "/api/erp-picking-address";
+  const response = await fetch(`${endpoint}?empresa=${empresa.toLowerCase()}&produtoId=${resolvido.produto.id}`, {
+    headers: getHeadersForProxyEndpoint(endpoint),
+  });
+
+  if (response.status === 404) return null;
+  const body = (await response.json().catch(() => ({}))) as { endereco?: unknown; error?: unknown };
+  if (!response.ok) throw new Error(typeof body.error === "string" ? body.error : `Falha ao consultar endereco (${response.status}).`);
+  return typeof body.endereco === "string" && body.endereco.trim() ? body.endereco.trim() : null;
 };
 
 export const buscarProdutoVarejoFacil = async (
