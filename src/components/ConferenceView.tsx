@@ -3187,9 +3187,22 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
             ) : (
               <div className="mt-2 space-y-1.5 text-sm">
                 {estoquesItemAtual.map((estoque) => (
-                  <div key={estoque.lojaId} className="flex items-center justify-between rounded-lg bg-muted/40 px-3 py-2">
-                    <span className="font-semibold text-foreground">{estoque.loja}</span>
-                    <span className="font-mono font-black text-foreground">{estoque.quantidade}</span>
+                  <div key={estoque.lojaId} className="rounded-lg bg-muted/40 px-3 py-2">
+                    <div className="flex items-center justify-between">
+                      <span className="font-semibold text-foreground">{estoque.loja}</span>
+                      <span className="font-mono font-black text-foreground">{estoque.quantidade}</span>
+                    </div>
+                    {estoque.locais.length > 0 && (
+                      <div className="mt-2 border-t border-amber-400/30 pt-2">
+                        <p className="text-[10px] font-bold uppercase tracking-wide text-amber-700">Local para separar</p>
+                        {estoque.locais.map((local) => (
+                          <div key={local.localId} className="mt-1 flex items-center justify-between rounded-md bg-amber-100 px-2 py-1 text-xs text-amber-950">
+                            <span className="font-bold">{local.descricao}</span>
+                            <span className="font-mono font-black">{local.quantidade}</span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
