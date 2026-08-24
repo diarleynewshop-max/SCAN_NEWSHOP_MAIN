@@ -245,6 +245,8 @@ const getSupabaseFunctionsBase = (): string => {
 const getConfiguredErpProxyBase = (): string =>
   ((import.meta.env.VITE_ERP_PROXY_BASE as string | undefined) || "").replace(/\/$/, "");
 
+const SCANNER_VERCEL_API_BASE = "https://scan-newshop-main.vercel.app/api";
+
 const getErpProxyEndpoint = (name: "erp-proxy" | "erp-image-proxy"): string => {
   const configuredBase = getConfiguredErpProxyBase();
   if (configuredBase) return `${configuredBase}/${name}`;
@@ -750,7 +752,15 @@ export const buscarEnderecoPickingVarejoFacil = async (
 
   const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
   const configuredBase = getConfiguredErpProxyBase();
-  const endpoint = configuredBase ? `${configuredBase}/erp-picking-address` : "/api/erp-picking-address";
+  const usaApiDoScanner =
+    typeof window !== "undefined" &&
+    window.location.hostname !== "scan-newshop-main.vercel.app" &&
+    !window.location.hostname.endsWith(".vercel.app");
+  const endpoint = configuredBase
+    ? `${configuredBase}/erp-picking-address`
+    : usaApiDoScanner
+      ? `${SCANNER_VERCEL_API_BASE}/erp-picking-address`
+      : "/api/erp-picking-address";
   const response = await fetch(`${endpoint}?empresa=${empresa.toLowerCase()}&produtoId=${resolvido.produto.id}`, {
     headers: getHeadersForProxyEndpoint(endpoint),
   });
