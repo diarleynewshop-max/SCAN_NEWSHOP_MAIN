@@ -1020,6 +1020,40 @@ grant select on public.dashboard_por_conferente to anon, authenticated, service_
 grant select on public.dashboard_por_secao to anon, authenticated, service_role;
 grant select on public.dashboard_item_frequencia to anon, authenticated, service_role;
 
+-- ---------------------------------------------------------------------
+-- 046 - Restaura acesso REST da fila de Conferencia
+-- ---------------------------------------------------------------------
+grant select, insert, update, delete on table public.pedidos
+  to anon, authenticated;
+
+grant select, insert, update, delete on table public.pedido_itens
+  to anon, authenticated;
+
+grant select, insert, update, delete on table public.recomendacoes_substituicao
+  to anon, authenticated;
+
+alter table public.pedidos enable row level security;
+alter table public.pedido_itens enable row level security;
+alter table public.recomendacoes_substituicao enable row level security;
+
+drop policy if exists pedidos_anon_all on public.pedidos;
+create policy pedidos_anon_all on public.pedidos
+  for all to anon, authenticated
+  using (true)
+  with check (true);
+
+drop policy if exists pedido_itens_anon_all on public.pedido_itens;
+create policy pedido_itens_anon_all on public.pedido_itens
+  for all to anon, authenticated
+  using (true)
+  with check (true);
+
+drop policy if exists recomendacoes_substituicao_anon_all on public.recomendacoes_substituicao;
+create policy recomendacoes_substituicao_anon_all on public.recomendacoes_substituicao
+  for all to anon, authenticated
+  using (true)
+  with check (true);
+
 
 -- #######################################################################
 -- VERIFICACAO - rode isto depois pra confirmar que tudo subiu certo
