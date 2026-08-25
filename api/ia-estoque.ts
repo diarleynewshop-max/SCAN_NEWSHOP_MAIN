@@ -91,10 +91,15 @@ function keyMatches(recebida: string, esperada: string): boolean {
   return a.length === b.length && a.length > 0 && timingSafeEqual(a, b);
 }
 
-function validApiKey(req: VercelRequest, tipo: "leitura" | "escrita"): boolean {
-  const configurada = tipo === "escrita"
-    ? process.env.IA_ESTOQUE_WRITE_API_KEY || ""
-    : process.env.IA_ESTOQUE_API_KEY || "";
+function apiKeyConfigurada(empresa: Empresa, tipo: "leitura" | "escrita"): string {
+  const nome = tipo === "escrita" ? "IA_ESTOQUE_WRITE_API_KEY" : "IA_ESTOQUE_API_KEY";
+  // A chave generica antiga so e mantida como compatibilidade da NEWSHOP.
+  // FACIL e SOYE nunca podem reutiliza-la entre si.
+  return process.env[`${nome}_${empresa}`] || (empresa === "NEWSHOP" ? process.env[nome] || "" : "");
+}
+
+function validApiKey(req: VercelRequest, empresa: Empresa, tipo: "leitura" | "escrita"): boolean {
+  const configurada = apiKeyConfigurada(empresa, tipo);
   return Boolean(configurada) && keyMatches(suppliedKey(req), configurada);
 }
 
@@ -243,14 +248,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       escrita: { ativa: false, aviso: "O ajuste de estoque continua bloqueado ate homologar a rota oficial de inventario do ERP." },
     });
   }
-  const escrita = req.method === "POST" || acao === "ajustar";
-  if (!validApiKey(req, escrita ? "escrita" : "leitura")) {
-    return error(res, 401, "UNAUTHORIZED", "Chave de API ausente, invalida ou sem o escopo exigido.");
-  }
-
   const origem = req.method === "POST" && req.body && typeof req.body === "object" ? req.body as Record<string, unknown> : {};
   const empresa = asEmpresa(origem.empresa || req.query.empresa);
   if (!allowedEmpresas().includes(empresa)) return error(res, 403, "EMPRESA_NOT_ALLOWED", `A chave nao tem acesso a ${empresa}.`);
+  const escrita = req.method === "POST" || acao === "ajustar";
+  if (!validApiKey(req, empresa, escrita ? "escrita" : "leitura")) {
+    return error(res, 401, "UNAUTHORIZED", "Chave de API ausente, invalida ou sem o escopo exigido.");
+  }
 
   try {
     if (!escrita) {
@@ -259,7 +263,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       }
       if (acao === "status") {
         return res.status(200).json({
-          versao: "1.0", empresaPadrao: "NEWSHOP", empresasPermitidas: allowedEmpresas(),
+          versao: "1.1", empresaAutenticada: empresa, empresasPermitidas: [empresa],
           capacidades: { consultarProduto: true, consultarEstoque: true, ajustarEstoque: process.env.IA_ESTOQUE_WRITE_ENABLED === "true" && Boolean(process.env.IA_ESTOQUE_ERP_AJUSTE_PATH) },
           aviso: "A escrita exige chave separada, habilitacao explicita e adaptador ERP validado.",
         });

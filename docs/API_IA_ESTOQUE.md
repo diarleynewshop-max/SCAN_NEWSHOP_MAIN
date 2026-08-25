@@ -20,8 +20,10 @@ Configure somente no ambiente **Production**. Nenhuma chave abaixo usa prefixo `
 
 | Variavel | Obrigatoria | Uso |
 | --- | --- | --- |
-| `IA_ESTOQUE_API_KEY` | Sim | Chave de leitura. Entregue a IA externa somente se ela precisar consultar dados. |
-| `IA_ESTOQUE_EMPRESAS` | Sim | Empresas liberadas, separadas por virgula. Inicie com `NEWSHOP`. |
+| `IA_ESTOQUE_API_KEY_NEWSHOP` | Sim | Chave exclusiva de leitura da NEWSHOP. |
+| `IA_ESTOQUE_API_KEY_FACIL` | Sim | Chave exclusiva de leitura da FACIL. |
+| `IA_ESTOQUE_API_KEY_SOYE` | Sim | Chave exclusiva de leitura da SOYE. |
+| `IA_ESTOQUE_EMPRESAS` | Sim | Empresas liberadas, separadas por virgula: `NEWSHOP,FACIL,SOYE`. |
 | `IA_ESTOQUE_WRITE_API_KEY` | Para escrita | Chave diferente e mais restrita, usada somente no `POST ajustar`. |
 | `IA_ESTOQUE_WRITE_ENABLED` | Para escrita | Deve ser literalmente `true`; qualquer outro valor bloqueia ajustes. |
 | `IA_ESTOQUE_ERP_AJUSTE_PATH` | Para escrita | Rota oficial validada do ERP, iniciando com `/`. Nunca inventar esta rota. |
@@ -35,7 +37,9 @@ node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"
 Cadastre no painel da Vercel ou com:
 
 ```powershell
-vercel env add IA_ESTOQUE_API_KEY production
+vercel env add IA_ESTOQUE_API_KEY_NEWSHOP production
+vercel env add IA_ESTOQUE_API_KEY_FACIL production
+vercel env add IA_ESTOQUE_API_KEY_SOYE production
 vercel env add IA_ESTOQUE_EMPRESAS production
 ```
 
@@ -57,7 +61,7 @@ Nao ha CORS publico propositalmente. Esta API e server-to-server: use Actions, F
 
 ## Empresas e locais
 
-Valores aceitos: `NEWSHOP`, `FACIL`, `SOYE`, `SEFULY`. A empresa precisa tambem estar em `IA_ESTOQUE_EMPRESAS`. Embora SOYE e FACIL usem o mesmo host, continuam empresas logicas distintas e devem ter credenciais/escopo tratados separadamente.
+Valores ativos: `NEWSHOP`, `FACIL` e `SOYE`. A empresa precisa estar em `IA_ESTOQUE_EMPRESAS`, e cada uma exige a sua propria chave. Embora SOYE e FACIL usem o mesmo host, continuam empresas logicas distintas: chave FACIL nao consulta SOYE e chave SOYE nao consulta FACIL.
 
 Os saldos retornam `lojaId` do ERP. No fluxo ja validado do SCAN, o mapa e:
 
@@ -215,4 +219,3 @@ curl -G 'https://scan-newshop-main.vercel.app/api/ia-estoque' \
 4. Testar chave errada: deve retornar 401.
 5. Confirmar que `POST ajustar` retorna `WRITE_DISABLED` enquanto a escrita nao foi homologada.
 6. Somente apos homologar a rota oficial do ERP, configurar chave de escrita, path e flag; testar um produto/local isolado e confirmar o saldo com GET.
-

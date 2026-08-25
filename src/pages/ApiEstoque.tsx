@@ -7,13 +7,16 @@ type CredencialResposta = {
   apiKey: string;
   endpoint: string;
   header: string;
-  empresa: string[];
+  empresa: "NEWSHOP" | "FACIL" | "SOYE";
 };
+
+const EMPRESAS: CredencialResposta["empresa"][] = ["NEWSHOP", "FACIL", "SOYE"];
 
 export default function ApiEstoque() {
   const { loginSalvo } = useAuth();
   const { toast } = useToast();
   const [senha, setSenha] = useState("");
+  const [empresa, setEmpresa] = useState<CredencialResposta["empresa"]>("NEWSHOP");
   const [mostrarSenha, setMostrarSenha] = useState(false);
   const [credencial, setCredencial] = useState<CredencialResposta | null>(null);
   const [carregando, setCarregando] = useState(false);
@@ -28,7 +31,7 @@ export default function ApiEstoque() {
       const resposta = await fetch("/api/ia-estoque-credencial", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ login: loginSalvo.login, senha }),
+        body: JSON.stringify({ login: loginSalvo.login, senha, empresa }),
       });
       const data = await resposta.json() as CredencialResposta & { error?: string };
       if (!resposta.ok || !data.apiKey) throw new Error(data.error || "Nao foi possivel liberar a chave.");
@@ -66,9 +69,9 @@ export default function ApiEstoque() {
 
       <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
         <div className="flex items-center gap-2 text-sm font-bold text-foreground"><BookOpen className="h-4 w-4 text-primary" /> Como a API funciona</div>
-        <p className="mt-2 text-sm text-muted-foreground">Ela consulta o ERP: resolve EAN, traz o cadastro e o saldo por Loja, Depósito e CD. Hoje ela não altera saldo.</p>
+        <p className="mt-2 text-sm text-muted-foreground">Ela consulta o ERP: resolve EAN, traz o cadastro e o saldo por Loja, Depósito e CD. NEWSHOP, FACIL e SOYE possuem chaves separadas. Hoje ela não altera saldo.</p>
         <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm text-foreground">
-          <li>Copie a chave abaixo, após confirmar sua senha.</li>
+          <li>Selecione a empresa e copie a chave abaixo, após confirmar sua senha.</li>
           <li>Cadastre na outra IA como secret: <code className="rounded bg-muted px-1">X-API-Key</code>.</li>
           <li>Use primeiro <code className="rounded bg-muted px-1">?acao=status</code>; depois <code className="rounded bg-muted px-1">?acao=resolver&amp;empresa=NEWSHOP&amp;codigo=EAN</code>.</li>
           <li>Leia cada <code className="rounded bg-muted px-1">lojaId</code>: 1 Loja, 2 Depósito, 3 CD.</li>
@@ -83,6 +86,10 @@ export default function ApiEstoque() {
       {!credencial ? (
         <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
           <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-foreground"><ShieldCheck className="h-4 w-4 text-primary" /> Confirme sua senha de Super</div>
+          <label className="mb-2 block text-xs font-semibold uppercase tracking-wide text-muted-foreground">Empresa da chave</label>
+          <select value={empresa} onChange={(event) => setEmpresa(event.target.value as CredencialResposta["empresa"])} className="mb-3 h-11 w-full rounded-lg border border-input bg-background px-3 text-sm font-semibold text-foreground">
+            {EMPRESAS.map((item) => <option key={item} value={item}>{item}</option>)}
+          </select>
           <div className="flex gap-2">
             <div className="relative flex-1">
               <input
@@ -113,7 +120,7 @@ export default function ApiEstoque() {
           </div>
           <div className="mt-4 grid gap-3 text-sm sm:grid-cols-2">
             <div><p className="text-xs text-muted-foreground">Endpoint</p><p className="break-all font-mono text-xs text-foreground">{credencial.endpoint}</p></div>
-            <div><p className="text-xs text-muted-foreground">Empresas liberadas</p><p className="font-semibold text-foreground">{credencial.empresa.join(", ")}</p></div>
+            <div><p className="text-xs text-muted-foreground">Chave vinculada</p><p className="font-semibold text-foreground">{credencial.empresa}</p></div>
           </div>
           <div className="mt-4 rounded-lg bg-muted p-3 font-mono text-xs text-foreground">{credencial.header}: {credencial.apiKey}</div>
           <p className="mt-4 text-xs text-amber-700 dark:text-amber-400">Envie a chave somente pelo cofre de secrets da outra IA. Nao cole em chat, frontend ou codigo.</p>
