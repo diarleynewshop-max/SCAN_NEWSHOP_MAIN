@@ -1,5 +1,5 @@
 ﻿import { useNavigate, useSearchParams } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw, MessageSquareText } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw, MessageSquareText, KeyRound } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLoginContext } from "@/hooks/useAuth";
@@ -62,6 +62,7 @@ const analyticsMenuItems: Array<{ Icon: LucideIcon; label: string; description: 
 const adminMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string; accent: string; permission: AccessPermission }> = [
   { Icon: Shield, label: "Usuários", description: "Cadastro e acesso por loja", path: "/usuarios", accent: "hsl(var(--destructive))", permission: "usuarios" },
   { Icon: MessageSquareText, label: "Feedback", description: "Notas e sugestões dos usuários", path: "/feedback", accent: "hsl(var(--primary))", permission: "feedback" },
+  { Icon: KeyRound, label: "API Estoque", description: "Chave para conectar outra IA ao estoque", path: "/api-estoque", accent: "hsl(var(--warning))", permission: "feedback" },
 ];
 
 // Componente de card do menu

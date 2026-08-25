@@ -30,6 +30,7 @@ const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Chat = lazy(() => import("./pages/Chat"));
 const Notificacoes = lazy(() => import("./pages/Notificacoes"));
 const Feedback = lazy(() => import("./pages/Feedback"));
+const ApiEstoque = lazy(() => import("./pages/ApiEstoque"));
 
 const queryClient = new QueryClient();
 
@@ -147,6 +148,12 @@ const App = () => {
             <Route path="/feedback" element={
               <ProtectedRoute requiredRole="super">
                 <DesktopShell pageTitle="Feedback"><Feedback /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/api-estoque" element={
+              <ProtectedRoute requiredRole="super">
+                <DesktopShell pageTitle="API Estoque"><ApiEstoque /></DesktopShell>
               </ProtectedRoute>
             } />
 

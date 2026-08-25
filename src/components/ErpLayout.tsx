@@ -4,7 +4,7 @@ import {
   ScanBarcode, ClipboardList, GitCompare, BadgeDollarSign,
   Package, ShoppingCart, BarChart3, Users, User, Settings, Boxes,
   ChevronDown, ChevronRight, LogOut, Menu, Home as HomeIcon,
-  MessageSquare, Bell, MessageSquareText,
+  MessageSquare, Bell, MessageSquareText, KeyRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { LoginData } from "@/hooks/useAuth";
@@ -131,6 +131,7 @@ export function ErpLayout({
       items: [
         { icon: Users, label: "Usuarios", path: "/usuarios" },
         ...(isSuper ? [{ icon: MessageSquareText, label: "Feedback", path: "/feedback" }] : []),
+        ...(isSuper ? [{ icon: KeyRound, label: "API Estoque", path: "/api-estoque" }] : []),
       ],
     }] : []),
   ];
