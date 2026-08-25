@@ -201,6 +201,13 @@ function codigoEan(value: unknown): string | null {
   return /^\d{6,18}$/.test(codigo) ? codigo : null;
 }
 
+function candidatosEan(ean: string): string[] {
+  const candidatos = [ean];
+  if (ean.length < 14) candidatos.push(ean.padStart(14, "0"));
+  if (ean.length === 14 && ean.startsWith("0")) candidatos.push(ean.slice(1));
+  return [...new Set(candidatos)];
+}
+
 function error(res: VercelResponse, status: number, codigo: string, mensagem: string) {
   return res.status(status).json({ error: { codigo, mensagem } });
 }
@@ -241,11 +248,14 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       if (acao === "resolver" && !id) {
         const ean = codigoEan(req.query.codigo);
         if (!ean) return error(res, 400, "INVALID_CODE", "Informe produtoId numerico ou codigo EAN com 6 a 18 digitos.");
-        const busca = await erpJson(empresa, `/v1/produto/codigos-auxiliares?q=${encodeURIComponent(`id==${ean}`)}&count=5`);
-        const itens = ((busca.data as { items?: Array<{ produtoId?: number | string; id?: string; tipo?: string }> }).items || []);
-        const item = itens.find((atual) => atual.produtoId && atual.tipo === "EAN") || itens.find((atual) => atual.produtoId);
-        id = produtoId(item?.produtoId);
-        eanResolvido = item?.id || ean;
+        for (const candidato of candidatosEan(ean)) {
+          const busca = await erpJson(empresa, `/v1/produto/codigos-auxiliares?q=${encodeURIComponent(`id==${candidato}`)}&count=5`);
+          const itens = ((busca.data as { items?: Array<{ produtoId?: number | string; id?: string; tipo?: string }> }).items || []);
+          const item = itens.find((atual) => atual.produtoId && atual.tipo === "EAN") || itens.find((atual) => atual.produtoId);
+          id = produtoId(item?.produtoId);
+          eanResolvido = item?.id || candidato;
+          if (id) break;
+        }
         if (!id) return error(res, 404, "PRODUCT_NOT_FOUND", "Nenhum produto foi encontrado para este EAN.");
       }
       if (!id) return error(res, 400, "PRODUCT_ID_REQUIRED", "Informe produtoId. Para EAN use acao=resolver&codigo=.");
