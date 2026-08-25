@@ -8,7 +8,7 @@ import type { VercelRequest, VercelResponse } from "@vercel/node";
  * confirmado.
  */
 type Empresa = "NEWSHOP" | "FACIL" | "SOYE" | "SEFULY";
-type AcaoLeitura = "status" | "resolver" | "produto" | "estoque";
+type AcaoLeitura = "docs" | "status" | "resolver" | "produto" | "estoque";
 type AcaoEscrita = "ajustar";
 
 const EMPRESAS: readonly Empresa[] = ["NEWSHOP", "FACIL", "SOYE", "SEFULY"];
@@ -220,6 +220,29 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   if (req.method !== "GET" && req.method !== "POST") return error(res, 405, "METHOD_NOT_ALLOWED", "Use GET para consulta ou POST para ajuste.");
 
   const acao = String(req.query.acao || (req.method === "POST" ? "ajustar" : "status")).trim().toLowerCase();
+  if (req.method === "GET" && acao === "docs") {
+    return res.status(200).json({
+      titulo: "API IA Estoque - SCAN",
+      versao: "1.0",
+      objetivo: "Consulta segura de produto e saldo do Varejo Facil sem expor credenciais do ERP.",
+      baseUrl: "https://scan-newshop-main.vercel.app/api/ia-estoque",
+      autenticacao: {
+        obrigatoria: true,
+        headerPreferido: "X-API-Key: SUA_CHAVE_DE_LEITURA",
+        alternativa: "Authorization: Bearer SUA_CHAVE_DE_LEITURA",
+        aviso: "Abrir a URL no navegador sem header retorna 401. Use a API pela outra IA, Postman, curl ou backend.",
+      },
+      endpoints: [
+        { acao: "status", metodo: "GET", url: "?acao=status", faz: "Mostra empresas liberadas e se escrita esta habilitada." },
+        { acao: "resolver", metodo: "GET", url: "?acao=resolver&empresa=NEWSHOP&codigo=7893095626124", faz: "Resolve EAN, retorna produto e saldos por lojaId." },
+        { acao: "produto", metodo: "GET", url: "?acao=produto&empresa=NEWSHOP&produtoId=143", faz: "Retorna o cadastro bruto do produto." },
+        { acao: "estoque", metodo: "GET", url: "?acao=estoque&empresa=NEWSHOP&produtoId=143", faz: "Retorna saldos por local." },
+      ],
+      locais: { "1": "Loja", "2": "Deposito", "3": "CD" },
+      fluxoRecomendado: ["Chame status.", "Resolva o EAN do produto.", "Leia o saldo por lojaId.", "Compare com a contagem fisica e devolva divergencias."],
+      escrita: { ativa: false, aviso: "O ajuste de estoque continua bloqueado ate homologar a rota oficial de inventario do ERP." },
+    });
+  }
   const escrita = req.method === "POST" || acao === "ajustar";
   if (!validApiKey(req, escrita ? "escrita" : "leitura")) {
     return error(res, 401, "UNAUTHORIZED", "Chave de API ausente, invalida ou sem o escopo exigido.");
@@ -232,7 +255,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   try {
     if (!escrita) {
       if (!(["status", "resolver", "produto", "estoque"] as AcaoLeitura[]).includes(acao as AcaoLeitura)) {
-        return error(res, 400, "INVALID_ACTION", "Acoes GET: status, resolver, produto ou estoque.");
+        return error(res, 400, "INVALID_ACTION", "Acoes GET: docs, status, resolver, produto ou estoque.");
       }
       if (acao === "status") {
         return res.status(200).json({

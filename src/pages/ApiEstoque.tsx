@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Copy, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
+import { BookOpen, Copy, Eye, EyeOff, KeyRound, Loader2, ShieldCheck } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { useToast } from "@/hooks/use-toast";
 
@@ -61,6 +61,22 @@ export default function ApiEstoque() {
             <h1 className="mt-1 text-2xl font-black text-foreground">API IA Estoque</h1>
             <p className="mt-2 text-sm text-muted-foreground">Libere sua chave de leitura para conectar outra IA ao estoque do ERP.</p>
           </div>
+        </div>
+      </section>
+
+      <section className="rounded-xl border border-border bg-card p-5 shadow-sm">
+        <div className="flex items-center gap-2 text-sm font-bold text-foreground"><BookOpen className="h-4 w-4 text-primary" /> Como a API funciona</div>
+        <p className="mt-2 text-sm text-muted-foreground">Ela consulta o ERP: resolve EAN, traz o cadastro e o saldo por Loja, Depósito e CD. Hoje ela não altera saldo.</p>
+        <ol className="mt-4 list-decimal space-y-2 pl-5 text-sm text-foreground">
+          <li>Copie a chave abaixo, após confirmar sua senha.</li>
+          <li>Cadastre na outra IA como secret: <code className="rounded bg-muted px-1">X-API-Key</code>.</li>
+          <li>Use primeiro <code className="rounded bg-muted px-1">?acao=status</code>; depois <code className="rounded bg-muted px-1">?acao=resolver&amp;empresa=NEWSHOP&amp;codigo=EAN</code>.</li>
+          <li>Leia cada <code className="rounded bg-muted px-1">lojaId</code>: 1 Loja, 2 Depósito, 3 CD.</li>
+        </ol>
+        <div className="mt-4 rounded-lg bg-muted p-3">
+          <p className="text-xs font-semibold text-muted-foreground">DOCUMENTAÇÃO PARA ENVIAR À OUTRA IA</p>
+          <code className="mt-2 block break-all text-xs text-foreground">https://scan-newshop-main.vercel.app/api/ia-estoque?acao=docs</code>
+          <p className="mt-2 text-xs text-muted-foreground">Este link explica endpoints, headers, exemplos e limites. Não contém sua chave.</p>
         </div>
       </section>
 
