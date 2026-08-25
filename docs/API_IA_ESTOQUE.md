@@ -78,11 +78,11 @@ Sempre use o `lojaId` retornado pelo ERP como fonte final. Nao some locais sem d
 ### 1. Estado da integracao
 
 ```http
-GET /api/ia-estoque?acao=status
+GET /api/ia-estoque?acao=status&empresa=NEWSHOP
 X-API-Key: SUA_CHAVE_DE_LEITURA
 ```
 
-Mostra empresas liberadas e se a escrita esta realmente habilitada. Use antes de qualquer operacao.
+Mostra o escopo da chave usada e se a escrita esta realmente habilitada. Informe sempre `empresa`; a chave precisa ser da mesma empresa da chamada.
 
 ### 2. Resolver um EAN e trazer produto + saldo
 

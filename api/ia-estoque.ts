@@ -237,8 +237,13 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         alternativa: "Authorization: Bearer SUA_CHAVE_DE_LEITURA",
         aviso: "Abrir a URL no navegador sem header retorna 401. Use a API pela outra IA, Postman, curl ou backend.",
       },
+      chavesPorEmpresa: {
+        obrigatorioInformarEmpresa: true,
+        empresas: ["NEWSHOP", "FACIL", "SOYE"],
+        regra: "Cada empresa possui chave propria. Uma chave FACIL nao acessa SOYE ou NEWSHOP; uma chave SOYE nao acessa FACIL ou NEWSHOP.",
+      },
       endpoints: [
-        { acao: "status", metodo: "GET", url: "?acao=status", faz: "Mostra empresas liberadas e se escrita esta habilitada." },
+        { acao: "status", metodo: "GET", url: "?acao=status&empresa=FACIL", faz: "Mostra o escopo da chave e se escrita esta habilitada." },
         { acao: "resolver", metodo: "GET", url: "?acao=resolver&empresa=NEWSHOP&codigo=7893095626124", faz: "Resolve EAN, retorna produto e saldos por lojaId." },
         { acao: "produto", metodo: "GET", url: "?acao=produto&empresa=NEWSHOP&produtoId=143", faz: "Retorna o cadastro bruto do produto." },
         { acao: "estoque", metodo: "GET", url: "?acao=estoque&empresa=NEWSHOP&produtoId=143", faz: "Retorna saldos por local." },
