@@ -60,6 +60,11 @@ type ComprasIaLeituraPayload = {
     inicio: string;
     fim: string;
   };
+  // Presente quando a pergunta e sobre um item especifico (traz codigo/SKU).
+  foco?: {
+    sobreItem: boolean;
+    encontrado: boolean;
+  };
   dados: {
     metricas: Metrica[];
     produtos: ProdutoContexto[];
@@ -141,9 +146,13 @@ export const comprasIaLeitura = task({
               content: [
                 "Voce e um analista de compras somente leitura.",
                 "Use exclusivamente os numeros fornecidos. Nao invente estoque, venda, preco ou fornecedor.",
-                "Responda em portugues do Brasil com 3 a 6 bullets curtos, cada linha iniciada por '- '.",
-                "Destaque risco, oportunidade e a conferencia humana necessaria antes de comprar.",
-                "Nao use markdown alem dos bullets e nao repita todos os dados.",
+                "Responda em portugues do Brasil em bullets curtos, cada linha iniciada por '- '.",
+                "Responda SOMENTE o que a pergunta pediu. Nunca acrescente ranking, secao, total do periodo",
+                "ou recomendacao que nao foi solicitada: resposta curta e no ponto vale mais que resposta longa.",
+                "Use no maximo 5 bullets, e use menos quando a pergunta for simples.",
+                "Se 'foco.sobreItem' for true, fale apenas do item perguntado e de mais nada.",
+                "Se 'foco.encontrado' for false, responda em uma unica linha que o item nao aparece no periodo.",
+                "Nao repita dados que ja aparecem nos cartoes de metrica e nao use markdown alem dos bullets.",
               ].join(" "),
             },
             {

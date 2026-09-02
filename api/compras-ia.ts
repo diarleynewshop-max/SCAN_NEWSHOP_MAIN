@@ -87,7 +87,7 @@ type DiarioRow = {
   pendente: number | null;
 };
 
-type ProdutoAgregado = {
+export type ProdutoAgregado = {
   empresas: Empresa[];
   porEmpresa: Partial<Record<Empresa, {
     ocorrencias: number;
@@ -667,30 +667,74 @@ function inferirTipoPergunta(pergunta: string): Exclude<AnaliseTipo, "pergunta">
   return "pergunta";
 }
 
-function produtosCitadosNaPergunta(pergunta: string, produtos: ProdutoAgregado[]): ProdutoAgregado[] {
-  const ignorar = new Set([
-    "qual", "quais", "item", "itens", "produto", "produtos", "secao", "setor",
-    "teve", "tiveram", "mais", "menos", "maior", "menor", "pedido", "pedidos",
-    "falta", "faltas", "periodo", "mostrar", "mostre", "analise", "compras",
-    "gere", "lista", "liste", "foram", "vez", "vezes",
-    // stopwords gerais do PT-BR: sem isso, palavras como "para" batem em quase
-    // toda descricao de produto e geram falso-positivo em massa (bug real
-    // reportado: pergunta por item inexistente devolvia dezenas de itens
-    // aleatorios so porque a frase continha "para"/"mim"/"com").
-    "para", "com", "sem", "por", "pela", "pelo", "pelos", "pelas",
-    "que", "quem", "onde", "quando", "como", "porque",
-    "este", "esta", "esse", "essa", "isso", "isto", "aquele", "aquela", "aquilo",
-    "um", "uma", "uns", "umas", "dos", "das", "nos", "nas", "aos",
-    "meu", "minha", "seus", "suas", "nosso", "nossa",
-    "voce", "eles", "elas",
-    "mim", "ter", "tem", "sao", "historico", "geral", "todos", "todas", "sobre",
-  ]);
-  const tokens = normalizarBusca(pergunta).split(" ").filter((token) => token.length >= 3 && !ignorar.has(token));
+const STOPWORDS_PERGUNTA = new Set([
+  "qual", "quais", "item", "itens", "produto", "produtos", "secao", "setor",
+  "teve", "tiveram", "mais", "menos", "maior", "menor", "pedido", "pedidos",
+  "falta", "faltas", "periodo", "mostrar", "mostre", "analise", "compras",
+  "gere", "lista", "liste", "foram", "vez", "vezes",
+  // stopwords gerais do PT-BR: sem isso, palavras como "para" batem em quase
+  // toda descricao de produto e geram falso-positivo em massa.
+  "para", "com", "sem", "por", "pela", "pelo", "pelos", "pelas",
+  "que", "quem", "onde", "quando", "como", "porque",
+  "este", "esta", "esse", "essa", "isso", "isto", "aquele", "aquela", "aquilo",
+  "um", "uma", "uns", "umas", "dos", "das", "nos", "nas", "aos",
+  "meu", "minha", "seus", "suas", "nosso", "nossa",
+  "voce", "eles", "elas",
+  "mim", "ter", "tem", "sao", "historico", "completo", "geral", "todos", "todas", "sobre",
+]);
+
+// Codigos citados na pergunta ("NFM-9987", "SSH01-3S-2", "BM-F967" ou EAN puro),
+// ja quebrados nas partes que a normalizacao gera: "NFM-9987" -> ["nfm", "9987"].
+function codigosNaPergunta(pergunta: string): string[][] {
+  const brutos = pergunta.match(/[A-Za-z0-9][A-Za-z0-9-]*/g) ?? [];
+  const candidatos: string[][] = [];
+  for (const bruto of brutos) {
+    const ehEan = /^\d{8,14}$/.test(bruto);
+    const ehCodigo = /[A-Za-z]/.test(bruto) && /\d/.test(bruto) && bruto.length >= 3;
+    if (!ehEan && !ehCodigo) continue;
+    const partes = normalizarBusca(bruto).split(" ").filter((parte) => parte.length >= 2);
+    if (partes.length) candidatos.push(partes);
+  }
+  return candidatos;
+}
+
+export function perguntaCitaCodigo(pergunta: string): boolean {
+  return codigosNaPergunta(pergunta).length > 0;
+}
+
+function palavrasDoProduto(produto: ProdutoAgregado): Set<string> {
+  return new Set(
+    normalizarBusca(`${produto.codigo} ${produto.sku} ${produto.descricao} ${produto.secao}`).split(" ")
+  );
+}
+
+export function produtosCitadosNaPergunta(pergunta: string, produtos: ProdutoAgregado[]): ProdutoAgregado[] {
+  // 1) A pergunta traz codigo/SKU: so casa quem bate em TODAS as partes do codigo.
+  //    Sem isso, "NFM-9987 MASSAGEADOR FACIAL" devolvia todo massageador da base.
+  const codigos = codigosNaPergunta(pergunta);
+  if (codigos.length) {
+    return produtos.filter((produto) => {
+      const palavras = palavrasDoProduto(produto);
+      return codigos.some((partes) => partes.every((parte) => palavras.has(parte)));
+    });
+  }
+
+  // 2) Pergunta so descritiva: pontua por quantos termos batem e devolve apenas
+  //    os melhores, em vez de qualquer produto com uma unica palavra em comum.
+  const tokens = normalizarBusca(pergunta)
+    .split(" ")
+    .filter((token) => token.length >= 3 && !STOPWORDS_PERGUNTA.has(token));
   if (!tokens.length) return [];
-  return produtos.filter((produto) => {
-    const palavras = new Set(normalizarBusca(`${produto.codigo} ${produto.sku} ${produto.descricao} ${produto.secao}`).split(" "));
-    return tokens.some((token) => palavras.has(token));
+
+  let melhorPontuacao = 0;
+  const pontuados = produtos.map((produto) => {
+    const palavras = palavrasDoProduto(produto);
+    const pontos = tokens.reduce((total, token) => total + (palavras.has(token) ? 1 : 0), 0);
+    if (pontos > melhorPontuacao) melhorPontuacao = pontos;
+    return { produto, pontos };
   });
+  if (!melhorPontuacao) return [];
+  return pontuados.filter((item) => item.pontos === melhorPontuacao).map((item) => item.produto);
 }
 
 function selecionarProdutos(
@@ -852,6 +896,58 @@ function montarMetricasRanking(
   ];
 }
 
+// Pergunta sobre item especifico: os cartoes falam do item, nao do periodo
+// inteiro. Numeros globais aqui so afogam a resposta que foi pedida.
+function montarMetricasItem(produtos: ProdutoAgregado[]): Metrica[] {
+  if (!produtos.length) {
+    return [
+      { id: "item", label: "Item procurado", valor: "0", detalhe: "Não encontrado no período", tom: "atencao" },
+      { id: "pedido", label: "Quantidade pedida", valor: "0", detalhe: "Sem registro no período", tom: "neutro" },
+      { id: "atendido", label: "Atendido", valor: "0", detalhe: "Sem registro no período", tom: "neutro" },
+      { id: "falta", label: "Falta", valor: "0", detalhe: "Sem registro no período", tom: "neutro" },
+    ];
+  }
+
+  const ocorrencias = produtos.reduce((total, item) => total + item.ocorrencias, 0);
+  const pedido = produtos.reduce((total, item) => total + item.pedido, 0);
+  const atendido = produtos.reduce((total, item) => total + item.atendido, 0);
+  const falta = produtos.reduce((total, item) => total + item.falta, 0);
+  const taxa = pedido > 0 ? Math.min(100, (atendido / pedido) * 100) : 100;
+  return [
+    {
+      id: "vezes",
+      label: "Vezes pedido",
+      valor: ptNumero(ocorrencias),
+      detalhe: produtos.length === 1 ? produtos[0].descricao : `${ptNumero(produtos.length)} itens encontrados`,
+      tom: "neutro",
+    },
+    { id: "pedido", label: "Quantidade pedida", valor: ptNumero(pedido), detalhe: "No período selecionado", tom: "neutro" },
+    {
+      id: "atendido",
+      label: "Atendido",
+      valor: ptNumero(atendido),
+      detalhe: `${ptPercentual(taxa)} do pedido`,
+      tom: taxa >= 90 ? "positivo" : taxa >= 75 ? "atencao" : "critico",
+    },
+    {
+      id: "falta",
+      label: "Falta",
+      valor: ptNumero(falta),
+      detalhe: falta > 0 ? "Diferença entre pedido e atendido" : "Sem falta no período",
+      tom: falta > 0 ? "critico" : "positivo",
+    },
+  ];
+}
+
+function resumoItem(produtos: ProdutoAgregado[]): string {
+  if (!produtos.length) return "O item pesquisado não aparece nas conferências concluídas do período.";
+  if (produtos.length === 1) {
+    const item = produtos[0];
+    return `${item.descricao}: pedido ${ptNumero(item.ocorrencias)}x no período, ${ptNumero(item.pedido)} unidades pedidas e ${ptNumero(item.atendido)} atendidas.`;
+  }
+  return `${ptNumero(produtos.length)} itens correspondem ao que foi pesquisado no período.`;
+}
+
 function leituraFallback(
   tipo: AnaliseTipo,
   produtos: ProdutoAgregado[],
@@ -928,6 +1024,8 @@ async function fetchJsonComTimeout(
   }
 }
 
+type FocoPergunta = { sobreItem: true; encontrado: boolean };
+
 async function gerarLeituraTrigger(params: {
   tipo: AnaliseTipo;
   pergunta: string;
@@ -939,6 +1037,7 @@ async function gerarLeituraTrigger(params: {
   produtos: ProdutoAgregado[];
   secoes: SecaoAgregada[];
   metricas: Metrica[];
+  foco?: FocoPergunta;
 }): Promise<{ texto: string; modelo: string | null }> {
   const apiKey = triggerApiKey();
   if (!apiKey) throw new Error("Chave do Trigger nao configurada para Compras IA.");
@@ -957,6 +1056,7 @@ async function gerarLeituraTrigger(params: {
         empresa: params.empresa,
         flag: params.flag,
         periodo: { inicio: params.inicio, fim: params.fim },
+        foco: params.foco,
         dados: contextoCompacto(params.produtos, params.secoes, params.metricas),
       },
     }),
@@ -1078,11 +1178,14 @@ async function gerarLeituraIa(
   fim: string,
   produtos: ProdutoAgregado[],
   secoes: SecaoAgregada[],
-  metricas: Metrica[]
+  metricas: Metrica[],
+  foco?: FocoPergunta
 ): Promise<{ texto: string; origem: OrigemLeitura; modelo?: string | null; aviso?: string }> {
-  const fallback = leituraFallback(tipo, produtos, secoes, metricas);
+  const fallback = foco && !foco.encontrado
+    ? "- O item pesquisado não aparece nas conferências concluídas do período selecionado."
+    : leituraFallback(tipo, produtos, secoes, metricas);
   try {
-    const content = await gerarLeituraTrigger({ tipo, pergunta, modelo, empresa, flag, inicio, fim, produtos, secoes, metricas });
+    const content = await gerarLeituraTrigger({ tipo, pergunta, modelo, empresa, flag, inicio, fim, produtos, secoes, metricas, foco });
     return { texto: content.texto, origem: "trigger", modelo: content.modelo };
   } catch (error) {
     const detalhe = error instanceof Error ? error.message : "falha desconhecida";
@@ -1146,18 +1249,41 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       produto.pedido > 0
       && (criterios.minimoOcorrencias === null || produto.ocorrencias >= criterios.minimoOcorrencias)
     )).length;
+    // Pergunta sobre item especifico (traz codigo/SKU): o contexto da IA fica so
+    // no que foi perguntado. Mandar os rankings gerais faz o modelo responder
+    // sobre secao/ranking que ninguem pediu.
+    const perguntaSobreItem = tipo === "pergunta" && perguntaCitaCodigo(pergunta);
     const metricasRelatorio = criterios.estruturada
       ? montarMetricasRanking(produtos, totalElegiveis, criterios)
-      : metricas;
-    const produtosContexto = Array.from(new Map([
-      ...produtos,
-      ...selecionarProdutos("faltas", produtosTodos),
-      ...selecionarProdutos("mais_pedidos", produtosTodos),
-      ...selecionarProdutos("prioridades", produtosTodos),
-    ].map((produto) => [`${produto.codigo}|${produto.sku}`, produto])).values()).slice(0, 24);
+      : perguntaSobreItem
+        ? montarMetricasItem(produtos)
+        : metricas;
+    const produtosContexto = perguntaSobreItem
+      ? produtos.slice(0, 6)
+      : Array.from(new Map([
+        ...produtos,
+        ...selecionarProdutos("faltas", produtosTodos),
+        ...selecionarProdutos("mais_pedidos", produtosTodos),
+        ...selecionarProdutos("prioridades", produtosTodos),
+      ].map((produto) => [`${produto.codigo}|${produto.sku}`, produto])).values()).slice(0, 24);
+    const secoesContexto = perguntaSobreItem
+      ? secoes.filter((secao) => produtos.some((produto) => produto.secao === secao.nome))
+      : secoes;
     const leitura = criterios.estruturada
       ? { texto: montarLeituraEstruturada(criterios, produtos, totalElegiveis), origem: "calculada" as const, modelo: null as string | null }
-      : await gerarLeituraIa(tipo, pergunta, modelo, empresa, flag, inicio, fim, produtosContexto, secoes, metricas);
+      : await gerarLeituraIa(
+        tipo,
+        pergunta,
+        modelo,
+        empresa,
+        flag,
+        inicio,
+        fim,
+        produtosContexto,
+        secoesContexto,
+        metricasRelatorio,
+        perguntaSobreItem ? { sobreItem: true, encontrado: produtos.length > 0 } : undefined
+      );
     if (leitura.aviso) avisos.push(leitura.aviso);
 
     return res.status(200).json({
@@ -1168,7 +1294,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         pergunta,
         resumo: criterios.estruturada
           ? `${ptNumero(totalElegiveis)} itens encontrados no filtro solicitado. Resultado ordenado por ${criterios.ordenacao === "ocorrencias" ? "frequência" : "quantidade pedida"}.`
-          : resumoCurto(metricas, secoes),
+          : perguntaSobreItem
+            ? resumoItem(produtos)
+            : resumoCurto(metricas, secoes),
         leitura: leitura.texto,
         origemLeitura: leitura.origem,
         modeloLeitura: leitura.modelo ?? (leitura.origem === "trigger" ? modelo : null),
