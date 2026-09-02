@@ -673,12 +673,23 @@ function produtosCitadosNaPergunta(pergunta: string, produtos: ProdutoAgregado[]
     "teve", "tiveram", "mais", "menos", "maior", "menor", "pedido", "pedidos",
     "falta", "faltas", "periodo", "mostrar", "mostre", "analise", "compras",
     "gere", "lista", "liste", "foram", "vez", "vezes",
+    // stopwords gerais do PT-BR: sem isso, palavras como "para" batem em quase
+    // toda descricao de produto e geram falso-positivo em massa (bug real
+    // reportado: pergunta por item inexistente devolvia dezenas de itens
+    // aleatorios so porque a frase continha "para"/"mim"/"com").
+    "para", "com", "sem", "por", "pela", "pelo", "pelos", "pelas",
+    "que", "quem", "onde", "quando", "como", "porque",
+    "este", "esta", "esse", "essa", "isso", "isto", "aquele", "aquela", "aquilo",
+    "um", "uma", "uns", "umas", "dos", "das", "nos", "nas", "aos",
+    "meu", "minha", "seus", "suas", "nosso", "nossa",
+    "voce", "eles", "elas",
+    "mim", "ter", "tem", "sao", "historico", "geral", "todos", "todas", "sobre",
   ]);
   const tokens = normalizarBusca(pergunta).split(" ").filter((token) => token.length >= 3 && !ignorar.has(token));
   if (!tokens.length) return [];
   return produtos.filter((produto) => {
-    const busca = normalizarBusca(`${produto.codigo} ${produto.sku} ${produto.descricao} ${produto.secao}`);
-    return tokens.some((token) => busca.includes(token));
+    const palavras = new Set(normalizarBusca(`${produto.codigo} ${produto.sku} ${produto.descricao} ${produto.secao}`).split(" "));
+    return tokens.some((token) => palavras.has(token));
   });
 }
 
@@ -702,6 +713,12 @@ function selecionarProdutos(
     }
     const inferido = inferirTipoPergunta(pergunta);
     if (inferido !== "pergunta") return selecionarProdutos(inferido, ativos, pergunta, criterios);
+    // Pergunta citava item(ns) especifico(s) mas nada bateu na base, e nao da
+    // pra classificar como faltas/mais_pedidos/prioridades/resumo: nao existe
+    // lista "certa" pra devolver aqui. Melhor nao mostrar produtos do que
+    // devolver um ranking generico sem relacao com o que foi perguntado
+    // (a leitura da IA ja explica que o item nao foi encontrado).
+    return [];
   }
   if (criterios.ordenacao === "ocorrencias") {
     return [...ativos]
