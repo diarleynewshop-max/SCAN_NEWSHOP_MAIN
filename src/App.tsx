@@ -26,6 +26,7 @@ const ConsultaPreco = lazy(() => import("./pages/ConsultaPreco"));
 const Clientes = lazy(() => import("./pages/Clientes"));
 const Perfil = lazy(() => import("./pages/Perfil"));
 const MeusPedidos = lazy(() => import("./pages/MeusPedidos"));
+const Transferencias = lazy(() => import("./pages/Transferencias"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
 const Chat = lazy(() => import("./pages/Chat"));
 const Notificacoes = lazy(() => import("./pages/Notificacoes"));
@@ -93,6 +94,14 @@ const App = () => {
             <Route path="/perfil" element={
               <ProtectedRoute requiredPermission="scanner">
                 <DesktopShell pageTitle="Perfil"><Perfil /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            {/* Transferencia entre lojas: rota propria para nao se confundir
+                com o pedido de reposicao pro CD feito no /scanner. */}
+            <Route path="/transferencias" element={
+              <ProtectedRoute requiredPermission="transferencia" requiredLojaFeature="transferencia_loja">
+                <DesktopShell pageTitle="Transferencia entre lojas"><Transferencias /></DesktopShell>
               </ProtectedRoute>
             } />
 

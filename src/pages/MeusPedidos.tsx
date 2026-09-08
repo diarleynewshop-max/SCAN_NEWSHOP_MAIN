@@ -23,6 +23,7 @@ import {
   type MeuPedidoResumo,
   type PedidoFilaItem,
 } from "@/lib/pedidosFila";
+import { rotuloLoja } from "@/lib/transferencias";
 import {
   buscarCatalogoItens,
   produtoKey,
@@ -559,6 +560,11 @@ export default function MeusPedidos() {
                       <span className="inline-flex items-center rounded-full border border-emerald-300 bg-emerald-100 px-2 py-0.5 text-[11px] font-bold text-emerald-800 sm:px-3 sm:py-1 sm:text-xs">
                         Concluido
                       </span>
+                      {pedido.tipo === "transferencia" && (
+                        <span className="inline-flex items-center rounded-full bg-foreground px-2 py-0.5 text-[11px] font-black text-background sm:px-3 sm:py-1 sm:text-xs">
+                          {"⇄ " + rotuloLoja(pedido.empresa) + " → " + rotuloLoja(pedido.empresaDestino)}
+                        </span>
+                      )}
                     </div>
 
                     <div className="mt-2 flex flex-col gap-1.5 text-xs text-muted-foreground sm:mt-3 sm:gap-2 sm:text-sm">

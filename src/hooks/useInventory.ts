@@ -17,6 +17,7 @@ interface OpenListParams {
   person: string;
   flag: ListFlag;
   empresa: string;
+  transferenciaDestino?: string | null;
   clientePdv?: ClientePdv | null;
 }
 
@@ -176,6 +177,7 @@ function loadLists(storageKey: string): ListData[] {
       ...list,
       flag: list.flag ?? "loja",
       empresa: list.empresa ?? "",
+      transferenciaDestino: list.transferenciaDestino ?? null,
       createdAt: new Date(list.createdAt),
       closedAt: list.closedAt ? new Date(list.closedAt) : undefined,
       products: list.products.map((product) => ({
@@ -367,7 +369,7 @@ export function useInventory(userKey: string | null | undefined) {
   }, [lists]);
 
   const openList = useCallback(
-    ({ title, person, flag, empresa, clientePdv }: OpenListParams): boolean => {
+    ({ title, person, flag, empresa, transferenciaDestino, clientePdv }: OpenListParams): boolean => {
       const normalizedTitle = flag === "cd" ? (title.trim() || "CD") : title.trim();
 
       if (flag !== "cd" && !normalizedTitle) {
@@ -386,6 +388,7 @@ export function useInventory(userKey: string | null | undefined) {
         person: person.trim(),
         flag,
         empresa,
+        transferenciaDestino: transferenciaDestino ?? null,
         products: [],
         createdAt: new Date(),
         status: "open",

@@ -5,6 +5,7 @@ export const ACCESS_PERMISSIONS = [
   "lista",
   "fazer_pedido",
   "conferencia",
+  "transferencia",
   "consulta_preco",
   "chat",
   "notificacoes",
@@ -24,6 +25,7 @@ export const ACCESS_PERMISSION_LABELS: Record<AccessPermission, string> = {
   lista: "Acesso a lista",
   fazer_pedido: "Fazer pedido",
   conferencia: "Conferencia",
+  transferencia: "Transferencia entre lojas",
   consulta_preco: "Consulta de preco",
   chat: "Chat",
   notificacoes: "Notificacoes",
@@ -39,7 +41,7 @@ export const ACCESS_PERMISSION_GROUPS: Array<{
   titulo: string;
   permissoes: AccessPermission[];
 }> = [
-  { titulo: "Operacional", permissoes: ["scanner", "lista", "fazer_pedido", "conferencia", "consulta_preco", "chat", "notificacoes"] },
+  { titulo: "Operacional", permissoes: ["scanner", "lista", "fazer_pedido", "conferencia", "transferencia", "consulta_preco", "chat", "notificacoes"] },
   { titulo: "Gestao", permissoes: ["compras", "sugestao_cd", "dashboard", "analytics"] },
   { titulo: "Admin", permissoes: ["usuarios"] },
 ];
@@ -77,6 +79,7 @@ export const ROLE_PERMISSION_DEFAULTS: Record<UserRole, Record<AccessPermission,
     compras: true,
     sugestao_cd: true,
     dashboard: true,
+    transferencia: true,
   },
   admin: {
     ...ALL_FALSE,
@@ -92,6 +95,7 @@ export const ROLE_PERMISSION_DEFAULTS: Record<UserRole, Record<AccessPermission,
     dashboard: true,
     analytics: true,
     usuarios: true,
+    transferencia: true,
   },
   super: { ...ALL_TRUE },
 };

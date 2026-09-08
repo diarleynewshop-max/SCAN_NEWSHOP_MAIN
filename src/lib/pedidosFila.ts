@@ -13,9 +13,18 @@ const SUPABASE_ANON_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | und
 export type EmpresaKey = 'NEWSHOP' | 'SOYE' | 'FACIL' | 'SEFULY';
 export type FlagKey = 'loja' | 'cd';
 
+// 'reposicao'     = fluxo de sempre (a loja pede, o CD da propria empresa separa)
+// 'transferencia' = uma loja separa e manda para OUTRA loja (ver migration 047).
+// Em transferencia, `empresa` continua sendo quem SEPARA (dono da fila de
+// conferencia) e `empresa_destino` diz quem recebe.
+export type TipoPedido = 'reposicao' | 'transferencia';
+
 interface PedidoFilaRow {
   id: string;
   titulo: string | null;
+  empresa?: string | null;
+  empresa_destino?: string | null;
+  tipo?: string | null;
   listeiro: string | null;
   pessoa: string | null;
   status: string;
@@ -30,6 +39,9 @@ interface PedidoFilaRow {
 interface MeuPedidoRow {
   id: string;
   titulo: string | null;
+  empresa: string | null;
+  empresa_destino: string | null;
+  tipo: string | null;
   pessoa: string | null;
   listeiro: string | null;
   conferente: string | null;
@@ -88,6 +100,9 @@ export interface PedidoParaConferencia {
   id: string;
   name: string;
   listeiro: string;
+  empresa: EmpresaKey | null;
+  empresaDestino: EmpresaKey | null;
+  tipo: TipoPedido;
   date_created: string;
   emAndamento: boolean;
   clickupTaskId: string | null;
@@ -140,6 +155,9 @@ export interface PedidoFilaItem {
 export interface MeuPedidoResumo {
   id: string;
   titulo: string;
+  empresa: EmpresaKey | null;
+  empresaDestino: EmpresaKey | null;
+  tipo: TipoPedido;
   pessoa: string;
   listeiro: string;
   conferente: string;
@@ -181,6 +199,7 @@ export interface AnalisePendentesResult {
 export interface ListarPedidosFiltro {
   empresa: string;
   flag: string;
+  tipo?: TipoPedido;        // filtra reposicao x transferencia entre lojas
   pessoa?: string;          // match EXATO (usado por listarMeusPedidos)
   pessoaBusca?: string;     // match PARCIAL (ilike) — filtro da tela
   status?: string;          // ex.: 'concluido' para so os finalizados
@@ -224,7 +243,12 @@ export interface PedidoFilaProduto {
 
 export interface EnviarListaParaConferenciaPayload {
   flag: string;
+  // Quem SEPARA a lista (dono da fila de conferencia). Numa transferencia
+  // entre lojas, e a loja de ORIGEM — nao quem pediu.
   empresa: string;
+  // So em transferencia entre lojas: quem RECEBE a mercadoria.
+  empresaDestino?: string | null;
+  tipo?: TipoPedido;
   pessoa: string;
   titulo: string;
   totalItens: number;
@@ -250,6 +274,18 @@ function normalizarEmpresa(value: unknown): EmpresaKey {
 
 function normalizarFlag(value: unknown): FlagKey {
   return String(value ?? 'loja').trim().toLowerCase() === 'cd' ? 'cd' : 'loja';
+}
+
+function normalizarTipoPedido(value: unknown): TipoPedido {
+  return String(value ?? '').trim().toLowerCase() === 'transferencia' ? 'transferencia' : 'reposicao';
+}
+
+// Diferente de normalizarEmpresa, aqui NAO ha default: destino vazio precisa
+// continuar nulo, senao um pedido normal viraria transferencia para NEWSHOP.
+function normalizarEmpresaOpcional(value: unknown): EmpresaKey | null {
+  const empresa = String(value ?? '').trim().toUpperCase();
+  if (!empresa) return null;
+  return normalizarEmpresa(empresa);
 }
 
 export function formatarNumeroPedido(numero: number | null | undefined): string {
@@ -724,7 +760,7 @@ export async function listarPedidosParaConferencia(
 
   const { data, error } = await supabase
     .from('pedidos')
-    .select('id,titulo,listeiro,pessoa,status,observacao,created_at,clickup_task_id,pedido_numero,catalogo_cliente_nome,catalogo_payload')
+    .select('id,titulo,listeiro,pessoa,status,observacao,created_at,clickup_task_id,pedido_numero,catalogo_cliente_nome,catalogo_payload,empresa,empresa_destino,tipo')
     .eq('empresa', normalizarEmpresa(empresa))
     .eq('flag', normalizarFlag(flag))
     .in('status', ['analisado', 'em_andamento'])
@@ -740,6 +776,9 @@ export async function listarPedidosParaConferencia(
       listeiro: String(pedido.listeiro ?? pedido.pessoa ?? '').trim(),
       date_created: pedido.created_at ? String(new Date(pedido.created_at).getTime()) : '',
       emAndamento: pedido.status === 'em_andamento',
+      empresa: normalizarEmpresaOpcional(pedido.empresa),
+      empresaDestino: normalizarEmpresaOpcional(pedido.empresa_destino),
+      tipo: normalizarTipoPedido(pedido.tipo),
       clickupTaskId: pedido.clickup_task_id ?? null,
       numeroPedido: pedido.pedido_numero == null ? null : toInt(pedido.pedido_numero),
       clienteNome: cliente.clienteNome,
@@ -785,6 +824,9 @@ function mapMeuPedido(row: MeuPedidoRow): MeuPedidoResumo {
   return {
     id: row.id,
     titulo: String(row.titulo ?? row.id).trim() || row.id,
+    empresa: normalizarEmpresaOpcional(row.empresa),
+    empresaDestino: normalizarEmpresaOpcional(row.empresa_destino),
+    tipo: normalizarTipoPedido(row.tipo),
     pessoa: String(row.pessoa ?? '').trim(),
     listeiro: String(row.listeiro ?? '').trim(),
     conferente: String(row.conferente ?? '').trim(),
@@ -804,6 +846,9 @@ function mapMeuPedido(row: MeuPedidoRow): MeuPedidoResumo {
 const MEU_PEDIDO_SELECT_COLUMNS = [
   'id',
   'titulo',
+  'empresa',
+  'empresa_destino',
+  'tipo',
   'pessoa',
   'listeiro',
   'conferente',
@@ -846,13 +891,23 @@ export async function listarPedidos(f: ListarPedidosFiltro): Promise<MeuPedidoRe
 
   // Quem esta logado no CD tambem enxerga os pedidos da loja (o CD atende a loja).
   // Quem esta na loja continua vendo apenas os pedidos da loja.
+  //
+  // Transferencia entre lojas: alem dos pedidos que a minha empresa separa
+  // (`empresa`), preciso ver os que EU pedi para outra loja separar
+  // (`empresa_destino`). Como so transferencia preenche empresa_destino, isso
+  // nao muda nada no fluxo antigo. Chamadas .or() repetidas sao ANDadas pelo
+  // PostgREST, entao esse filtro convive com os de pessoa mais abaixo.
+  const empresaFiltro = normalizarEmpresa(f.empresa);
+  const tipo = f.tipo;
+
   const buildQuery = () => {
     let q = supabase
       .from('pedidos')
       .select(MEU_PEDIDO_SELECT_COLUMNS)
-      .eq('empresa', normalizarEmpresa(f.empresa))
+      .or(`empresa.eq.${empresaFiltro},empresa_destino.eq.${empresaFiltro}`)
       .order('created_at', { ascending: false });
     q = flagFiltro === 'cd' ? q.in('flag', ['cd', 'loja']) : q.eq('flag', flagFiltro);
+    if (tipo) q = q.eq('tipo', tipo);
     if (status) q = q.eq('status', status);
     if (pessoa) q = q.or(`pessoa.eq.${pessoa},listeiro.eq.${pessoa}`);
     if (pessoaBusca) q = q.or(`pessoa.ilike.*${pessoaBusca}*,listeiro.ilike.*${pessoaBusca}*`);
@@ -1175,12 +1230,13 @@ export async function juntarPedidos(
 
   const { data, error } = await supabase
     .from('pedidos')
-    .select('id,empresa,flag,listeiro,pessoa,titulo,status,observacao,created_at')
+    .select('id,empresa,flag,tipo,empresa_destino,listeiro,pessoa,titulo,status,observacao,created_at')
     .in('id', ids);
   if (error) throw error;
 
   type PedidoMeta = {
-    id: string; empresa: string; flag: string; listeiro: string | null;
+    id: string; empresa: string; flag: string; tipo: string | null; empresa_destino: string | null;
+    listeiro: string | null;
     pessoa: string | null; titulo: string | null; status: string; observacao: string | null; created_at: string | null;
   };
   const pedidos = (data ?? []) as PedidoMeta[];
@@ -1188,6 +1244,11 @@ export async function juntarPedidos(
 
   if (new Set(pedidos.map((p) => p.empresa)).size > 1 || new Set(pedidos.map((p) => p.flag)).size > 1) {
     throw new Error('So da pra juntar pedidos da mesma empresa e tipo (loja/CD).');
+  }
+  // Juntar move os itens para o pedido alvo. Se os pedidos tiverem destinos
+  // diferentes, os itens de um destino iriam parar na loja errada.
+  if (new Set(pedidos.map((p) => `${normalizarTipoPedido(p.tipo)}:${normalizarEmpresaOpcional(p.empresa_destino) ?? ''}`)).size > 1) {
+    throw new Error('So da pra juntar pedidos com o mesmo destino (reposicao com reposicao, transferencia com a mesma loja de destino).');
   }
   if (pedidos.some((p) => p.status === 'concluido')) {
     throw new Error('Nao da pra juntar pedidos ja concluidos.');
@@ -1487,7 +1548,16 @@ export async function enviarListaParaConferencia(
 
   const empresa = normalizarEmpresa(payload.empresa);
   const flag = normalizarFlag(payload.flag);
+  const tipo = normalizarTipoPedido(payload.tipo);
+  const empresaDestino = tipo === 'transferencia' ? normalizarEmpresaOpcional(payload.empresaDestino) : null;
   const conferenceId = resolveConferenceId(payload);
+
+  // Espelha a constraint pedidos_transferencia_coerente_check (migration 047):
+  // falhar aqui da uma mensagem util em vez de um 400 cru do PostgREST.
+  if (tipo === 'transferencia') {
+    if (!empresaDestino) throw new Error('Transferencia sem loja de destino.');
+    if (empresaDestino === empresa) throw new Error('A loja de destino tem que ser diferente da loja que separa.');
+  }
 
   const { data: existing, error: existingError } = await supabase
     .from('pedidos')
@@ -1515,6 +1585,8 @@ export async function enviarListaParaConferencia(
     .insert({
       empresa,
       flag,
+      tipo,
+      empresa_destino: empresaDestino,
       titulo: String(payload.titulo ?? '').trim() || `Lista ${payload.pessoa || 'sem nome'}`,
       pessoa: String(payload.pessoa ?? '').trim() || null,
       listeiro: String(payload.pessoa ?? '').trim() || null,
@@ -1721,6 +1793,11 @@ export async function gerarPedidoPendentes(params: {
   empresa: string;
   flag: string;
   pessoa: string;
+  // Herdados do pedido que acabou de ser conferido: um pendente de
+  // transferencia continua sendo daquela transferencia, senao vira reposicao
+  // da loja que separou e o destinatario perde o item de vista.
+  tipo?: TipoPedido;
+  empresaDestino?: string | null;
   itens: FecharConferenciaItemPayload[];
 }): Promise<string | null> {
   if (!isSupabaseConfigured) return null;
@@ -1730,19 +1807,29 @@ export async function gerarPedidoPendentes(params: {
 
   const empresa = normalizarEmpresa(params.empresa);
   const flag = normalizarFlag(params.flag);
+  const tipo = normalizarTipoPedido(params.tipo);
+  const empresaDestinoBruto = tipo === 'transferencia' ? normalizarEmpresaOpcional(params.empresaDestino) : null;
+  // Sem destino valido nao da pra manter como transferencia (a constraint
+  // recusaria); cai para reposicao em vez de perder os pendentes.
+  const ehTransferencia = tipo === 'transferencia' && !!empresaDestinoBruto && empresaDestinoBruto !== empresa;
+  const empresaDestino = ehTransferencia ? empresaDestinoBruto : null;
   const pessoa = String(params.pessoa ?? '').trim();
   const dataLabel = new Intl.DateTimeFormat('pt-BR', {
     timeZone: 'America/Sao_Paulo',
     dateStyle: 'short',
     timeStyle: 'short',
   }).format(new Date());
-  const titulo = `⏳ ${pessoa || 'Sem nome'} — ${dataLabel} — PENDENTES`;
+  const titulo = ehTransferencia
+    ? `⏳ ${empresa} → ${empresaDestino} — ${pessoa || 'Sem nome'} — ${dataLabel} — PENDENTES`
+    : `⏳ ${pessoa || 'Sem nome'} — ${dataLabel} — PENDENTES`;
 
   const { data: pedido, error: pedidoError } = await supabase
     .from('pedidos')
     .insert({
       empresa,
       flag,
+      tipo: ehTransferencia ? 'transferencia' : 'reposicao',
+      empresa_destino: empresaDestino,
       titulo,
       pessoa: pessoa || null,
       listeiro: pessoa || null,

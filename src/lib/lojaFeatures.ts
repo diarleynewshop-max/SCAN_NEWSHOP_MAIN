@@ -4,7 +4,7 @@
 // "essa loja usa?". As duas travas sao independentes e ambas precisam passar:
 // um admin da SEFULY tem permissao `sugestao_cd`, mas a SEFULY nao opera CD.
 
-export type LojaFeature = "sugestao_cd" | "pdv_prevenda";
+export type LojaFeature = "sugestao_cd" | "pdv_prevenda" | "transferencia_loja";
 
 type LoginLike = {
   empresa?: string | null;
@@ -26,12 +26,18 @@ const SEM_SUGESTAO_CD = new Set(["SEFULY"]);
 // SYSpdv/Casa Magalhaes). Ver src/lib/pdvPrevenda.ts.
 const COM_PDV_PREVENDA = new Set(["SEFULY"]);
 
+// Lojas que participam da transferencia entre lojas (migration 047).
+// SEFULY fica de fora: opera pre-venda direta no PDV, nao troca mercadoria
+// com as outras lojas.
+const COM_TRANSFERENCIA_LOJA = new Set(["NEWSHOP", "SOYE", "FACIL"]);
+
 export function lojaTemFeature(empresa: unknown, feature: LojaFeature): boolean {
   const chave = normalizarEmpresa(empresa);
-  if (!chave) return feature !== "pdv_prevenda";
+  if (!chave) return feature !== "pdv_prevenda" && feature !== "transferencia_loja";
 
   if (feature === "sugestao_cd") return !SEM_SUGESTAO_CD.has(chave);
   if (feature === "pdv_prevenda") return COM_PDV_PREVENDA.has(chave);
+  if (feature === "transferencia_loja") return COM_TRANSFERENCIA_LOJA.has(chave);
   return true;
 }
 

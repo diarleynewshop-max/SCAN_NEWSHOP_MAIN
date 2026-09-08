@@ -1,5 +1,5 @@
 ﻿import { useNavigate, useSearchParams } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw, MessageSquareText, KeyRound } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw, MessageSquareText, KeyRound, Repeat2 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLoginContext } from "@/hooks/useAuth";
@@ -52,6 +52,8 @@ const comprasMenuItems: Array<{ Icon: LucideIcon; label: string; description: st
   { Icon: ShoppingCart, label: "Compras",     description: "Gestão de reposição e itens faltantes", path: "/compras", accent: "hsl(var(--indigo))", permission: "compras" },
   // `lojaFeature` esconde o card em lojas que nao operam o recurso (SEFULY nao tem CD).
   { Icon: Boxes,        label: "Sugestao do CD", description: "Itens do CD para sugerir envio para a loja", path: "/sugestao-cd", accent: "hsl(var(--warning))", permission: "sugestao_cd", lojaFeature: "sugestao_cd" },
+  // Tela separada de proposito: transferencia entre lojas NAO e pedido pro CD.
+  { Icon: Repeat2,      label: "Transferencia", description: "Mandar ou pedir mercadoria de outra loja", path: "/transferencias", accent: "hsl(var(--violet))", permission: "transferencia", lojaFeature: "transferencia_loja" },
 ];
 
 // Menu para analytics (admin, super)

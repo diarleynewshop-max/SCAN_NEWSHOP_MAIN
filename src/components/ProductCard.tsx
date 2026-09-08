@@ -34,6 +34,9 @@ export interface ListData {
   closedAt?: Date;
   status: "open" | "yellow" | "green" | "red";
   flag: ListFlag; // "loja" | "cd"
+  // So em transferencia entre lojas: `empresa` e quem SEPARA (origem) e este
+  // campo e quem RECEBE. Vazio no fluxo normal de lista/pedido.
+  transferenciaDestino?: string | null;
   clientePdv?: ClientePdv | null;
   sentToConference?: boolean; // true depois do primeiro envio bem-sucedido
 }

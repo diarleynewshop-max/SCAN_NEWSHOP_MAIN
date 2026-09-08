@@ -58,6 +58,7 @@ import {
 import { enviarConferenciaParaSupabase } from "@/lib/pedidosSupabase";
 import { descreverFalhaPrevenda, enfileirarPrevendaConferencia } from "@/lib/pdvFila";
 import { lojaEnviaPrevendaParaPdv } from "@/lib/lojaFeatures";
+import { rotuloLoja } from "@/lib/transferencias";
 import { supabase } from "@/lib/supabaseClient";
 import { obterLoginSalvo } from "@/hooks/useAuth";
 import type { ClientePdv } from "@/lib/erpClientes";
@@ -1770,6 +1771,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           empresa,
           flag,
           pessoa: listeiro || conferente,
+          // Pendente de transferencia continua sendo daquela transferencia,
+          // senao vira reposicao da loja que separou e o destino perde o item.
+          tipo: taskSelecionada?.tipo,
+          empresaDestino: taskSelecionada?.empresaDestino,
           itens: itensFechamento,
         });
         if (pedidoPendentesId) {
@@ -2700,6 +2705,7 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           {tasks.map((task) => {
             const isLoading = loadingJson && taskSelecionada?.id === task.id;
             const emAndamento = task.emAndamento === true;
+            const ehTransferencia = task.tipo === "transferencia" && !!task.empresaDestino;
             const tituloPedido = formatarTituloPedido(task.name, task.numeroPedido);
             const data = task.date_created
               ? new Date(Number(task.date_created)).toLocaleString("pt-BR", { timeZone: "America/Fortaleza", day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit" })
@@ -2721,10 +2727,20 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <p className="text-sm font-bold text-foreground truncate">{tituloPedido}</p>
+                    {ehTransferencia && (
+                      <span className="text-[10px] font-black px-1.5 py-0.5 rounded bg-foreground text-background flex-shrink-0">
+                        ⇄ TRANSFERENCIA → {rotuloLoja(task.empresaDestino)}
+                      </span>
+                    )}
                     {emAndamento && (
                       <span className="text-[10px] font-bold px-1.5 py-0.5 rounded bg-warning/15 text-warning border border-warning/30 flex-shrink-0">🔒 EM ANDAMENTO</span>
                     )}
                   </div>
+                  {ehTransferencia && (
+                    <p className="mt-0.5 text-[11px] font-semibold text-muted-foreground">
+                      Separar aqui e mandar para {rotuloLoja(task.empresaDestino)} — nao e reposicao da loja.
+                    </p>
+                  )}
                   {data && <p className="text-xs text-muted-foreground mt-0.5">{data}</p>}
                   {task.clienteNome && (
                     <p className="mt-1 flex items-center gap-1 text-xs font-semibold text-muted-foreground">
