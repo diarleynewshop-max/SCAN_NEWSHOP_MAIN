@@ -16,9 +16,10 @@ export function EmpresaToggleSF() {
   }, []);
 
   if (!login) return null;
-  const elevado = login.role === "compras" || login.role === "admin" || login.role === "super";
-  if (!elevado) return null;
 
+  // Sem trava por role: quem tem so 1 loja permitida nunca ve o botao
+  // (CICLO.length < 2 abaixo ja cobre isso sozinho). Quem tem mais de uma
+  // loja pode trocar rapido, seja operador, compras, admin ou super.
   const CICLO: Empresa[] = login.role === "super"
     ? TODAS_EMPRESAS
     : login.empresasPermitidas && login.empresasPermitidas.length > 0

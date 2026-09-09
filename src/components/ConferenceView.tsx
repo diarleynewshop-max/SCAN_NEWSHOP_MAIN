@@ -390,6 +390,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
           photo: photo && !photo.startsWith("data:") ? photo : null,
         })),
         currentIndex, pedidoOrigemIds, taskOrigemIds, elapsedSeconds, apenasVisualizar,
+        // Sem isto, um reload no meio da conferencia (queda de conexao,
+        // troca de rede) perdia a reserva: fecharConferencia() nao achava
+        // pedidoId, tratava como conferencia "avulsa" e criava um pedido
+        // NOVO — o original ficava travado em "em_andamento" para sempre.
+        pedidoReservadoIds: pedidoReservadoIdsRef.current,
         clientePdv, clienteNomePedido,
         savedAt: Date.now(),
       };
@@ -422,6 +427,11 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
       setCurrentIndex(d.currentIndex ?? 0);
       setPedidoOrigemIds(d.pedidoOrigemIds ?? []);
       pedidoOrigemIdsRef.current = d.pedidoOrigemIds ?? [];
+      // Rascunhos salvos antes desta correcao nao tem pedidoReservadoIds —
+      // cai para pedidoOrigemIds (a reserva quase sempre e o proprio
+      // pedido de origem; so nao e quando a conferencia era so visualizacao).
+      pedidoReservadoIdsRef.current =
+        d.pedidoReservadoIds ?? (d.apenasVisualizar ? [] : d.pedidoOrigemIds ?? []);
       setTaskOrigemIds(d.taskOrigemIds ?? []);
       taskOrigemIdsRef.current = d.taskOrigemIds ?? [];
       setElapsedSeconds(d.elapsedSeconds ?? 0);
@@ -490,6 +500,10 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
   };
 
   const voltarLiberandoPedido = async () => {
+    // Veio da fila do Supabase (pickTask): guarda antes de liberarPedidoAtual
+    // zerar os IDs de origem, senao perdemos a informacao de onde voltar.
+    const veioDaFila = taskSelecionada !== null;
+
     try {
       await liberarPedidoAtual();
     } catch (e: any) {
@@ -498,6 +512,18 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
         description: e?.message ?? "Tente liberar o pedido novamente.",
         variant: "destructive",
       });
+      return;
+    }
+
+    setTaskSelecionada(null);
+
+    // Volta para a MESMA fila de conferencia em vez de jogar o conferente
+    // pra fora da tela (Index cai na aba "Lista", que e outra coisa). Sem
+    // isso, ao entrar em Conferencia de novo ele tinha que digitar a senha
+    // de novo so pra ver a fila outra vez.
+    if (veioDaFila) {
+      setPhase("pickTask");
+      void recarregarTasks();
       return;
     }
 
@@ -1681,7 +1707,13 @@ const ConferenceView = ({ onBack, empresa: empresaProp, flag: flagProp, modoDesk
     }
 
     setSendStatus("sending");
-    const pedidoId = pedidoReservadoIdsRef.current[0];
+    // Fallback para pedidoOrigemIds (mesmo padrao usado nas linhas 936 e
+    // 1579): depois de um reload no meio da conferencia, pedidoReservadoIds
+    // pode nao ter chegado a tempo de ser restaurado, mas o pedido de
+    // origem e o mesmo. Sem isso, o app tratava como conferencia "avulsa"
+    // (sem pedido) e criava um pedido NOVO, deixando o original preso em
+    // "em_andamento" pra sempre — o admin tinha que liberar na mao.
+    const pedidoId = pedidoReservadoIdsRef.current[0] ?? pedidoOrigemIdsRef.current[0];
     const itensFechamento = items.map((i) => ({
       id: i.id,
       codigo: i.codigo,
