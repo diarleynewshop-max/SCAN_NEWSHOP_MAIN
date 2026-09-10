@@ -7,6 +7,7 @@ export type CatalogoPedidoItem = {
   codigo: string;
   sku: string | null;
   descricao: string;
+  descricao_base: string | null;
   secao: string | null;
   foto_url: string | null;
   preco_unitario: number;
@@ -155,6 +156,7 @@ function normalizeItem(raw: unknown, index: number): CatalogoPedidoItem {
     codigo,
     sku: asString(pick(item, ["sku", "referencia"])) || null,
     descricao,
+    descricao_base: asString(pick(item, ["descricaoBase", "descricao_base"])) || null,
     secao: asString(pick(item, ["secao", "\u0073\u0065\u00e7\u00e3\u006f", "categoria"])) || null,
     foto_url: normalizePhoto(pick(item, ["foto", "fotoUrl", "foto_url", "imagem", "image"])),
     preco_unitario: Number(preco.toFixed(2)),
