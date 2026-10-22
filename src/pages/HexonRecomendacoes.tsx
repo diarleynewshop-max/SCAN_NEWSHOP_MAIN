@@ -292,39 +292,43 @@ export default function HexonRecomendacoes() {
               </header>
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
                 {grupo.itens.map((item) => (
-                  <article key={chaveItem(item)} className="overflow-hidden rounded-xl border bg-card shadow-sm">
+                  <article key={chaveItem(item)} className="flex h-full flex-col overflow-hidden rounded-xl border bg-card shadow-sm">
                     {item.fotoUrl ? (
-                      <img
-                        src={item.fotoUrl}
-                        alt={item.descricao}
-                        loading="lazy"
-                        className="h-44 w-full bg-muted object-contain p-2"
-                        onError={() => setItens((anteriores) => anteriores.map((atual) =>
-                          chaveItem(atual) === chaveItem(item) ? { ...atual, fotoUrl: null } : atual
-                        ))}
-                      />
+                      <div className="flex h-44 shrink-0 items-center justify-center bg-muted/50 p-2">
+                        <img
+                          src={item.fotoUrl}
+                          alt={item.descricao}
+                          loading="lazy"
+                          className="max-h-full max-w-full object-contain"
+                          onError={() => setItens((anteriores) => anteriores.map((atual) =>
+                            chaveItem(atual) === chaveItem(item) ? { ...atual, fotoUrl: null } : atual
+                          ))}
+                        />
+                      </div>
                     ) : (
-                      <div className="flex h-44 items-center justify-center bg-muted/50 text-muted-foreground">
+                      <div className="flex h-44 shrink-0 items-center justify-center bg-muted/50 text-muted-foreground">
                         <ImageOff className="h-8 w-8" aria-label="Foto indisponivel" />
                       </div>
                     )}
-                    <div className="p-4">
+                    <div className="flex flex-1 flex-col p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
                           <span className="inline-flex rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">Reposição</span>
-                          <h3 className="mt-2 break-words font-semibold">{item.descricao}</h3>
+                          <h3 className="mt-2 line-clamp-2 min-h-10 break-words font-semibold leading-5" title={item.descricao}>{item.descricao}</h3>
                         </div>
                         <span className="shrink-0 rounded-lg bg-muted px-2.5 py-1 text-sm font-bold">Qtd. {item.quantidade}</span>
                       </div>
                       <dl className="mt-3 space-y-1.5 text-xs text-muted-foreground">
-                        <div><dt className="inline font-medium text-foreground">EAN: </dt><dd className="inline">{item.ean || "Nao informado"}</dd></div>
-                        <div><dt className="inline font-medium text-foreground">Lote: </dt><dd className="inline break-all">{item.lote}</dd></div>
-                        <div><dt className="inline font-medium text-foreground">{item.origem === "entrada_recente" ? "Conferência: " : "Recebido: "}</dt><dd className="inline">{dataLegivel(item.criadoEm)}</dd></div>
+                        <div className="flex min-w-0 gap-1"><dt className="shrink-0 font-medium text-foreground">EAN:</dt><dd className="min-w-0 truncate" title={item.ean || "Não informado"}>{item.ean || "Não informado"}</dd></div>
+                        <div className="flex min-w-0 gap-1"><dt className="shrink-0 font-medium text-foreground">Lote:</dt><dd className="min-w-0 truncate" title={item.lote}>{item.lote}</dd></div>
+                        <div className="flex min-w-0 gap-1"><dt className="shrink-0 font-medium text-foreground">{item.origem === "entrada_recente" ? "Conferência:" : "Recebido:"}</dt><dd className="min-w-0 truncate" title={dataLegivel(item.criadoEm)}>{dataLegivel(item.criadoEm)}</dd></div>
                         {!item.encontrado && <div className="pt-1 font-semibold text-destructive">Item nao localizado na separacao.</div>}
                       </dl>
-                      <Button className="mt-4 w-full" size="sm" onClick={() => abrirPedido(item)} disabled={!item.loja}>
-                        <ShoppingCart /> Fazer pedido
-                      </Button>
+                      <div className="mt-auto pt-4">
+                        <Button className="w-full" size="sm" onClick={() => abrirPedido(item)} disabled={!item.loja}>
+                          <ShoppingCart /> Fazer pedido
+                        </Button>
+                      </div>
                     </div>
                   </article>
                 ))}
