@@ -634,6 +634,41 @@ const resolverProdutoErp = async (
   return { produto, eanResolvido };
 };
 
+const fotoProdutoLookupCache = new Map<string, Promise<string | null>>();
+
+export const buscarFotoProdutoVarejoFacil = async (
+  codigo: string,
+  contexto: VarejoFacilLookupContext = {}
+): Promise<string | null> => {
+  const codigoLimpo = codigo.trim();
+  if (!codigoLimpo) return null;
+
+  const empresa = normalizarEmpresaVarejoFacil(contexto.empresa);
+  const cacheKey = `${empresa}:${codigoLimpo}`;
+  const cached = fotoProdutoLookupCache.get(cacheKey);
+  if (cached) return cached;
+
+  const lookup = resolverProdutoErp(codigoLimpo, { ...contexto, empresa })
+    .then((resolvido) => {
+      if (!resolvido?.produto.id) return null;
+      const imagemOriginal = extrairImagemProduto(resolvido.produto);
+      return imagemOriginal
+        ? resolverImagemProduto(imagemOriginal, resolvido.produto.id, { ...contexto, empresa }) ?? null
+        : null;
+    })
+    .then((foto) => {
+      if (!foto) fotoProdutoLookupCache.delete(cacheKey);
+      return foto;
+    })
+    .catch((error) => {
+      fotoProdutoLookupCache.delete(cacheKey);
+      throw error;
+    });
+
+  fotoProdutoLookupCache.set(cacheKey, lookup);
+  return lookup;
+};
+
 const montarProdutoVarejoFacil = async (
   produto: ErpProduto,
   eanResolvido: string,

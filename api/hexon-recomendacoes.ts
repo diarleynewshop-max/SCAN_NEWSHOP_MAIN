@@ -100,6 +100,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
           criadoEm: texto(lote.createdAt) || null,
           descricao: texto(item.itemDescricao) || texto(item.descricao) || "Item sem descricao",
           ean: texto(item.ean) || null,
+          externalItemRef: texto(item.externalItemRef) || null,
           quantidade: Math.max(0, Number(item.quantidade) || 0),
           encontrado: item.encontrado !== false,
         };
