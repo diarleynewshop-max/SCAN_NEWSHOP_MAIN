@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Building2, ImageOff, Loader2, PackageSearch, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { buscarFotoProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
+import { buscarReposicoesRecentes } from "@/lib/pedidosSupabase";
 
 type Loja = "NEWSHOP" | "FACIL" | "SOYE";
 type Recomendacao = {
@@ -18,6 +19,7 @@ type Recomendacao = {
   quantidade: number;
   encontrado: boolean;
   fotoUrl?: string | null;
+  origem?: "hexon" | "entrada_recente";
 };
 
 const GRUPOS_LOJA: Array<{ id: Loja | "SEM_LOJA"; label: string }> = [
@@ -41,12 +43,14 @@ export default function HexonRecomendacoes() {
   const [itens, setItens] = useState<Recomendacao[]>([]);
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
+  const [usandoHistorico, setUsandoHistorico] = useState(false);
   const requisicaoRef = useRef(0);
 
   const carregarFotos = useCallback((lista: Recomendacao[], requisicao: number) => {
     const porLojaECodigo = new Map<string, { empresa: Loja; codigo: string; itens: Recomendacao[] }>();
     for (const item of lista) {
       const codigo = item.ean || item.externalItemRef || "";
+      if (item.fotoUrl) continue;
       if (!codigo || !item.loja) continue;
       const chave = `${item.loja}:${codigo}`;
       const existente = porLojaECodigo.get(chave);
@@ -90,8 +94,33 @@ export default function HexonRecomendacoes() {
       if (!response.ok) throw new Error(body?.error || `Falha ao consultar Hexon (${response.status}).`);
       if (requisicao !== requisicaoRef.current) return;
       const resultado = Array.isArray(body?.result) ? body.result as Recomendacao[] : [];
-      setItens(resultado);
-      carregarFotos(resultado, requisicao);
+      if (resultado.length > 0) {
+        setItens(resultado.map((item) => ({ ...item, origem: "hexon" })));
+        setUsandoHistorico(false);
+        carregarFotos(resultado, requisicao);
+      } else {
+        const recentes = await buscarReposicoesRecentes();
+        if (requisicao !== requisicaoRef.current) return;
+        const reposicoes: Recomendacao[] = recentes.map((item) => ({
+          id: item.id,
+          loteId: item.pedidoId,
+          lote: "Reposição registrada na conferência",
+          externalRef: item.pedidoId,
+          destino: item.empresa,
+          loja: item.empresa as Loja,
+          criadoEm: item.dataConferencia,
+          descricao: item.descricao,
+          ean: item.codigo,
+          externalItemRef: item.sku,
+          quantidade: item.quantidade,
+          encontrado: true,
+          fotoUrl: item.fotoUrl,
+          origem: "entrada_recente",
+        }));
+        setItens(reposicoes);
+        setUsandoHistorico(true);
+        carregarFotos(reposicoes, requisicao);
+      }
     } catch (error) {
       if (requisicao === requisicaoRef.current) {
         setErro(error instanceof Error ? error.message : "Nao foi possivel carregar as recomendacoes.");
@@ -118,7 +147,7 @@ export default function HexonRecomendacoes() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Recomendacoes Hexon</h1>
-          <p className="mt-1 text-sm text-muted-foreground">Somente itens de reposicao, separados por loja.</p>
+          <p className="mt-1 text-sm text-muted-foreground">Reposições recentes separadas por loja.</p>
         </div>
         <Button onClick={() => void carregar()} disabled={carregando} variant="outline" className="gap-2">
           {carregando ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
@@ -168,7 +197,7 @@ export default function HexonRecomendacoes() {
                     <div className="p-4">
                       <div className="flex items-start justify-between gap-3">
                         <div className="min-w-0">
-                          <span className="inline-flex rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">Reposicao</span>
+                          <span className="inline-flex rounded-full bg-primary/10 px-2.5 py-1 text-xs font-semibold text-primary">Reposição</span>
                           <h3 className="mt-2 break-words font-semibold">{item.descricao}</h3>
                         </div>
                         <span className="shrink-0 rounded-lg bg-muted px-2.5 py-1 text-sm font-bold">Qtd. {item.quantidade}</span>
@@ -176,7 +205,7 @@ export default function HexonRecomendacoes() {
                       <dl className="mt-3 space-y-1.5 text-xs text-muted-foreground">
                         <div><dt className="inline font-medium text-foreground">EAN: </dt><dd className="inline">{item.ean || "Nao informado"}</dd></div>
                         <div><dt className="inline font-medium text-foreground">Lote: </dt><dd className="inline break-all">{item.lote}</dd></div>
-                        <div><dt className="inline font-medium text-foreground">Recebido: </dt><dd className="inline">{dataLegivel(item.criadoEm)}</dd></div>
+                        <div><dt className="inline font-medium text-foreground">{item.origem === "entrada_recente" ? "Conferência: " : "Recebido: "}</dt><dd className="inline">{dataLegivel(item.criadoEm)}</dd></div>
                         {!item.encontrado && <div className="pt-1 font-semibold text-destructive">Item nao localizado na separacao.</div>}
                       </dl>
                     </div>
@@ -188,7 +217,11 @@ export default function HexonRecomendacoes() {
         </div>
       )}
 
-      <p className="text-xs text-muted-foreground">Exibindo somente itens com status reposicao do Hexon. Fotos carregam do cadastro do ERP quando o produto e localizado.</p>
+      <p className="text-xs text-muted-foreground">
+        {usandoHistorico
+          ? "Sem reposições pendentes no Hexon. Exibindo itens encontrados nas conferências das lojas nos últimos 14 dias; esses itens são enviados ao Hexon como reposição."
+          : "Exibindo somente itens marcados como reposição no Hexon. Fotos carregam do cadastro do ERP quando o produto é localizado."}
+      </p>
     </main>
   );
 }

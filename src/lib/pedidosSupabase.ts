@@ -132,12 +132,25 @@ interface PedidoItemRow {
   pedido_id: string;
   codigo: string;
   sku: string | null;
+  descricao: string | null;
   secao: string | null;
   quantidade_pedida: number | null;
   quantidade_real: number | null;
   status: ConferenceStatusSupabase;
   foto_url: string | null;
   ordem: number | null;
+}
+
+export interface ReposicaoRecente {
+  id: string;
+  pedidoId: string;
+  empresa: string;
+  dataConferencia: string;
+  descricao: string;
+  codigo: string;
+  sku: string | null;
+  quantidade: number;
+  fotoUrl: string | null;
 }
 
 function normalizarEmpresa(value: unknown): EmpresaKey {
@@ -298,6 +311,61 @@ export async function enviarConferenciaParaSupabase(payload: EnviarConferenciaSu
     await supabase.from('pedidos').delete().eq('id', pedidoId);
     throw error;
   }
+}
+
+/** Itens encontrados em conferencias de loja concluidas nos ultimos 14 dias.
+ * Sao os mesmos itens positivos enviados ao Hexon como reposicao.
+ */
+export async function buscarReposicoesRecentes(): Promise<ReposicaoRecente[]> {
+  if (!isSupabaseConfigured) throw new Error('Supabase nao configurado para consultar entradas recentes.');
+
+  const limite = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000)
+    .toLocaleDateString('en-CA', { timeZone: 'America/Sao_Paulo' });
+  const pedidos = await selectAll<Pick<PedidoRow, 'id' | 'empresa' | 'data_conferencia'>>(() => supabase
+    .from('pedidos')
+    .select('id,empresa,data_conferencia')
+    .in('empresa', ['NEWSHOP', 'FACIL', 'SOYE'])
+    .eq('flag', 'loja')
+    .eq('status', 'concluido')
+    .gte('data_conferencia', limite)
+    .order('data_conferencia', { ascending: false })
+    .limit(2000));
+
+  if (pedidos.length === 0) return [];
+
+  const porPedido = new Map(pedidos.map((pedido) => [pedido.id, pedido]));
+  const itens: ReposicaoRecente[] = [];
+  for (const ids of chunk(pedidos.map((pedido) => pedido.id), 200)) {
+    const rows = await selectAll<Pick<PedidoItemRow, 'id' | 'pedido_id' | 'codigo' | 'sku' | 'descricao' | 'quantidade_real' | 'status' | 'foto_url'>>(() => supabase
+      .from('pedido_itens')
+      .select('id,pedido_id,codigo,sku,descricao,quantidade_real,status,foto_url')
+      .in('pedido_id', ids)
+      .in('status', ['separado', 'nao_tem_tudo'])
+      .gt('quantidade_real', 0));
+
+    for (const item of rows) {
+      const pedido = porPedido.get(item.pedido_id);
+      const quantidade = Number(item.quantidade_real) || 0;
+      if (!pedido || quantidade <= 0) continue;
+      itens.push({
+        id: item.id,
+        pedidoId: pedido.id,
+        empresa: pedido.empresa,
+        dataConferencia: pedido.data_conferencia,
+        descricao: textoSeguro(item.descricao) || item.sku || item.codigo,
+        codigo: item.codigo,
+        sku: item.sku,
+        quantidade,
+        fotoUrl: item.foto_url,
+      });
+    }
+  }
+
+  return itens.sort((a, b) => b.dataConferencia.localeCompare(a.dataConferencia));
+}
+
+function textoSeguro(value: unknown): string {
+  return String(value ?? '').trim();
 }
 
 export async function listarDatasComConferencia(
