@@ -1,6 +1,18 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Building2, ImageOff, Loader2, PackageSearch, RefreshCw } from "lucide-react";
+import { Building2, ImageOff, Loader2, PackageSearch, RefreshCw, ShoppingCart } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { useAuth } from "@/hooks/useAuth";
+import { useToast } from "@/hooks/use-toast";
+import { enviarListaParaConferencia } from "@/lib/pedidosFila";
 import { buscarFotoProdutoVarejoFacil } from "@/lib/varejoFacilIntegration";
 import { buscarReposicoesRecentes } from "@/lib/pedidosSupabase";
 
@@ -44,7 +56,80 @@ export default function HexonRecomendacoes() {
   const [carregando, setCarregando] = useState(true);
   const [erro, setErro] = useState("");
   const [usandoHistorico, setUsandoHistorico] = useState(false);
+  const [pedidoRecomendacao, setPedidoRecomendacao] = useState<Recomendacao | null>(null);
+  const [quantidadePedido, setQuantidadePedido] = useState(1);
+  const [criandoPedido, setCriandoPedido] = useState(false);
+  const { loginSalvo } = useAuth();
+  const { toast } = useToast();
   const requisicaoRef = useRef(0);
+
+  const abrirPedido = (item: Recomendacao) => {
+    setQuantidadePedido(Math.max(1, Math.trunc(item.quantidade || 1)));
+    setPedidoRecomendacao(item);
+  };
+
+  const confirmarPedido = async () => {
+    if (!pedidoRecomendacao || criandoPedido) return;
+    const loja = pedidoRecomendacao.loja;
+    const codigo = pedidoRecomendacao.ean || pedidoRecomendacao.externalItemRef || "";
+    const quantidade = Math.trunc(Number(quantidadePedido));
+    const empresasPermitidas = loginSalvo?.empresasPermitidas?.length
+      ? loginSalvo.empresasPermitidas
+      : loginSalvo ? [loginSalvo.empresa] : [];
+
+    if (!loginSalvo) {
+      toast({ title: "Entre novamente", description: "Seu login não foi encontrado.", variant: "destructive" });
+      return;
+    }
+    if (!loja || !empresasPermitidas.includes(loja)) {
+      toast({ title: "Sem acesso à loja", description: "Você não tem permissão para criar pedido nessa loja.", variant: "destructive" });
+      return;
+    }
+    if (!codigo) {
+      toast({ title: "Código do item ausente", description: "Não foi possível identificar o produto para criar o pedido.", variant: "destructive" });
+      return;
+    }
+    if (!Number.isFinite(quantidade) || quantidade < 1) {
+      toast({ title: "Quantidade inválida", description: "Informe uma quantidade maior que zero.", variant: "destructive" });
+      return;
+    }
+
+    setCriandoPedido(true);
+    try {
+      const resultado = await enviarListaParaConferencia({
+        flag: "loja",
+        empresa: loja,
+        tipo: "reposicao",
+        pessoa: loginSalvo.nomePessoa,
+        titulo: `Reposição recomendada - ${pedidoRecomendacao.descricao}`,
+        totalItens: 1,
+        dataCriacao: new Date().toISOString(),
+        conferenceId: `recomendacao-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+        produtos: [{
+          barcode: codigo,
+          sku: "",
+          quantidade,
+          removeTag: false,
+          photo: pedidoRecomendacao.fotoUrl || null,
+          description: pedidoRecomendacao.descricao,
+        }],
+      });
+      if (!resultado) throw new Error("Não foi possível salvar o pedido.");
+      toast({
+        title: "Pedido enviado para conferência",
+        description: `${pedidoRecomendacao.descricao} · ${quantidade} un. · ${loja}`,
+      });
+      setPedidoRecomendacao(null);
+    } catch (error) {
+      toast({
+        title: "Falha ao criar pedido",
+        description: error instanceof Error ? error.message : "Tente novamente.",
+        variant: "destructive",
+      });
+    } finally {
+      setCriandoPedido(false);
+    }
+  };
 
   const carregarFotos = useCallback((lista: Recomendacao[], requisicao: number) => {
     const porLojaECodigo = new Map<string, { empresa: Loja; codigo: string; itens: Recomendacao[] }>();
@@ -144,6 +229,35 @@ export default function HexonRecomendacoes() {
 
   return (
     <main className="mx-auto w-full max-w-6xl space-y-5 p-4 md:p-6">
+      <Dialog open={Boolean(pedidoRecomendacao)} onOpenChange={(aberto) => { if (!aberto && !criandoPedido) setPedidoRecomendacao(null); }}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Fazer pedido</DialogTitle>
+            <DialogDescription>
+              {pedidoRecomendacao?.descricao} · {pedidoRecomendacao?.loja || "Loja não identificada"}
+            </DialogDescription>
+          </DialogHeader>
+          <label className="space-y-2 text-sm font-medium" htmlFor="quantidade-recomendacao">
+            Quantidade
+            <Input
+              id="quantidade-recomendacao"
+              type="number"
+              min={1}
+              step={1}
+              value={quantidadePedido}
+              onChange={(event) => setQuantidadePedido(Number(event.target.value))}
+              autoFocus
+            />
+          </label>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPedidoRecomendacao(null)} disabled={criandoPedido}>Cancelar</Button>
+            <Button onClick={() => void confirmarPedido()} disabled={criandoPedido || !pedidoRecomendacao?.loja}>
+              {criandoPedido ? <Loader2 className="animate-spin" /> : <ShoppingCart />}
+              {criandoPedido ? "Enviando..." : "Criar pedido"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Recomendacoes Hexon</h1>
@@ -208,6 +322,9 @@ export default function HexonRecomendacoes() {
                         <div><dt className="inline font-medium text-foreground">{item.origem === "entrada_recente" ? "Conferência: " : "Recebido: "}</dt><dd className="inline">{dataLegivel(item.criadoEm)}</dd></div>
                         {!item.encontrado && <div className="pt-1 font-semibold text-destructive">Item nao localizado na separacao.</div>}
                       </dl>
+                      <Button className="mt-4 w-full" size="sm" onClick={() => abrirPedido(item)} disabled={!item.loja}>
+                        <ShoppingCart /> Fazer pedido
+                      </Button>
                     </div>
                   </article>
                 ))}
