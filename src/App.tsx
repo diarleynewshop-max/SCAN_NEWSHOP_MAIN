@@ -4,14 +4,13 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
 import { ProtectedRoute } from "@/components/ProtectedRoute";
 import { DesktopShell } from "@/components/DesktopShell";
 
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import TourGuide from "@/components/TourGuide";
 import { AppUpdateManager } from "@/components/AppUpdateManager";
-import { FeedbackPrompt } from "@/components/FeedbackPrompt";
 import { useAuth } from "@/hooks/useAuth";
 import { loginEhSefuly } from "@/lib/lojaFeatures";
 
@@ -28,9 +27,6 @@ const Perfil = lazy(() => import("./pages/Perfil"));
 const MeusPedidos = lazy(() => import("./pages/MeusPedidos"));
 const Transferencias = lazy(() => import("./pages/Transferencias"));
 const Usuarios = lazy(() => import("./pages/Usuarios"));
-const Chat = lazy(() => import("./pages/Chat"));
-const Notificacoes = lazy(() => import("./pages/Notificacoes"));
-const Feedback = lazy(() => import("./pages/Feedback"));
 const ApiEstoque = lazy(() => import("./pages/ApiEstoque"));
 const HexonRecomendacoes = lazy(() => import("./pages/HexonRecomendacoes"));
 
@@ -62,7 +58,6 @@ const App = () => {
 
       <BrowserRouter>
         <AppUpdateManager />
-        <FeedbackPrompt />
         {/* TourGuide DENTRO do Router para useLocation funcionar */}
         <TourGuide />
         <Suspense fallback={<div className="p-4 text-sm text-muted-foreground">Carregando...</div>}>
@@ -112,17 +107,8 @@ const App = () => {
               </ProtectedRoute>
             } />
 
-            <Route path="/chat" element={
-              <ProtectedRoute requiredPermission="notificacoes">
-                <DesktopShell pageTitle="Chat"><Chat /></DesktopShell>
-              </ProtectedRoute>
-            } />
-
-            <Route path="/notificacoes" element={
-              <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
-                <DesktopShell pageTitle="Notificacoes"><Notificacoes /></DesktopShell>
-              </ProtectedRoute>
-            } />
+            <Route path="/chat" element={<Navigate to="/" replace />} />
+            <Route path="/notificacoes" element={<Navigate to="/" replace />} />
 
             <Route path="/recomendacoes-hexon" element={
               <ProtectedRoute requiredPermission="scanner">
@@ -161,11 +147,7 @@ const App = () => {
               </ProtectedRoute>
             } />
 
-            <Route path="/feedback" element={
-              <ProtectedRoute requiredRole="super">
-                <DesktopShell pageTitle="Feedback"><Feedback /></DesktopShell>
-              </ProtectedRoute>
-            } />
+            <Route path="/feedback" element={<Navigate to="/" replace />} />
 
             <Route path="/api-estoque" element={
               <ProtectedRoute requiredRole="super">

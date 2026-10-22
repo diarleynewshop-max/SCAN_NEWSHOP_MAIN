@@ -4,7 +4,7 @@ import {
   ScanBarcode, ClipboardList, GitCompare, BadgeDollarSign,
   Package, ShoppingCart, BarChart3, Users, User, Settings, Boxes,
   ChevronDown, ChevronRight, LogOut, Menu, Home as HomeIcon,
-  MessageSquare, Bell, MessageSquareText, KeyRound,
+  PackageSearch, KeyRound,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import type { LoginData } from "@/hooks/useAuth";
@@ -112,8 +112,7 @@ export function ErpLayout({
         ...((flag === 'loja' || isPriv) ? [{ icon: Package, label: "Meus Pedidos", path: "/meus-pedidos" }] : []),
         ...((flag === 'cd' || isPriv) ? [{ icon: GitCompare, label: "Conferência", path: "/scanner?tab=conference" }] : []),
         { icon: BadgeDollarSign, label: "Consulta Preço", path: "/consulta-preco" },
-        { icon: MessageSquare, label: "Chat", path: "/chat" },
-        { icon: Bell, label: "Notificações", path: "/notificacoes" },
+        { icon: PackageSearch, label: "Recomendações", path: "/recomendacoes-hexon" },
       ],
     },
     ...(!isSefuly && isPriv ? [{
@@ -130,7 +129,6 @@ export function ErpLayout({
       label: "Admin",
       items: [
         { icon: Users, label: "Usuarios", path: "/usuarios" },
-        ...(isSuper ? [{ icon: MessageSquareText, label: "Feedback", path: "/feedback" }] : []),
         ...(isSuper ? [{ icon: KeyRound, label: "API Estoque", path: "/api-estoque" }] : []),
       ],
     }] : []),

@@ -1,5 +1,5 @@
 ﻿import { useNavigate, useSearchParams } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw, MessageSquareText, KeyRound, Repeat2, PackageSearch } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, RefreshCw, KeyRound, Repeat2, PackageSearch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLoginContext } from "@/hooks/useAuth";
@@ -40,9 +40,7 @@ const baseMenuItems: Array<{ Icon: LucideIcon; label: string; description: strin
   { Icon: BadgeDollarSign, label: "Consulta Preço", description: "Consulte varejo, atacado e grupo", path: "/consulta-preco", accent: "hsl(var(--warning))", permission: "consulta_preco" },
   { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))", permission: "lista" },
   { Icon: Package,      label: "Meus Pedidos", description: "Acompanhe o status dos seus pedidos",  path: "/meus-pedidos",              accent: "hsl(var(--indigo))", permission: "fazer_pedido" },
-  { Icon: Bell,         label: "Notificações", description: "Trocas, avisos e mensagens",          path: "/notificacoes",              accent: "hsl(var(--warning))", permission: "notificacoes" },
-  { Icon: PackageSearch, label: "Recomendações Hexon", description: "Veja reposições destinadas às lojas", path: "/recomendacoes-hexon", accent: "hsl(var(--indigo))", permission: "scanner" },
-  { Icon: MessageSquare, label: "Chat",        description: "Converse com a equipe",               path: "/chat",                      accent: "hsl(var(--success))", permission: "chat" },
+  { Icon: PackageSearch, label: "Recomendações", description: "Veja reposições destinadas às lojas", path: "/recomendacoes-hexon", accent: "hsl(var(--indigo))", permission: "scanner" },
   { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))", permission: "conferencia" },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },
   { Icon: Settings,     label: "Configuração", description: "Tema, layout e Modo Leve", path: null, accent: "hsl(var(--indigo))" },
@@ -64,7 +62,6 @@ const analyticsMenuItems: Array<{ Icon: LucideIcon; label: string; description: 
 
 const adminMenuItems: Array<{ Icon: LucideIcon; label: string; description: string; path: string; accent: string; permission: AccessPermission }> = [
   { Icon: Shield, label: "Usuários", description: "Cadastro e acesso por loja", path: "/usuarios", accent: "hsl(var(--destructive))", permission: "usuarios" },
-  { Icon: MessageSquareText, label: "Feedback", description: "Notas e sugestões dos usuários", path: "/feedback", accent: "hsl(var(--primary))", permission: "feedback" },
   { Icon: KeyRound, label: "API Estoque", description: "Chave para conectar outra IA ao estoque", path: "/api-estoque", accent: "hsl(var(--warning))", permission: "feedback" },
 ];
 
@@ -1554,26 +1551,6 @@ const Home = ({ loginOnly = false }: HomeProps) => {
                     }}
                   >
                     <Shield style={{ width: 17, height: 17 }} /> Abrir Usuarios
-                  </button>
-                </div>
-              )}
-
-              {loginSalvo?.role === "super" && (
-                <div style={{ background: "hsl(var(--secondary))", border: "1px solid hsl(var(--border))", borderRadius: 10, padding: "16px" }}>
-                  <p style={{ fontSize: 13, fontWeight: 600, color: "hsl(var(--foreground))", marginBottom: 10 }}>Feedback do SCAN</p>
-                  <button
-                    onClick={() => {
-                      setMostrarConfiguracoes(false);
-                      navigate("/feedback");
-                    }}
-                    style={{
-                      width: "100%", height: 44, background: "hsl(var(--primary))",
-                      color: "hsl(var(--primary-foreground))", border: "none",
-                      borderRadius: 10, fontFamily: "var(--font-sans)", fontSize: 13, fontWeight: 800,
-                      cursor: "pointer", display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
-                    }}
-                  >
-                    <MessageSquareText style={{ width: 17, height: 17 }} /> Abrir Feedback
                   </button>
                 </div>
               )}
