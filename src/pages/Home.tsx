@@ -1,5 +1,5 @@
 ﻿import { useNavigate, useSearchParams } from "react-router-dom";
-import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw, MessageSquareText, KeyRound, Repeat2 } from "lucide-react";
+import { ScanBarcode, ClipboardList, GitCompare, Trash2, AlertTriangle, Eye, EyeOff, Store, User, ShoppingCart, BarChart3, Settings, Moon, Sun, Monitor, Smartphone, BadgeDollarSign, Download, Shield, Package, Loader2, Boxes, MessageSquare, Bell, RefreshCw, MessageSquareText, KeyRound, Repeat2, PackageSearch } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import { useState, useEffect, useRef } from "react";
 import { useAuth, type Empresa, type LoginFlag, type LoginResult, type UsuarioLoginContext } from "@/hooks/useAuth";
@@ -41,6 +41,7 @@ const baseMenuItems: Array<{ Icon: LucideIcon; label: string; description: strin
   { Icon: ClipboardList, label: "Lista",       description: "Visualize e gerencie o histórico",    path: "/scanner?tab=list",          accent: "hsl(var(--success))", permission: "lista" },
   { Icon: Package,      label: "Meus Pedidos", description: "Acompanhe o status dos seus pedidos",  path: "/meus-pedidos",              accent: "hsl(var(--indigo))", permission: "fazer_pedido" },
   { Icon: Bell,         label: "Notificações", description: "Trocas, avisos e mensagens",          path: "/notificacoes",              accent: "hsl(var(--warning))", permission: "notificacoes" },
+  { Icon: PackageSearch, label: "Recomendações Hexon", description: "Veja reposições destinadas às lojas", path: "/recomendacoes-hexon", accent: "hsl(var(--indigo))", permission: "scanner" },
   { Icon: MessageSquare, label: "Chat",        description: "Converse com a equipe",               path: "/chat",                      accent: "hsl(var(--success))", permission: "chat" },
   { Icon: GitCompare,   label: "Conferência", description: "Importe e confira listas do ERP",     path: "/scanner?tab=conference",    accent: "hsl(var(--destructive))", permission: "conferencia" },
   { Icon: User,         label: "Perfil",      description: "Visualize seus dados de login",       path: null, accent: "hsl(var(--warning))" },

@@ -5,6 +5,9 @@
     },
     "api/relatorio-whatsapp-diario.ts": {
       "maxDuration": 60
+    },
+    "api/hexon-recomendacoes.ts": {
+      "maxDuration": 60
     }
   },
   "headers": [

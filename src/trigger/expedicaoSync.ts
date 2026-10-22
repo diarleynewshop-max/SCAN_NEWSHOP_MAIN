@@ -3,23 +3,9 @@ import { escolherDescricaoProdutoExterno, normalizarCodigoExterno14 } from "../l
 
 const SEPARACAO_API_URL = "https://api-recebimento.newgrup.cloud/functions/v1/separacao-integration";
 
-// Newshop usa SEPARACAO_API_KEY; Soye e Facil usam SEPARACAO_API_KEY_SF.
-// Mantem fallback para os nomes antigos enquanto o ambiente do Trigger.dev e atualizado.
-if (!process.env.SEPARACAO_API_KEY && !process.env.EXPEDICAO_API_KEY) {
-  console.warn("[expedicaoSync] SEPARACAO_API_KEY nao configurada.");
-}
-if (!process.env.SEPARACAO_API_KEY_SF && !process.env.EXPEDICAO_API_KEY_SF) {
-  console.warn("[expedicaoSync] SEPARACAO_API_KEY_SF nao configurada - Soye/Facil serao ignorados.");
-}
-
-type LojaExpedicao = "NEWSHOP" | "SOYE" | "FACIL";
-
-function getApiKey(empresa: string | undefined): string | undefined {
-  const loja = (empresa ?? "NEWSHOP").toUpperCase() as LojaExpedicao;
-  if (loja === "SOYE" || loja === "FACIL") {
-    return process.env.SEPARACAO_API_KEY_SF || process.env.EXPEDICAO_API_KEY_SF;
-  }
-  return process.env.SEPARACAO_API_KEY || process.env.EXPEDICAO_API_KEY;
+// O Hexon unificou NEWSHOP e FACIL: todas as empresas usam a mesma credencial.
+if (!process.env.HEXON_API_KEY) {
+  console.warn("[expedicaoSync] HEXON_API_KEY nao configurada.");
 }
 
 interface ItemExpedicao {
@@ -47,7 +33,7 @@ export const expedicaoSync = task({
   retry: { maxAttempts: 3, factor: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 20_000 },
   run: async (payload: PayloadExpedicaoSync) => {
     const lojaLabel = (payload.empresa ?? "NEWSHOP").toUpperCase();
-    const apiKey = getApiKey(payload.empresa);
+    const apiKey = process.env.HEXON_API_KEY;
 
     if (!apiKey) {
       console.warn(`[expedicaoSync] API key ausente para loja=${lojaLabel}. Abortando sem erro.`);

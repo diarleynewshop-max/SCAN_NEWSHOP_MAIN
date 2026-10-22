@@ -32,6 +32,7 @@ const Chat = lazy(() => import("./pages/Chat"));
 const Notificacoes = lazy(() => import("./pages/Notificacoes"));
 const Feedback = lazy(() => import("./pages/Feedback"));
 const ApiEstoque = lazy(() => import("./pages/ApiEstoque"));
+const HexonRecomendacoes = lazy(() => import("./pages/HexonRecomendacoes"));
 
 const queryClient = new QueryClient();
 
@@ -120,6 +121,12 @@ const App = () => {
             <Route path="/notificacoes" element={
               <ProtectedRoute requiredRole={['operador', 'compras', 'admin', 'super']}>
                 <DesktopShell pageTitle="Notificacoes"><Notificacoes /></DesktopShell>
+              </ProtectedRoute>
+            } />
+
+            <Route path="/recomendacoes-hexon" element={
+              <ProtectedRoute requiredPermission="scanner">
+                <DesktopShell pageTitle="Recomendacoes Hexon"><HexonRecomendacoes /></DesktopShell>
               </ProtectedRoute>
             } />
 
